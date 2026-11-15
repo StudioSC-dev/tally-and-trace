@@ -89,7 +89,11 @@ const snapshot = {
     { id: 3, name: 'Emergency fund', target_amount: 10000, current_amount: 2500, progress_pct: 25.0, remaining: 7500 },
   ],
   wishlist_next_up: [
-    { id: 4, name: 'Sofa', cost: 15000, priority: 'high', affordable_by: '2027-03-01' },
+    { id: 4, name: 'Sofa', cost: 15000, priority: 'high', affordable_by: '2027-03-01', note: null },
+    {
+      id: 5, name: 'Camera', cost: 900, priority: 'low', affordable_by: null,
+      note: "No projected income or expenses in EUR, so this can't be judged yet.",
+    },
   ],
   available_cash: 7000.0,
   account_closings: [

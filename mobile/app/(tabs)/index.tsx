@@ -193,7 +193,10 @@ export default function HomeScreen() {
                       <Text className="text-white font-semibold">
                         {formatCurrency(item.cost, currency)}
                       </Text>
-                      <Badge label={`By ${item.affordable_by}`} color="yellow" />
+                      <Badge
+                        label={item.affordable_by ? `By ${item.affordable_by}` : 'No projection'}
+                        color="yellow"
+                      />
                     </View>
                   </View>
                 </View>

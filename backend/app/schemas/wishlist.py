@@ -53,11 +53,13 @@ class WishlistReadiness(BaseModel):
     item_id: int
     name: str
     estimated_cost: float
+    currency: str
     monthly_disposable: float
     savings_rate: float
     months_needed: int
     estimated_purchase_date: str
     affordable_now: bool
+    note: Optional[str] = None
 
 
 class WishlistPlanItem(BaseModel):

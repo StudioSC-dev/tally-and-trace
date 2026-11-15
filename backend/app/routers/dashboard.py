@@ -24,6 +24,7 @@ from app.models.allocation import Allocation, AllocationType
 from app.models.user import User
 from app.models.wishlist_item import WishlistItem
 from app.schemas.dashboard import DashboardDue
+from app.routers.wishlist import no_projection_note
 from app.services import card_charges as card_charges_svc
 from app.services import card_credit as card_credit_svc
 from app.services import forecast as forecast_svc
@@ -229,8 +230,8 @@ def get_snapshot(
     # -----------------------------------------------------------------------
     # 6. Top 3 wishlist items (unpurchased) with affordability
     # -----------------------------------------------------------------------
-    monthly_disposable = disposable_data["monthly_disposable"]
-    savings_rate = max(monthly_disposable * SAVINGS_RATE_FACTOR, 0.01)
+    # Each item is judged against the disposable row of its own currency (STU-304).
+    rows_by_currency = {r["currency"]: r for r in disposable["by_currency"]}
 
     from sqlalchemy import case
     priority_order = case(
@@ -251,14 +252,23 @@ def get_snapshot(
     from datetime import timedelta
     wishlist_next_up = []
     for item in wishlist_items:
-        months_needed = math.ceil(float(item.estimated_cost) / savings_rate)
-        affordable_by = (utc_now() + timedelta(days=months_needed * 30)).date().isoformat()
+        code = item.currency.value
+        row = rows_by_currency.get(code)
+        if row is None:
+            # No row for this currency: not affordable, and it says so.
+            affordable_by, note = None, no_projection_note(code)
+        else:
+            savings_rate = max(row["monthly_disposable"] * SAVINGS_RATE_FACTOR, 0.01)
+            months_needed = math.ceil(float(item.estimated_cost) / savings_rate)
+            affordable_by = (utc_now() + timedelta(days=months_needed * 30)).date().isoformat()
+            note = None
         wishlist_next_up.append({
             "id": item.id,
             "name": item.name,
             "cost": item.estimated_cost,
             "priority": item.priority.value,
             "affordable_by": affordable_by,
+            "note": note,
         })
 
     # -----------------------------------------------------------------------
