@@ -37,8 +37,8 @@ export function Layout() {
           {user && <OutboxHost key={user.id} userId={user.id} />}
           <div className="min-h-screen" data-app-shell>
             <Navigation />
-            {/* pt-20 clears the fixed top nav; pb-20 sm:pb-8 clears the fixed bottom tab bar on mobile */}
-            <main id="main-content" tabIndex={-1} className="pt-20 pb-20 sm:pb-8">
+            {/* pt-20 clears the fixed top nav; pb-20 sm:pb-8 clears the fixed bottom tab bar on mobile; --toast-room (Toast.tsx, STU-629) lifts it over the toast stack */}
+            <main id="main-content" tabIndex={-1} className="pt-20 pb-[max(5rem,var(--toast-room,0px))] sm:pb-[max(2rem,var(--toast-room,0px))]">
               <div className="fade-in">
                 <Outlet />
               </div>
