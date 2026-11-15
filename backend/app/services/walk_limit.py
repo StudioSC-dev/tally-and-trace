@@ -27,6 +27,7 @@ from typing import List
 
 from fastapi import HTTPException
 
+from app.models.transaction import RecurrenceFrequency
 from app.services import forecast as fc
 
 WALK_STEP_LIMIT = 10_000
@@ -43,30 +44,42 @@ class WalkLimitReached(HTTPException):
         self.limit = limit
 
 
-def _ended_within(entry, start: datetime, end: datetime, limit: int) -> bool:
-    """Whether the uncapped walk ends on its own within ``limit`` steps: one
-    more step yields nothing. From ``start`` = ``next_occurrence`` every step
-    that does not end the walk yields (a semi-monthly month past the first
-    yields a day, or is past ``end``, where the walk ends anyway)."""
-    def count(steps: int) -> int:
-        return sum(1 for _ in fc.iter_occurrences(entry, start, end, max_steps=steps,
-                                                  apply_cap=False))
-    return count(limit + 1) == count(limit)
+def _step_of(entry, anchor: datetime, index: int, occ: datetime) -> int:
+    """The step (1-based) of the walk from ``anchor`` that yielded ``occ``, the
+    ``index``-th occurrence yielded. A fixed-step walk from ``next_occurrence``
+    yields once a step; a semi-monthly one walks a month a step."""
+    if entry.cadence == RecurrenceFrequency.SEMI_MONTHLY:
+        return (occ.year - anchor.year) * 12 + occ.month - anchor.month + 1
+    return index + 1
 
 
 def walk_capped(entry, start: datetime, end: datetime, bound: int) -> List[datetime]:
     """``forecast.capped_distinct_days(entry, start, end, max_steps=bound)``,
-    walked at most ``WALK_STEP_LIMIT`` steps. ``start`` is ``next_occurrence``
-    and ``bound`` the caller's complete-walk bound, so a bound within the limit
-    is walked as before. Past it, the walk stops at the limit and is returned
-    only when it was complete there (its cap reached, or it ended on its own);
-    otherwise ``WalkLimitReached``."""
+    walked at most ``WALK_STEP_LIMIT`` steps, plus one sentinel step. ``start``
+    is ``next_occurrence`` and ``bound`` the caller's complete-walk bound, so a
+    bound within the limit is walked as before. Past it, one walk of
+    ``WALK_STEP_LIMIT + 1`` steps: an occurrence the sentinel step yields (one
+    inside ``[start, end)`` and the end date) means the schedule runs on past
+    the limit, so ``WalkLimitReached``, unless the cap was reached first.
+    Otherwise the walk ended on its own within the limit and is returned. One
+    call never advances the schedule more than ``WALK_STEP_LIMIT + 1`` times."""
     limit = WALK_STEP_LIMIT
     if bound <= limit:
         return fc.capped_distinct_days(entry, start, end, max_steps=bound)
-    days = fc.capped_distinct_days(entry, start, end, max_steps=limit)
     cap = (entry.max_occurrences
            if getattr(entry, "end_mode", None) == "after_occurrences" else None)
-    if (cap is not None and len(days) >= cap) or _ended_within(entry, start, end, limit):
-        return days
-    raise WalkLimitReached(getattr(entry, "id", None), limit)
+    if cap is not None and cap <= 0:
+        return []
+    anchor = fc._naive(start)
+    seen: set = set()
+    days: List[datetime] = []
+    occurrences = fc.iter_occurrences(entry, start, end, max_steps=limit + 1, apply_cap=False)
+    for index, occ in enumerate(occurrences):
+        if _step_of(entry, anchor, index, occ) > limit:
+            raise WalkLimitReached(getattr(entry, "id", None), limit)
+        if occ.date() not in seen:
+            seen.add(occ.date())
+            days.append(occ)
+            if cap is not None and len(days) >= cap:
+                break
+    return days

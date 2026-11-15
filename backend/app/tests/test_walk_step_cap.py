@@ -135,3 +135,54 @@ def test_walk_step_cap_reaches_the_request(sw_client, sw_people, monkeypatch):
     assert (r.status_code, r.json()["detail"]) == (409, WALK_LIMIT_MESSAGE), r.text
     r = client.get(f"{API}/budget-entries/{weekly}", headers=me["headers"])
     assert r.json()["next_occurrence"].startswith(start.isoformat())
+
+
+class _Advances:
+    """Counts schedule advances: fixed-step ``step_occurrence`` calls, and
+    semi-monthly months (two ``_clamp_day`` calls each, for days 1 and 15)."""
+
+    def __init__(self, monkeypatch):
+        self.steps = self.clamps = 0
+        step, clamp = fc.step_occurrence, fc._clamp_day
+
+        def counted_step(*args, **kwargs):
+            self.steps += 1
+            return step(*args, **kwargs)
+
+        def counted_clamp(*args, **kwargs):
+            self.clamps += 1
+            return clamp(*args, **kwargs)
+
+        monkeypatch.setattr(fc, "step_occurrence", counted_step)
+        monkeypatch.setattr(fc, "_clamp_day", counted_clamp)
+
+    def reset(self):
+        self.steps = self.clamps = 0
+
+    @property
+    def total(self) -> int:
+        return self.steps + self.clamps // 2
+
+
+@pytest.mark.parametrize("walk", sorted(WALKS))
+def test_walk_step_cap_bounds_the_work_of_one_call(walk, monkeypatch):
+    """One call advances the schedule at most cap + 1 times, over the cap or under it."""
+    monkeypatch.setattr(walk_limit, "WALK_STEP_LIMIT", 50)
+    advances = _Advances(monkeypatch)
+    over = [_entry(F.WEEKLY, datetime(2020, 1, 5)), _entry(F.SEMI_MONTHLY, datetime(2015, 1, 1))]
+    under = [
+        _entry(F.WEEKLY, _weeks_before_today(49)),  # past the bound, ends on its own at the limit
+        _entry(F.WEEKLY, datetime(2020, 1, 5), end_mode="on_date", end_date=datetime(2020, 6, 1)),
+        _entry(F.WEEKLY, datetime(2020, 1, 5), end_mode="after_occurrences", max_occurrences=3),
+        _entry(F.WEEKLY, _weeks_before_today(3)),  # within the bound
+        _entry(F.SEMI_MONTHLY, datetime(2023, 1, 1), end_mode="on_date", end_date=datetime(2024, 1, 1)),
+    ]
+    for entry in over:
+        advances.reset()
+        with pytest.raises(WalkLimitReached):
+            WALKS[walk](entry)
+        assert 0 < advances.total <= 51, (entry.cadence, advances.steps, advances.clamps)
+    for entry in under:
+        advances.reset()
+        WALKS[walk](entry)
+        assert 0 < advances.total <= 51, (entry.cadence, advances.steps, advances.clamps)
