@@ -8,7 +8,7 @@ does not need, so no two paths can wait on each other in a cycle:
 2. the transaction row being edited or deleted (``lock_transaction``), or an
    entry's linked rows, which its delete nullifies;
 3. accounts, in ascending id (``lock_accounts``);
-4. budget allocations, in ascending id.
+4. budget allocations, in ascending id (``routers.transactions._lock_allocations``).
 
 Callers reach these through the module (``locking.lock_owner_budgets(...)``),
 never by importing the names, so one patch of the module reaches every caller.
