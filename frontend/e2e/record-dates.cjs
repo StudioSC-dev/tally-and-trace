@@ -206,7 +206,13 @@ async function addNative(browser) {
   await attempt(TOO_EARLY, 'under', '0006-05-10')
   await attempt(TOO_LATE, 'over', 'max + 1 day')
 
+  // STU-582: the future date above unticked "Mark as posted", and moving the date back to
+  // today never re-ticks it. The control saves a posted row, so tick the box again.
+  const posted = modal.getByLabel('Mark as posted')
+  check('(a) a future date unticked "Mark as posted" (STU-582)', await posted.isChecked(), false)
   await input.fill(TODAY)
+  check('(a) moving the date back to today leaves the box unticked', await posted.isChecked(), false)
+  await posted.check()
   mark()
   const saved = page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname.replace(/\/$/, '').endsWith('/transactions'))
   await modal.getByRole('button', { name: 'Create Transaction', exact: true }).click()
