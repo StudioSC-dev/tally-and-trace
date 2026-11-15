@@ -1,4 +1,6 @@
 """/health probes the database. Never touches a real database: SessionLocal is replaced."""
+import logging
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -63,3 +65,35 @@ def test_health_head_ok(client, reachable_db):
 
 def test_health_head_503_when_database_down(client, unreachable_db):
     assert client.head("/health").status_code == 503
+
+
+def test_probe_failure_returns_503(client, unreachable_db):
+    r = client.get("/health")
+    assert r.status_code == 503
+    assert r.json() == {"status": "degraded", "database": "unavailable"}
+
+
+def test_probe_failure_is_not_error_level(client, unreachable_db, caplog):
+    with caplog.at_level(logging.DEBUG):
+        client.get("/health")
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+
+def test_probe_failure_keeps_traceback(client, unreachable_db, caplog):
+    with caplog.at_level(logging.DEBUG):
+        client.get("/health")
+    records = [
+        r for r in caplog.records if r.getMessage() == "Health check database probe failed"
+    ]
+    assert len(records) == 1
+    assert records[0].levelno == logging.WARNING
+    assert records[0].exc_info is not None
+    assert records[0].exc_info[0] is RuntimeError
+
+
+def test_successful_probe_response_unchanged(client, reachable_db, caplog):
+    with caplog.at_level(logging.DEBUG):
+        r = client.get("/health")
+    assert r.status_code == 200
+    assert r.json() == {"status": "healthy", "database": "ok"}
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
