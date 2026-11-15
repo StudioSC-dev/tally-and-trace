@@ -6,7 +6,7 @@ the monthly view, the upcoming/payables listings and the per-account closings.
 Generic fixtures on a throwaway user. Skips without a database.
 """
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -1478,3 +1478,38 @@ def test_a_transfer_retargeted_into_a_loan_keeps_an_explicit_fee(db, user):
     assert _balances(db, bank, savings, loan) == (
         Decimal("42000.00"), Decimal("0.00"), Decimal("-82100.00"))
     _assert_paid_once_then_november(db, user, loan, bank)
+
+
+def test_legacy_converted_payable_cross_currency_funding_preserves_all_contributing_rates(
+        db, user):
+    """STU-306 part 5: a legacy USD loan paid from a PHP account. Its payable is
+    estimated USD -> PHP when its leg is built, so it is listed in PHP, labelled
+    from that estimate (the payable's own: USD 100 at 58.00), and the response's
+    ``fx`` carries the one rate that contributed. The upcoming list labels it the
+    same way."""
+    from app.core.context import RequestContext
+    from app.models.user import CurrencyType
+    from app.services.forecast import FxCollector, payables_by_currency, upcoming_by_currency
+    from app.tests.conftest import FX_REF
+
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank, currency=CurrencyType.USD,
+                 loan_payment_amount=Decimal("100"))
+    rate_as_of = (FX_REF - timedelta(hours=1)).date().isoformat()  # the suite's stored rate
+    labels = {"currency": "PHP", "estimated": True, "original_amount": 100.0,
+              "original_currency": "USD", "rate": 58.0, "rate_as_of": rate_as_of,
+              "rate_stale": False}
+
+    collector = FxCollector()
+    (payable,) = payables_by_currency(RequestContext(db, user.id), days=30, reference=REF,
+                                      collector=collector)
+    assert (payable["source"], payable["source_id"], payable["due_date"], payable["amount"],
+            payable["account_id"]) == ("loan", loan.id, "2026-10-04", 5800.0, bank.id)
+    assert {k: payable.get(k) for k in labels} == labels
+    assert [(r["base"], r["quote"], r["rate"], r["stale"])
+            for r in collector.as_dict()["rates"]] == [("USD", "PHP", 58.0, False)]
+
+    upcoming = upcoming_by_currency(RequestContext(db, user.id), days=30, reference=REF)
+    (item,) = [i for i in upcoming["items"] if i["source"] == "loan"]
+    assert (item["amount"], *(item.get(k) for k in labels)) == (5800.0, *labels.values())
+    assert [(r["base"], r["quote"]) for r in upcoming["fx"]["rates"]] == [("USD", "PHP")]
