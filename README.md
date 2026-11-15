@@ -239,10 +239,16 @@ shares. It gives them your Household, never write access and never
 - **Accounts:** the accounts you own and tag Household become visible to them
   with `my_role` `tag_viewer` (ranked below `viewer`), showing only `id`,
   `name`, `account_type`, `currency`, `balance`, the access fields (every
-  permission false), `owner_name` and `tags`. Statements, loan schedules,
-  shares and settings stay 404; balance history lists only the records they
-  may read. An account share they also hold wins when its role is higher, so
-  an editor on your joint account stays `editor` there.
+  permission false, `can_view_details` included, so the web app shows no
+  statement or loan controls), `owner_name` and `tags`. Active accounts only:
+  an inactive one is left out of the list, `GET /accounts/{id}`, its balance
+  and the export alike. Shares and settings stay 404. Statements and loan
+  schedules are the limited forms a `viewer` gets, listing only the lines and
+  payments they may read; balance history lists only the records they may
+  read. A card's statement amount includes other users' charges on that card
+  (its amount due is the card's, whoever made the charge). An account share
+  they also hold wins when its role is higher, so an editor on your joint
+  account stays `editor` there.
 - **Records:** they read your own records whose every account is yours and
   that either touch a Household-tagged account (rule b2) or carry your
   Household tag explicitly (rule c, including a record with no account).
@@ -256,6 +262,13 @@ shares. It gives them your Household, never write access and never
   record's `tags` only when the record carries it explicitly. A Household bill
   on your private card or wallet shows its description with the account
   neutral.
+- **Totals:** the dashboard total (`balances.total`, as the web dashboard
+  shows it) counts every balance they can see, your Household-tagged accounts
+  included, and nothing they can't. Available cash and their own projection
+  count your Household-tagged accounts as plain cash: whether one is a
+  spending wallet is your setting, so it changes no figure they see. A card
+  of yours whose payment account they can't see shows its statement figure
+  (no cash moves for them).
 - **Projections** include your Household-tagged accounts. Your explicitly
   Household-tagged records outside them (a bill on a private card or wallet,
   or a recurring entry with no account) are listed as Household occurrences:
@@ -316,8 +329,8 @@ planned payment, counts only posted payments.
 - `PUT    /accounts/{id}` — Update an account (owner or admin)
 - `DELETE /accounts/{id}` — Delete an account (owner)
 - `GET    /accounts/{id}/balance` — Get account balance
-- `GET    /accounts/{id}/statements` — A card's statements (viewers get a limited form)
-- `GET    /accounts/{id}/loan-schedule` — A loan's schedule (viewers get a limited form)
+- `GET    /accounts/{id}/statements` — A card's statements (viewers and Household viewers get a limited form)
+- `GET    /accounts/{id}/loan-schedule` — A loan's schedule (viewers and Household viewers get a limited form)
 - `GET    /accounts/{id}/shares` — The owner and every share (owner or admin)
 - `POST   /accounts/{id}/shares` — Share with a user by exact email (`email`, `role`); resolved and rate-limited like `/users/lookup`, with the same 404 "No matching user"
 - `PATCH  /accounts/{id}/shares/{share_id}` — Change a share's role
