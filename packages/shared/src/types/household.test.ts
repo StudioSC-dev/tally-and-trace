@@ -16,7 +16,7 @@ const tagViewerAccount = {
   id: 4, name: 'Cash Wallet', account_type: 'cash', currency: 'PHP', balance: 200.0,
   tags: [{ id: 1, name: 'Household', color: null, is_system: true }],
   my_role: 'tag_viewer',
-  permissions: { can_edit_settings: false, can_manage_shares: false, can_add_transactions: false, can_delete: false },
+  permissions: { can_edit_settings: false, can_manage_shares: false, can_add_transactions: false, can_delete: false, can_view_details: false },
   owner_name: 'Demo U.',
 } satisfies Account
 

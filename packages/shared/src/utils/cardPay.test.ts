@@ -122,7 +122,7 @@ describe('cardPayers', () => {
     tags: [],
     my_role: 'owner',
     owner_name: null,
-    permissions: { can_edit_settings: true, can_manage_shares: true, can_add_transactions: true, can_delete: true },
+    permissions: { can_edit_settings: true, can_manage_shares: true, can_add_transactions: true, can_delete: true, can_view_details: true },
     ...over,
   })
 
@@ -136,7 +136,7 @@ describe('cardPayers', () => {
       account({ id: 5, is_active: false }),
       account({ id: 6, account_type: 'credit' }),
       account({ id: 7, account_type: 'loan' }),
-      account({ id: 8, permissions: { can_edit_settings: false, can_manage_shares: false, can_add_transactions: false, can_delete: false } }),
+      account({ id: 8, permissions: { can_edit_settings: false, can_manage_shares: false, can_add_transactions: false, can_delete: false, can_view_details: false } }),
     ]
     expect(cardPayers(accounts, card).map((a) => a.id)).toEqual([2, 3])
   })
