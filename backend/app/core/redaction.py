@@ -468,7 +468,8 @@ def serialize_accounts(db: Session, user, accounts: List[Account]) -> List[dict]
     the caller reaches only through a Household tag share (``tag_viewer``)
     shows ``TAG_VIEWER_ACCOUNT_FIELDS`` alone, with the same access fields
     (every permission false) and ``tags``. ``is_shared`` is the owner's alone
-    (null for other direct roles, absent for ``tag_viewer``)."""
+    (null for other direct roles, absent for ``tag_viewer``). ``owner_id`` (the
+    owner's user id) is given to every direct role and absent for ``tag_viewer``."""
     from app.core.access import (MANAGE_ROLES, OWNER, OWNER_ROLES, TAG_VIEWER, access_map,
                                  shared_out_ids)
     from app.core.tags import attach_visible_tags
@@ -500,6 +501,7 @@ def serialize_accounts(db: Session, user, accounts: List[Account]) -> List[dict]
             "owner_name": display_name(owners.get(account.user_id)),
         })
         if role != TAG_VIEWER:
+            data["owner_id"] = account.user_id
             data["is_shared"] = account.id in shared_out if role == OWNER else None
         out.append(data)
     return out
