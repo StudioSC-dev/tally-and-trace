@@ -26,8 +26,8 @@ statement engine's order (``_settle_with_sources``, mirroring
 and paid oldest statement first, and only then are the projected entry
 charges added and paid from what is left, so a payment the rows already used
 never covers a charge projected later. Recurring transfers into the card are
-applied last, as the engine nets them (STU-249), each over the statement's own
-horizon (below). A virtual overflow move is
+applied last, as the engine nets them (STU-249): each pays only statements
+due on or after its date, oldest first. A virtual overflow move is
 not cash and never counts. When the card's primary payment account is in the
 view scope (a cash account, or, on legacy data only, a scope spending
 wallet), its routed statement payment pays whatever the statement still
@@ -497,9 +497,10 @@ def _settle_with_sources(cycles: List[dict], lines: list,
     as the engine computes it. ``in_scope`` is the part of each cycle paid by
     a payment flagged True (an in-scope payment from a cash account or
     spending wallet); credits are never in
-    scope. Recurring transfers into the card, which the engine nets last too
-    (STU-249), are applied last, in date order, oldest statement first; the
-    caller bounds them by each statement's due date. ``amount_of``
+    scope. Recurring transfers into the card are applied last, in date order,
+    exactly as the engine nets them (``settle_projected``, STU-249): each pays,
+    oldest statement first, only the statements due on or after its date, so
+    one after a statement's due date never covers it. ``amount_of``
     reads a line's figure in the card's currency (``normalise_lines``), and
     ``today`` is the day the rows are read on (``statements.statement_day``).
 
@@ -556,8 +557,10 @@ def _settle_with_sources(cycles: List[dict], lines: list,
         first = next((idx for idx, c in enumerate(cycles) if c["due"].date() >= day),
                      len(cycles))
         _spend_from(owed, in_scope, amount, False, first)
-    for _, amount, flag in sorted(recurring, key=lambda p: p[0]):
-        _spend_from(owed, in_scope, amount, flag, 0)
+    for when, amount, flag in sorted(recurring, key=lambda p: p[0].date()):
+        first = next((idx for idx, c in enumerate(cycles) if c["due"].date() >= when.date()),
+                     len(cycles))
+        _spend_from(owed, in_scope, amount, flag, first)
     return owed, in_scope
 
 
