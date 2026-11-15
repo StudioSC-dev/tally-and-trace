@@ -12,7 +12,7 @@ import {
   type StoredDayRow,
 } from './entryDayFields'
 import { statementCloseDay, statementCycleClose, type StatementCycleSettings } from './markPaid'
-import { generateOccurrences, isMonthFamily, lastWeekday } from './recurrence'
+import { generateOccurrences, isMonthFamily, lastWeekday, type RecurringSchedule } from './recurrence'
 import {
   automaticOffered,
   isCappedEnd,
@@ -342,17 +342,18 @@ export const formatScheduleLabel = (
   return cadenceLabel
 }
 
+/** The schedule a save would store, as `generateOccurrences` reads it, with its resolved day fields. */
+interface DraftSchedule {
+  schedule: RecurringSchedule & { next_occurrence: string; anchor_day: number | null; day_rule: DayRule | null }
+  cadence: RecurrenceFrequency
+}
+
 /**
- * The schedule a save would store: its label and next three dates, or the detail the
- * API would refuse its day with. Null when there is nothing to show (no readable date). With a fixed date before `today`
- * (Manila's), the occurrences after the first and before today are counted: they
- * will show as missed.
+ * The schedule a save would store (the date the server keeps, the day fields it resolves
+ * them to and the ends), or the detail the API would refuse its day with. Null when the
+ * date is not readable.
  */
-export function schedulePreview(
-  draft: ScheduleDraft,
-  ctx: ScheduleContext,
-  today: string = manilaToday(),
-): SchedulePreview | null {
+function draftSchedule(draft: ScheduleDraft, ctx: ScheduleContext): DraftSchedule | { error: string } | null {
   const state = scheduleState(draft, ctx)
   const { cadence } = state
   let nextOccurrence: string
@@ -384,15 +385,35 @@ export function schedulePreview(
       endDate = null
     }
   }
-  const schedule = {
+  return {
     cadence,
-    next_occurrence: nextOccurrence,
-    anchor_day: resolved.anchor_day,
-    day_rule: resolved.day_rule,
-    end_mode: draft.end_mode,
-    end_date: endDate,
-    max_occurrences: draft.end_mode === 'after_occurrences' ? draft.max_occurrences ?? null : null,
+    schedule: {
+      cadence,
+      next_occurrence: nextOccurrence,
+      anchor_day: resolved.anchor_day,
+      day_rule: resolved.day_rule,
+      end_mode: draft.end_mode,
+      end_date: endDate,
+      max_occurrences: draft.end_mode === 'after_occurrences' ? draft.max_occurrences ?? null : null,
+    },
   }
+}
+
+/**
+ * The schedule a save would store: its label and next three dates, or the detail the
+ * API would refuse its day with. Null when there is nothing to show (no readable date). With a fixed date before `today`
+ * (Manila's), the occurrences after the first and before today are counted: they
+ * will show as missed.
+ */
+export function schedulePreview(
+  draft: ScheduleDraft,
+  ctx: ScheduleContext,
+  today: string = manilaToday(),
+): SchedulePreview | null {
+  const built = draftSchedule(draft, ctx)
+  if (built === null || 'error' in built) return built
+  const { cadence, schedule } = built
+  const nextOccurrence = schedule.next_occurrence
   const first = parseEntryDate(nextOccurrence)
   const dates = generateOccurrences(schedule, first, PREVIEW_RANGE_END, 3)
   let missed: string | null = null
@@ -405,7 +426,7 @@ export function schedulePreview(
     }
   }
   return {
-    label: formatScheduleLabel(cadence, { ...resolved, next_occurrence: nextOccurrence }),
+    label: formatScheduleLabel(cadence, { anchor_day: schedule.anchor_day, day_rule: schedule.day_rule, next_occurrence: nextOccurrence }),
     dates: dates.map((date) => formatEntryDate(date)),
     missed,
   }
