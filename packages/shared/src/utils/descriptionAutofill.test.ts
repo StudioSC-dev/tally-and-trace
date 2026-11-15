@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
   AUTOFILL_FIELDS,
+  autofillForm,
   autofillPatch,
+  cleanFormForType,
   createLatestGate,
   exactSuggestion,
   type AutofillField,
   type AutofillUsable,
   type DescriptionSuggestion,
+  type TypeFits,
 } from './descriptionAutofill'
 
 // The suite the ticket names: transaction_description_autofill (STU-626).
@@ -199,5 +202,77 @@ describe('transaction_description_autofill', () => {
     const third = gate.next('Gro')
     gate.reset() // the form was reset
     expect(gate.accepts(third, 'Gro')).toBe(false)
+  })
+})
+
+// STU-633: autofill that changes the type runs the type-change clean-up first.
+describe('transaction_description_autofill: type change (STU-633)', () => {
+  // Budget entry 50 is an expense entry, 51 an income entry; categories 30 and 32 are income
+  // kind, 31 is expense kind (an expense form keeps 31, an income form keeps 30 and 32).
+  const fits: TypeFits = {
+    budgetEntry: (id, type) => (id === 50 ? type === 'debit' : id === 51 ? type === 'credit' : false),
+    category: (id, type) => (type === 'credit' ? id === 30 || id === 32 : type === 'debit' ? id === 31 : false),
+  }
+  const linked = (over: Partial<Form> = {}) =>
+    blank({ budget_entry_id: 50, allocation_id: 9, category_id: 31, account_id: 3, ...over })
+  const fill = (form: Form, s: DescriptionSuggestion, changed = none) => autofillForm(form, s, changed, everything, fits)
+
+  it('type_change_clears_links: a type change clears the budget-entry and allocation links, as a type click does', () => {
+    // Expense to transfer: both links go, as clicking Transfer clears them.
+    const out = fill(linked(), transfer)
+    expect(out.budget_entry_id).toBeUndefined()
+    expect(out.allocation_id).toBeUndefined()
+    expect({ ...cleanFormForType(linked(), 'transfer', fits), ...autofillPatch(cleanFormForType(linked(), 'transfer', fits), transfer, none, everything) })
+      .toEqual(out)
+    // Expense to income: an expense budget entry no longer fits and goes.
+    expect(fill(linked(), groceries).budget_entry_id).toBeUndefined()
+    // An income entry survives an expense form turning income.
+    expect(fill(linked({ budget_entry_id: 51 }), groceries).budget_entry_id).toBe(51)
+  })
+
+  it('type_change_replaces_mismatched_category: a category that does not fit goes, then the autofilled one applies', () => {
+    const out = fill(linked(), groceries)
+    expect(out.transaction_type).toBe('credit')
+    expect(out.category_id).toBe(30)
+    // The same when the user picked the mismatched category themselves.
+    expect(fill(linked(), groceries, new Set<AutofillField>(['category_id'])).category_id).toBe(30)
+    // Not usable on the new type: blank, the old one does not stay behind.
+    const none30 = autofillForm(linked(), groceries, none, { ...everything, category: () => false }, fits)
+    expect(none30.category_id).toBeUndefined()
+  })
+
+  it('same_type_autofill_unchanged: with the type kept, links and category stay as STU-626 leaves them', () => {
+    const sameType: DescriptionSuggestion = { ...groceries, transaction_type: 'debit', category_id: 31 }
+    const form = linked({ category_id: 31 })
+    expect(fill(form, sameType)).toEqual({ ...form, ...autofillPatch(form, sameType, none, everything) })
+    expect(fill(form, sameType).budget_entry_id).toBe(50)
+    expect(fill(form, sameType).allocation_id).toBe(9)
+    // A user-picked category stays too when the suggestion has none for it to take.
+    const picked = fill(linked({ category_id: 99 }), { ...sameType, category_id: null }, new Set<AutofillField>(['category_id']))
+    expect(picked.category_id).toBe(99)
+  })
+
+  it('type_change_preserves_user_edits: user edits survive a type change unless the clean-up clears them', () => {
+    // Retained: the user's account, an income category that fits the new type, tags.
+    const kept = fill(
+      linked({ category_id: 32, tag_ids: [102] }),
+      groceries,
+      new Set<AutofillField>(['account_id', 'category_id', 'tag_ids']),
+    )
+    expect([kept.account_id, kept.category_id, kept.tag_ids]).toEqual([3, 32, [102]])
+    // Cleared: the user's expense category cannot stay on an income, as after a manual click;
+    // once cleared it is not the user's, so autofill's category goes in (blank if unusable).
+    const cleared = fill(linked(), groceries, new Set<AutofillField>(['category_id']))
+    expect(cleared.category_id).toBe(30)
+    const clearedBlank = autofillForm(linked(), groceries, new Set<AutofillField>(['category_id']), { ...everything, category: () => false }, fits)
+    expect(clearedBlank.category_id).toBeUndefined()
+    // A user-edited transfer destination equal to the source is cleared, as a click clears it,
+    // then the suggestion's destination fills it.
+    const sameAccount = fill(blank({ account_id: 3, transfer_to_account_id: 3 }), transfer, new Set<AutofillField>(['account_id', 'transfer_to_account_id']))
+    expect(sameAccount.transfer_to_account_id).toBe(8)
+    expect(cleanFormForType(blank({ account_id: 3, transfer_to_account_id: 3 }), 'transfer', fits).transfer_to_account_id).toBeUndefined()
+    // A user-chosen type is never changed, so nothing is cleaned.
+    const typed = fill(linked(), groceries, new Set<AutofillField>(['transaction_type']))
+    expect([typed.transaction_type, typed.budget_entry_id, typed.allocation_id]).toEqual(['debit', 50, 9])
   })
 })

@@ -103,6 +103,67 @@ export function autofillPatch<F extends AutofillForm>(
   return patch as Partial<Pick<F, AutofillField>>
 }
 
+/** The part of the transaction form a type change cleans up (a manual type click and autofill). */
+export type TypeCleanupForm = AutofillForm & {
+  budget_entry_id?: number
+  allocation_id?: number
+  transfer_fee?: number
+}
+
+/** What still fits a transaction of `type`: the form's budget entries and categories. */
+export type TypeFits = {
+  budgetEntry: (id: number, type: TransactionType) => boolean
+  category: (id: number, type: TransactionType) => boolean
+}
+
+/**
+ * The form after its type becomes `nextType`: the one clean-up the type buttons and autofill
+ * both run. A budget-entry link that no longer fits, and an allocation link on a transfer, are
+ * dropped; so is a category whose kind does not fit. The transfer fields come and go with the type.
+ */
+export function cleanFormForType<F extends TypeCleanupForm>(form: F, nextType: TransactionType, fits: TypeFits): F {
+  const transfer = nextType === 'transfer'
+  let budgetEntryId = form.budget_entry_id
+  if (transfer) budgetEntryId = undefined
+  else if (budgetEntryId && !fits.budgetEntry(budgetEntryId, nextType)) budgetEntryId = undefined
+  const categoryId = form.category_id && fits.category(form.category_id, nextType) ? form.category_id : undefined
+  const source = form.account_id || form.transfer_from_account_id
+  return {
+    ...form,
+    transaction_type: nextType,
+    budget_entry_id: budgetEntryId,
+    category_id: categoryId,
+    allocation_id: transfer ? undefined : form.allocation_id,
+    transfer_fee: transfer ? form.transfer_fee : undefined,
+    transfer_from_account_id: transfer ? source : undefined,
+    transfer_to_account_id: transfer && form.transfer_to_account_id && form.transfer_to_account_id !== source ? form.transfer_to_account_id : undefined,
+  }
+}
+
+/**
+ * The form after autofill. When the suggestion changes the type, the type-change clean-up runs
+ * first (what a manual click runs), then the autofill values go in over the cleaned form, still
+ * never over a field in `changed`. A user-changed field survives unless the clean-up clears it,
+ * and then autofill may fill it.
+ * With the type unchanged, only the autofill fields change.
+ */
+export function autofillForm<F extends TypeCleanupForm>(
+  form: F,
+  suggestion: DescriptionSuggestion,
+  changed: ReadonlySet<AutofillField>,
+  usable: AutofillUsable,
+  fits: TypeFits,
+): F {
+  const type = changed.has('transaction_type') ? form.transaction_type : suggestion.transaction_type
+  const base = type === form.transaction_type ? form : cleanFormForType(form, type, fits)
+  // A value the clean-up cleared is no longer the user's: autofill may fill it. (The account
+  // and the transfer source stay in step through the patch, so only these two can be cleared.)
+  const open = new Set(changed)
+  if (form.category_id !== undefined && base.category_id === undefined) open.delete('category_id')
+  if (form.transfer_to_account_id !== undefined && base.transfer_to_account_id === undefined) open.delete('transfer_to_account_id')
+  return { ...base, ...autofillPatch(base, suggestion, open, usable) }
+}
+
 /**
  * Latest-wins for the suggestion requests: each request takes a ticket for the Description
  * value it asked about, and its answer is used only while it is the newest ticket and that
