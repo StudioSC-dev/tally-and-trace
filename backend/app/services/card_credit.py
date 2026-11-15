@@ -107,6 +107,7 @@ from app.services.fx import FxRates, convert
 from app.services.installment_duplicates import held_occurrences
 from app.services.payment_dates import Moved, effective, extend, load_entry_overrides
 from app.services.recurring_kinds import entry_kind, is_card_installment, is_kind_eligible
+from app.services.walk_limit import walk_capped
 from app.services.statements import (
     _split_card_rows, iter_cycles_from, load_due_overrides, resolve_cycle_fields,
     statement_day, statement_history, statement_summaries,
@@ -194,7 +195,9 @@ def _stream(entry, end: datetime, *, whole: bool, moved: Optional[Moved] = None
     far: one step per day to ``end`` as ``unrecorded_occurrences`` bounds it,
     and never fewer steps than the cap plus two, so a long plan is never cut
     short at the window's end. Otherwise the walk stops at ``end``, or the reach
-    past it for an entry with forced dates (``moved``).
+    past it for an entry with forced dates (``moved``). At most
+    ``walk_limit.WALK_STEP_LIMIT`` steps: a longer walk raises
+    ``WalkLimitReached`` (409) rather than return part of the schedule.
     """
     if moved and not whole:
         end = extend(end)
@@ -202,8 +205,8 @@ def _stream(entry, end: datetime, *, whole: bool, moved: Optional[Moved] = None
     bound = max((end - start).days, 0) + 2
     if whole:
         bound = max(bound, max(entry.max_occurrences or 0, 0) + 2)
-        return fc.capped_distinct_days(entry, start, datetime.max, max_steps=bound)
-    return fc.capped_distinct_days(entry, start, end, max_steps=bound)
+        return walk_capped(entry, start, datetime.max, bound)
+    return walk_capped(entry, start, end, bound)
 
 
 def credit_for_cards(ctx: RequestContext, card_ids: Iterable[int]) -> Dict[int, dict]:

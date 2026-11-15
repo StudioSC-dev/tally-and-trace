@@ -37,8 +37,10 @@ export function Layout() {
           {user && <OutboxHost key={user.id} userId={user.id} />}
           <div className="min-h-screen" data-app-shell>
             <Navigation />
-            {/* pt-20 clears the fixed top nav; pb-20 sm:pb-8 clears the fixed bottom tab bar on mobile */}
-            <main id="main-content" tabIndex={-1} className="pt-20 pb-20 sm:pb-8">
+            {/* below-nav clears the fixed top nav including its status-bar inset: a flat pt-20
+                leaves 16px of slack over the 64px bar, which the ~59px inset on a notched phone
+                in standalone mode swallows. pb-20 sm:pb-8 clears the fixed bottom tab bar. */}
+            <main id="main-content" tabIndex={-1} className="below-nav pb-20 sm:pb-8">
               <div className="fade-in">
                 <Outlet />
               </div>

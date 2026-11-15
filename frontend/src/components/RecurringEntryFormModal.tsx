@@ -2,6 +2,9 @@ import { useMemo, useRef, useState } from 'react'
 import {
   bankKindOf,
   DEFAULT_SETTLEMENT,
+  ENTRY_END_YEARS_AHEAD,
+  ENTRY_NEXT_YEARS_AHEAD,
+  RECORD_DATE_MIN,
   daySettingOf,
   fromWireWallTime,
   isCappedEnd,
@@ -15,6 +18,8 @@ import {
   settlementFollowUp,
   finalMonthHelp,
   fieldErrorProps,
+  recordDateError,
+  recordDateMax,
   withLoadedVersion,
   withoutError,
 } from '@tally-trace/shared'
@@ -93,6 +98,17 @@ const createSubscriptionDefaults = (currency: CurrencyCode): SubscriptionFormSta
 })
 
 type RecurringFieldKey = 'name' | 'account_id' | 'amount' | 'next_occurrence' | 'end_date' | 'max_occurrences' | 'day' | 'day_of_month' | 'lead_time_days'
+
+/** The bounded dates (STU-427), each with how many years past the Manila today it may be. */
+const DATE_REACH = { next_occurrence: ENTRY_NEXT_YEARS_AHEAD, end_date: ENTRY_END_YEARS_AHEAD } as const
+type BoundedDateKey = keyof typeof DATE_REACH
+const isBoundedDate = (key: RecurringFieldKey | undefined): key is BoundedDateKey =>
+  key === 'next_occurrence' || key === 'end_date'
+/** A bounded date's `datetime-local` min and max: the whole first day through the whole last day. */
+const dateInputBounds = (key: BoundedDateKey) => ({
+  min: `${RECORD_DATE_MIN}T00:00`,
+  max: `${recordDateMax(undefined, DATE_REACH[key])}T23:59`,
+})
 
 /** The app's own wording for a required field left empty; a bound such as `step` uses the browser's text. */
 const REQUIRED_COPY: Partial<Record<RecurringFieldKey, string>> = {
@@ -192,7 +208,12 @@ export function RecurringEntryFormModal({
         first.focus()
         return
       }
-      fail(key, (input.validity.valueMissing && REQUIRED_COPY[key]) || input.validationMessage)
+      // A bounded date out of its range gets the app's own wording, as the submit check does.
+      const rangeError =
+        isBoundedDate(key) && (input.validity.rangeUnderflow || input.validity.rangeOverflow)
+          ? recordDateError(input.value.slice(0, 10), undefined, DATE_REACH[key])
+          : null
+      fail(key, rangeError || (input.validity.valueMissing && REQUIRED_COPY[key]) || input.validationMessage)
     }, 0)
   }
 
@@ -261,6 +282,18 @@ export function RecurringEntryFormModal({
   // The date input as loaded. A paused entry turned active with this date untouched is resumed: the
   // server moves it to the first scheduled date on or after today, so the date is left out of the save.
   const [loadedNextOccurrence] = useState(() => (editingBudgetEntry ? fromWireWallTime(editingBudgetEntry.next_occurrence) : null))
+  const [loadedEndDate] = useState(() =>
+    editingBudgetEntry?.end_date ? fromWireWallTime(editingBudgetEntry.end_date) : null,
+  )
+  // A bounded date is checked only when the form changes it: an edit that leaves a stored
+  // out-of-range date as loaded (a legacy entry) still saves, as the server allows (STU-427).
+  const dateTouched = (key: BoundedDateKey) => {
+    const value = subscriptionForm[key]
+    if (!value) return false
+    return !editingBudgetEntry || value !== (key === 'next_occurrence' ? loadedNextOccurrence : loadedEndDate)
+  }
+  const boundsFor = (key: BoundedDateKey) => (dateTouched(key) ? dateInputBounds(key) : undefined)
+  const nextOccurrenceBounds = boundsFor('next_occurrence')
   const resuming =
     editingBudgetEntry != null &&
     !editingBudgetEntry.is_active &&
@@ -325,6 +358,16 @@ export function RecurringEntryFormModal({
       if (subscriptionForm.amount <= 0) {
         fail('amount', 'Please enter an amount greater than zero.')
         return
+      }
+      // A changed date outside its range (STU-427), the next occurrence first.
+      for (const key of ['next_occurrence', 'end_date'] as const) {
+        if (key === 'end_date' && subscriptionForm.end_mode !== 'on_date') continue
+        const value = subscriptionForm[key]
+        const rangeError = value && dateTouched(key) ? recordDateError(value.slice(0, 10), undefined, DATE_REACH[key]) : null
+        if (rangeError) {
+          fail(key, rangeError)
+          return
+        }
       }
       // The date, the ends and the day, in that order (scheduleRequest).
       const scheduleFields = scheduleRequest(subscriptionForm, scheduleContext)
@@ -641,6 +684,7 @@ export function RecurringEntryFormModal({
                   (editingBudgetEntry.max_occurrences ?? 0) > 0
                 }
                 finalMonthHelp={finalMonthHelp}
+                endDateBounds={boundsFor('end_date')}
                 dateField={
                 <div>
                   <label className="block text-sm font-medium text-body">Next Occurrence</label>
@@ -657,6 +701,8 @@ export function RecurringEntryFormModal({
               required
                   ref={bindField('next_occurrence')}
                   data-field="next_occurrence"
+                  min={nextOccurrenceBounds?.min}
+                  max={nextOccurrenceBounds?.max}
                   {...fieldProps('next_occurrence')}
                   />
                   {renderFieldError('next_occurrence')}

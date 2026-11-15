@@ -58,6 +58,7 @@ from app.services.payment_dates import (
     extend, in_order, load_entry_overrides, load_loan_overrides, refuse_forced_date, set_override,
 )
 from app.services.recurrence import LAST_WEEKDAY, MONTH_FAMILY
+from app.services.walk_limit import walk_capped
 from app.services.recurring_kinds import (
     auto_posts, entry_kind, is_capped, is_card_installment, settlement_block,
 )
@@ -89,10 +90,12 @@ def schedule_walk(entry, through: date) -> List[datetime]:
     step, and a semi-monthly step is a month), which a complete walk never
     reaches. Each calendar day is one occurrence (``capped_distinct_days``): a
     semi-monthly schedule's two days clamped onto one are listed, counted and
-    recorded once, and a cap counts the merged days."""
+    recorded once, and a cap counts the merged days. At most
+    ``walk_limit.WALK_STEP_LIMIT`` steps: a longer walk raises
+    ``WalkLimitReached`` (409) rather than return part of the schedule."""
     start, end = _naive(entry.next_occurrence), _day_after(through)
     bound = max((end - start).days, 0) + 2
-    return capped_distinct_days(entry, start, end, max_steps=bound)
+    return walk_capped(entry, start, end, bound)
 
 
 def _moved(db: Session, entry) -> Moved:

@@ -155,7 +155,7 @@ def health_check(response: Response):
         # nothing restarts the container on this status; it reaches the uptime
         # monitor only. Adding a health check to render.yaml later would turn a
         # database outage into a restart loop, which would not fix anything.
-        logger.exception("Health check database probe failed")
+        logger.warning("Health check database probe failed", exc_info=True)
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return {"status": "degraded", "database": "unavailable"}
 

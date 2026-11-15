@@ -160,6 +160,7 @@ def test_materialize_refuses_a_transaction_date_outside_the_range(sw_client, sw_
         _assert_refused(r)
 
 
+@pytest.mark.usefixtures("entry_date_bounds_lifted")
 def test_post_n_due_on_a_legacy_schedule_is_refused_and_writes_nothing(
         sw_client, sw_db, sw_people):
     me = sw_people()
@@ -173,6 +174,7 @@ def test_post_n_due_on_a_legacy_schedule_is_refused_and_writes_nothing(
     assert state["next_occurrence"].startswith("1999-12-01")
 
 
+@pytest.mark.usefixtures("entry_date_bounds_lifted")
 def test_mark_paid_on_a_legacy_occurrence_needs_an_in_range_date(sw_client, sw_db, sw_people):
     me = sw_people()
     acct = _account(sw_client, me)
@@ -186,6 +188,7 @@ def test_mark_paid_on_a_legacy_occurrence_needs_an_in_range_date(sw_client, sw_d
     assert _txn_count(sw_db, acct) == 0
 
 
+@pytest.mark.usefixtures("entry_date_bounds_lifted")
 def test_mark_paid_on_a_legacy_occurrence_with_an_in_range_date_succeeds(
         sw_client, sw_db, sw_people):
     """Labelled guard: passes before the change. It keeps the ``_create``

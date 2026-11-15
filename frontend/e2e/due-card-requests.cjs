@@ -77,6 +77,7 @@ async function record(page, run) {
   }
   return seen
 }
+
 const show = (seen) => seen.map((r) => `${r.method} ${label(r.url)}`).join(' | ')
 
 async function seedUser(tag) {
@@ -163,6 +164,16 @@ async function scenarioA(browser) {
     for (const [name, is] of REMOVED) {
       await h.check(`a.no-${name.replace(/ /g, '-')}`, 'B', async () => !seen.some((r) => is(r.url)) || `${name} was sent`)
     }
+    // STU-636: opening Transactions sends no `GET /tags`; the Add dialog sends exactly one (its tag picker's read).
+    await h.check('a.tags-read-only-with-add-dialog', 'B', async () => {
+      if (seen.some((r) => pathOf(r.url) === '/tags')) return 'opening Transactions sent GET /tags'
+      const opened = await record(page, async () => {
+        await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+        await page.locator('[data-testid="tag-picker"]').waitFor()
+      })
+      const tags = opened.filter((r) => pathOf(r.url) === '/tags')
+      return (tags.length === 1 && tags[0].method === 'GET') || `the Add dialog sent ${tags.length} /tags reads`
+    })
   } finally {
     await ctx.close()
   }

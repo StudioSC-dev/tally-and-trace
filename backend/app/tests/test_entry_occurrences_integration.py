@@ -212,6 +212,8 @@ def test_occurrences_report_no_due_range_when_nothing_is_due(sw_client, sw_peopl
     assert (body["due_unposted"], body["oldest_due"], body["latest_due"]) == (0, None, None)
 
 
+@pytest.mark.schedule_date_guards
+@pytest.mark.usefixtures("entry_date_bounds_lifted")
 def test_occurrences_walk_a_decades_stale_schedule_completely(sw_client, sw_people, monkeypatch):
     """Past the projection's guard (2000 weekly steps, 600 semi-monthly months)."""
     client, me = sw_client, sw_people()

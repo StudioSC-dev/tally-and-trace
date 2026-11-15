@@ -25,6 +25,9 @@ Hosts, addresses and paths below are placeholders:
 
 - **One transaction.** The load writes through the app's own write paths
   inside one database transaction. Any refusal or error rolls everything back.
+- **Owner writes queue behind it.** The loader holds the owner's advisory lock
+  (226) and account row locks for the entire load, including dry runs; the
+  owner's app writes queue behind it.
 - **One run at a time.** The load and the reset take a transaction-scoped
   advisory lock; a second run is refused ("another cutover run is active")
   instead of waiting.
@@ -101,8 +104,13 @@ Apply every pending migration (`alembic upgrade head`) to the target database
 or sign-off: the owner fingerprint hashes `SELECT * FROM transactions` (and
 the other owned tables) with the column names included, so a new column
 changes the fingerprint even while every value in it is NULL, and the reset
-then refuses. The current example is `transactions.occurrence_date`. If a
-load already exists, reset it or sign it off before migrating.
+and `--complete-record` then refuse. The current example is
+`transactions.occurrence_date`. If a load already exists, reset it or sign it
+off before migrating.
+
+Production deployments run `alembic upgrade head` through the `render.yaml`
+buildCommand. Nothing may be merged or deployed between a load and its reset
+or sign-off.
 
 ## Before the window
 

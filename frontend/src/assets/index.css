@@ -145,7 +145,14 @@ html {
 body {
   margin: 0;
   min-width: 320px;
+  /*
+    `dvh` with a `vh` fallback. On iOS Safari the toolbar is dynamic, so `100vh`
+    resolves to the *expanded* viewport — taller than what is actually visible —
+    which clips the bottom of full-height screens and jumps the scroll position
+    every time the toolbar collapses. `100dvh` tracks the visible box.
+  */
   min-height: 100vh;
+  min-height: 100dvh;
   color: var(--body);
   font-family: var(--font-sans);
   line-height: 1.5;
@@ -167,6 +174,7 @@ body {
 
 #root {
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 /*
@@ -444,7 +452,80 @@ body::after {
   animation: fadeIn 0.3s ease-out;
 }
 
+/* ── Touch devices ────────────────────────────────────────────────────────── */
+
+/*
+  iOS Safari (and therefore Firefox on iOS, which is the same engine) zooms the
+  page in whenever a focused text control renders below 16px — and does not zoom
+  back out afterwards, so the user is left panning a magnified layout. Enforce
+  the floor on the *controls themselves* rather than auditing every call site:
+  a stray `text-sm` on an input is otherwise a silent regression that nothing in
+  the build catches.
+
+  Scoped to coarse pointers so desktop density is untouched. Excludes the
+  controls that have no text to zoom.
+*/
+@media (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/*
+  The default tap flash is a saturated blue rectangle — the one piece of
+  unthemed colour left on mobile. Elements carry their own `active:` states.
+*/
+@media (pointer: coarse) {
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
 /* ── Safe Area (notched phones) ───────────────────────────────────────────── */
 .safe-area-bottom {
   padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/*
+  The top inset is needed because index.html asks for a translucent status bar
+  (`apple-mobile-web-app-status-bar-style: black-translucent`). Installed to the
+  Home Screen the page owns the full height, so a `fixed top-0` bar renders
+  *under* the clock and battery unless it pads itself. In a normal browser tab
+  the inset resolves to 0, so this is inert there.
+*/
+.safe-area-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/*
+  Top offset for <main>, kept in step with .safe-area-top on the nav: the bar is
+  h-16 (4rem) plus whatever inset it padded itself with, and 1rem of air.
+*/
+.below-nav {
+  padding-top: calc(5rem + env(safe-area-inset-top, 0px));
+}
+
+/*
+  Modal backdrop. Replaces the `px-4 py-6` that all ten dialogs carried, and
+  does two jobs the padding did not:
+
+  1. Keeps the dialog clear of the notch and the home indicator. `max(…)` keeps
+     the original breathing room on devices that report no insets.
+  2. Stops scroll chaining. The backdrop is `fixed inset-0`, so it covers the
+     viewport and every wheel/touch scroll lands on it — but by default, once it
+     hits its own end (or if its content is shorter than the viewport and it
+     never scrolls at all) the browser passes the scroll to <body> and the page
+     moves behind the dialog. `overscroll-behavior: contain` ends the chain
+     here, which is why no JS scroll-lock and no `position: fixed` on <body> is
+     needed — and so the page keeps its scroll position when the dialog closes.
+*/
+.modal-backdrop {
+  padding-top: max(1.5rem, env(safe-area-inset-top, 0px));
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 0px));
+  padding-left: max(1rem, env(safe-area-inset-left, 0px));
+  padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }

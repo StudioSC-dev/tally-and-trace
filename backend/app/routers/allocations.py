@@ -141,7 +141,11 @@ def apply_allocation_update(db: Session, user: User, allocation: Allocation,
     and the total is recomputed.
     """
     locking.lock_owner_budgets(db, user.id)
-    (allocation,) = _lock_allocations(db, [allocation])
+    locked = _lock_allocations(db, [allocation])
+    if not locked:
+        # Deleted between the caller's ownership check and the lock.
+        raise HTTPException(status_code=404, detail="Allocation not found")
+    (allocation,) = locked
     update_data = dict(update_data)
     if "account_id" in update_data and update_data["account_id"] is not None:
         get_account_or_404(db, user, update_data["account_id"], roles=OWNER_ROLES)

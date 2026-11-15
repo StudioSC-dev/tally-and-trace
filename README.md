@@ -218,6 +218,12 @@ An account's owner can share it with another user as `viewer`, `editor` or
   cash, whatever its settings, so a transfer or card payment involving one can
   project differently for you than for its owner (on a shared card's
   statements, or on a joint account's transfers).
+- **Linked-row suppression** (a transaction recorded for a recurring entry's
+  occurrence takes that occurrence out of the projection) removes the upcoming
+  occurrence for a viewer who reads the entry only through its overflow
+  account, and for a Household tag reader of an entry none of whose accounts
+  carries the tag, even when the creator's row is one they can't read. Their
+  balances don't change: they have no cash leg for it either way.
 - **Attachments:** uploaded receipts are never served as public files. Fetch
   one from `GET /transactions/{id}/receipt` with your bearer token; it is
   returned only to a caller who sees the transaction in `full` view, and

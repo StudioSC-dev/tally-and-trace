@@ -287,6 +287,8 @@ def test_a_pending_linked_row_on_a_missed_month_is_split_out(sw_client, sw_peopl
             missed["pending_transaction_ids"]) == (3, 1, "2026-10-10", sorted([aug, sep]))
 
 
+@pytest.mark.schedule_date_guards
+@pytest.mark.usefixtures("entry_date_bounds_lifted")
 def test_missed_count_walks_a_decades_stale_schedule_completely(sw_client, sw_people,
                                                                 monkeypatch):
     """Past the projection's guard (2000 weekly steps): the missed count is the
