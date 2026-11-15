@@ -114,6 +114,29 @@ def test_posted_create_moves_each_side_by_its_own_figure(sw_client, sw_db, xc):
     assert usd_history["calculated_balance"] == pytest.approx(170.0)
 
 
+def test_mobile_cross_currency_transfer_payload(sw_client, sw_db, xc):
+    """STU-632: the exact body the mobile transfer form builds is accepted and stored."""
+    client, db, a = sw_client, sw_db, xc["a"]
+    payload = {  # as mobile/app/(tabs)/transactions.tsx builds it for PHP -> USD (an unset category is omitted)
+        "description": "send to savings",
+        "amount": 5800,
+        "transaction_type": "transfer",
+        "account_id": xc["php"],
+        "transaction_date": "2026-10-07T00:00:00.000Z",
+        "currency": "PHP",
+        "transfer_from_account_id": xc["php"],
+        "transfer_to_account_id": xc["usd"],
+        "received_amount": 100,
+    }
+    r = client.post(f"{API}/transactions/", json=payload, headers=a["headers"])
+    assert r.status_code == 200, r.text  # the create route answers 200, as every other test here accepts
+    body = r.json()
+    assert body["received_amount"] == 100
+    assert body["amount"] == 5800
+    assert _balance(db, xc["php"]) == Decimal("44200.00")
+    assert _balance(db, xc["usd"]) == Decimal("1100.00")
+
+
 def test_currency_is_the_source_accounts_whatever_the_request_says(sw_client, xc):
     r = _transfer(sw_client, xc["a"], xc["usd"], xc["php"], 100, received_amount=5_800,
                   currency="PHP")
