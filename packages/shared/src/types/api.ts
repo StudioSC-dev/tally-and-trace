@@ -826,8 +826,11 @@ export interface WishlistPlanItem {
   item_id: number
   name: string
   estimated_cost: number
-  estimated_purchase_date: string
+  /** Null when the item's currency has no projected income or expenses. */
+  estimated_purchase_date: string | null
   cumulative_months: number
+  /** Why there is no date, when there isn't one. */
+  note?: string | null
 }
 
 export interface WishlistPlan {
