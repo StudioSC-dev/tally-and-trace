@@ -33,11 +33,13 @@ def no_projection_note(currency: str) -> str:
     return f"No projected income or expenses in {currency}, so this can't be judged yet."
 
 
-def item_currency_row(ctx: RequestContext, item) -> Optional[dict]:
+def item_currency_row(ctx: RequestContext, item, rows: Optional[List[dict]] = None) -> Optional[dict]:
     """The ``by_currency`` disposable row of the item's own currency, or None
-    when the projection has none (STU-304: never the default-currency scalars)."""
+    when the projection has none (STU-304: never the default-currency scalars).
+    Pass ``rows`` (the projection's ``by_currency``) to avoid recomputing it."""
     code = getattr(item.currency, "value", item.currency)
-    rows = forecast_svc.disposable_by_currency(ctx)["by_currency"]
+    if rows is None:
+        rows = forecast_svc.disposable_by_currency(ctx)["by_currency"]
     return next((r for r in rows if r["currency"] == code), None)
 
 
@@ -115,11 +117,12 @@ def get_wishlist_plan(
 
     now = utc_now()
     cumulative_by_currency: Dict[str, int] = {}
+    currency_rows = forecast_svc.disposable_by_currency(ctx)["by_currency"] if items else []
     plan: List[WishlistPlanItem] = []
 
     for item in items:
         code = getattr(item.currency, "value", item.currency)
-        row = item_currency_row(ctx, item)
+        row = item_currency_row(ctx, item, currency_rows)
         if row is None:
             plan.append(
                 WishlistPlanItem(

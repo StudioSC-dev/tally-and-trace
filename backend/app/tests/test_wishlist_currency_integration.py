@@ -142,3 +142,23 @@ def test_plan_single_currency_unchanged(sw_client, cx, frozen):
     assert [(i["name"], i["cumulative_months"], i["estimated_purchase_date"], i["note"])
             for i in body["items"]] == [
         ("Peso one", 1, _due(1), None), ("Peso two", 4, _due(4), None)]
+
+
+def test_plan_computes_currency_rows_once(sw_client, cx, frozen, monkeypatch):
+    from app.services import forecast as forecast_svc
+
+    a = cx["a"]
+    for n in range(4):
+        _item(sw_client, a, f"Peso {n}", 1_000, "PHP")
+    _item(sw_client, a, "Dollar gadget", 100, "USD")
+    _item(sw_client, a, "Euro gadget", 10, "EUR")
+    real, calls = forecast_svc.disposable_by_currency, []
+
+    def counting(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(forecast_svc, "disposable_by_currency", counting)
+    body = _get(sw_client, a, "/wishlist/plan")
+    assert len(body["items"]) == 6
+    assert len(calls) == 1
