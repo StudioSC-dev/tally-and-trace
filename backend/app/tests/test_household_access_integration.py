@@ -209,7 +209,14 @@ def viewer_id_equals_private_txn_id(sw_db):
 
     users, txns = seq("users"), seq("transactions")
     before = {t: sw_db.execute(text(f"SELECT last_value FROM {t}")).scalar() for t in (users, txns)}
-    target = 9000
+    # Above every id and both sequences, so they only ever move forward (a reused
+    # database may already hold ids this high).
+    top = max(
+        *before.values(),
+        sw_db.execute(text("SELECT COALESCE(MAX(id), 0) FROM users")).scalar(),
+        sw_db.execute(text("SELECT COALESCE(MAX(id), 0) FROM transactions")).scalar(),
+    )
+    target = top + A_PRIVATE_OFFSET + 10
     # ``a_private`` is the ``A_PRIVATE_OFFSET``-th transaction row ``leak`` creates.
     sw_db.execute(text("SELECT setval(:seq, :v)"), {"seq": txns, "v": target - A_PRIVATE_OFFSET})
     sw_db.execute(text("SELECT setval(:seq, :v)"), {"seq": users, "v": target - 3})
