@@ -29,7 +29,6 @@ export function Navigation() {
   }
   const { theme, toggleTheme } = useTheme()
   const [showUserMenu, setShowUserMenu] = useState(false)
-  const [showMobileMenu, setShowMobileMenu] = useState(false)
   const symbol = getCurrencyLogoSymbol(user?.default_currency)
 
   // Active tab is an ink underline rather than a tinted pill — a saturated fill
@@ -42,9 +41,6 @@ export function Navigation() {
   const navLinkBase = "inline-flex items-center border-b-2 px-3 py-2 text-sm transition-colors duration-200"
   const navLinkInactive = "border-transparent text-muted hover:text-ink"
   const navLinkActive = "border-ink text-ink"
-  const mobileNavLinkBase = "flex w-full items-center border-l-2 px-3 py-3 text-base transition-colors duration-200"
-  const mobileNavLinkInactive = "border-transparent text-muted hover:text-ink"
-  const mobileNavLinkActive = "border-ink text-ink"
 
   return (
     // safe-area-top: index.html asks for a translucent status bar, so when the
@@ -99,7 +95,7 @@ export function Navigation() {
             </div>
           </div>
 
-          {/* Right side: theme toggle + user menu + mobile hamburger */}
+          {/* Right side: theme toggle + user menu */}
           <div className="flex items-center space-x-2 shrink-0">
             {/* Theme Toggle */}
             <button
@@ -168,76 +164,9 @@ export function Navigation() {
                 </div>
               )}
             </div>
-
-            {/* Hamburger – only on medium screens where desktop nav is hidden but bottom nav is too */}
-            {/* Hidden on mobile (sm:hidden) since BottomNav handles nav; hidden on sm+ since desktop nav links show */}
-            <div className="hidden">
-              <button
-                type="button"
-                onClick={() => setShowMobileMenu(!showMobileMenu)}
-                className="inline-flex items-center justify-center p-2 text-muted transition-colors duration-200 hover:text-ink focus:outline-none"
-              >
-                <span className="sr-only">Open main menu</span>
-                {showMobileMenu ? (
-                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                ) : (
-                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                  </svg>
-                )}
-              </button>
-            </div>
           </div>
         </div>
       </div>
-
-      {/* Mobile menu dropdown */}
-      {showMobileMenu && (
-        <div className="space-y-1 border-t border-line bg-surface px-4 pb-4 pt-2 sm:hidden">
-          <Link to="/" activeOptions={{ exact: true }} className={mobileNavLinkBase} activeProps={{ className: mobileNavLinkActive }} inactiveProps={{ className: mobileNavLinkInactive }} onClick={() => setShowMobileMenu(false)}>
-            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2H5a2 2 0 00-2-2z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5a2 2 0 012-2h4a2 2 0 012 2v2H8V5z" />
-            </svg>
-            Dashboard
-          </Link>
-          <Link to="/accounts" className={mobileNavLinkBase} activeProps={{ className: mobileNavLinkActive }} inactiveProps={{ className: mobileNavLinkInactive }} onClick={() => setShowMobileMenu(false)}>
-            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-            </svg>
-            Accounts
-          </Link>
-          <Link to="/transactions" className={mobileNavLinkBase} activeProps={{ className: mobileNavLinkActive }} inactiveProps={{ className: mobileNavLinkInactive }} onClick={() => setShowMobileMenu(false)}>
-            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-            </svg>
-            Transactions
-          </Link>
-          <Link to="/allocations" className={mobileNavLinkBase} activeProps={{ className: mobileNavLinkActive }} inactiveProps={{ className: mobileNavLinkInactive }} onClick={() => setShowMobileMenu(false)}>
-            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-            </svg>
-            Allocations
-          </Link>
-          <div className="border-t border-line pt-2">
-            <div className="px-3 py-2 text-sm text-muted">
-              <div className="font-medium text-ink">{user?.first_name} {user?.last_name}</div>
-              <div className="text-xs mt-0.5">{user?.email}</div>
-            </div>
-            <button
-              onClick={() => { logout(); setShowMobileMenu(false) }}
-              className="flex w-full items-center px-3 py-3 text-base text-danger transition-colors duration-200 hover:bg-sunken"
-            >
-              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-              Sign out
-            </button>
-          </div>
-        </div>
-      )}
     </nav>
   )
 }

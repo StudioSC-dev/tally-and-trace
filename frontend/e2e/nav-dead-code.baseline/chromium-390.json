@@ -1,0 +1,72 @@
+[
+  {
+    "name": "nav",
+    "x": 0,
+    "y": 0,
+    "w": 390,
+    "h": 65
+  },
+  {
+    "name": "₱Tally & Trace",
+    "x": 12,
+    "y": 18,
+    "w": 28,
+    "h": 28
+  },
+  {
+    "name": "nav-home",
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+  },
+  {
+    "name": "Forecast",
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+  },
+  {
+    "name": "nav-accounts",
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+  },
+  {
+    "name": "nav-transactions",
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+  },
+  {
+    "name": "nav-allocations",
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+  },
+  {
+    "name": "Toggle theme",
+    "x": 254,
+    "y": 14,
+    "w": 36,
+    "h": 36
+  },
+  {
+    "name": "UTUserbgeo Test",
+    "x": 298,
+    "y": 8,
+    "w": 80,
+    "h": 48
+  },
+  {
+    "name": "Open main menu",
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+  }
+]
