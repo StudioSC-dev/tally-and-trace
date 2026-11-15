@@ -436,6 +436,39 @@ export function schedulePreview(
 }
 
 /**
+ * The schedule of a card purchase recorded as an installment from its total (STU-631): the
+ * same draft Repeat sends for a card installment (monthly, ending after `months` payments,
+ * Installment), with the transaction's date (`datetime-local`) as its first payment.
+ */
+export function installmentScheduleDraft(nextOccurrence: string, months: number): ScheduleDraft {
+  return {
+    cadence: 'monthly',
+    next_occurrence: nextOccurrence,
+    day: { kind: 'same_as_date' },
+    end_mode: 'after_occurrences',
+    end_date: undefined,
+    max_occurrences: months,
+    kind_choice: 'installment',
+    bank_kind: 'other',
+    settlement: 'manual',
+  }
+}
+
+/**
+ * Every payment day (`YYYY-MM-DD`) of the capped schedule a save would store, first to
+ * last: on a card with a statement cycle, the statement closes. Null when the date is not
+ * readable, the day is refused or the schedule is not capped.
+ */
+export function cappedPaymentDays(draft: ScheduleDraft, ctx: ScheduleContext): string[] | null {
+  const built = draftSchedule(draft, ctx)
+  if (built === null || 'error' in built) return null
+  const count = built.schedule.max_occurrences
+  if (built.schedule.end_mode !== 'after_occurrences' || !count || count <= 0) return null
+  const first = parseEntryDate(built.schedule.next_occurrence)
+  return generateOccurrences(built.schedule, first, PREVIEW_RANGE_END, count).map((date) => date.toISOString().slice(0, 10))
+}
+
+/**
  * The forecast's walk guard (the backend `iter_occurrences` default): at most this many
  * steps from the next occurrence, or months for a semi-monthly schedule. The warning
  * walks no further, so it names no date the forecast would not reach.
