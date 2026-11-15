@@ -6,14 +6,18 @@ worked example from the portfolio blog post: a month that closes positive but go
 insolvent mid-month before payday. If the engine ever stops flagging that, the
 "month-end total lied" bug is back.
 """
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
 from app.models.transaction import RecurrenceFrequency
+from app.services.recurrence import step_occurrence
 from app.services.forecast import (
     build_timeline,
     iter_occurrences,
+    iter_window_occurrences,
     _monthly_equivalent,
 )
 
@@ -219,3 +223,55 @@ def test_monthly_equivalent_new_cadences():
     assert round(_monthly_equivalent(100.0, RecurrenceFrequency.WEEKLY), 2) == round(100 * 52 / 12, 2)
     assert round(_monthly_equivalent(100.0, RecurrenceFrequency.BIWEEKLY), 2) == round(100 * 26 / 12, 2)
     assert _monthly_equivalent(300.0, RecurrenceFrequency.MONTHLY) == 300.0
+
+
+# ---------------------------------------------------------------------------
+# The forecast counts each real payment once (STU-648)
+# ---------------------------------------------------------------------------
+
+def _february_outflow(entry, amount, year=2027):
+    """The entry's projected February outflow: its window occurrences as dated
+    outflow events through ``build_timeline``, the closing balance minus the opening."""
+    events = [{"date": when, "name": "rent", "amount": -amount, "type": "expense"}
+              for when, _ in iter_window_occurrences(
+                  entry, datetime(year, 2, 1), datetime(year, 3, 1))]
+    timeline = build_timeline(Decimal("1000.00"), events)
+    return Decimal("1000.00") - timeline["closing_balance"], len(events)
+
+
+def test_uncapped_semi_monthly_february_total():
+    e = _entry(RecurrenceFrequency.SEMI_MONTHLY, datetime(2027, 1, 30),
+               semi_monthly_day_1=30, semi_monthly_day_2=31)
+    assert _february_outflow(e, Decimal("100.00")) == (Decimal("100.00"), 1)
+    leap = _entry(RecurrenceFrequency.SEMI_MONTHLY, datetime(2028, 1, 30),
+                  semi_monthly_day_1=30, semi_monthly_day_2=31)
+    assert _february_outflow(leap, Decimal("100.00"), year=2028) == (Decimal("100.00"), 1)
+
+
+def test_capped_projection_unchanged():
+    """STU-364: a capped entry merges the clamped day before the cap applies,
+    so the cap's last place is not spent on a second Feb 28."""
+    e = _entry(RecurrenceFrequency.SEMI_MONTHLY, datetime(2027, 1, 30),
+               semi_monthly_day_1=30, semi_monthly_day_2=31,
+               end_mode="after_occurrences", max_occurrences=5)
+    got = [o.date() for o in iter_occurrences(e, e.next_occurrence, datetime(2028, 1, 1))]
+    assert got == [date(2027, 1, 30), date(2027, 1, 31), date(2027, 2, 28),
+                   date(2027, 3, 30), date(2027, 3, 31)]
+
+
+@pytest.mark.parametrize("cadence", [c for c in RecurrenceFrequency
+                                     if c is not RecurrenceFrequency.SEMI_MONTHLY])
+def test_non_semi_monthly_projection_unchanged(cadence):
+    """Every other cadence walks fixed steps, so no two occurrences share a day:
+    the projection is the plain step sequence, capped or not."""
+    start = datetime(2027, 1, 31)
+    end = datetime(2030, 1, 1)
+    for kw in ({}, dict(end_mode="after_occurrences", max_occurrences=6)):
+        e = _entry(cadence, start, anchor_day=31, day_rule=None, **kw)
+        got = [o for o, _ in iter_window_occurrences(e, start, end)]
+        walked, cur = [], start
+        while cur < end and len(walked) < kw.get("max_occurrences", 10**6):
+            walked.append(cur)
+            cur = step_occurrence(e, cur)
+        assert got == walked
+        assert len(got) == len(set(got))

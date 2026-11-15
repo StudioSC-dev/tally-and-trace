@@ -701,10 +701,10 @@ def iter_occurrences(entry, start: datetime, end: datetime,
     - Respects ``end_date`` (``end_mode == "on_date"``) and caps future occurrences
       at ``max_occurrences`` (``end_mode == "after_occurrences"``; counted from
       ``next_occurrence`` forward — best-effort, since elapsed count isn't stored).
-      A capped ``SEMI_MONTHLY`` walk merges a day clamped onto the one before it
+      A ``SEMI_MONTHLY`` walk merges a day clamped onto the one before it
       (days 30/31 both on Feb 28) before it counts: one occurrence, one place in
-      the cap, as posting records it (``capped_distinct_days``). An uncapped
-      walk yields both.
+      the cap, as posting records it (``capped_distinct_days``). Capped or not,
+      the walk yields that day once (STU-364, STU-648).
     - Stops at the last date ``datetime`` can hold rather than raising, so an
       unbounded walk (``end`` of ``datetime.max``) ends there.
     - Walks at most ``max_steps`` steps (months, for ``SEMI_MONTHLY``); by
@@ -741,7 +741,7 @@ def iter_occurrences(entry, start: datetime, end: datetime,
                     continue
                 if end_date is not None and occ > end_date:
                     return
-                if cap is not None and occ.date() == last:
+                if occ.date() == last:
                     continue  # clamped onto the day before: merged, so not counted again
                 if cap is not None and produced >= cap:
                     return
