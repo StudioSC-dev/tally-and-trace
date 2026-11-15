@@ -157,6 +157,8 @@ const snapshotRow = async (u, id) => (await get(u.token, '/dashboard/snapshot'))
 async function newPage(browser) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 1000 } })
   const page = await ctx.newPage()
+  // These checks assert the older request set (STU-603): `/dashboard/due` answers 404, so the Due card falls back to it.
+  await require('./_smooth.cjs').olderApi(page)
   const native = dialogs.trackNativeDialogs(page)
   if (process.env.DEBUG) page.on('response', (r) => { if (r.url().includes('/api/v1/')) console.log(`    [net] ${r.request().method()} ${r.url().replace(API, '')} -> ${r.status()}`) })
   return { ctx, page, native }
@@ -197,7 +199,8 @@ function trackRequests(page) {
   page.on('request', (r) => {
     const url = r.url()
     if (r.method() === 'POST' && url.endsWith('/budget-entries/review-installments')) s.posts.push(JSON.parse(r.postData() || '{}'))
-    if (r.method() === 'GET' && url.includes('/dashboard/snapshot')) s.snapshots++
+    // What the Due card reads: `/dashboard/due`, or the snapshot when that route is answered 404 (STU-603).
+    if (r.method() === 'GET' && url.includes(process.env.TT_DUE_API === 'real' ? '/dashboard/due' : '/dashboard/snapshot')) s.snapshots++
   })
   return s
 }

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type {
+  DashboardDue,
   InstallmentAutoPostRow,
   CardCharges,
   CardStatementDue,
@@ -1537,5 +1538,42 @@ describe('STU-511: Due loses subscription and installment rows', () => {
     it('is stale for the previous day', () => {
       expect(freshFor('2026-10-19', TODAY)).toBe(false)
     })
+  })
+})
+
+describe('the due helpers read a /dashboard/due body as they read a snapshot (STU-603)', () => {
+  const lists = snap({
+    payables: [payable({ name: 'Rent', source_id: 7, occurrence_date: TODAY })],
+    installment_auto_post: [],
+    auto_post_scheduled: true,
+  })
+  const due: DashboardDue = {
+    today: TODAY,
+    payables: lists.payables,
+    upcoming_this_month: lists.upcoming_this_month,
+    card_charges: lists.card_charges,
+    missed: lists.missed,
+    card_statements_due: lists.card_statements_due,
+    installment_review: lists.installment_review,
+    installment_auto_post: lists.installment_auto_post,
+    autopay_due: lists.autopay_due,
+    auto_post_scheduled: lists.auto_post_scheduled,
+    linked_pending: [],
+    upcoming_occurrences: { items: [], total: 0, auto_post_scheduled: true },
+    subscription_occurrences: { items: [], total: 0, auto_post_scheduled: true },
+    unposted: { items: [], total: 0, page: 1, page_size: 200, has_more: false },
+  }
+
+  it('gives the same rows from either body', () => {
+    expect(dueRecurringRows(due, TODAY)).toEqual(dueRecurringRows(lists, TODAY))
+    expect(dueRecurringRows(due, TODAY).map((r) => r.name)).toEqual(['Rent'])
+    expect(pendingLinkIds(due)).toEqual(pendingLinkIds(lists))
+    expect(dueStatementRows(due)).toEqual(dueStatementRows(lists))
+    expect(shouldPostOnOpen(due)).toBe(shouldPostOnOpen(lists))
+  })
+
+  it('reads its own day for freshness', () => {
+    expect(freshFor(due.today, TODAY)).toBe(true)
+    expect(freshFor(due.today, '2026-10-21')).toBe(false)
   })
 })

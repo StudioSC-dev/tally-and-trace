@@ -93,7 +93,7 @@ const wireAt = (day, time) => `${day}T${time}`
       })
     }
 
-    const { ctx, page } = await h.newPage(browser, { timezoneId: zone })
+    const { ctx, page } = await h.newPage(browser, { timezoneId: zone }, { older: true })
     const requests = h.logRequests(page)
     try {
       const local = await h.localDay(page)
@@ -130,7 +130,10 @@ const wireAt = (day, time) => `${day}T${time}`
       const expectedEnd = `${addDays(today, WINDOW_DAYS)}T23:59:59.999999Z`
       await h.check('c.due-window-end-date', 'B', async () => {
         const ends = requests
-          .filter((r) => r.method === 'GET' && new URL(r.url).pathname.endsWith('/transactions/') && new URL(r.url).searchParams.get('is_posted') === 'false')
+          // The older queries ask for the pending window (is_posted=false); on `/dashboard/due` the server owns that
+          // window and the card's own reads are the upcoming transactions, which end on the same day.
+          .filter((r) => r.method === 'GET' && new URL(r.url).pathname.endsWith('/transactions/') &&
+            (process.env.TT_DUE_API === 'real' || new URL(r.url).searchParams.get('is_posted') === 'false'))
           .map((r) => new URL(r.url).searchParams.get('end_date'))
         return ends.includes(expectedEnd) || `end_date values ${JSON.stringify([...new Set(ends)])}, expected ${expectedEnd}`
       })

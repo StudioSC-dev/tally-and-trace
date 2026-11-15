@@ -2211,6 +2211,46 @@ export interface DashboardSnapshot {
   today?: string
 }
 
+/** The lists the Due card reads, as `GET /dashboard/snapshot` and `GET /dashboard/due` both return them. */
+export type DueLists = Pick<
+  DashboardSnapshot,
+  | 'payables'
+  | 'upcoming_this_month'
+  | 'card_charges'
+  | 'missed'
+  | 'card_statements_due'
+  | 'installment_review'
+  | 'installment_auto_post'
+  | 'autopay_due'
+  | 'auto_post_scheduled'
+  | 'today'
+>
+
+/** `GET /dashboard/due`'s `unposted`: one page of unposted rows dated on or before the Manila day, newest first. */
+export interface DueUnpostedPage {
+  items: Transaction[]
+  total: number
+  /** 1-based. */
+  page: number
+  page_size: number
+  has_more: boolean
+}
+
+/**
+ * GET /dashboard/due: what the Transactions page's Due card renders, in one request
+ * (`docs/dashboard-due.md`). `linked_pending` is the unposted rows a missed row links; the two
+ * occurrence lists are `GET /budget-entries/upcoming-occurrences` for the 30 days after `today`
+ * (`plan=none` and `plan=subscription`, limit 500).
+ */
+export interface DashboardDue extends DueLists {
+  /** The Manila day every list was computed for (`YYYY-MM-DD`). */
+  today: string
+  linked_pending: Transaction[]
+  upcoming_occurrences: UpcomingOccurrences
+  subscription_occurrences: UpcomingOccurrences
+  unposted: DueUnpostedPage
+}
+
 // ─── Forced dates ────────────────────────────────────────────────────────────
 
 /** Body of `PUT /budget-entries/{id}/occurrences/{day}/date` and `PUT /accounts/{id}/loan-due-dates/{day}/date`. */

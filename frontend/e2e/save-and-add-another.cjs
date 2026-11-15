@@ -66,7 +66,7 @@ const isUpcomingList = (r) => isTxGet(r) && !param(r, 'search') && startDay(r) >
 const isUpcomingWindow = (r) => isUpcomingList(r) && param(r, 'order') === 'asc'
 const isSearchList = (term) => (r) => isTxGet(r) && param(r, 'search') === term
 const isAccountsList = (r) => r.method() === 'GET' && pathOf(r.url()).endsWith('/accounts')
-const isSnapshot = (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/dashboard/snapshot')
+const isDue = (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/dashboard/due')
 
 // ─── Locators ────────────────────────────────────────────────────────────────
 const formModal = (page, heading) =>
@@ -540,7 +540,7 @@ async function scenarioD2(browser) {
 
     // The dialog is usable while the save is held: a second save queues.
     const events = []
-    page.on('request', (r) => { if (isMainList(r) || isSnapshot(r) || isAccountsList(r)) events.push({ kind: 'get', r }) })
+    page.on('request', (r) => { if (isMainList(r) || isDue(r) || isAccountsList(r)) events.push({ kind: 'get', r }) })
     page.on('response', (res) => {
       const r = res.request()
       if (isCreate(r) && (r.postData() || '').includes('"Dinner"')) events.push({ kind: 'second-post-done' })
@@ -555,20 +555,19 @@ async function scenarioD2(browser) {
       const done = events.findIndex((e) => e.kind === 'second-post-done')
       if (done < 0) return 'the second save never completed'
       const after = events.slice(done + 1).filter((e) => e.kind === 'get').map((e) => e.r)
-      const fresh = { list: after.filter(isMainList), snapshot: after.filter(isSnapshot), accounts: after.filter(isAccountsList) }
+      // STU-603: a transaction save refetches the main list and the Due card's `/dashboard/due` (its `Due` tag)
+      // and leaves the accounts list alone: this page shows no balance, and Accounts reads its own on mount.
+      const fresh = { list: after.filter(isMainList), due: after.filter(isDue) }
       const counts = Object.fromEntries(Object.entries(fresh).map(([k, v]) => [k, v.length]))
-      if (Object.values(counts).some((n) => n === 0)) return `requests sent after the second save settled ${JSON.stringify(counts)}`
-      const res = await fresh.accounts[fresh.accounts.length - 1].response()
-      const body = res ? await res.json().catch(() => null) : null
-      const items = Array.isArray(body) ? body : (body && body.items) || []
-      const shown = items.find((a) => a.id === seed.checking.id)?.balance
-      const truth = (await client.get(seed.user.token, `/accounts/${seed.checking.id}`)).balance
+      const accountsRefetched = after.filter(isAccountsList).length
+      if (Object.values(counts).some((n) => n === 0) || accountsRefetched > 0) {
+        return `requests sent after the second save settled ${JSON.stringify(counts)}, accounts ${accountsRefetched}`
+      }
       const listed = [
         await until(() => rowFor(page, 'Coffee').count(), (c) => c > 0),
         await until(() => rowFor(page, 'Dinner').count(), (c) => c > 0),
       ]
-      const ok = shown !== undefined && Number(shown) === Number(truth) && listed.every((n) => n > 0)
-      return ok || `balance on the page ${shown}, server ${truth}, rows listed (Coffee, Dinner) ${JSON.stringify(listed)}, ${JSON.stringify(counts)}`
+      return listed.every((n) => n > 0) || `rows listed (Coffee, Dinner) ${JSON.stringify(listed)}, ${JSON.stringify(counts)}`
     })
   } finally {
     for (const gate of gates) gate.release({ disarm: true })
@@ -1069,7 +1068,7 @@ async function scenarioJ(browser) {
     const modal = createModal(page)
     await fillEntry(modal, 'Coffee', 180)
     const listGate = await h.gate(page, isMainList)
-    const snapGate = await h.gate(page, isSnapshot)
+    const snapGate = await h.gate(page, isDue)
     gates.push(listGate, snapGate)
     await clickAnother(page, modal)
     await waitNotice(modal, 'Saving "Coffee ₱180.00"…')

@@ -11,7 +11,7 @@ export interface OutboxFormHandlers {
 }
 
 /** Tags a transaction save invalidates (as the mutations it replaces did). */
-export const TRANSACTION_TAGS = ['Transaction', 'Account', 'Allocation']
+export const TRANSACTION_TAGS = ['Transaction', 'Balance', 'Allocation', 'Due']
 
 /** Queues the delete of a transaction row (the Transactions page's Delete and the toast's Undo). */
 export function transactionDelete(id: number, description: string): NewOutboxEntry {
@@ -29,7 +29,7 @@ export function transactionDelete(id: number, description: string): NewOutboxEnt
 }
 
 /** Tags a Due-card save invalidates (as Mark paid, Post all due and Pay card did). */
-export const DUE_TAGS = ['BudgetEntry', 'Transaction', 'Account', 'Allocation']
+export const DUE_TAGS = ['BudgetEntry', 'Transaction', 'Account', 'Allocation', 'Due']
 
 /** The outbox form of a recurring entry's Due-card action; its targetId is the entry id. */
 export const DUE_ENTRY_FORM = 'due-entry' as const

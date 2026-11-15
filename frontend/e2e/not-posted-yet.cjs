@@ -41,7 +41,7 @@
 // Exit 0 when every check passed, 1 when one failed, 2 when the stack did not start.
 const { startLocalStack, consumePageOpen } = require('./_local_stack.cjs')
 const { useDueCheck, DUE_TABS, allDueRows, rowsOf, showRow, goToPage, currentPage, pagerLabel, hasPager, openDueTab } = require('./_due_pages.cjs')
-const { waitQuiet } = require('./_smooth.cjs')
+const { waitQuiet, alignServerDay } = require('./_smooth.cjs')
 const dialogs = require('./_dialogs.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -464,6 +464,8 @@ async function manilaDay(browser) {
   await unposted(u, bank, addDays(D, -1), 30, 'F Mid')
   await unposted(u, bank, D, 40, 'F New')
   const { ctx, page } = await newPage(browser, natives, { timezoneId: 'America/Los_Angeles' })
+  // The API answers `/dashboard/due` dated by the page clock, as a server on the page's day would (an answer dated another day is not shown, STU-603).
+  await alignServerDay(page)
   // Manila 23:58 on D-1 (15:58 UTC), two minutes before its midnight: the browser's own day is D-1 too.
   await page.clock.install({ time: new Date(`${addDays(D, -1)}T15:58:00Z`) })
   await uiLogin(page, u)

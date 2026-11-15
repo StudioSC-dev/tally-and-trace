@@ -403,14 +403,51 @@ async function waitQuiet(page, ms = 5000, { settleMs = 150 } = {}) {
 // ─── Pages and logs ──────────────────────────────────────────────────────────
 
 /**
+ * For a script that moves the page clock while the API stays on the real day (TT_DUE_API=real): `/dashboard/due` and
+ * the installment plans say which day they are for, and the card shows "…" for an answer dated another day than its
+ * own. This answers both as the day the page's clock reads in Manila, as a server on that clock would.
+ */
+async function alignServerDay(page) {
+  const dated = (url) => /\/api\/v1\/(dashboard\/due|budget-entries\/installment-plans)$/.test(url.pathname)
+  await page.route(dated, async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    // A page closed while this answers (a scenario ends) is not an error.
+    try {
+      const res = await route.fetch()
+      if (res.status() !== 200) return await route.fulfill({ response: res })
+      const json = await res.json()
+      const today = await page.evaluate(() => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)).catch(() => null)
+      return await route.fulfill({ response: res, json: today ? { ...json, today } : json })
+    } catch {
+      return undefined
+    }
+  })
+  return null
+}
+
+/**
+ * Answers `GET /dashboard/due` with 404, as an API from before STU-599 does: the Transactions page's Due card
+ * then reads the older request set (the snapshot, linked-id batches, 1000-row window batches, two occurrence
+ * reads). A script that asserts that request set opens its pages this way (`newPage(browser, options, { older: true })`);
+ * the new request set is checked in due-card-requests.cjs. Returns failWith's handle.
+ */
+function olderApi(page) {
+  // TT_DUE_API=real runs the same suites against the real `/dashboard/due` (README, "Both Due card paths").
+  if (process.env.TT_DUE_API === 'real') return alignServerDay(page)
+  return failWith(page, (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/api/v1/dashboard/due'), 404)
+}
+
+/**
  * A fresh browser context and page. `contextOptions` are Playwright context options,
  * for example `{ timezoneId: 'Asia/Manila' }` for a scenario that crosses a day, or
- * `{ reducedMotion: 'reduce' }`. The viewport defaults to 1280x1000. Returns { ctx, page }.
+ * `{ reducedMotion: 'reduce' }`. The viewport defaults to 1280x1000. `{ older: true }` as the third argument
+ * answers `/dashboard/due` with 404 (see `olderApi`). Returns { ctx, page }.
  */
-async function newPage(browser, contextOptions = {}) {
+async function newPage(browser, contextOptions = {}, { older = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 1000 }, ...contextOptions })
   const page = await ctx.newPage()
   trackRequests(page)
+  if (older) await olderApi(page)
   return { ctx, page }
 }
 
@@ -589,6 +626,8 @@ module.exports = {
   trackRequests,
   waitQuiet,
   newPage,
+  olderApi,
+  alignServerDay,
   logRequests,
   localDay,
   installDayClock,

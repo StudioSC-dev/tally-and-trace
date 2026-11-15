@@ -51,6 +51,11 @@ const wire = (day) => `${day}T00:00:00`
 let stack, client
 
 const tid = (id) => `[data-testid="${id}"]`
+// STU-603: the card's rows come from `/dashboard/due` (TT_DUE_API=real) or, with that route answered 404, from the
+// older queries. The scenarios hold whichever request brings the rows: the route itself in one case, the linked
+// batch, the window batch and the occurrences request in the other.
+const REAL = process.env.TT_DUE_API === 'real'
+const isDueRoute = (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/api/v1/dashboard/due')
 const pathIs = (suffix) => (r) => new URL(r.url()).pathname.endsWith(suffix)
 /** The window query: transactions with no `ids`. */
 const isWindow = (r) => r.method() === 'GET' && pathIs('/transactions/')(r) && new URL(r.url()).searchParams.getAll('ids').length === 0
@@ -88,14 +93,14 @@ async function scenarioE(browser) {
     account_id: bank.id, transaction_type: 'debit', amount: 900, description: 'Water bill',
     transaction_date: wire(start), is_posted: false, budget_entry_id: water.id,
   })
-  const { ctx, page } = await h.newPage(browser, { viewport: { width: 1280, height: 1400 } })
+  const { ctx, page } = await h.newPage(browser, { viewport: { width: 1280, height: 1400 } }, { older: true })
   page.setDefaultTimeout(10000)
   await h.recordTexts(page, ['due-count'])
   let drop, g
   try {
     // The window query does not return the linked row, so only the linked batch can.
     drop = await h.rewrite(page, isWindow, (json) => ({ ...json, items: json.items.filter((t) => t.id !== linked.id) }))
-    g = await h.gate(page, isLinkedBatch)
+    g = await h.gate(page, REAL ? isDueRoute : isLinkedBatch)
     await h.uiLogin(page, stack, u)
     await page.goto(`${stack.webUrl}/transactions`)
     await h.check('e.linked-batch-held', 'S', async () => (await g.waitHits(1)) || 'linked batch never requested')
@@ -143,12 +148,12 @@ async function scenarioF(browser) {
       transaction_date: wire(addDays(today, -days)), is_posted: false,
     })
   }
-  const { ctx, page } = await h.newPage(browser, { viewport: { width: 1280, height: 1400 } })
+  const { ctx, page } = await h.newPage(browser, { viewport: { width: 1280, height: 1400 } }, { older: true })
   page.setDefaultTimeout(10000)
   await h.recordTexts(page, ['due-count', 'due-not-posted-count'])
   let g
   try {
-    g = await h.gate(page, isSectionWindow)
+    g = await h.gate(page, REAL ? isDueRoute : isSectionWindow)
     await h.uiLogin(page, stack, u)
     await page.goto(`${stack.webUrl}/transactions`)
     await h.check('f.window-held', 'S', async () => (await g.waitHits(1)) || 'window query never requested')
@@ -205,7 +210,7 @@ async function scenarioG(browser) {
     entry_type: 'expense', currency: 'PHP', cadence: 'monthly', name: 'G Bill', amount: 800, account_id: bank.id,
     next_occurrence: wire(addDays(day, 3)),
   })
-  const { ctx, page } = await h.newPage(browser, { viewport: { width: 1280, height: 1400 } })
+  const { ctx, page } = await h.newPage(browser, { viewport: { width: 1280, height: 1400 } }, { older: true })
   page.setDefaultTimeout(10000)
   // A UTC browser two minutes before Manila midnight (16:00 UTC) of the real day.
   await page.clock.install({ time: new Date(`${day}T15:58:00Z`) })
@@ -222,7 +227,12 @@ async function scenarioG(browser) {
     await h.waitQuiet(page)
     await h.sleep(500)
     await h.resetTexts(page)
-    g = await h.gate(page, isUpcomingOccurrences)
+    // The backend clock is real, so on `/due` the held answer says it is the next day, as a server past midnight would.
+    const next = addDays(day, 1)
+    g = REAL
+      ? await h.holdResponse(page, isDueRoute, { transform: (json) => ({ ...json, today: next }) })
+      : await h.gate(page, isUpcomingOccurrences)
+    if (REAL) await h.rewrite(page, (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/budget-entries/installment-plans'), (json) => ({ ...json, today: next }))
     gt = await h.gate(page, isUpcomingTransactions)
     // Playwright reads '03:00' as mm:ss: three minutes, past Manila midnight.
     await page.clock.fastForward('03:00')

@@ -83,7 +83,7 @@ const waitResponse = (page, pred) => page.waitForResponse(pred, { timeout: 10000
  * overlay element ever appeared (`overlaySeen`), and a request log.
  */
 async function openPage(browser, contextOptions = {}, { clock = null } = {}) {
-  const { ctx, page } = await h.newPage(browser, contextOptions)
+  const { ctx, page } = await h.newPage(browser, contextOptions, { older: true })
   page.setDefaultTimeout(10000)
   if (clock) await page.clock.install({ time: clock })
   await page.addInitScript((sel) => {
@@ -544,6 +544,11 @@ async function scenarioJ(browser) {
 
 const entry = (u, fields) => client.post(u.token, '/budget-entries/', { entry_type: 'expense', currency: 'PHP', cadence: 'monthly', ...fields })
 const isSnapshot = (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/dashboard/snapshot')
+// STU-603: what the Transactions page's Due card reads for its rows: `/dashboard/due` (TT_DUE_API=real) or, with that
+// route answered 404, the snapshot.
+const REAL = process.env.TT_DUE_API === 'real'
+const isDueRoute = (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/dashboard/due')
+const isDueSource = REAL ? isDueRoute : isSnapshot
 /** The Transactions main list: no ids, no is_posted, end_date on or before `day`. */
 const isMainList = (day) => (r) => {
   if (r.method() !== 'GET') return false
@@ -650,7 +655,7 @@ async function scenarioK(browser) {
     await dialog.locator(tid('mark-paid-occurrence')).waitFor()
     await h.waitQuiet(page)
     const save = await h.gate(page, (r) => r.method() === 'POST' && r.url().endsWith(`/budget-entries/${rent.id}/materialize`))
-    const snap = await h.gate(page, isSnapshot)
+    const snap = await h.gate(page, isDueSource)
     const list = await h.gate(page, isMainList(addDays(today, 1)))
     gates.push(save, snap, list)
     await dialog.locator(tid('mark-paid-submit')).click()
@@ -699,10 +704,23 @@ async function scenarioD(browser) {
     await h.uiLogin(page, stack, u)
     await page.locator(tid('net-worth')).waitFor()
     await h.waitQuiet(page)
-    await client.post(u.token, `/budget-entries/${bill.id}/materialize`, {})
-    snap = await h.gate(page, isSnapshot)
-    await navLink(page, '/transactions').click()
-    await page.locator(tid('due-section')).waitFor()
+    if (REAL) {
+      // `/dashboard/due` is not read by the dashboard, so the stale rows are the card's own cache: open Transactions
+      // once, go back, and let the API pay the bill. A window focus then refetches the held `/due` (a return within
+      // a minute does not), and the stale row must be disabled until it lands.
+      await navLink(page, '/transactions').click()
+      await page.locator(tid('due-section')).waitFor()
+      await showRow(page, dueRecurring(page, 'D Bill'))
+      await h.waitQuiet(page)
+      await client.post(u.token, `/budget-entries/${bill.id}/materialize`, {})
+      snap = await h.gate(page, isDueRoute)
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    } else {
+      await client.post(u.token, `/budget-entries/${bill.id}/materialize`, {})
+      snap = await h.gate(page, isSnapshot)
+      await navLink(page, '/transactions').click()
+      await page.locator(tid('due-section')).waitFor()
+    }
     await h.check('d.snapshot-hit', 'S', async () => (await snap.waitHits(1)) || 'no snapshot refetch')
     const stale = page.locator(`${tid('due-row')}[data-kind="recurring"]`).filter({ hasText: 'D Bill' }).locator(tid('due-mark-paid'))
     await h.check('d.stale-row-shown', 'S', async () => (await stale.count()) > 0 || 'no stale row to click (cache not painted)')
@@ -882,7 +900,7 @@ async function scenarioG3(browser) {
     await receipt.waitHits(1)
     await page.getByRole('button', { name: 'Close actions modal' }).click()
     const form = await createTransactionUI(page, { accountName: 'Owner Checking', amount: 42, description: 'Overlay G3 new' })
-    const snap = await h.gate(page, isSnapshot)
+    const snap = await h.gate(page, isDueSource)
     gates.push(snap)
     await form.getByRole('button', { name: 'Create Transaction' }).click()
     await h.check('g3.form-closes-at-once', 'B', async () => (await h.expectAbsentFor(page, form, 300)) || 'the form is still open')
@@ -1214,7 +1232,7 @@ async function scenarioU(browser) {
       await h.waitQuiet(page)
       const refresh = await h.gate(page, { url: /\/auth\/refresh$/ }, { failStatus: 401 })
       refresh.release({ disarm: true })
-      const fail = await h.failWith(page, isSnapshot, 401)
+      const fail = await h.failWith(page, isDueSource, 401)
       stops.push(refresh, fail)
       await navLink(page, '/transactions').click()
       await h.check('u2.login', 'G', async () => {

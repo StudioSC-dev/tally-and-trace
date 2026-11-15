@@ -66,6 +66,11 @@ try {
 }
 
 const only = process.argv[2]
+// STU-603: with TT_DUE_API=real the card reads `/dashboard/due`, one request for what the older API read as the snapshot
+// and the occurrences. (i), (j) and (m) run on it with that one request in their place; (k) and (l) are about two
+// sources of one badge disagreeing, which only the older API has, so they run on the older API alone.
+const REAL = process.env.TT_DUE_API === 'real'
+const isDueRoute = (url) => url.pathname.endsWith('/api/v1/dashboard/due')
 let pass = 0, total = 0
 function check(what, actual, expected) {
   total++
@@ -181,6 +186,8 @@ const missedFor = (snapshot, entryId) =>
 async function newPage(browser, contextOptions = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 1400 }, timezoneId: 'Asia/Manila', ...contextOptions })
   const page = await ctx.newPage()
+  // These checks assert the older request set (STU-603): `/dashboard/due` answers 404, so the Due card falls back to it.
+  await require('./_smooth.cjs').olderApi(page)
   const native = trackNativeDialogs(page)
   if (process.env.DEBUG) page.on('response', (r) => { if (r.url().includes('/api/v1/')) console.log(`    [net] ${r.request().method()} ${r.url().replace(API, '')} -> ${r.status()}`) })
   return { ctx, page, native }
@@ -706,18 +713,20 @@ async function heldRollover(browser) {
 
   // Each route is held (when armed) on its own gate and then fulfilled with the real response
   // rewritten: `today`, and one subscription occurrence and one plan removed.
-  const KINDS = ['snapshot', 'plans', 'subs', 'none']
+  const KINDS = REAL ? ['snapshot', 'plans'] : ['snapshot', 'plans', 'subs', 'none']
   const openGate = () => ({ held: Promise.resolve(), open: () => {} })
   const heldGate = () => { const g = {}; g.held = new Promise((resolve) => { g.open = resolve }); return g }
-  const stage = { active: false, gates: Object.fromEntries(KINDS.map((k) => [k, openGate()])), today: next, hits: { snapshot: 0, plans: 0, subs: 0, none: 0 } }
+  const stage = { active: false, gates: Object.fromEntries(KINDS.map((k) => [k, openGate()])), today: next, hits: Object.fromEntries(KINDS.map((k) => [k, 0])) }
   const kindOf = (url) => {
     const p = url.pathname
-    if (p.endsWith('/dashboard/snapshot')) return 'snapshot'
+    if (p.endsWith('/dashboard/snapshot') || (REAL && p.endsWith('/dashboard/due'))) return 'snapshot'
     if (p.endsWith('/budget-entries/installment-plans')) return 'plans'
     if (p.endsWith('/budget-entries/upcoming-occurrences')) return url.searchParams.get('plan') === 'subscription' ? 'subs' : url.searchParams.get('plan') === 'none' ? 'none' : null
     return null
   }
   const rewrite = (kind, json) => {
+    // On `/due` the one answer carries the subscription occurrences too.
+    if (kind === 'snapshot' && REAL) return { ...json, today: stage.today, subscription_occurrences: { ...json.subscription_occurrences, items: json.subscription_occurrences.items.slice(1), total: Math.max(0, json.subscription_occurrences.total - 1) } }
     if (kind === 'snapshot') return { ...json, today: stage.today }
     if (kind === 'plans') return { ...json, today: stage.today, items: json.items.slice(1) }
     if (kind === 'subs') return { ...json, items: json.items.slice(1), total: Math.max(0, json.total - 1) }
@@ -755,14 +764,19 @@ async function heldRollover(browser) {
 
   // The snapshot and the plans land first, with the subscription occurrences still held:
   // Subscriptions waits for both of its sources, so it stays at "...".
-  for (const k of ['snapshot', 'plans', 'none']) stage.gates[k].open()
-  await page.locator(`[data-testid="${BADGES[1]}"]`).filter({ hasNotText: '…' }).waitFor({ timeout: 15000 }).catch(() => {})
-  await sleep(600)
-  check('(i) the snapshot and plans in, the subscription occurrences held: Subscriptions reads "...", Installments the new count',
-    [await badgeOf(page, 'subscriptions'), await badgeOf(page, 'installments')], ['…', '1'])
-  check('(i) and no Subscriptions empty text is shown', await page.locator('[data-testid="due-subscriptions-empty"]').count(), 0)
-  check('(i) the snapshot in, the subscription occurrences held: none of the previous window\'s occurrence rows', await oldSubRows(), 0)
-  stage.gates.subs.open()
+  if (!REAL) {
+    for (const k of ['snapshot', 'plans', 'none']) stage.gates[k].open()
+    await page.locator(`[data-testid="${BADGES[1]}"]`).filter({ hasNotText: '…' }).waitFor({ timeout: 15000 }).catch(() => {})
+    await sleep(600)
+    check('(i) the snapshot and plans in, the subscription occurrences held: Subscriptions reads "...", Installments the new count',
+      [await badgeOf(page, 'subscriptions'), await badgeOf(page, 'installments')], ['…', '1'])
+    check('(i) and no Subscriptions empty text is shown', await page.locator('[data-testid="due-subscriptions-empty"]').count(), 0)
+    check('(i) the snapshot in, the subscription occurrences held: none of the previous window\'s occurrence rows', await oldSubRows(), 0)
+    stage.gates.subs.open()
+  } else {
+    // One source for Subscriptions: it and the plans land together.
+    for (const k of KINDS) stage.gates[k].open()
+  }
   for (const id of BADGES) await page.locator(`[data-testid="${id}"]`).filter({ hasNotText: '…' }).waitFor({ timeout: 15000 })
   await settle(page)
   check('(i) after release: the badges show the rewritten counts, 1 and 1', [await badgeOf(page, 'subscriptions'), await badgeOf(page, 'installments')], ['1', '1'])
@@ -773,18 +787,25 @@ async function heldRollover(browser) {
   }
 
   // A later response that still carries the old day: the badges go back to "..." and stay there.
-  stage.hits = { snapshot: 0, plans: 0, subs: 0, none: 0 }
+  stage.hits = Object.fromEntries(KINDS.map((k) => [k, 0]))
   stage.today = day
   stage.gates = Object.fromEntries(KINDS.map((k) => [k, openGate()]))
-  await page.locator('nav a[href="/"]').first().click()
-  await page.waitForURL((url) => url.pathname === '/')
-  await settle(page)
-  await page.locator('nav a[href="/transactions"]').first().click()
-  await page.waitForURL((url) => url.pathname === '/transactions')
-  await settle(page)
-  precondition('the return to Transactions refetched the snapshot and the plans', stage.hits.snapshot >= 1 && stage.hits.plans >= 1, stage.hits)
+  if (REAL) {
+    // `/due` is not refetched on a return within a minute: a window focus is what refetches it.
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await settle(page)
+  } else {
+    await page.locator('nav a[href="/"]').first().click()
+    await page.waitForURL((url) => url.pathname === '/')
+    await settle(page)
+    await page.locator('nav a[href="/transactions"]').first().click()
+    await page.waitForURL((url) => url.pathname === '/transactions')
+    await settle(page)
+  }
+  precondition('the return to Transactions (or a window focus, on /due) refetched the snapshot (plans stay cached for a minute)', stage.hits.snapshot >= 1, stage.hits)
   await sleep(600)
-  check('(i) a response still dated the old day keeps both badges at "..."', [await badgeOf(page, 'subscriptions'), await badgeOf(page, 'installments')], ['…', '…'])
+  // Plans stay cached for a minute on return (STU-603), so only the snapshot-dated Subscriptions badge waits.
+  check('(i) a response still dated the old day keeps the subscriptions badge at "..."', await badgeOf(page, 'subscriptions'), '…')
   await page.locator(`[data-testid="${DUE_TABS.find((t) => t.slug === 'subscriptions').tab}"]`).click()
   check('(i) and no empty text is shown', await page.locator('[data-testid="due-subscriptions-empty"], [data-testid="due-installments-empty"]').count(), 0)
   checkNoNative('i', native)
@@ -813,6 +834,7 @@ async function oneSourceFails(browser) {
     occurrences: (url) => url.pathname.endsWith('/budget-entries/upcoming-occurrences') && url.searchParams.get('plan') === 'none',
     snapshot: (url) => url.pathname.endsWith('/dashboard/snapshot'),
     'subscription occurrences': (url) => url.pathname.endsWith('/budget-entries/upcoming-occurrences') && url.searchParams.get('plan') === 'subscription',
+    'dashboard due': isDueRoute,
   }
   /** Signs in with `source` failing (500) from the first request, opens Transactions and the tab; returns the page. */
   async function failing(source, slug) {
@@ -846,7 +868,10 @@ async function oneSourceFails(browser) {
     checkNoNative('j', native)
     await ctx.close()
   }
-  for (const [source, slug, failedRetry] of [['occurrences', 'upcoming', true], ['transactions', 'upcoming', true], ['subscription occurrences', 'subscriptions', true], ['snapshot', 'subscriptions', false]]) {
+  const failures = REAL
+    ? [['transactions', 'upcoming', true], ['dashboard due', 'upcoming', false], ['dashboard due', 'subscriptions', false]]
+    : [['occurrences', 'upcoming', true], ['transactions', 'upcoming', true], ['subscription occurrences', 'subscriptions', true], ['snapshot', 'subscriptions', false]]
+  for (const [source, slug, failedRetry] of failures) {
     const { ctx, page, native } = await failing(source, slug)
     check(`(j) only the ${source} request fails: the ${slug} badge reads 0, not the other source's part`, await badgeOf(page, slug), '0')
     if (failedRetry) {
@@ -1089,7 +1114,7 @@ async function failWhileSiblingHeld(browser) {
   // From the first request: the Upcoming transactions are held on one gate, the occurrences fail on another.
   const gates = { txns: gateOf(), occs: gateOf() }
   await page.route((url) => (url.pathname.endsWith('/api/v1/transactions/') && url.searchParams.get('order') === 'asc')
-    || (url.pathname.endsWith('/budget-entries/upcoming-occurrences') && url.searchParams.get('plan') === 'none'), async (route) => {
+    || (REAL ? isDueRoute(url) : (url.pathname.endsWith('/budget-entries/upcoming-occurrences') && url.searchParams.get('plan') === 'none')), async (route) => {
     if (new URL(route.request().url()).pathname.endsWith('/api/v1/transactions/')) {
       gates.txns.hits++
       await gates.txns.released
@@ -1129,7 +1154,8 @@ async function failWhileSiblingHeld(browser) {
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  const steps = { a: theSplit, b: missedSubscription, c: installmentPlans, d: creditBadge, e: overdueFlag, f: emptyPagerCap, g: manilaDay, h: bankSubscription, i: heldRollover, j: oneSourceFails, k: staleSourceAfterMove, l: failWithOldDaySnapshot, m: failWhileSiblingHeld }
+  const skipped = async () => console.log('  (skipped: two sources of one badge disagreeing exist only on the older API)')
+  const steps = { a: theSplit, b: missedSubscription, c: installmentPlans, d: creditBadge, e: overdueFlag, f: emptyPagerCap, g: manilaDay, h: bankSubscription, i: heldRollover, j: oneSourceFails, k: REAL ? skipped : staleSourceAfterMove, l: REAL ? skipped : failWithOldDaySnapshot, m: failWhileSiblingHeld }
   for (const [k, fn] of Object.entries(steps)) if (run(k)) await fn(browser)
   await browser.close()
   stack.stop()
