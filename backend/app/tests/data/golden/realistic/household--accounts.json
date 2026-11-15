@@ -14,7 +14,8 @@
      "can_add_transactions": false,
      "can_delete": false,
      "can_edit_settings": false,
-     "can_manage_shares": false
+     "can_manage_shares": false,
+     "can_view_details": false
     },
     "tags": [
      {

@@ -30,3 +30,6 @@ class AccountPermissions(BaseModel):
     can_add_transactions: bool
     # Deleting or deactivating the account (``is_active``): its owner only.
     can_delete: bool
+    # A card's statements and a loan's schedule offered in the web app: any
+    # direct role; false for ``tag_viewer`` (STU-253).
+    can_view_details: bool

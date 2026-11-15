@@ -269,7 +269,8 @@ def test_account_role_permissions_and_field_visibility(sw, sw_client, house):
         assert body["my_role"] == role
         assert body["permissions"] == {"can_edit_settings": manage, "can_manage_shares": manage,
                                        "can_add_transactions": add,
-                                       "can_delete": role == "owner"}
+                                       "can_delete": role == "owner",
+                                       "can_view_details": True}
         assert body["owner_name"] == "Alice O."
         if manage:
             assert body["credit_limit"] == 99_999 and body["payment_account_id"]

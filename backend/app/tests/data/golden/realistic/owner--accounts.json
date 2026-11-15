@@ -34,7 +34,8 @@
      "can_add_transactions": true,
      "can_delete": true,
      "can_edit_settings": true,
-     "can_manage_shares": true
+     "can_manage_shares": true,
+     "can_view_details": true
     },
     "shares_limit_with_account_id": null,
     "tags": [],
@@ -72,7 +73,8 @@
      "can_add_transactions": true,
      "can_delete": true,
      "can_edit_settings": true,
-     "can_manage_shares": true
+     "can_manage_shares": true,
+     "can_view_details": true
     },
     "shares_limit_with_account_id": null,
     "tags": [],
@@ -110,7 +112,8 @@
      "can_add_transactions": true,
      "can_delete": true,
      "can_edit_settings": true,
-     "can_manage_shares": true
+     "can_manage_shares": true,
+     "can_view_details": true
     },
     "shares_limit_with_account_id": null,
     "tags": [],
@@ -148,7 +151,8 @@
      "can_add_transactions": true,
      "can_delete": true,
      "can_edit_settings": true,
-     "can_manage_shares": true
+     "can_manage_shares": true,
+     "can_view_details": true
     },
     "shares_limit_with_account_id": null,
     "tags": [],
@@ -186,7 +190,8 @@
      "can_add_transactions": true,
      "can_delete": true,
      "can_edit_settings": true,
-     "can_manage_shares": true
+     "can_manage_shares": true,
+     "can_view_details": true
     },
     "shares_limit_with_account_id": null,
     "tags": [],
@@ -224,7 +229,8 @@
      "can_add_transactions": true,
      "can_delete": true,
      "can_edit_settings": true,
-     "can_manage_shares": true
+     "can_manage_shares": true,
+     "can_view_details": true
     },
     "shares_limit_with_account_id": null,
     "tags": [],
@@ -262,7 +268,8 @@
      "can_add_transactions": true,
      "can_delete": true,
      "can_edit_settings": true,
-     "can_manage_shares": true
+     "can_manage_shares": true,
+     "can_view_details": true
     },
     "shares_limit_with_account_id": null,
     "tags": [],
@@ -300,7 +307,8 @@
      "can_add_transactions": true,
      "can_delete": true,
      "can_edit_settings": true,
-     "can_manage_shares": true
+     "can_manage_shares": true,
+     "can_view_details": true
     },
     "shares_limit_with_account_id": null,
     "tags": [],
@@ -338,7 +346,8 @@
      "can_add_transactions": true,
      "can_delete": true,
      "can_edit_settings": true,
-     "can_manage_shares": true
+     "can_manage_shares": true,
+     "can_view_details": true
     },
     "shares_limit_with_account_id": null,
     "tags": [],
@@ -376,7 +385,8 @@
      "can_add_transactions": true,
      "can_delete": true,
      "can_edit_settings": true,
-     "can_manage_shares": true
+     "can_manage_shares": true,
+     "can_view_details": true
     },
     "shares_limit_with_account_id": null,
     "tags": [
@@ -421,7 +431,8 @@
      "can_add_transactions": true,
      "can_delete": true,
      "can_edit_settings": true,
-     "can_manage_shares": true
+     "can_manage_shares": true,
+     "can_view_details": true
     },
     "shares_limit_with_account_id": null,
     "tags": [],
@@ -459,7 +470,8 @@
      "can_add_transactions": true,
      "can_delete": true,
      "can_edit_settings": true,
-     "can_manage_shares": true
+     "can_manage_shares": true,
+     "can_view_details": true
     },
     "shares_limit_with_account_id": null,
     "tags": [],
