@@ -3,11 +3,9 @@ import React, { useState, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useResendVerificationMutation } from '../../store/authApi'
+import { apiErrorMessage } from '../../utils/apiError'
 
 type ApiErrorPayload = {
-  data?: {
-    detail?: string
-  }
   message?: string
 }
 
@@ -49,6 +47,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
   const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value
     setEmail(value)
+    setResendMessage('') // a resend result belongs to the email it was sent for
 
     // Validate email format
     const trimmedValue = value.trim()
@@ -81,13 +80,14 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
   const handleDemoLogin = async (demoEmail: string) => {
     setIsLoading(true)
     setError('')
+    setResendMessage('')
     try {
       await login(demoEmail, 'password123')
       onSuccess?.()
     } catch (err: unknown) {
       if (typeof err === 'object' && err !== null) {
         const apiError = err as ApiErrorPayload
-        const detail = apiError.data?.detail || apiError.message
+        const detail = apiErrorMessage(err) || apiError.message
         if (detail) { setError(detail); return }
       }
       setError('Demo login failed. Please try again.')
@@ -108,6 +108,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
 
     setIsLoading(true)
     setError('')
+    setResendMessage('')
     setShowSuccessMessage(false) // Clear success message on submit
     navigate({
       to: '/login',
@@ -120,7 +121,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
     } catch (err: unknown) {
       if (typeof err === 'object' && err !== null) {
         const apiError = err as ApiErrorPayload
-        const detail = apiError.data?.detail || apiError.message
+        const detail = apiErrorMessage(err) || apiError.message
         if (detail) {
           setError(detail)
           return
@@ -151,7 +152,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
     } catch (err: unknown) {
       if (typeof err === 'object' && err !== null) {
         const apiError = err as ApiErrorPayload
-        const detail = apiError.data?.detail || apiError.message
+        const detail = apiErrorMessage(err) || apiError.message
         setResendMessage(detail || 'Failed to send verification email. Please try again.')
       } else {
         setResendMessage('Failed to send verification email. Please try again.')
@@ -208,7 +209,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
                 )}
               </div>
             )}
-            {resendMessage && !isEmailNotVerified && (
+            {resendMessage && (
               <div
                 className={`border-l-2 py-1 pl-4 ${ resendMessage.includes('sent') || resendMessage.includes('already verified') ? 'border-ok' : 'border-warn' }`}
               >

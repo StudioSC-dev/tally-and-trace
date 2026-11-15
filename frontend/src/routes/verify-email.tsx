@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate, useSearch } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useVerifyEmailMutation } from '../store/authApi'
 import { PageLoader } from '../components/Loading'
+import { apiErrorMessage } from '../utils/apiError'
 
 export const Route = createFileRoute('/verify-email')({
   component: VerifyEmailPage,
@@ -42,12 +43,7 @@ export function VerifyEmailPage() {
 
   useEffect(() => {
     if (isError && error) {
-      if ('data' in error && error.data && typeof error.data === 'object') {
-        const errorData = error.data as { detail?: string }
-        setErrorMessage(errorData.detail || 'Verification failed. Please try again.')
-      } else {
-        setErrorMessage('Verification failed. Please try again.')
-      }
+      setErrorMessage(apiErrorMessage(error) || 'Verification failed. Please try again.')
     }
   }, [isError, error])
 
