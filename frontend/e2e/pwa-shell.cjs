@@ -25,7 +25,16 @@
 //
 // Setup: a throwaway database named tt_test_188_*, exported as DATABASE_URL, plus
 // PLAYWRIGHT_PATH (see ./README.md). Optional env: PR_NUMBER (the PR checks),
-// AUDIT_GATE=open (accept one Verdict per auditor, the pre-open gate; default needs two).
+// AUDIT_GATE=open (check the open gate only; default checks open and pre-merge),
+// AUDITORS (comma list, default Opus,Sol). The repo's current policy is one auditor per
+// gate; set AUDITORS to that auditor, or leave the default for the Opus + Sol policy.
+//
+// pr.audit-evidence counts a PR comment when it is its own comment, contains "Verdict:",
+// names exactly one auditor (a comment naming several counts for none) and carries a line
+// `Audit gate: open` or `Audit gate: pre-merge`. Each auditor needs one such comment per
+// required gate, and createdAt must put each auditor's open comment before their
+// pre-merge one (a sanity check only; the marker line decides the gate).
+// Self-test of that counting, no stack or browser: node frontend/e2e/pwa-shell.cjs --self-test
 //
 // Check kinds: [B] behavioural, [S] structural, [G] guard. Ends with RESULT: k/m and exits
 // 0 only when every check passed, 1 when any failed, 2 for setup.
@@ -41,6 +50,82 @@ const REPO = pathMod.resolve(__dirname, '..', '..')
 const SOURCE_SHA = '603ed45'
 const HEALTH_SHA = '8c707da'
 const PR_NUMBER = process.env.PR_NUMBER || ''
+
+// ─── Audit evidence counting (AC9) ───────────────────────────────────────────
+
+const GATES = ['open', 'pre-merge']
+const escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * comments: [{ body, createdAt }]. Returns { ok, problems }. A comment counts when its body
+ * has "Verdict:", names exactly one of `auditors` (whole word, any case) and has an
+ * `Audit gate: open|pre-merge` line. One comment per auditor per required gate is needed,
+ * and an auditor's first open comment must be earlier than their first pre-merge one.
+ */
+function auditEvidence(comments, { auditors, gates }) {
+  const problems = []
+  const counted = new Map() // `${auditor}|${gate}` -> [createdAt, ...]
+  for (const c of comments) {
+    const body = c.body || ''
+    if (!body.includes('Verdict:')) continue
+    const named = auditors.filter((a) => new RegExp(`\\b${escapeRe(a)}\\b`, 'i').test(body))
+    if (named.length !== 1) continue
+    const gate = (body.match(/^[ \t]*Audit gate:[ \t]*(open|pre-merge)[ \t]*$/im) || [])[1]
+    if (!gate) continue
+    const key = `${named[0]}|${gate.toLowerCase()}`
+    counted.set(key, [...(counted.get(key) || []), c.createdAt])
+  }
+  for (const a of auditors) {
+    for (const g of gates) {
+      if (!counted.has(`${a}|${g}`)) problems.push(`no own comment with "Verdict:", "Audit gate: ${g}" and only ${a} named`)
+    }
+    if (gates.includes('open') && gates.includes('pre-merge') && counted.has(`${a}|open`) && counted.has(`${a}|pre-merge`)) {
+      const first = (k) => counted.get(k).map((t) => Date.parse(t)).sort((x, y) => x - y)[0]
+      if (!(first(`${a}|open`) < first(`${a}|pre-merge`))) problems.push(`${a}: the open gate comment is not earlier than the pre-merge one`)
+    }
+  }
+  return { ok: problems.length === 0, problems }
+}
+
+function selfTest() {
+  const A = { auditors: ['Opus', 'Sol'], gates: GATES }
+  const c = (body, createdAt) => ({ body, createdAt })
+  const mk = (who, gate, at) => c(`${who} audit\nAudit gate: ${gate}\nVerdict: GO`, at)
+  const distinct = [
+    mk('Opus', 'open', '2026-11-15T10:00:00Z'), mk('Sol', 'open', '2026-11-15T10:05:00Z'),
+    mk('Opus', 'pre-merge', '2026-11-15T12:00:00Z'), mk('Sol', 'pre-merge', '2026-11-15T12:05:00Z'),
+  ]
+  const cases = [
+    ['combined comment counts for neither auditor', () => {
+      const r = auditEvidence([c('Opus and Sol\nAudit gate: open\nVerdict: GO', '2026-11-15T10:00:00Z'), ...distinct.slice(2)], A)
+      return !r.ok && r.problems.length === 2 && r.problems.every((p) => /gate: open/.test(p))
+    }],
+    ['distinct comments pass', () => auditEvidence(distinct, A).ok],
+    ['a missing gate fails', () => {
+      const r = auditEvidence(distinct.slice(0, 2), A)
+      return !r.ok && r.problems.length === 2 && r.problems.every((p) => /gate: pre-merge/.test(p))
+    }],
+    ['the gates in the wrong order fail', () => {
+      const swapped = [distinct[0], distinct[1], mk('Opus', 'pre-merge', '2026-11-15T09:00:00Z'), distinct[3]]
+      const r = auditEvidence(swapped, A)
+      return !r.ok && r.problems.length === 1 && /Opus: the open gate/.test(r.problems[0])
+    }],
+    ['AUDIT_GATE=open checks the open gate only', () => auditEvidence(distinct.slice(0, 2), { ...A, gates: ['open'] }).ok],
+    ['a comment with no gate marker or no Verdict counts for nothing', () =>
+      !auditEvidence([c('Opus\nVerdict: GO', '2026-11-15T10:00:00Z'), c('Sol\nAudit gate: open', '2026-11-15T10:00:00Z')], { ...A, gates: ['open'] }).ok],
+    ['one auditor policy', () => auditEvidence(distinct.filter((x) => /Sol/.test(x.body)), { auditors: ['Sol'], gates: GATES }).ok],
+  ]
+  let failed = 0
+  for (const [name, fn] of cases) {
+    const ok = fn()
+    if (!ok) failed++
+    console.log(`  ${ok ? 'PASS' : 'FAIL'} self-test: ${name}`)
+  }
+  console.log(`\nRESULT: ${cases.length - failed}/${cases.length}`)
+  process.exit(failed ? 1 : 0)
+}
+
+if (process.argv[2] === '--self-test') selfTest()
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -395,14 +480,10 @@ async function scenarioScope() {
 async function scenarioAuditEvidence() {
   if (!PR_NUMBER) return skip('pr.audit-evidence', 'no PR_NUMBER')
   const comments = JSON.parse(gh('pr', 'view', PR_NUMBER, '--json', 'comments')).comments
-    .map((c) => c.body).filter((b) => b.includes('Verdict:'))
-  const need = process.env.AUDIT_GATE === 'open' ? 1 : 2
-  for (const [name, re] of [['opus', /opus/i], ['sol', /\bsol\b/i]]) {
-    await h.check(`pr.audit-evidence.${name}`, 'B', async () => {
-      const n = comments.filter((b) => re.test(b)).length
-      return n >= need || `${n} "Verdict:" comment(s) naming ${name}, need ${need} (one per gate)`
-    })
-  }
+  const auditors = (process.env.AUDITORS || 'Opus,Sol').split(',').map((a) => a.trim()).filter(Boolean)
+  const gates = process.env.AUDIT_GATE === 'open' ? ['open'] : GATES
+  const r = auditEvidence(comments, { auditors, gates })
+  await h.check('pr.audit-evidence', 'B', async () => r.ok || r.problems.join('; '))
 }
 
 // ─── Run ─────────────────────────────────────────────────────────────────────
