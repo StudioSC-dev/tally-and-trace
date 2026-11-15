@@ -254,3 +254,50 @@ def test_tag_viewer_loan_schedule_limited_shape(hh, sw_client, sw_db, sw_people)
     # A card the share does not reach (untagged) stays a 404.
     assert _call(sw_client, c, "GET", f"/accounts/{hh['a_card']}/statements").status_code == 404
 
+
+
+# --- Part 3: one rule for the dashboard total ------------------------------------------------
+
+def test_dashboard_snapshot_visible_balance_totals(hh, sw_client):
+    """AC10: ``balances.total`` is the caller-visible balances (tag-viewer ones in,
+    hidden ones out), as the web dashboard shows it; ``available_cash`` is the
+    caller-visible cash with a tag viewer's accounts as plain cash."""
+    c = hh["c"]
+    visible = {a["id"]: a for a in _get(sw_client, c, "/accounts/", limit=100)["items"]}
+    assert hh["joint"] in visible and hh["a_private"] not in visible
+    snapshot = _get(sw_client, c, "/dashboard/snapshot")
+    expected = sum(a["balance"] for a in visible.values() if a["currency"] == "PHP")
+    assert snapshot["balances"]["total"] == expected == 10_000 + 2_000
+    [php] = [r for r in snapshot["balances"]["by_currency"] if r["currency"] == "PHP"]
+    assert php["total"] == expected
+    assert snapshot["available_cash"] == php["available_cash"] == 10_000 + 2_000
+    assert {r["id"] for r in snapshot["balances"]["by_account"]} == set(visible)
+
+
+# --- Everything else stays as it was ---------------------------------------------------------
+
+def test_unaffected_household_viewer_behaviour(hh, sw_client, sw_db, sw_people):
+    """AC11: no write, no settings or shares for a tag viewer; the direct roles'
+    statements and schedules keep their views; balance history keeps the
+    tag-share invariant."""
+    a, b, c = hh["a"], hh["b"], hh["c"]
+    viewer = sw_people("Vic", "Viewer")
+    sw_share(sw_db, hh["a_card"], viewer["id"], "viewer", a["id"])
+    sw_share(sw_db, hh["a_card"], b["id"], "editor", a["id"])
+    _tag(sw_client, hh, hh["a_card"])
+    _tag(sw_client, hh, hh["a_loan"])
+    _debit(sw_client, b, hh["joint"], B_CHARGE, "Bea lunch")
+    card = _get(sw_client, c, f"/accounts/{hh['a_card']}")
+    assert card["my_role"] == "tag_viewer" and "credit_limit" not in card
+    assert not any(v for k, v in card["permissions"].items())
+    for method, path in (("PUT", f"/accounts/{hh['a_card']}"),
+                         ("GET", f"/accounts/{hh['a_card']}/shares"),
+                         ("GET", f"/accounts/{hh['a_loan']}/auto-post-preview")):
+        assert _call(sw_client, c, method, path, {}).status_code == 404, path
+    path = f"/accounts/{hh['a_card']}/statements"
+    assert _get(sw_client, a, path)["view"] == "full"
+    assert _get(sw_client, b, path)["view"] == "full"
+    assert _get(sw_client, viewer, path)["view"] == "limited"
+    assert _get(sw_client, a, f"/accounts/{hh['a_loan']}/loan-schedule")["view"] == "full"
+    history = _get(sw_client, c, f"/accounts/{hh['joint']}/balance")["balance_history"]
+    assert B_CHARGE not in [abs(h["amount"]) for h in history]
