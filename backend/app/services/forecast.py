@@ -1613,8 +1613,13 @@ def collect_events(
         ), leg_currencies, rows, card.currency)
         if access.access_map().of(card) == TAG_VIEWER:
             # Seen through a tag share: no statement detail (as a hidden card's).
+            figure = statement["face_amount"]
             _limit(statement, redactor, name=p["name"], currency=card.currency,
                    kind="card_payment")
+            if not legs:
+                # No payment account in view, so no cash: the face is the
+                # statement's figure (its Limited ``amount_due``), never 0 (STU-253).
+                statement["face_amount"] = figure
         events.append(statement)
 
     # Discovered cards: neutral "Card payment" events from internal inputs. A

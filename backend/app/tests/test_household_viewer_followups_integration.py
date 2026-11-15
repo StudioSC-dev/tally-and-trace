@@ -143,3 +143,36 @@ def test_tag_viewer_wallet_flag_not_inferable(hh, sw_client, sw_db):
     _set_wallet(sw_db, wallet, True)
     assert _get(sw_client, a, "/dashboard/snapshot")["available_cash"] == 10_000 + 5_000
 
+
+def _tag(client, hh, account):
+    r = client.put(f"{API}/accounts/{account}", headers=hh["a"]["headers"],
+                   json={"tag_ids": [hh["hh_a"]]})
+    assert r.status_code == 200, r.text
+
+
+def _debit(client, who, account, amount, description, when="2026-10-01T00:00:00"):
+    return sw_post(client, who, "/transactions/", {
+        "account_id": account, "amount": amount, "transaction_type": "debit",
+        "description": description, "transaction_date": when, "is_posted": True})["id"]
+
+# --- Part 4: a tag-viewer card paid from a hidden account is never "Card payment 0" -------
+
+def test_tag_viewer_card_event_not_zero(hh, sw_client, sw_db):
+    """AC3: the card's statement event, with its payment account hidden from C, shows
+    the Limited statement figure (or is left out), never a face of 0."""
+    from datetime import datetime
+
+    from app.tests.projection_lists import payable_rows, upcoming_rows
+
+    a, c = hh["a"], hh["c"]
+    _tag(sw_client, hh, hh["a_card"])  # paid from A's private bank, which C can't view
+    _debit(sw_client, a, hh["a_card"], 100, "Household internet", when="2026-10-12T00:00:00")
+    sw_db.expire_all()
+    ref = datetime(2026, 10, 10)
+    rows = [r for r in [*upcoming_rows(sw_db, c["id"], days=60, reference=ref),
+                        *payable_rows(sw_db, c["id"], days=60, reference=ref)]
+            if r.get("kind") == "card_payment"]
+    assert rows, "the statement event is listed"
+    for row in rows:
+        assert row["view"] == "limited" and row["cash_delta"] == 0
+        assert row["face_amount"] == 100, row
