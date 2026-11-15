@@ -17,17 +17,21 @@
 // Regression data (AC3, AC8). The manifest and inventory were recorded on 75cba71, the post-STU-188
 // main, before any token change. To re-record on such a tree (not on the changed tree):
 //   node frontend/e2e/tokens-alpha.cjs --record-manifest              samples' computed colours into the manifest
-//   node frontend/e2e/tokens-alpha.cjs --capture-shots <dir>          baseline screenshots + element rectangles
+//   node frontend/e2e/tokens-alpha.cjs --capture-shots <dir>          baseline screenshots + element rectangles + provenance
+//   node frontend/e2e/tokens-alpha.cjs --measure-noise <dir> [n]      renderer noise envelope into the manifest (n repeats, default 4)
+// --record-manifest also records every token's computed colour on the light, dark-class and dark-media paths.
 // h.visual-regression needs the baseline directory: TOKENS_BASELINE_DIR=<dir>. The baseline is
 // not checked in (binary, machine-specific); capture it from a worktree of the base commit on
-// the same database. The run fails when it is not set. TOKENS_SAVE_DIR=<dir> keeps the
+// the same database. The baseline records the base SHA, a hash of the base web source, the
+// fixture, manifest and inventory; h.baseline-binding refuses a baseline that is not the base
+// commit's (base = TOKENS_BASE_SHA, else `git merge-base HEAD origin/main`). The run fails when it is not set. TOKENS_SAVE_DIR=<dir> keeps the
 // screenshots that differ outside the allowed boxes.
 //
 // Visual rule: the comparison is exact (zero pixels) everywhere except inside the bounding
 // boxes of the elements that carry a non-hover opacity-modifier class from the inventory
-// (the baseline run records those boxes; the compared run adds its own). A screen that differs
-// outside them is shot again, up to three attempts in all, because the renderer is not
-// bit-stable run to run. Pixels changed
+// (the baseline run records those boxes; the compared run adds its own). A screen is shot until two attempts
+// match exactly outside them (at most four), and every attempt must stay inside the noise
+// envelope measured on the base tree (manifest.renderNoise); one past it fails the screen. Pixels changed
 // inside them are listed per screen; pixels changed outside fail the check.
 //
 // Revert-and-fail (AC7): put `paper: 'var(--paper)'` back in tailwind.config.js in place of
@@ -42,7 +46,8 @@
 // Usage: node frontend/e2e/tokens-alpha.cjs [scenario]
 const fs = require('fs')
 const pathMod = require('path')
-const { spawnSync } = require('child_process')
+const crypto = require('crypto')
+const { spawnSync, execFileSync } = require('child_process')
 const { startLocalStack } = require('./_local_stack.cjs')
 const h = require('./_smooth.cjs')
 const fx = require('./_tokens_fixture.cjs')
@@ -62,7 +67,7 @@ const THEMES = ['light', 'dark']
 const argv = process.argv.slice(2)
 const flag = (name) => argv.includes(name)
 const flagValue = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined }
-const only = argv.find((a, i) => !a.startsWith('--') && argv[i - 1] !== '--capture-shots')
+const only = argv.find((a, i) => !a.startsWith('--') && !['--capture-shots', '--measure-noise'].includes(argv[i - 1]) && !/^\d+$/.test(a))
 
 const manifest = fx.readJson(fx.MANIFEST)
 const inventory = fx.readJson(fx.INVENTORY)
@@ -187,6 +192,41 @@ async function readStyle(page, { selector, index, target, property, hover }) {
   }, { selector, index, target, property, all: index === undefined && !hover })
 }
 
+// ─── Every token, every theme path ──────────────────────────────────────────
+
+/** The three ways a token gets its value: the light default, the data-theme=dark block, the no-attribute media block. */
+const TOKEN_PATHS = ['light', 'dark-class', 'dark-media']
+
+/** Puts the page on one theme path. */
+async function setPath(page, path) {
+  if (path === 'light') { await page.emulateMedia({ colorScheme: 'light' }); await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light')) }
+  else if (path === 'dark-class') { await page.emulateMedia({ colorScheme: 'light' }); await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark')) }
+  else { await page.emulateMedia({ colorScheme: 'dark' }); await page.evaluate(() => document.documentElement.removeAttribute('data-theme')) }
+}
+
+/**
+ * One probe element per token. Its colour is the token as the stylesheet defines it, read
+ * whatever the format (a hex value before the conversion, "r g b" channels after) and
+ * resolved by the browser; the computed colour is returned. An unusable value comes back as
+ * "invalid" rather than the colour the probe inherits.
+ */
+function probeTokens(page, tokens) {
+  return page.evaluate((names) => {
+    const root = getComputedStyle(document.documentElement)
+    const out = {}
+    for (const name of names) {
+      const raw = root.getPropertyValue(`--${name}`).trim()
+      const el = document.createElement('span')
+      el.setAttribute('data-token-probe', name)
+      el.style.color = raw.startsWith('#') ? raw : `rgb(${raw})`
+      document.body.appendChild(el)
+      out[name] = el.style.color === '' ? 'invalid' : getComputedStyle(el).color
+      el.remove()
+    }
+    return out
+  }, tokens)
+}
+
 // ─── Recording (run on the unchanged tree) ──────────────────────────────────
 
 async function recordManifest() {
@@ -207,6 +247,15 @@ async function recordManifest() {
       sample.values[theme] = values
     }
   }
+  // Every token's computed colour on every theme path, from the base stylesheet.
+  manifest.tokenProbe = {}
+  const { ctx, page } = await pageFor('light')
+  await fx.gotoRoute(page, stack, '/')
+  for (const path of TOKEN_PATHS) {
+    await setPath(page, path)
+    manifest.tokenProbe[path] = await probeTokens(page, Object.keys(manifest.tokens))
+  }
+  await ctx.close()
   manifest.recordedOn = manifest.baseCommit
   fs.writeFileSync(fx.MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`)
   console.log(`recorded ${manifest.samples.length} samples into ${fx.MANIFEST}`)
@@ -261,6 +310,84 @@ async function shoot(screen) {
   }
 }
 
+
+// ─── Binding a baseline to the base commit and the fixture ──────────────────
+
+const sha256 = (...parts) => { const hash = crypto.createHash('sha256'); parts.forEach((x) => hash.update(x)); return hash.digest('hex') }
+const git = (args, opts = {}) => execFileSync('git', args, { cwd: REPO, maxBuffer: 256 * 1024 * 1024, ...opts })
+const SRC_ROOTS = ['frontend/src', 'frontend/tailwind.config.js', 'frontend/index.html']
+
+/** The base commit: TOKENS_BASE_SHA when given, else `git merge-base HEAD origin/main`. */
+function baseSha() {
+  if (process.env.TOKENS_BASE_SHA) return git(['rev-parse', process.env.TOKENS_BASE_SHA], { encoding: 'utf8' }).trim()
+  return git(['merge-base', 'HEAD', 'origin/main'], { encoding: 'utf8' }).trim()
+}
+
+/** Hash of the web source (src, tailwind config, index.html) as committed at `rev`, or in the working tree when rev is null. */
+function sourceHash(rev) {
+  let files
+  if (rev) files = git(['ls-tree', '-r', '--name-only', rev, '--', ...SRC_ROOTS], { encoding: 'utf8' }).split('\n').filter(Boolean)
+  else {
+    const walk = (rel) => {
+      const abs = pathMod.join(REPO, rel)
+      if (!fs.existsSync(abs)) return []
+      return fs.statSync(abs).isDirectory() ? fs.readdirSync(abs).flatMap((n) => walk(pathMod.join(rel, n))) : [rel]
+    }
+    files = SRC_ROOTS.flatMap(walk)
+  }
+  const hash = crypto.createHash('sha256')
+  for (const f of files.sort()) {
+    hash.update(`${f}\0`)
+    hash.update(rev ? git(['show', `${rev}:${f}`]) : fs.readFileSync(pathMod.join(REPO, f)))
+    hash.update('\0')
+  }
+  return hash.digest('hex')
+}
+
+/** Hash of the fixture: its seed source and what the database actually holds from it. */
+async function fixtureHash() {
+  const get = (url) => client.get(user.token, url)
+  const accounts = (await get('/accounts/')).items.map((a) => [a.name, a.account_type, a.balance]).sort()
+  const tags = (await get('/tags/')).map((t) => [t.name, t.color]).sort()
+  const wishlist = (await get('/wishlist/')).map((w) => [w.name, w.estimated_cost, w.priority]).sort()
+  return sha256(fs.readFileSync(pathMod.join(__dirname, '_tokens_fixture.cjs')), JSON.stringify({ accounts, tags, wishlist }))
+}
+
+const fileHash = (file) => {
+  // The noise envelope is measured after the baseline is captured, so it is left out of the manifest's hash.
+  if (file === fx.MANIFEST) { const m = JSON.parse(fs.readFileSync(file, 'utf8')); delete m.renderNoise; return sha256(JSON.stringify(m)) }
+  return sha256(fs.readFileSync(file))
+}
+const rendererKey = () => sha256(JSON.stringify(RENDER_ARGS))
+
+/** What a baseline records about where it came from. */
+async function baselineMeta() {
+  return {
+    baseSha: baseSha(),
+    capturedHead: git(['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+    sourceHash: sourceHash(null),
+    fixtureHash: await fixtureHash(),
+    manifestHash: fileHash(fx.MANIFEST),
+    inventoryHash: fileHash(fx.INVENTORY),
+    rendererKey: rendererKey(),
+  }
+}
+
+/** The reasons a baseline's meta is not the base commit's on this fixture, or []. */
+async function refuseBaseline(meta) {
+  if (!meta) return ['rects.json has no meta: capture the baseline again with --capture-shots']
+  const want = baseSha()
+  const bad = []
+  if (meta.baseSha !== want) bad.push(`baseline is for ${meta.baseSha}, base is ${want}`)
+  const baseSource = sourceHash(want)
+  if (meta.sourceHash !== baseSource) bad.push('baseline screenshots were not captured from the base commit\'s web source')
+  if (meta.fixtureHash !== await fixtureHash()) bad.push('fixture data differs from the baseline\'s')
+  if (meta.manifestHash !== fileHash(fx.MANIFEST)) bad.push('manifest changed since the baseline')
+  if (meta.inventoryHash !== fileHash(fx.INVENTORY)) bad.push('inventory changed since the baseline')
+  if (meta.rendererKey !== rendererKey()) bad.push('renderer flags changed since the baseline')
+  return bad
+}
+
 async function captureShots(dir) {
   fs.mkdirSync(dir, { recursive: true })
   const rects = {}
@@ -270,7 +397,7 @@ async function captureShots(dir) {
     rects[screen.key] = r
     console.log(`captured ${screen.key} (${r.length} mask boxes)`)
   }
-  fs.writeFileSync(pathMod.join(dir, 'rects.json'), JSON.stringify(rects))
+  fs.writeFileSync(pathMod.join(dir, 'rects.json'), JSON.stringify({ meta: await baselineMeta(), rects }))
 }
 
 /** Pixel diff of two PNG buffers in a blank page; changed pixels inside and outside the boxes. */
@@ -457,6 +584,24 @@ async function scenarioD() {
       }
     } finally { await ctx.close() }
   })
+  await h.check('d.all-tokens', 'B', async () => {
+    if (!manifest.tokenProbe) return 'manifest has no recorded tokenProbe'
+    const { ctx, page } = await pageFor('light')
+    const bad = []
+    try {
+      await fx.gotoRoute(page, stack, '/')
+      for (const path of TOKEN_PATHS) {
+        await setPath(page, path)
+        const got = await probeTokens(page, Object.keys(manifest.tokens))
+        for (const name of Object.keys(manifest.tokens)) {
+          const want = (manifest.tokenProbe[path] || {})[name]
+          if (!want) bad.push(`${path} ${name}: nothing recorded`)
+          else if (got[name] !== want) bad.push(`${path} ${name}: ${got[name]} != recorded ${want}`)
+        }
+      }
+    } finally { await ctx.close() }
+    return bad.length ? bad.join('; ') : true
+  })
   await h.check('d.theme-switch.media-first-paint', 'B', async () => {
     // No stored choice and a dark system: the blocking script in index.html picks dark.
     const ctx = await browser.newContext({ storageState: state, viewport: DESKTOP, colorScheme: 'dark' })
@@ -525,35 +670,79 @@ async function scenarioH() {
     await h.check('h.visual-regression', 'B', async () => 'TOKENS_BASELINE_DIR is not set to a baseline made with --capture-shots')
     return
   }
-  const baseRects = JSON.parse(fs.readFileSync(pathMod.join(dir, 'rects.json'), 'utf8'))
+  const recorded = JSON.parse(fs.readFileSync(pathMod.join(dir, 'rects.json'), 'utf8'))
+  const reasons = await refuseBaseline(recorded.meta)
+  await h.check('h.baseline-binding', 'S', async () => (reasons.length ? reasons.join('; ') : true))
+  if (reasons.length) return
+  const baseRects = recorded.rects
+  const envelope = manifest.renderNoise
+  if (!envelope) {
+    await h.check('h.visual-regression', 'B', async () => 'manifest has no renderNoise envelope: run --measure-noise on the base tree')
+    return
+  }
   const compare = await browser.newPage()
   const summary = []
   const bad = []
   for (const screen of screens()) {
     const baseFile = pathMod.join(dir, `${screen.key}.png`)
     if (!fs.existsSync(baseFile)) { bad.push(`${screen.key}: no baseline image`); continue }
-    // The renderer is not bit-stable run to run (a few hundred text pixels on one screen in
-    // about thirty, on an unchanged tree too), so a screen with pixels outside the boxes is
-    // shot again, up to three times in all; a real regression differs on every attempt.
-    let d, png, boxes, attempts = 0
-    do {
-      attempts++
+    // The renderer is not bit-stable run to run, so a screen is shot until two attempts match
+    // the baseline exactly outside the allowed boxes (at most four attempts). Every attempt must
+    // stay inside the measured noise envelope: an attempt past it fails the screen, even when
+    // a later attempt is clean, so an intermittent regression cannot pass on a retry.
+    const log = []
+    let exact = 0, verdict = null
+    for (let attempt = 1; attempt <= 4 && !verdict; attempt++) {
       const shot = await shoot(screen)
-      png = shot.png
-      boxes = [...(baseRects[screen.key] || []), ...shot.rects]
-      d = await diffPngs(compare, fs.readFileSync(baseFile), png, boxes)
-    } while (!d.sizeA && d.outside && attempts < 3)
-    if (d.sizeA) { bad.push(`${screen.key}: size ${d.sizeA} -> ${d.sizeB}`); summary.push(`${screen.key}: size changed`); continue }
-    summary.push(`${screen.key}: inside-mask ${d.inside}px, outside ${d.outside}px (max channel delta ${d.maxOutside}), masked boxes ${boxes.length}${attempts > 1 ? `, attempts ${attempts}` : ''}`)
-    if (d.outside && process.env.TOKENS_SAVE_DIR) {
-      fs.mkdirSync(process.env.TOKENS_SAVE_DIR, { recursive: true })
-      fs.writeFileSync(pathMod.join(process.env.TOKENS_SAVE_DIR, `${screen.key}.png`), png)
+      const boxes = [...(baseRects[screen.key] || []), ...shot.rects]
+      const d = await diffPngs(compare, fs.readFileSync(baseFile), shot.png, boxes)
+      if (d.sizeA) { verdict = `size ${d.sizeA} -> ${d.sizeB}`; log.push('size changed'); break }
+      log.push(`${d.outside}px/delta ${d.maxOutside} (inside ${d.inside}px)`)
+      if (d.outside > envelope.maxOutsidePixels || d.maxOutside > envelope.maxChannelDelta) {
+        verdict = `attempt ${attempt}: ${d.outside}px, max delta ${d.maxOutside}, past the noise envelope (${envelope.maxOutsidePixels}px, delta ${envelope.maxChannelDelta}); first at ${d.firstOutside}, box ${d.outsideBox}`
+        if (process.env.TOKENS_SAVE_DIR) {
+          fs.mkdirSync(process.env.TOKENS_SAVE_DIR, { recursive: true })
+          fs.writeFileSync(pathMod.join(process.env.TOKENS_SAVE_DIR, `${screen.key}.png`), shot.png)
+        }
+      } else if (d.outside === 0 && ++exact >= 2) break
     }
-    if (d.outside) bad.push(`${screen.key}: ${d.outside}px differ outside the inventoried elements (first at ${d.firstOutside}, box ${d.outsideBox})`)
+    if (!verdict && exact < 2) verdict = `fewer than two exact matches in 4 attempts`
+    summary.push(`${screen.key}: attempts [${log.join('; ')}]${verdict ? ` FAIL` : ''}`)
+    if (verdict) bad.push(`${screen.key}: ${verdict}`)
   }
   await compare.close()
   summary.forEach((l) => console.log(`    ${l}`))
   await h.check('h.visual-regression', 'B', async () => (bad.length ? bad.join('; ') : true))
+}
+
+/**
+ * Measures the renderer's noise on the unchanged tree: every screen is shot `repeats` times
+ * and compared with the baseline; the largest outside-the-boxes diff seen is the envelope.
+ * Writes manifest.renderNoise. Run on the base tree only.
+ */
+async function measureNoise(dir, repeats) {
+  const recorded = JSON.parse(fs.readFileSync(pathMod.join(dir, 'rects.json'), 'utf8'))
+  const reasons = await refuseBaseline(recorded.meta)
+  if (reasons.length) throw new Error(`measure the noise on the base tree against its own baseline: ${reasons.join('; ')}`)
+  const compare = await browser.newPage()
+  let maxOutsidePixels = 0, maxChannelDelta = 0
+  const perScreen = {}
+  for (const screen of screens()) {
+    for (let i = 0; i < repeats; i++) {
+      const shot = await shoot(screen)
+      const boxes = [...(recorded.rects[screen.key] || []), ...shot.rects]
+      const d = await diffPngs(compare, fs.readFileSync(pathMod.join(dir, `${screen.key}.png`)), shot.png, boxes)
+      if (d.sizeA) throw new Error(`${screen.key}: size changed on the base tree`)
+      maxOutsidePixels = Math.max(maxOutsidePixels, d.outside)
+      maxChannelDelta = Math.max(maxChannelDelta, d.maxOutside)
+      perScreen[screen.key] = Math.max(perScreen[screen.key] || 0, d.outside)
+      if (d.outside) console.log(`  noise ${screen.key} repeat ${i + 1}: ${d.outside}px delta ${d.maxOutside}`)
+    }
+  }
+  await compare.close()
+  manifest.renderNoise = { maxOutsidePixels, maxChannelDelta, repeats, screens: Object.keys(perScreen).length, measuredOn: baseSha() }
+  fs.writeFileSync(fx.MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`)
+  console.log(`envelope: ${JSON.stringify(manifest.renderNoise)}`)
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────
@@ -567,6 +756,7 @@ async function scenarioH() {
   }
   try {
     if (flag('--record-manifest')) { await recordManifest(); return }
+    if (flag('--measure-noise')) { await measureNoise(flagValue('--measure-noise'), Number(argv[argv.indexOf('--measure-noise') + 2] || 4)); return }
     if (flag('--capture-shots')) { await captureShots(flagValue('--capture-shots')); return }
     const scenarios = { a: scenarioA, b: scenarioB, c: scenarioC, d: scenarioD, e: scenarioE, f: scenarioF, h: scenarioH }
     for (const [key, fn] of Object.entries(scenarios)) if (!only || only === key) await fn()
