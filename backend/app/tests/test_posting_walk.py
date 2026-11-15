@@ -72,8 +72,8 @@ def test_walk_from_a_future_next_occurrence_is_empty_before_it():
 
 
 def test_walk_lists_a_clamped_semi_monthly_day_once():
-    """Days 30 and 31 both clamp onto Feb 28: one occurrence to record. The
-    projection's own walk still yields both."""
+    """Days 30 and 31 both clamp onto Feb 28: one occurrence to record, and the
+    projection's own walk lists it once too (STU-648)."""
     e = _entry(F.SEMI_MONTHLY, datetime(2027, 1, 30), semi_monthly_day_1=30,
                semi_monthly_day_2=31)
 
@@ -81,7 +81,7 @@ def test_walk_lists_a_clamped_semi_monthly_day_once():
         date(2027, 1, 30), date(2027, 1, 31), date(2027, 2, 28), date(2027, 3, 30),
         date(2027, 3, 31)]
     assert [o.date() for o in iter_occurrences(e, e.next_occurrence, datetime(2027, 3, 1))] == [
-        date(2027, 1, 30), date(2027, 1, 31), date(2027, 2, 28), date(2027, 2, 28)]
+        date(2027, 1, 30), date(2027, 1, 31), date(2027, 2, 28)]
 
 
 def test_capped_walk_counts_a_clamped_semi_monthly_day_once(monkeypatch):
@@ -200,17 +200,48 @@ def test_non_semi_monthly_projection_unchanged():
         date(2027, 1, 15), date(2027, 4, 15)]
 
 
-def test_uncapped_semi_monthly_walk_unchanged():
-    """An uncapped semi-monthly schedule projects as before: days 1/15 on both,
-    and days 30/31 still yield both clamped Feb 28s (only a capped walk
-    merges them)."""
+def test_non_colliding_semi_monthly_unchanged():
+    """Semi-monthly days that never clamp onto each other (1/15, and 15/30, where
+    30 clamps to Feb 28 but 15 does not) project every day, as before."""
     end = datetime(2027, 4, 1)
     plain = _entry(F.SEMI_MONTHLY, datetime(2027, 1, 1))
     assert [o for o, _ in _window(plain, datetime(2027, 1, 1), end)] == [
         date(2027, 1, 1), date(2027, 1, 15), date(2027, 2, 1), date(2027, 2, 15),
         date(2027, 3, 1), date(2027, 3, 15)]
+    fifteen_thirty = _entry(F.SEMI_MONTHLY, datetime(2027, 1, 15), semi_monthly_day_1=15,
+                            semi_monthly_day_2=30)
+    assert [o for o, _ in _window(fifteen_thirty, datetime(2027, 1, 1), end)] == [
+        date(2027, 1, 15), date(2027, 1, 30), date(2027, 2, 15), date(2027, 2, 28),
+        date(2027, 3, 15), date(2027, 3, 30)]
+    same_day = _entry(F.SEMI_MONTHLY, datetime(2027, 1, 10), semi_monthly_day_1=10,
+                      semi_monthly_day_2=10)
+    assert [o for o, _ in _window(same_day, datetime(2027, 1, 1), end)] == [
+        date(2027, 1, 10), date(2027, 2, 10), date(2027, 3, 10)]
+
+
+# --- An uncapped entry's projection merges a clamped day too (STU-648) --------------------
+
+def test_uncapped_projection_merges_clamped_day():
+    """Days 30/31, no cap: Feb 28 once in a common year, Feb 29 once in a leap
+    year, over January to April. The end_date variant merges too."""
+    for year, feb_last in ((2027, 28), (2028, 29)):
+        e = _entry(F.SEMI_MONTHLY, datetime(year, 1, 30), semi_monthly_day_1=30,
+                   semi_monthly_day_2=31)
+        got = [o for o, _ in _window(e, datetime(year, 1, 1), datetime(year, 5, 1))]
+        assert got == [date(year, 1, 30), date(year, 1, 31), date(year, 2, feb_last),
+                       date(year, 3, 30), date(year, 3, 31), date(year, 4, 30)]
+        assert got.count(date(year, 2, feb_last)) == 1
     ended = _entry(F.SEMI_MONTHLY, datetime(2027, 1, 30), semi_monthly_day_1=30,
                    semi_monthly_day_2=31, end_mode="on_date", end_date=datetime(2027, 3, 30))
-    assert [o for o, _ in _window(ended, datetime(2027, 1, 1), end)] == [
-        date(2027, 1, 30), date(2027, 1, 31), date(2027, 2, 28), date(2027, 2, 28),
-        date(2027, 3, 30)]
+    assert [o for o, _ in _window(ended, datetime(2027, 1, 1), datetime(2027, 4, 1))] == [
+        date(2027, 1, 30), date(2027, 1, 31), date(2027, 2, 28), date(2027, 3, 30)]
+
+
+def test_uncapped_projection_matches_posting_days():
+    """The forecast's days equal the days posting would record over the window."""
+    for year in (2027, 2028):
+        e = _entry(F.SEMI_MONTHLY, datetime(year, 1, 30), semi_monthly_day_1=30,
+                   semi_monthly_day_2=31)
+        forecast = [o for o, _ in _window(e, datetime(year, 1, 1), datetime(year, 5, 1))]
+        posting = [o.date() for o in schedule_walk(e, date(year, 4, 30))]
+        assert forecast == posting
