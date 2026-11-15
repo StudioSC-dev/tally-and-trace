@@ -117,6 +117,14 @@ jobs:
       - name: Test shared package
         run: pnpm --filter @tally-trace/shared test
 
+      - name: Test frontend
+        working-directory: .
+        run: pnpm --dir frontend test
+
+      - name: Test mobile
+        working-directory: .
+        run: pnpm --dir mobile test
+
       # No separate type-check step: `pnpm build` runs `tsc && vite build`, so
       # types are already gated there. A non-blocking `tsc --noEmit || true`
       # used to sit here and reported nothing.

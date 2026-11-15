@@ -22,20 +22,25 @@
     Dark palette held as constants, so switching themes below is pure aliasing
     and no colour value is ever written twice.
   */
-  --dark-paper: #1c1917;
-  --dark-surface: #231f1d;
-  --dark-sunken: #171412;
-  --dark-line: #332e2b;
-  --dark-line-strong: #443d39;
-  --dark-ink: #f5f5f4;
-  --dark-body: #d6d3d1;
-  --dark-muted: #a8a29e;
-  --dark-ok: #a3b18a;
-  --dark-warn: #d9a05b;
-  --dark-info: #a8a29e;
-  --dark-danger: #e0918a;
+  --dark-paper: 28 25 23;
+  --dark-surface: 35 31 29;
+  --dark-sunken: 23 20 18;
+  --dark-line: 51 46 43;
+  --dark-line-strong: 68 61 57;
+  --dark-ink: 245 245 244;
+  --dark-body: 214 211 209;
+  --dark-muted: 168 162 158;
+  --dark-ok: 163 177 138;
+  --dark-warn: 217 160 91;
+  --dark-info: 168 162 158;
+  --dark-danger: 224 145 138;
 
   /*
+    Colour tokens are space-separated RGB channels, not colours, so Tailwind can
+    add an alpha (a `/NN` suffix on a utility): tailwind.config.js wraps them as
+    `rgb(var(--paper) / <alpha-value>)`, and any direct use here or in a
+    component must wrap them too: `rgb(var(--paper))`.
+
     Light theme (default).
 
     The page is a soft grey, not white: it sits at ~70% of pure white's
@@ -54,24 +59,24 @@
   */
 
   /* Surfaces — surface is lighter than paper, sunken is darker */
-  --paper: #dedad4;
-  --surface: #e9e6e0;
-  --sunken: #d2cdc6;
+  --paper: 222 218 212;
+  --surface: 233 230 224;
+  --sunken: 210 205 198;
 
   /* Hairlines */
-  --line: #c2bcb4;
-  --line-strong: #a9a29a;
+  --line: 194 188 180;
+  --line-strong: 169 162 154;
 
   /* Text */
-  --ink: #201d1a; /* headings */
-  --body: #43403c; /* paragraphs */
-  --muted: #59554f; /* metadata, labels — 4.68:1 on --sunken at 11px */
+  --ink: 32 29 26; /* headings */
+  --body: 67 64 60; /* paragraphs */
+  --muted: 89 85 79; /* metadata, labels — 4.68:1 on --sunken at 11px */
 
   /* Status — desaturated, used as small dots and text, never as glowing fills */
-  --ok: #3c610b;
-  --warn: #7f4021;
-  --info: #59554f;
-  --danger: #8c221d;
+  --ok: 60 97 11;
+  --warn: 127 64 33;
+  --info: 89 85 79;
+  --danger: 140 34 29;
 
   /* Paper texture strength — see the body::before/::after rules below. */
   --grain-opacity: 0.085;
@@ -138,15 +143,22 @@
   render after negative-z-index children.
 */
 html {
-  background-color: var(--paper);
+  background-color: rgb(var(--paper));
   scroll-behavior: smooth;
 }
 
 body {
   margin: 0;
   min-width: 320px;
+  /*
+    `dvh` with a `vh` fallback. On iOS Safari the toolbar is dynamic, so `100vh`
+    resolves to the *expanded* viewport — taller than what is actually visible —
+    which clips the bottom of full-height screens and jumps the scroll position
+    every time the toolbar collapses. `100dvh` tracks the visible box.
+  */
   min-height: 100vh;
-  color: var(--body);
+  min-height: 100dvh;
+  color: rgb(var(--body));
   font-family: var(--font-sans);
   line-height: 1.5;
   font-weight: 400;
@@ -167,6 +179,7 @@ body {
 
 #root {
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 /*
@@ -230,7 +243,7 @@ body::after {
     font-family: var(--font-sans);
     font-weight: 700;
     letter-spacing: -0.02em;
-    color: var(--ink);
+    color: rgb(var(--ink));
   }
 
   /*
@@ -244,7 +257,7 @@ body::after {
     font-size: 0.6875rem;
     letter-spacing: 0.14em;
     text-transform: uppercase;
-    color: var(--muted);
+    color: rgb(var(--muted));
   }
 
   /*
@@ -330,8 +343,8 @@ body::after {
     the page and render ink-on-ink in dark.
   */
   .select-field option {
-    background-color: var(--surface);
-    color: var(--ink);
+    background-color: rgb(var(--surface));
+    color: rgb(var(--ink));
   }
 
   /*
@@ -417,15 +430,15 @@ body::after {
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--sunken);
+  background: rgb(var(--sunken));
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--line-strong);
+  background: rgb(var(--line-strong));
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--muted);
+  background: rgb(var(--muted));
 }
 
 /* ── Animations ───────────────────────────────────────────────────────────── */
@@ -444,7 +457,92 @@ body::after {
   animation: fadeIn 0.3s ease-out;
 }
 
+/* ── Touch devices ────────────────────────────────────────────────────────── */
+
+/*
+  iOS Safari (and therefore Firefox on iOS, which is the same engine) zooms the
+  page in whenever a focused text control renders below 16px — and does not zoom
+  back out afterwards, so the user is left panning a magnified layout. Enforce
+  the floor on the *controls themselves* rather than auditing every call site:
+  a stray `text-sm` on an input is otherwise a silent regression that nothing in
+  the build catches.
+
+  Scoped to coarse pointers so desktop density is untouched. Excludes the
+  controls that have no text to zoom.
+*/
+@media (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/*
+  The default tap flash is a saturated blue rectangle — the one piece of
+  unthemed colour left on mobile. Elements carry their own `active:` states.
+*/
+@media (pointer: coarse) {
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
 /* ── Safe Area (notched phones) ───────────────────────────────────────────── */
 .safe-area-bottom {
   padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/*
+  The top inset is needed because index.html asks for a translucent status bar
+  (`apple-mobile-web-app-status-bar-style: black-translucent`). Installed to the
+  Home Screen the page owns the full height, so a `fixed top-0` bar renders
+  *under* the clock and battery unless it pads itself. In a normal browser tab
+  the inset resolves to 0, so this is inert there.
+*/
+.safe-area-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/*
+  Top offset for <main>, kept in step with .safe-area-top on the nav: the bar is
+  h-16 (4rem) plus whatever inset it padded itself with, and 1rem of air.
+*/
+.below-nav {
+  padding-top: calc(5rem + env(safe-area-inset-top, 0px));
+}
+
+/*
+  Modal backdrop. Replaces the `px-4 py-6` that all ten dialogs carried, and
+  does two jobs the padding did not:
+
+  1. Keeps the dialog clear of the notch and the home indicator. `max(…)` keeps
+     the original breathing room on devices that report no insets.
+  2. Stops scroll chaining. The backdrop is `fixed inset-0`, so it covers the
+     viewport and every wheel/touch scroll lands on it — but by default, once it
+     hits its own end (or if its content is shorter than the viewport and it
+     never scrolls at all) the browser passes the scroll to <body> and the page
+     moves behind the dialog. `overscroll-behavior: contain` ends the chain
+     here, which is why no JS scroll-lock and no `position: fixed` on <body> is
+     needed — and so the page keeps its scroll position when the dialog closes.
+*/
+.modal-backdrop {
+  padding-top: max(1.5rem, env(safe-area-inset-top, 0px));
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 0px));
+  padding-left: max(1rem, env(safe-area-inset-left, 0px));
+  padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/*
+  Room for the toast stack under a dialog (STU-629). The stack (Toast.tsx) sits above the dialogs so
+  a failed save can be acted on at once; `--toast-room` is the height it takes from the bottom of
+  the viewport (unset when there are no toasts). Every dialog overlay is `fixed inset-0
+  overflow-y-auto bg-black/60 py-6`: padding its bottom by that room lets the dialog scroll, and
+  centre, above the stack, so its buttons are never under a toast. The confirm dialog (z-100) sits
+  above the stack, so it needs no room. Outside @layer so it wins over the py-6 utility.
+*/
+.fixed.inset-0.overflow-y-auto.bg-black\/60:not(.z-\[100\]) {
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 0px), var(--toast-room, 0px));
 }

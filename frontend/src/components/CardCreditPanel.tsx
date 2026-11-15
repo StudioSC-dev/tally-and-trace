@@ -79,7 +79,9 @@ export function CardCreditPanel({ account }: { account: Account }) {
     )
   }
   if (!detail) {
-    // Shaped like the landed panel, in its order, so Transactions below it does not jump.
+    // Shaped like the landed panel, in its order, so Transactions below it does not jump: the
+    // statement block and the open-cycle line reserve the height one closed statement and the
+    // current cycle take.
     return (
       <section className="card p-4 sm:p-5 space-y-4" data-testid="card-credit-panel-loading" aria-busy="true">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -93,13 +95,13 @@ export function CardCreditPanel({ account }: { account: Account }) {
           </div>
           <Skeleton className="h-4 w-full" />
         </div>
-        <div className="border border-line p-3 space-y-1">
+        <div className="border border-line p-3 space-y-1 min-h-[126px]">
           <Skeleton className="h-5 w-3/5" />
           <Skeleton className="h-4 w-2/5" />
           <Skeleton className="h-4 w-4/5" />
           <Skeleton className="h-4 w-3/5" />
         </div>
-        <Skeleton className="h-5 w-3/5" />
+        <Skeleton className="h-10 w-3/5" />
         <span role="status" className="sr-only">Loading credit</span>
       </section>
     )

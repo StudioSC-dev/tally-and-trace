@@ -456,12 +456,14 @@ export function AccountsPage() {
       // Routing never points across owners: a target belongs to the edited account's
       // owner, and the caller needs an edit role on it. Your own account routes to your
       // own accounts; an account shared with you (as admin) to accounts of that same
-      // owner shared with you as editor or admin.
+      // owner (matched by id: two owners can share a display name) shared with you as
+      // editor or admin.
       (editingOwnAccount
         ? a.my_role === 'owner'
         : a.my_role !== 'owner' &&
           a.permissions.can_add_transactions &&
-          a.owner_name === editingAccount?.owner_name),
+          a.owner_id != null &&
+          a.owner_id === editingAccount?.owner_id),
   )
   // A stored route the picker can't offer (the owner's account, not shared with you)
   // stays selected as it is, under a neutral name, and is left out of the save.
@@ -867,7 +869,7 @@ export function AccountsPage() {
 
       {isActionModalOpen && actionAccount && (
         <div
-          className="fixed inset-0 z-50 overflow-y-auto bg-black/60 px-4 py-6"
+          className="modal-backdrop fixed inset-0 z-50 overflow-y-auto bg-black/60"
           onClick={closeActionModal}
         >
           <div className="min-h-full flex items-center justify-center">
@@ -1039,7 +1041,7 @@ export function AccountsPage() {
 
       {/* Create/Edit Modal */}
       {isCreateModalOpen && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 px-4 py-6">
+        <div className="modal-backdrop fixed inset-0 z-50 overflow-y-auto bg-black/60">
           <div className="min-h-full flex items-center justify-center">
           <div className="bg-surface p-6 w-full max-w-md border border-line">
             <div className="flex items-center justify-between mb-6">

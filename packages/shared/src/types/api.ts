@@ -125,6 +125,11 @@ export interface Account {
    * `null` for admin, editor and viewer; absent for `tag_viewer`.
    */
   is_shared?: boolean | null
+  /**
+   * The owner's user id, for every direct role; absent for `tag_viewer`. Match accounts
+   * of one owner by this, never by `owner_name` (two owners can share a display name).
+   */
+  owner_id?: number
   /** Who owns the account ("First L."). */
   owner_name: string | null
   permissions: AccountPermissions
@@ -132,7 +137,7 @@ export interface Account {
 
 /** POST /accounts/ and PUT /accounts/{id}. */
 export type AccountInput = Partial<
-  Omit<Account, 'id' | 'tags' | 'my_role' | 'is_shared' | 'owner_name' | 'permissions' | 'created_at' | 'updated_at' | 'auto_post_enabled'>
+  Omit<Account, 'id' | 'tags' | 'my_role' | 'is_shared' | 'owner_id' | 'owner_name' | 'permissions' | 'created_at' | 'updated_at' | 'auto_post_enabled'>
 > &
   TagIdsInput
 

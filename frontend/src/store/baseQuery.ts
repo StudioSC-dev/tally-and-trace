@@ -2,6 +2,9 @@ import { fetchBaseQuery } from '@reduxjs/toolkit/query/react'
 import type { BaseQueryFn, FetchArgs, FetchBaseQueryError } from '@reduxjs/toolkit/query/react'
 import { stepAfter401 } from '@tally-trace/shared'
 
+/** Pages a signed-out visitor is meant to be on: a 401 there is not an expired session. */
+const PUBLIC_AUTH_PATHS = ['/login', '/register', '/verify-email']
+
 const API_BASE = `${import.meta.env.VITE_API_URL || ''}/api/v1`
 
 const rawBaseQuery = fetchBaseQuery({
@@ -119,7 +122,8 @@ export const baseQueryWithReauth: BaseQueryFn<
       result = await rawBaseQuery(args, api, extraOptions)
     } else {
       clearSession()
-      if (window.location.pathname !== '/login') {
+      // The public auth pages show their own 401 (a refused sign-up or verification link).
+      if (!PUBLIC_AUTH_PATHS.includes(window.location.pathname)) {
         window.location.href = '/login'
       }
     }

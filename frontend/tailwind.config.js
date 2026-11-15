@@ -16,6 +16,24 @@ module.exports = {
   ],
   theme: {
     extend: {
+      /*
+        `min-h-screen` / `h-screen` are redefined to `dvh` rather than fixed at
+        each of the 15 call sites. iOS Safari's dynamic toolbar makes `100vh`
+        resolve to the expanded viewport, so a `100vh` box is taller than what
+        is visible — the bottom clips and the scroll jumps whenever the toolbar
+        collapses. `dvh` tracks the visible box instead.
+
+        No `vh` fallback is emitted here (Tailwind writes one declaration per
+        utility); `body` and `#root` in index.css carry the fallback pair, and
+        every browser these ship to supports `dvh` (Safari 15.4+, Firefox 101+,
+        Chrome 108+).
+      */
+      minHeight: {
+        screen: '100dvh',
+      },
+      height: {
+        screen: '100dvh',
+      },
       fontFamily: {
         sans: ['var(--font-sans)'],
         serif: ['var(--font-serif)'],
@@ -23,26 +41,26 @@ module.exports = {
       },
       colors: {
         // Surfaces — surface is lighter than paper, sunken is darker
-        paper: 'var(--paper)',
-        surface: 'var(--surface)',
-        sunken: 'var(--sunken)',
+        paper: 'rgb(var(--paper) / <alpha-value>)',
+        surface: 'rgb(var(--surface) / <alpha-value>)',
+        sunken: 'rgb(var(--sunken) / <alpha-value>)',
 
         // Hairlines
         line: {
-          DEFAULT: 'var(--line)',
-          strong: 'var(--line-strong)',
+          DEFAULT: 'rgb(var(--line) / <alpha-value>)',
+          strong: 'rgb(var(--line-strong) / <alpha-value>)',
         },
 
         // Text
-        ink: 'var(--ink)',
-        body: 'var(--body)',
-        muted: 'var(--muted)',
+        ink: 'rgb(var(--ink) / <alpha-value>)',
+        body: 'rgb(var(--body) / <alpha-value>)',
+        muted: 'rgb(var(--muted) / <alpha-value>)',
 
         // Status — small dots and text, never glowing fills
-        ok: 'var(--ok)',
-        warn: 'var(--warn)',
-        info: 'var(--info)',
-        danger: 'var(--danger)',
+        ok: 'rgb(var(--ok) / <alpha-value>)',
+        warn: 'rgb(var(--warn) / <alpha-value>)',
+        info: 'rgb(var(--info) / <alpha-value>)',
+        danger: 'rgb(var(--danger) / <alpha-value>)',
       },
     },
   },
