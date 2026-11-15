@@ -10,7 +10,7 @@ import type {
   RecordPermissions,
   SharedFullTransaction,
 } from '../store/api'
-import { DEFAULT_SETTLEMENT, canMakeRepeat, formatCadenceLabel, editFormProjectedAmount, fieldErrorProps, repeatFieldControl, repeatingRefusal, repeatScheduleOf, scheduleRequest, schedulePreview, scheduleState, settlementControlState, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, scheduledRange, postedCycleHint, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError, completionShown, pendingTargets } from '@tally-trace/shared'
+import { entryDay, DEFAULT_SETTLEMENT, canMakeRepeat, formatCadenceLabel, editFormProjectedAmount, fieldErrorProps, repeatFieldControl, repeatingRefusal, repeatScheduleOf, scheduleRequest, schedulePreview, scheduleState, settlementControlState, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, scheduledRange, postedCycleHint, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError, completionShown, pendingTargets } from '@tally-trace/shared'
 import { AUTOFILL_FIELDS, autofillForm, cleanFormForType } from '@tally-trace/shared'
 import type { AutofillField, DescriptionSuggestion, TypeFits } from '@tally-trace/shared'
 import type { FieldErrors, ListRange, OutboxKind, OutboxRequest, RepeatingTransactionInput, ScheduleContext, ScheduleDraft, TransactionStatus } from '@tally-trace/shared'
@@ -1883,7 +1883,7 @@ export function TransactionsPage() {
         transfer_fee: transaction.transfer_fee ?? 0,
       description: transaction.description || '',
       transaction_type: transaction.transaction_type,
-      transaction_date: new Date(transaction.transaction_date).toISOString().split('T')[0],
+      transaction_date: entryDay(transaction.transaction_date),
         posting_date: transaction.posting_date
           ? postingDay(transaction.posting_date) ?? undefined
           : undefined,
