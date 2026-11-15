@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { entryCalendarDate, formatEntryDate, fromWireWallTime, parseEntryDate, toWireWallTime } from './entryDate'
+import { entryCalendarDate, entryDay, formatEntryDate, fromWireWallTime, parseEntryDate, toWireWallTime } from './entryDate'
 
 // Budget-entry dates are wall time stored as UTC components: what the owner
 // types is what the API stores, whatever the browser's zone (UTC+8 here).
@@ -52,5 +52,32 @@ describe('wall-time helpers', () => {
   it('reports an unreadable value', () => {
     expect(formatEntryDate('not a date')).toBe('Invalid date')
     expect(fromWireWallTime('not a date')).toBe('')
+  })
+})
+
+// STU-309 AC1 and AC2: the transaction edit form shows the stored calendar day D in
+// every browser zone. Run under TZ=Asia/Manila, America/Los_Angeles and UTC.
+describe('edit_prefill_zones', () => {
+  it('pre-fills the stored day for a naive D 00:00, a Z value and a Date', () => {
+    expect(entryDay('2026-10-30T00:00:00')).toBe('2026-10-30')
+    expect(entryDay('2026-10-30T00:00:00Z')).toBe('2026-10-30')
+    expect(entryDay('2026-10-30T00:00:00.000000')).toBe('2026-10-30')
+    expect(entryDay('2026-10-30')).toBe('2026-10-30')
+    expect(entryDay(new Date('2026-10-30T00:00:00Z'))).toBe('2026-10-30')
+  })
+
+  it('keeps the day across month and year edges', () => {
+    expect(entryDay('2026-03-01T00:00:00')).toBe('2026-03-01')
+    expect(entryDay('2027-01-01T00:00:00')).toBe('2027-01-01')
+    expect(entryDay('2028-02-29T00:00:00')).toBe('2028-02-29')
+  })
+
+  it('reports an unreadable value as empty', () => {
+    expect(entryDay('not a date')).toBe('')
+  })
+
+  it('saves an untouched edit as the stored value (the create form sends D as UTC midnight)', () => {
+    const day = entryDay('2026-10-30T00:00:00')
+    expect(new Date(day).toISOString()).toBe('2026-10-30T00:00:00.000Z')
   })
 })
