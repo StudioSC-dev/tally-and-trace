@@ -1,7 +1,8 @@
 // Browser checks for STU-335 PR 2's Household polish (plan 3.6 Q7, scenarios in 5.2): the
 // title waits for the views instead of flipping from "Household" to the sharer's name, and
 // the Transactions tab waits for the dashboard's account names before it lists rows. Scenario
-// (h) is STU-253's: statement and loan controls follow `permissions.can_view_details`.
+// (h) is STU-253's: statement and loan controls follow `permissions.can_view_details`, and
+// the dashboard total counts the balances the viewer can see.
 // Starts its own API and web app against a throwaway database (./_local_stack.cjs) and
 // seeds through the API; every expected figure is read from the API. Not wired into CI and
 // not part of `pnpm build`. Run steps: see ./README.md.
@@ -263,6 +264,25 @@ async function scenarioH(browser) {
     const shown = viewer.shown[w.card.id].statements + viewer.shown[w.card.id].loan + viewer.shown[w.loan.id].statements + viewer.shown[w.loan.id].loan
     return (shown === 0 && viewer.asked.length === 0) || `tag viewer sees ${JSON.stringify(viewer.shown)}, asked ${JSON.stringify(viewer.asked)}`
   })
+  // The dashboard's total is the snapshot's, over the accounts B can see: A's Household ones in.
+  const listed = (await client.get(w.b.token, '/accounts/?limit=100')).items
+  const visible = listed.filter((a) => a.currency === 'PHP').reduce((n, a) => n + a.balance, 0)
+  const snapshot = await client.get(w.b.token, '/dashboard/snapshot')
+  const { ctx, page } = await h.newPage(browser)
+  page.setDefaultTimeout(10000)
+  try {
+    await h.uiLogin(page, stack, w.b)
+    await page.goto(`${stack.webUrl}/`)
+    await page.locator(tid('net-worth')).waitFor()
+    await h.waitQuiet(page)
+    const shown = ((await page.locator(tid('net-worth')).textContent()) || '').trim()
+    const peso = (n) => `₱${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    await h.check('h.visible-balance-total', 'B', async () =>
+      (listed.some((a) => a.my_role === 'tag_viewer') && snapshot.balances.total === visible && shown === peso(visible)) ||
+      `shown ${shown}, snapshot ${snapshot.balances.total}, visible accounts ${visible}`)
+  } finally {
+    await ctx.close()
+  }
 }
 
 const SCENARIOS = [
