@@ -9,6 +9,8 @@
 //   (f) AC7  register with a 422 array: readable text, the form stays usable.
 //   (g) AC8  a string `detail` reads as itself on sign-in, demo-login, resend, register, verify-email.
 //   (h) AC9  register and verify-email with 400, 401 and 500: a message, no crash.
+//   (j) a resend result is cleared when the email changes or a new sign-in or demo-login starts.
+//   (k) guard: a 401 on an authenticated page still redirects to /login.
 //   (i) AC10 successful sign-in, demo-login, resend, registration and verification keep their
 //            navigation and confirmation.
 // Every /auth request is a route mock; the API is never reached. A crash is a page error or a
@@ -325,11 +327,9 @@ async function scenarioH(browser) {
     const register = await registerPage(browser, { register: reply })
     try {
       await submitRegister(register.page)
-      // A 401 makes the shared base query send the browser to /login, so for it a sign-in page that
-      // rendered is also a page that did not crash.
       await h.check(`h.register-${name}`, 'B', async () => {
-        const seen = (await shows(register.page, expected, 4000)) || (name === '401' && (await emailBox(register.page).isVisible().catch(() => false)))
-        if (!seen) return `no message; page: ${(await bodyText(register.page)).slice(0, 200)}`
+        if (!(await shows(register.page, expected))) return `no message; page: ${(await bodyText(register.page)).slice(0, 200)}`
+        if (new URL(register.page.url()).pathname !== '/register') return `left /register for ${register.page.url()}`
         return noCrash(register)
       })
     } finally { await register.ctx.close() }
@@ -337,8 +337,8 @@ async function scenarioH(browser) {
     const verify = await verifyPage(browser, { 'verify-email': reply })
     try {
       await h.check(`h.verify-${name}`, 'B', async () => {
-        const seen = (await shows(verify.page, expected, 4000)) || (name === '401' && (await emailBox(verify.page).isVisible().catch(() => false)))
-        if (!seen) return `no message; page: ${(await bodyText(verify.page)).slice(0, 200)}`
+        if (!(await shows(verify.page, expected))) return `no message; page: ${(await bodyText(verify.page)).slice(0, 200)}`
+        if (new URL(verify.page.url()).pathname !== '/verify-email') return `left /verify-email for ${verify.page.url()}`
         return noCrash(verify)
       })
     } finally { await verify.ctx.close() }
@@ -410,7 +410,75 @@ async function scenarioI(browser) {
   } finally { await verify.ctx.close() }
 }
 
-const SCENARIOS = { a: scenarioA, b: scenarioB, c: scenarioC, d: scenarioD, e: scenarioE, f: scenarioF, g: scenarioG, h: scenarioH, i: scenarioI }
+async function scenarioJ(browser) {
+  const SENT = 'Verification email sent!'
+  const mocks = { login: NOT_VERIFIED, 'resend-verification': json(200, { message: SENT }) }
+  const sendResend = async (page) => {
+    await submitSignIn(page, 'user@example.com')
+    await page.getByRole('button', { name: 'Resend verification email' }).click()
+    await shows(page, SENT)
+  }
+  const gone = async (page) => (await page.getByText(SENT, { exact: false }).count()) === 0
+
+  const edit = await signInPage(browser, mocks)
+  try {
+    await sendResend(edit.page)
+    await emailBox(edit.page).fill('other@example.com')
+    await h.check('j.cleared-on-email-change', 'B', async () => (await gone(edit.page)) || 'the old resend message is still shown')
+  } finally { await edit.ctx.close() }
+
+  const again = await signInPage(browser, mocks)
+  try {
+    await sendResend(again.page)
+    await signInButton(again.page).click()
+    await h.check('j.cleared-on-new-signin', 'B', async () => {
+      if (!(await shows(again.page, 'Email not verified'))) return 'no new "Email not verified"'
+      return (await gone(again.page)) || 'the old resend message sits beside the new error'
+    })
+  } finally { await again.ctx.close() }
+
+  const demo = await signInPage(browser, mocks)
+  try {
+    await sendResend(demo.page)
+    await demo.page.getByRole('button', { name: 'Sign in as Demo User' }).click()
+    await h.check('j.cleared-on-demo-login', 'B', async () => {
+      if (!(await shows(demo.page, 'Email not verified'))) return 'no new "Email not verified"'
+      return (await gone(demo.page)) || 'the old resend message sits beside the new error'
+    })
+  } finally { await demo.ctx.close() }
+
+  const failed = await signInPage(browser, { login: NOT_VERIFIED, 'resend-verification': json(400, { detail: 'Resend refused' }) })
+  try {
+    await submitSignIn(failed.page, 'user@example.com')
+    await failed.page.getByRole('button', { name: 'Resend verification email' }).click()
+    await shows(failed.page, 'Resend refused')
+    await signInButton(failed.page).click()
+    await h.check('j.failure-cleared-on-new-signin', 'B', async () => {
+      if (!(await shows(failed.page, 'Email not verified'))) return 'no new "Email not verified"'
+      return (await failed.page.getByText('Resend refused').count()) === 0 || 'the old resend failure is still shown'
+    })
+  } finally { await failed.ctx.close() }
+}
+
+async function scenarioK(browser) {
+  // Guard: a 401 on an authenticated page (an expired session) still goes to /login.
+  const ctx = await openPage(browser, { me: json(401, { detail: 'Could not validate credentials' }), refresh: json(401, { detail: 'Invalid or expired refresh token' }) })
+  try {
+    await ctx.ctx.addInitScript((user) => {
+      if (location.pathname === '/login') return
+      localStorage.setItem('access_token', 'expired-token')
+      localStorage.setItem('user', JSON.stringify(user))
+    }, USER)
+    await goto(ctx.page, '/')
+    await h.check('k.expired-session-redirects', 'G', async () => {
+      await ctx.page.waitForURL((u) => u.pathname === '/login', { timeout: 15000 })
+      const token = await ctx.page.evaluate(() => localStorage.getItem('access_token'))
+      return token === null || `token still stored: ${token}`
+    })
+  } finally { await ctx.ctx.close() }
+}
+
+const SCENARIOS = { a: scenarioA, b: scenarioB, c: scenarioC, d: scenarioD, e: scenarioE, f: scenarioF, g: scenarioG, h: scenarioH, i: scenarioI, j: scenarioJ, k: scenarioK }
 
 async function main() {
   try {
