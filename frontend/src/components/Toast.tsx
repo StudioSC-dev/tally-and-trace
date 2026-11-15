@@ -18,11 +18,16 @@ import { Spinner } from './Loading'
 // Newest at the bottom; at most four are shown, the rest behind "+N more". It lives in Layout,
 // so it outlasts a move between pages. Its mobile bottom offset is the tab bar clearance (6rem)
 // plus the device safe-area inset, since BottomNav pads itself by that inset.
+// The stack stays above the dialogs, so a failure can be acted on while one is open. The page and
+// every dialog overlay keep room under their content for it (`--toast-room`, STU-629): see
+// index.css for the overlays.
 
 /** How long a "Saved" toast stays. */
 export const SAVED_TOAST_MS = 4000
 /** Toasts shown before the rest fold into "+N more". */
 export const MAX_VISIBLE_TOASTS = 4
+/** Space kept between the last content and the top of the stack, in px. */
+const TOAST_ROOM_GAP_PX = 8
 
 type Variant = 'info' | 'pending' | 'success' | 'error'
 
@@ -70,6 +75,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const completions = useSelector((state: RootState) => state.outbox.completions)
   const [info, setInfo] = useState<{ id: number; seq: number; message: string } | null>(null)
   const [expanded, setExpanded] = useState(false)
+  // The stack element, once shown, so its height can be reported to the page (STU-629).
+  const [stackEl, setStackEl] = useState<HTMLDivElement | null>(null)
   // Each toast's place in the stack, by key, fixed when first seen: a save's toast keeps its
   // place as it turns from pending to saved or failed.
   const order = useRef(new Map<string, number>())
@@ -106,6 +113,26 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       )
     }
   }, [completions, hideSaved])
+  // Room the page keeps under its content while the stack is up (STU-629): the distance from the
+  // bottom of the viewport to the top of the stack, as `--toast-room` on <html>. Layout's <main>
+  // pads its bottom with it, so a list scrolled to its end clears the stack. Removed with the stack.
+  useEffect(() => {
+    if (!stackEl) return
+    const root = document.documentElement
+    const measure = () => {
+      const top = stackEl.getBoundingClientRect().top
+      root.style.setProperty('--toast-room', `${Math.max(0, Math.ceil(root.clientHeight - top)) + TOAST_ROOM_GAP_PX}px`)
+    }
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(stackEl)
+    window.addEventListener('resize', measure)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', measure)
+      root.style.removeProperty('--toast-room')
+    }
+  }, [stackEl])
   // Unfolded once, the stack folds again when it is short enough.
   const fits = entries.length + completions.length + (info ? 1 : 0) <= MAX_VISIBLE_TOASTS
   useEffect(() => {
@@ -206,6 +233,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       {items.length > 0 && (
         <div
+          ref={setStackEl}
           data-testid="toast-stack"
           className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom,0px))] left-4 right-4 z-[70] flex max-h-[70vh] flex-col gap-2 overflow-y-auto sm:bottom-6 sm:left-auto sm:right-6 sm:w-96"
         >

@@ -529,3 +529,15 @@ body::after {
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
 }
+
+/*
+  Room for the toast stack under a dialog (STU-629). The stack (Toast.tsx) sits above the dialogs so
+  a failed save can be acted on at once; `--toast-room` is the height it takes from the bottom of
+  the viewport (unset when there are no toasts). Every dialog overlay is `fixed inset-0
+  overflow-y-auto bg-black/60 py-6`: padding its bottom by that room lets the dialog scroll, and
+  centre, above the stack, so its buttons are never under a toast. The confirm dialog (z-100) sits
+  above the stack, so it needs no room. Outside @layer so it wins over the py-6 utility.
+*/
+.fixed.inset-0.overflow-y-auto.bg-black\/60:not(.z-\[100\]) {
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 0px), var(--toast-room, 0px));
+}
