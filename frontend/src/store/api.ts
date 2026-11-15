@@ -121,6 +121,7 @@ export type {
 import type {
   Account,
   Category,
+  DescriptionSuggestion,
   Allocation,
   BudgetEntry,
   Transaction,
@@ -631,6 +632,13 @@ export const accountingApi = createApi({
         timeout: OUTBOX_SEND_TIMEOUT_MS,
       }),
     }),
+    // Add Transaction's Description suggestions (STU-626): the caller's earlier descriptions
+    // starting with `q`, each with the latest such row's values. Always asked afresh (the lazy
+    // trigger), so a save just made is suggested on the next keystroke.
+    getDescriptionSuggestions: builder.query<{ items: DescriptionSuggestion[] }, string>({
+      query: (q) => ({ url: 'transactions/description-suggestions', params: { q } }),
+      keepUnusedDataFor: 0,
+    }),
     getTransaction: builder.query<Transaction, number>({
       query: (id) => `transactions/${id}`,
       providesTags: ['Transaction'],
@@ -958,6 +966,7 @@ export const {
   // Transaction hooks
   useGetTransactionsQuery,
   useLazyGetTransactionsQuery,
+  useLazyGetDescriptionSuggestionsQuery,
   useGetTransactionQuery,
   useCreateTransactionMutation,
   useCreateRepeatingTransactionMutation,
