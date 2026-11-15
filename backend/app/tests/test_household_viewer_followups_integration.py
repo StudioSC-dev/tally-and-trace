@@ -6,7 +6,7 @@ Household-tagged accounts).
 """
 import pytest
 
-from app.tests.conftest import API, sw_db_reachable, sw_share
+from app.tests.conftest import API, sw_db_reachable, sw_post, sw_share
 
 pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
 
@@ -36,3 +36,51 @@ def test_can_view_details_by_role(hh, sw_client, sw_db, sw_people):
         for body in (one, listed):
             assert body["my_role"] == role
             assert body["permissions"]["can_view_details"] is (role != "tag_viewer"), role
+
+
+# --- Part 7: an inactive tag-viewer account is hidden everywhere the list hides it ---------
+
+@pytest.fixture
+def inactive_household(hh, sw_client, sw_db):
+    """A's second Household-tagged bank account, with one of A's records, deactivated
+    (written directly: the deactivation rules are tested on their own)."""
+    from app.models.account import Account
+
+    account = sw_post(sw_client, hh["a"], "/accounts/", {
+        "name": "Old joint", "account_type": "checking", "balance": 0, "tag_ids": [hh["hh_a"]]})["id"]
+    sw_post(sw_client, hh["a"], "/transactions/", {
+        "account_id": account, "amount": 12, "transaction_type": "debit", "description": "Old",
+        "transaction_date": "2026-10-01T00:00:00", "is_posted": True})
+    # Active, the tag viewer reaches it everywhere.
+    assert _call(sw_client, hh["c"], "GET", f"/accounts/{account}").status_code == 200
+    sw_db.query(Account).filter(Account.id == account).update({"is_active": False})
+    sw_db.commit()
+    listed = {a["id"] for a in _get(sw_client, hh["c"], "/accounts/", limit=100)["items"]}
+    assert account not in listed and hh["joint"] in listed
+    return account
+
+
+def test_inactive_tag_viewer_hidden_get(hh, inactive_household, sw_client):
+    """AC4: ``GET /accounts/{id}`` is a 404, as the list leaves it out; the owner keeps it."""
+    assert _call(sw_client, hh["c"], "GET", f"/accounts/{inactive_household}").status_code == 404
+    assert _get(sw_client, hh["a"], f"/accounts/{inactive_household}")["is_active"] is False
+    assert _get(sw_client, hh["c"], f"/accounts/{hh['joint']}")["my_role"] == "tag_viewer"
+
+
+def test_inactive_tag_viewer_hidden_balance(hh, inactive_household, sw_client):
+    """AC4: ``GET /accounts/{id}/balance`` is a 404 too."""
+    path = f"/accounts/{inactive_household}/balance"
+    assert _call(sw_client, hh["c"], "GET", path).status_code == 404
+    assert _get(sw_client, hh["a"], path)["calculated_balance"] == -12
+    assert _call(sw_client, hh["c"], "GET", f"/accounts/{hh['joint']}/balance").status_code == 200
+
+
+def test_inactive_tag_viewer_hidden_export(hh, inactive_household, sw_client):
+    """AC4: the export's ``shared_accounts`` leaves it out, in JSON and CSV."""
+    body = _get(sw_client, hh["c"], "/data/export.json")
+    ids = {a["id"] for a in body["shared_accounts"]}
+    assert inactive_household not in ids and hh["joint"] in ids
+    r = sw_client.get(f"{API}/data/export.csv", headers=hh["c"]["headers"],
+                      params={"table": "shared_accounts"})
+    assert r.status_code == 200
+    assert "Old joint" not in r.text and "Joint account" in r.text

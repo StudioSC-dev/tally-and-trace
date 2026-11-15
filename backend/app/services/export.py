@@ -10,7 +10,7 @@ Version 2 (STU-232, shared accounts):
   accounts shared with them, as a reference (id, name, type, currency, their
   role and the owner's display name), nothing an owner keeps to managers.
   Accounts reached through a Household tag share are listed here too, with
-  ``my_role`` "tag_viewer" (STU-233).
+  ``my_role`` "tag_viewer" (STU-233), active ones only (STU-253).
 - ``transactions`` / ``budget_entries``: the caller's own records whose view is
   ``full`` (they can view every account the record touches).
 - ``others_transactions`` / ``others_budget_entries``: every other record the
@@ -44,6 +44,7 @@ from sqlalchemy.orm import Session
 
 from app.core.access import (
     OWNER,
+    TAG_VIEWER,
     VIEW_ROLES,
     access_map,
     household_grants,
@@ -193,8 +194,9 @@ def build_export(db: Session, user: User) -> Dict[str, object]:
     owned = db.query(Account).filter(owned_criterion(Account, user)).order_by(Account.id).all()
     held = access_map(db, user)
     owned = [a for a in owned if held.of(a) == OWNER]
+    # Active ones only through a tag share, as the account list (STU-253).
     shared = [a for a in viewable_accounts(db, user, roles=VIEW_ROLES).order_by(Account.id).all()
-              if held.of(a) != OWNER]
+              if held.of(a) != OWNER and (held.of(a) != TAG_VIEWER or a.is_active)]
     scope_ids = viewable_account_ids(db, user)
     grants = household_grants(db, user)
     redactor = Redactor(db, user)

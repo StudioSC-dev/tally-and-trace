@@ -689,9 +689,13 @@ def record_permissions(db: Session, user, record) -> dict:
 
 def get_account_or_404(db: Session, user, account_id: int, detail: str = "Account not found",
                        *, roles=DIRECT_ROLES) -> Account:
-    """The account, 404ing unless the caller holds one of ``roles`` on it."""
+    """The account, 404ing unless the caller holds one of ``roles`` on it.
+
+    An inactive account held only as ``tag_viewer`` is a 404 too, as the
+    account list leaves it out (STU-253)."""
     account = db.query(Account).filter(Account.id == account_id).first()
-    if not account or account_role(user, account) not in roles:
+    role = account_role(user, account) if account else NONE
+    if role not in roles or (role == TAG_VIEWER and not account.is_active):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
     return account
 
