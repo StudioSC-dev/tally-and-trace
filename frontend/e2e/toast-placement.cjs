@@ -166,6 +166,9 @@ async function uncovered(locator, names) {
   return bad.map(([n, v]) => `${n}: ${!v.inView ? 'off screen' : v.coveredByToasts ? 'covered by a toast' : `covered by ${v.topIs}`}`).join('; ')
 }
 
+/** A check's result from a reason: null (nothing wrong) passes; a string fails with it. */
+const verdict = (reason) => (reason === null ? true : reason)
+
 /** Trial click: Playwright's actionability and hit-target checks without clicking. */
 async function clickable(locator, options = {}) {
   try {
@@ -263,9 +266,11 @@ async function scenarioA(browser) {
     const create = form.getByRole('button', { name: 'Create Transaction', exact: true })
     await dialogToEnd(page, form)
     await shot(page, 'a-dialog')
-    await h.check('a.create-uncovered', 'B', async () => (await uncovered(create, ['centre'])) || true)
-    await h.check('a.create-clickable', 'B', async () => (await clickable(create)) || true)
+    const aPlaced = await uncovered(create, ['centre'])
+    await h.check('a.create-uncovered', 'B', async () => verdict(aPlaced))
+    await h.check('a.create-clickable', 'B', async () => (aPlaced !== null ? 'skipped: the placement check failed' : verdict(await clickable(create))))
     await h.check('a.create-clicks', 'B', async () => {
+      if (aPlaced !== null) return 'skipped: the placement check failed'
       await create.click({ timeout: 3000 })
       await form.waitFor({ state: 'hidden', timeout: 5000 })
       return (await toasts(page).count()) === 4 || `${await toasts(page).count()} toasts after the click`
@@ -286,8 +291,9 @@ async function scenarioB(browser) {
     await makePending(page, checking, held, 0, 3, 'TP B')
     const row = await lastRowInView(page)
     await shot(page, 'b-last-row')
-    await h.check('b.last-row-uncovered', 'B', async () => (await uncovered(row)) || true)
-    await h.check('b.last-row-clicks', 'B', async () => (await clickRowOpensActions(page, row)) || true)
+    const bPlaced = await uncovered(row)
+    await h.check('b.last-row-uncovered', 'B', async () => verdict(bPlaced))
+    await h.check('b.last-row-clicks', 'B', async () => (bPlaced !== null ? 'skipped: the placement check failed' : verdict(await clickRowOpensActions(page, row))))
     held.release({ disarm: true })
   } finally {
     await ctx.close()
@@ -304,8 +310,9 @@ async function scenarioC(browser) {
     await makePending(page, checking, held, 0, 3, 'TP C')
     const row = await lastRowInView(page)
     await shot(page, 'c-last-row')
-    await h.check('c.last-row-uncovered', 'B', async () => (await uncovered(row)) || true)
-    await h.check('c.last-row-clicks', 'B', async () => (await clickRowOpensActions(page, row)) || true)
+    const cPlaced = await uncovered(row)
+    await h.check('c.last-row-uncovered', 'B', async () => verdict(cPlaced))
+    await h.check('c.last-row-clicks', 'B', async () => (cPlaced !== null ? 'skipped: the placement check failed' : verdict(await clickRowOpensActions(page, row))))
     held.release({ disarm: true })
   } finally {
     await ctx.close()
@@ -339,7 +346,7 @@ async function usableAt(browser, size, name) {
   try {
     const held = await h.gate(page, isCreate)
     await makePending(page, checking, held, 0, 3, `TP D${size.width}`)
-    await h.check(`d.${name}.pending-readable`, 'B', async () => (await readable(page)) || true)
+    await h.check(`d.${name}.pending-readable`, 'B', async () => verdict(await readable(page)))
     await shot(page, `d-${name}-pending`)
     held.release({ disarm: true })
     for (let i = 1; i <= 3; i++) {
@@ -349,7 +356,12 @@ async function usableAt(browser, size, name) {
       })
     }
     // Saved toasts go after 4 s; act on them at once.
-    await h.check(`d.${name}.saved-readable`, 'B', async () => (await readable(page)) || true)
+    await h.check(`d.${name}.saved-readable`, 'B', async () => verdict(await readable(page)))
+    await h.check(`d.${name}.view`, 'B', async () => {
+      const view = toastFor(page, `TP D${size.width} Pending 3`).locator(tid('save-toast-view'))
+      await view.click({ timeout: 3000 })
+      return true
+    })
     await h.check(`d.${name}.dismiss`, 'B', async () => {
       const toast = toastFor(page, `TP D${size.width} Pending 2`)
       await toast.locator(tid('save-toast-dismiss')).click({ timeout: 3000 })
@@ -359,16 +371,10 @@ async function usableAt(browser, size, name) {
     await h.check(`d.${name}.undo`, 'B', async () => {
       const toast = toastFor(page, `TP D${size.width} Pending 1`)
       await toast.locator(tid('save-toast-undo')).click({ timeout: 3000 })
-      await toast.waitFor({ state: 'detached', timeout: 10000 }).catch(() => {})
+      await toast.waitFor({ state: 'detached', timeout: 10000 })
       await h.waitQuiet(page)
       const list = await client.get(user.token, `/transactions/?search=${encodeURIComponent(`TP D${size.width} Pending 1`)}&limit=100`)
       return list.items.length === 0 || 'the row was not removed by Undo'
-    })
-    await h.check(`d.${name}.view`, 'B', async () => {
-      const view = toastFor(page, `TP D${size.width} Pending 3`).locator(tid('save-toast-view'))
-      if ((await view.count()) === 0) return true // already timed out; View is covered by background-saves
-      await view.click({ timeout: 3000 })
-      return true
     })
     // Retry: a create whose answer never reaches the page.
     let dropped = 0
@@ -381,7 +387,7 @@ async function usableAt(browser, size, name) {
     await createUI(page, { accountName: checking.name, amount: 777, description: `TP D${size.width} Retry` })
     await h.check(`d.${name}.failed-readable`, 'B', async () => {
       await toastFor(page, `TP D${size.width} Retry`).and(page.locator('[data-state="failed"]')).first().waitFor({ timeout: 10000 })
-      return (await readable(page)) || true
+      return verdict(await readable(page))
     })
     await shot(page, `d-${name}-failed`)
     await h.check(`d.${name}.retry`, 'B', async () => {
@@ -441,7 +447,7 @@ async function scenarioE(browser) {
       await h.check(`e.${count}pending.w${width}.${label.replace(/\W+/g, '-').toLowerCase()}`, 'B', async () => {
         const button = form.getByRole('button', { name: label, exact: true })
         await dialogToEnd(page, form)
-        return (await uncovered(button)) || (await clickable(button)) || true
+        return verdict((await uncovered(button)) ?? (await clickable(button)))
       })
     }
   }, { dialog: true })
@@ -453,7 +459,7 @@ async function scenarioF(browser) {
     await h.check(`f.${count}pending.w${width}.primary`, 'B', async () => {
       const button = form.getByRole('button', { name: 'Create Transaction', exact: true })
       await dialogToEnd(page, form)
-      return (await uncovered(button)) || (await clickable(button)) || true
+      return verdict((await uncovered(button)) ?? (await clickable(button)))
     })
   }, { dialog: true })
 }
@@ -472,7 +478,7 @@ async function scenarioG(browser) {
       await settle(page)
       const row = await lowestVisibleRow(page)
       if (!row) return 'no fully visible row partway down the list'
-      return (await uncovered(row)) || (await clickable(row, { position: { x: 30, y: 12 } })) || true
+      return verdict((await uncovered(row)) ?? (await clickable(row, { position: { x: 30, y: 12 } })))
     })
     await h.check(`g.${count}pending.w${width}.end`, 'B', async () => {
       await scrollToEnd(page)
@@ -482,7 +488,7 @@ async function scenarioG(browser) {
       const hits = await hitTest(row)
       const toastHit = Object.entries(hits).filter(([, v]) => v.coveredByToasts).map(([n]) => n)
       if (toastHit.length) return `the stack covers the last row at ${toastHit.join(', ')}`
-      return (await uncovered(row)) || (await clickable(row, { position: { x: Math.max(4, (await row.boundingBox()).width - 24), y: 12 } })) || true
+      return verdict((await uncovered(row)) ?? (await clickable(row, { position: { x: Math.max(4, (await row.boundingBox()).width - 24), y: 12 } })))
     })
   }, { dialog: false })
 }
