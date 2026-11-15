@@ -150,3 +150,44 @@ def test_recurring_delete_readable_rows_still_block(sw, sw_client, sw_db):
         assert sw_db.get(BudgetEntry, entry) is not None
     for txn in rows:
         assert sw_db.get(Transaction, txn).budget_entry_id is not None
+
+
+# --- AC4: callers with full visibility, and what the ticket leaves alone ----------------
+
+def test_owner_messages_unchanged(sw, sw_client, sw_db):
+    a, b, d, v = sw["a"], sw["b"], sw["d"], sw["v"]
+    unrouted = _loan(sw_client, a, "Unrouted loan")
+    sw_share(sw_db, unrouted, d["id"], "admin", a["id"])
+    sw_share(sw_db, unrouted, b["id"], "editor", a["id"])
+    body = {"amount": 900, "transaction_date": DAY}
+    # Owner and admin see the loan's routing, so they keep the 400 that says why.
+    for who in (a, d):
+        r = _call(sw_client, who, "POST", f"/accounts/{unrouted}/loan-payment", body)
+        assert (r.status_code, r.json()) == (400, {"detail": NO_FUNDING_DETAIL}), r.text
+    # A caller with no role on the loan still gets the loan's own 404.
+    r = _call(sw_client, sw["s"], "POST", f"/accounts/{unrouted}/loan-payment", body)
+    assert (r.status_code, r.json()) == (404, {"detail": "Account not found"})
+    # An editor naming a funding account they may use still pays.
+    r = _call(sw_client, b, "POST", f"/accounts/{unrouted}/loan-payment",
+              {**body, "from_account_id": sw["joint"]})
+    assert r.status_code == 200, r.text
+
+    # The owner's currency mismatch gets the neutral wording too (the one change).
+    routed = _loan(sw_client, a, "Routed loan", payment_account_id=sw["a_private"])
+    r = _call(sw_client, a, "PUT", f"/accounts/{routed}", {"currency": "USD"})
+    assert (r.status_code, r.json()) == (400, {"detail": NEUTRAL_CURRENCY_DETAIL})
+    r = sw_client.post(f"{API}/accounts/", headers=a["headers"], json={
+        **LOAN, "name": "Dollar loan", "currency": "USD", "payment_account_id": sw["a_private"]})
+    assert (r.status_code, r.json()) == (400, {"detail": NEUTRAL_CURRENCY_DETAIL})
+
+    # The admin's is_active change keeps its 404 (part 4 of the ticket is not taken).
+    r = _call(sw_client, d, "PUT", f"/accounts/{sw['joint']}", {"is_active": False})
+    assert (r.status_code, r.json()) == (404, {"detail": "Account not found"})
+
+    # Deleting an entry: authorization is unchanged (a viewer is refused with 404),
+    # and the creator still deletes their own entry with their own linked rows.
+    entry = _entry(sw_client, a, sw["joint"])
+    r = _call(sw_client, v, "DELETE", f"/budget-entries/{entry}")
+    assert (r.status_code, r.json()) == (404, {"detail": "Budget entry not found"})
+    _linked_debit(sw_client, a, sw["a_private"], entry)
+    assert _call(sw_client, a, "DELETE", f"/budget-entries/{entry}").status_code == 204
