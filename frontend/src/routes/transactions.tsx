@@ -516,7 +516,9 @@ export function TransactionsPage() {
     for (const field of fields) changedFields.current.add(field)
   }
   const [autofillResetKey, setAutofillResetKey] = useState(0)
+  const pendingSuggestion = useRef<DescriptionSuggestion | null>(null)
   const resetAutofill = () => {
+    pendingSuggestion.current = null
     changedFields.current = new Set()
     setAutofillResetKey((n) => n + 1)
   }
@@ -1231,9 +1233,19 @@ export function TransactionsPage() {
   // Description autofill (STU-626): the latest transaction with this description fills the
   // fields the user has not changed, with what they can still use. Add only; never the amount.
   // Read only while the form is open, as the tag picker in it does (the same cached read): opening the page sends none (STU-636).
-  const { data: tagOptions = [] } = useGetTagsQuery(undefined, { skip: !isAuthenticated || !isCreateModalOpen })
+  const tagsQuery = useGetTagsQuery(undefined, { skip: !isAuthenticated || !isCreateModalOpen })
+  const tagOptions = tagsQuery.data ?? []
+  // A suggestion picked before the tags have answered waits for them, so none of its tags is dropped as unknown.
+  const tagsSettled = tagsQuery.isSuccess || tagsQuery.isError
   const applyAutofill = (suggestion: DescriptionSuggestion) => {
     if (editingTransaction) return
+    if (!tagsSettled) {
+      pendingSuggestion.current = suggestion
+      return
+    }
+    fillFromSuggestion(suggestion)
+  }
+  const fillFromSuggestion = (suggestion: DescriptionSuggestion) => {
     const changed = new Set(changedFields.current)
     setFormData((prev) => {
       // A type change runs the type-button clean-up first (cleanFormForType), then fills.
@@ -1264,6 +1276,14 @@ export function TransactionsPage() {
       return !!category && categoryKind(category) === TYPE_TO_KIND[type]
     },
   }
+
+  useEffect(() => {
+    if (!tagsSettled || !pendingSuggestion.current) return
+    const suggestion = pendingSuggestion.current
+    pendingSuggestion.current = null
+    fillFromSuggestion(suggestion)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once the tags have answered
+  }, [tagsSettled])
 
   const handleTypeChange = (nextType: Transaction['transaction_type']) => {
     // The destination, fee and received figure come and go with the type.
