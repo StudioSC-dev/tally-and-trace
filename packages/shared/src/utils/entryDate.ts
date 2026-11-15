@@ -35,6 +35,14 @@ export function fromWireWallTime(wire: string): string {
 }
 
 /**
+ * The calendar day (`YYYY-MM-DD`) of a stored date, read from its UTC components, for
+ * a `date` input ('' if unreadable). A naive `D 00:00` is D in every browser zone.
+ */
+export function entryDay(wire: string | Date): string {
+  return fromWireWallTime(wire instanceof Date ? wire.toISOString() : wire).slice(0, 10)
+}
+
+/**
  * The calendar day of a budget-entry date as local midnight, for day arithmetic
  * against the browser's today (relative labels, "days until").
  */

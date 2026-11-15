@@ -361,7 +361,7 @@ export function Dashboard() {
         <TagFilter value={selectedTag} onChange={setSelectedTag} />
         <CurrencyControl currencies={snapshot?.currencies} value={currency} onChange={setCurrency} />
         <div className="flex flex-col gap-1">
-          <div className="flex space-x-1 bg-sunken p-1" role="group" aria-label="Period for actual totals">
+          <div className="flex max-w-full space-x-1 overflow-x-auto bg-sunken p-1" role="group" aria-label="Period for actual totals">
             {(['week', 'month', 'year'] as const).map((period) => (
               <button
                 key={period}

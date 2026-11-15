@@ -28,11 +28,18 @@
 //       j.recurring-legacy-dates: an entry stored with both dates out of range opens with
 //         no min or max on them and saves an unrelated edit; editing one date checks that
 //         date only, and the other stays exempt
+//   (h) STU-309 AC1, h.edit-prefill-zones: Edit on a row stored as D 00:00 pre-fills D in a
+//       browser zone of UTC+8, UTC-8 and UTC
+//   (i) STU-309 AC2, i.edit-save-keeps-date: saving an Edit without touching the date leaves
+//       the stored date as D 00:00, in each of those zones
+//   (l) STU-309 AC4, l.edit-preserves-other-records: that save changes no other transaction
+//   (m) STU-309 AC4, m.change-scope-guard: the diff against origin/main has no migration,
+//       backend or data-rewrite file and only the expected runtime files
 //
 // The screen loader (STU-335) blocks input while any request is in flight, so every form
 // or dialog waits for it (`waitQuiet`) after it opens and before anything is filled.
 //
-// Usage: node frontend/e2e/record-dates.cjs [a|b|c|d|e|f|j|j.recurring-bounds|j.recurring-legacy-dates]
+// Usage: node frontend/e2e/record-dates.cjs [a|b|c|d|e|f|h|i|j|j.recurring-bounds|j.recurring-legacy-dates|l|m]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { showRow } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
@@ -114,8 +121,8 @@ const checking = (u, name, balance = 100000) => post(u.token, '/accounts/', { na
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /** A page whose requests are counted by method and path suffix, and whose dialogs are counted and dismissed. */
-async function newPage(browser) {
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 1000 } })
+async function newPage(browser, timezoneId) {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 1000 }, ...(timezoneId ? { timezoneId } : {}) })
   const page = await ctx.newPage()
   const requests = []
   page.on('request', (r) => requests.push({ method: r.method(), path: new URL(r.url()).pathname }))
@@ -296,6 +303,90 @@ async function edit(browser) {
   check('(c) client: the input is marked invalid', await attr(input, 'aria-invalid'), 'true')
   check('(c) client: no PUT', sent('PUT', `/transactions/${seeded.id}`), 0)
   await ctx.close()
+}
+
+// (h) (i) (l) STU-309: the Edit form's date in three browser zones.
+const ZONES = [['UTC+8', 'Asia/Manila'], ['UTC-8', 'Etc/GMT+8'], ['UTC', 'UTC']]
+async function editZones(browser, scenarios) {
+  console.log('\n=== (h, i, l) Edit transaction: the stored day D 00:00 in UTC+8, UTC-8 and UTC')
+  const day = addDays(TODAY, -3)
+  const other = await post(owner.token, '/transactions/', {
+    account_id: bank.id, transaction_type: 'debit', amount: 11, description: 'Edit bystander',
+    transaction_date: wire(addDays(TODAY, -5)), is_posted: true,
+  })
+  const read = async (id) => (await api(owner.token, 'GET', `/transactions/${id}`)).json
+  const otherBefore = JSON.stringify(await read(other.id))
+  for (const [label, zone] of ZONES) {
+    const description = `Zone ${label}`
+    const seeded = await post(owner.token, '/transactions/', {
+      account_id: bank.id, transaction_type: 'debit', amount: 33, description,
+      transaction_date: wire(day), is_posted: true,
+    })
+    const { ctx, page, sent, mark } = await newPage(browser, zone)
+    check(`(${label}) the browser zone is ${zone}`, await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone), zone)
+    await uiLogin(page, owner)
+    await page.goto(`${stack.webUrl}/transactions`)
+    await rows(page, description).first().waitFor()
+    await waitQuiet(page)
+    await rows(page, description).first().click()
+    await waitQuiet(page)
+    await page.getByRole('button', { name: 'Edit Transaction', exact: true }).click()
+    const modal = formModal(page, 'Edit Transaction')
+    await modal.waitFor()
+    await waitQuiet(page)
+    check(`h.edit-prefill-zones ${label}: the edit form pre-fills ${day}`, await dateInput(modal).inputValue(), day)
+    mark()
+    await modal.getByRole('button', { name: 'Update Transaction', exact: true }).click()
+    await page.waitForTimeout(2500)
+    check(`i.edit-save-keeps-date ${label}: one PUT`, sent('PUT', `/transactions/${seeded.id}`), 1)
+    const saved = await read(seeded.id)
+    check(`i.edit-save-keeps-date ${label}: the stored date is unchanged`, saved.transaction_date.slice(0, 19).replace(' ', 'T'), wire(day))
+    await ctx.close()
+  }
+  check('l.edit-preserves-other-records: another transaction is untouched by the edits', JSON.stringify(await read(other.id)) === otherBefore, true)
+
+  // The ticket describes the wire value as naive ("D 00:00" with no zone). This API answers
+  // with a Z (the column is timestamptz), so the same check runs once more with the zone
+  // designator stripped from the responses, to pin the naive shape in every browser zone.
+  await post(owner.token, '/transactions/', {
+    account_id: bank.id, transaction_type: 'debit', amount: 44, description: 'Naive wire',
+    transaction_date: wire(day), is_posted: true,
+  })
+  for (const [label, zone] of ZONES) {
+    const { ctx, page } = await newPage(browser, zone)
+    await page.route('**/api/v1/transactions**', async (route) => {
+      if (route.request().method() !== 'GET') return route.continue()
+      const response = await route.fetch()
+      const body = (await response.text()).replace(/("(?:transaction_date)":"[^"]*?)(?:Z|[+-]00:00)"/g, '$1"')
+      const { 'content-length': _length, 'content-encoding': _encoding, etag: _etag, ...headers } = response.headers()
+      return route.fulfill({ status: response.status(), headers, body })
+    })
+    await uiLogin(page, owner)
+    await page.goto(`${stack.webUrl}/transactions`)
+    await rows(page, 'Naive wire').first().waitFor()
+    await waitQuiet(page)
+    await rows(page, 'Naive wire').first().click()
+    await waitQuiet(page)
+    await page.getByRole('button', { name: 'Edit Transaction', exact: true }).click()
+    const modal = formModal(page, 'Edit Transaction')
+    await modal.waitFor()
+    await waitQuiet(page)
+    check(`h.edit-prefill-zones ${label}, naive wire value: pre-fills ${day}`, await dateInput(modal).inputValue(), day)
+    await ctx.close()
+  }
+}
+
+// (m) The change touches no migration, backend or data-rewrite file.
+function scopeGuard() {
+  console.log('\n=== (m) Change scope: no migration, backend or data rewrite')
+  const { execFileSync } = require('node:child_process')
+  const files = execFileSync('git', ['diff', '--name-only', 'origin/main'], { encoding: 'utf8' }).split('\n').filter(Boolean)
+  const allowed = [
+    'frontend/src/routes/transactions.tsx', 'frontend/e2e/record-dates.cjs', 'frontend/e2e/README.md',
+    'packages/shared/package.json', 'packages/shared/src/utils/entryDate.ts', 'packages/shared/src/utils/entryDate.test.ts',
+  ]
+  check('m.change-scope-guard: no migration or backend file changed', files.filter((f) => f.startsWith('backend/') || /migration|alembic/i.test(f)), [])
+  check('m.change-scope-guard: only the expected files changed', files.filter((f) => !allowed.includes(f)), [])
 }
 
 // (d) Mark paid.
@@ -555,6 +646,8 @@ async function recurringLegacyDates(browser) {
   if (run('f')) await loanPayment(browser)
   if (run('j') || only === 'j.recurring-bounds') await recurringBounds(browser)
   if (run('j') || only === 'j.recurring-legacy-dates') await recurringLegacyDates(browser)
+  if (run('h') || run('i') || run('l')) await editZones(browser)
+  if (run('m')) scopeGuard()
   check('no browser dialog fired in the whole script', dialogs, 0)
   await browser.close()
   stack.stop()
