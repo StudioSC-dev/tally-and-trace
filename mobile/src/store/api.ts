@@ -14,9 +14,6 @@ import type {
   GoalsSummary,
   TransactionSummary,
   DashboardSnapshot,
-  CashFlowProjection,
-  UpcomingBill,
-  NetDisposableIncome,
 } from '@tally-trace/shared'
 import { tokenStore } from '../utils/tokenStore'
 import Constants from 'expo-constants'
@@ -38,9 +35,6 @@ export type {
   GoalsSummary,
   TransactionSummary,
   DashboardSnapshot,
-  CashFlowProjection,
-  UpcomingBill,
-  NetDisposableIncome,
 }
 
 // Android emulator routes to the host machine via 10.0.2.2 (not localhost).
@@ -237,17 +231,6 @@ export const accountingApi = createApi({
       query: () => 'dashboard/snapshot',
       providesTags: ['Dashboard', 'Account', 'Transaction', 'Allocation'],
     }),
-
-    // ── Forecast ─────────────────────────────────────────────────────────────
-    getCashFlowProjection: builder.query<CashFlowProjection, { num_months?: number } | void>({
-      query: (params) => ({ url: 'forecast/cash-flow-projection', params: params ?? {} }),
-    }),
-    getUpcomingBills: builder.query<UpcomingBill[], { num_days?: number } | void>({
-      query: (params) => ({ url: 'forecast/upcoming-bills', params: params ?? {} }),
-    }),
-    getNetDisposableIncome: builder.query<NetDisposableIncome, void>({
-      query: () => 'forecast/net-disposable-income',
-    }),
   }),
 })
 
@@ -291,8 +274,4 @@ export const {
   useDeleteWishlistItemMutation,
   // Dashboard
   useGetDashboardSnapshotQuery,
-  // Forecast
-  useGetCashFlowProjectionQuery,
-  useGetUpcomingBillsQuery,
-  useGetNetDisposableIncomeQuery,
 } = accountingApi

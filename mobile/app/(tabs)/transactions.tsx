@@ -131,7 +131,7 @@ function TransactionItem({
 
 // ─── Transaction Form Modal ───────────────────────────────────────────────────
 
-function TransactionFormModal({
+export function TransactionFormModal({
   visible,
   onClose,
   initial,
@@ -177,7 +177,11 @@ function TransactionFormModal({
         account_id: parseInt(form.account_id),
         category_id: form.category_id ? parseInt(form.category_id) : undefined,
         transaction_date: new Date(form.transaction_date).toISOString(),
-        currency: (accounts.find((a) => String(a.id) === form.account_id)?.currency as CurrencyCode | undefined) ?? defaultCurrency,
+        // An edit keeps the record's own currency; only a new record takes its account's.
+        currency:
+          isEdit && initial?.currency
+            ? (initial.currency as CurrencyCode)
+            : ((accounts.find((a) => String(a.id) === form.account_id)?.currency as CurrencyCode | undefined) ?? defaultCurrency),
       }
       // Another user's record: the server refuses references owned by someone else.
       if (isSharedEdit) delete payload.category_id
@@ -239,6 +243,7 @@ function TransactionFormModal({
             value={form.amount}
             onChangeText={(v) => update('amount', v)}
             keyboardType="decimal-pad"
+            testID="amount"
           />
 
           <Input
@@ -256,6 +261,7 @@ function TransactionFormModal({
                 {accounts.map((acc) => (
                   <TouchableOpacity
                     key={acc.id}
+                    testID={`account-${acc.id}`}
                     onPress={() => update('account_id', String(acc.id))}
                     className={`px-3 py-2 rounded-lg border ${
                       form.account_id === String(acc.id)
@@ -330,6 +336,7 @@ function TransactionFormModal({
           <Button
             label={isEdit ? 'Save Changes' : 'Add Transaction'}
             onPress={handleSubmit}
+            testID="submit"
             loading={isSaving}
             className="mt-4"
           />
