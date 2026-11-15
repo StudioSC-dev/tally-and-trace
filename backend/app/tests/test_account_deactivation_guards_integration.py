@@ -233,6 +233,8 @@ def test_a_card_without_a_cycle_is_refused_until_its_recurring_charge_ends(
     assert _is_active(sw_client, a, card) is False
 
 
+@pytest.mark.schedule_date_guards
+@pytest.mark.usefixtures("entry_date_bounds_lifted")
 @pytest.mark.parametrize("how", DEACTIVATIONS)
 def test_an_indefinite_charge_starting_centuries_ahead_is_refused(sw, sw_client, how):
     # The guard stops at the first billed occurrence instead of walking the
@@ -244,6 +246,8 @@ def test_an_indefinite_charge_starting_centuries_ahead_is_refused(sw, sw_client,
     assert _is_active(sw_client, a, card) is True
 
 
+@pytest.mark.schedule_date_guards
+@pytest.mark.usefixtures("entry_date_bounds_lifted")
 @pytest.mark.parametrize("how", DEACTIVATIONS)
 @pytest.mark.parametrize("which", ["a_card", "store_card", "a_loan"])
 def test_a_recorded_occurrence_in_the_last_representable_year_ends_the_walk(

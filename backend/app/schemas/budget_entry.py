@@ -2,7 +2,9 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Optional, List, Literal, Union
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from app.core.record_dates import check_record_date
+from app.core.record_dates import (
+    ENTRY_END_YEARS_AHEAD, ENTRY_NEXT_YEARS_AHEAD, check_record_date,
+)
 from app.schemas.access import AccountRef, RecordPermissions
 from app.schemas.transaction import TransactionOut
 from app.models.budget_entry import BudgetEntryType
@@ -71,6 +73,19 @@ def zero_remaining_allowed(end_mode: str, max_occurrences: Optional[int], is_act
 
 class BudgetEntryCreate(BudgetEntryBase):
     tag_ids: TagIds = tag_ids_create_field()
+
+    # STU-427: a new entry's dates are bounded (app/core/record_dates.py). An
+    # edit checks only the dates it changes (routers/budget_entries.py
+    # ``_refuse_changed_dates``), so a stored legacy date never blocks it.
+    @field_validator("next_occurrence")
+    @classmethod
+    def _next_occurrence_in_range(cls, v):
+        return check_record_date(v, ENTRY_NEXT_YEARS_AHEAD)
+
+    @field_validator("end_date")
+    @classmethod
+    def _end_date_in_range(cls, v):
+        return check_record_date(v, ENTRY_END_YEARS_AHEAD)
 
     @model_validator(mode="after")
     def _zero_remaining_only_when_completed(self):
