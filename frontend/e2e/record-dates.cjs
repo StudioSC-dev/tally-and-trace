@@ -20,11 +20,19 @@
 //   (d) Mark paid: min/max on the date; the dialog's error line; no /materialize request
 //   (e) card Pay: min/max on the date; the dialog's error line; no payment request
 //   (f) loan payment: min/max on the date; the panel's error line; no loan-payment request
+//   (j) recurring entries (STU-427): next occurrence up to today + 5 years, end date up to
+//       today + 30 years.
+//       j.recurring-bounds: the Add Recurring Entry form's two date inputs carry their own
+//         min and max; each bound is refused inline (the browser's check, then the client
+//         check with native validation off) with no POST; in-range dates save
+//       j.recurring-legacy-dates: an entry stored with both dates out of range opens with
+//         no min or max on them and saves an unrelated edit; editing one date checks that
+//         date only, and the other stays exempt
 //
 // The screen loader (STU-335) blocks input while any request is in flight, so every form
 // or dialog waits for it (`waitQuiet`) after it opens and before anything is filled.
 //
-// Usage: node frontend/e2e/record-dates.cjs [a|b|c|d|e|f]
+// Usage: node frontend/e2e/record-dates.cjs [a|b|c|d|e|f|j|j.recurring-bounds|j.recurring-legacy-dates]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { showRow } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
@@ -54,9 +62,9 @@ const addDays = (day, n) => {
   d.setUTCDate(d.getUTCDate() + n)
   return d.toISOString().slice(0, 10)
 }
-/** Today + 5 calendar years; Feb 29 becomes Feb 28. */
-const maxDay = (today) => {
-  const year = Number(today.slice(0, 4)) + 5
+/** Today + `years` (5 by default) calendar years; Feb 29 becomes Feb 28. */
+const maxDay = (today, years = 5) => {
+  const year = Number(today.slice(0, 4)) + years
   const md = today.slice(5)
   return `${year}-${md === '02-29' ? '02-28' : md}`
 }
@@ -71,6 +79,7 @@ const wire = (day) => `${day}T00:00:00`
 
 const TOO_EARLY = '0006-05-10'
 let TODAY, MAX, TOO_LATE, MESSAGE
+let END_MAX, END_MESSAGE
 
 let stack, API
 let dialogs = 0
@@ -365,6 +374,153 @@ async function loanPayment(browser) {
   await ctx.close()
 }
 
+// ─── (j) The recurring entry form (STU-427) ──────────────────────────────────
+const recurringForm = (page, button) => page.locator('form').filter({ has: page.getByRole('button', { name: button, exact: true }) })
+const recurringField = (form, key) => form.locator(`[data-field="${key}"]`)
+const recurringError = (form, key) => form.locator(`[data-testid="field-error-${key}"]`)
+const isEntryWrite = (method, id) => (r) =>
+  r.request().method() === method && new URL(r.url()).pathname.replace(/\/$/, '').endsWith(id ? `/budget-entries/${id}` : '/budget-entries')
+
+async function openRecurring(browser) {
+  const opened = await newPage(browser)
+  await uiLogin(opened.page, owner)
+  await opened.page.goto(`${stack.webUrl}/allocations`)
+  await opened.page.getByRole('button', { name: 'Add Recurring Entry' }).waitFor()
+  await waitQuiet(opened.page)
+  return opened
+}
+
+/** Fills `input` with `value`, saves, and checks the field's inline message and that nothing was sent. */
+async function refusedDate(page, form, sent, mark, { scenario, key, input, value, flag, message, button, method, path }) {
+  await input.fill(value)
+  mark()
+  await form.getByRole('button', { name: button, exact: true }).click()
+  await page.waitForTimeout(1500)
+  if (flag) {
+    const v = await validity(input)
+    check(`${scenario}: ${key} ${value}: the browser flags it`, flag === 'under' ? v.under : v.over, true)
+  }
+  check(`${scenario}: ${key} ${value}: the inline message`, await text(recurringError(form, key)), message)
+  check(`${scenario}: ${key} ${value}: the input is marked invalid`, await attr(input, 'aria-invalid'), 'true')
+  check(`${scenario}: ${key} ${value}: nothing sent`, sent(method, path), 0)
+}
+
+// j.recurring-bounds: both dates, both bounds, on the Add form.
+async function recurringBounds(browser) {
+  const scenario = 'j.recurring-bounds'
+  console.log(`\n=== (${scenario}) Add Recurring Entry: each date's min and max, refused inline with no request`)
+  const { ctx, page, sent, mark } = await openRecurring(browser)
+  await page.getByRole('button', { name: 'Add Recurring Entry' }).click()
+  const form = recurringForm(page, 'Save Recurring Entry')
+  await form.waitFor()
+  await waitQuiet(page)
+  await recurringField(form, 'name').fill('Bounded gym')
+  await recurringField(form, 'account_id').selectOption({ label: 'Dates Checking' })
+  await recurringField(form, 'amount').fill('250')
+  await form.getByRole('button', { name: 'On date', exact: true }).click()
+  const next = recurringField(form, 'next_occurrence')
+  const end = recurringField(form, 'end_date')
+  await end.fill(`${TODAY}T00:00`)
+  check(`${scenario}: the next occurrence carries min and max`, await bounds(next), ['2000-01-01T00:00', `${MAX}T23:59`])
+  check(`${scenario}: the end date carries min and max`, await bounds(end), ['2000-01-01T00:00', `${END_MAX}T23:59`])
+
+  const common = { scenario, button: 'Save Recurring Entry', method: 'POST', path: '/budget-entries' }
+  const tooLateEnd = addDays(END_MAX, 1)
+  for (const [key, input, value, flag, message] of [
+    ['next_occurrence', next, '1999-12-31T23:59', 'under', MESSAGE],
+    ['next_occurrence', next, `${TOO_LATE}T00:00`, 'over', MESSAGE],
+  ]) await refusedDate(page, form, sent, mark, { ...common, key, input, value, flag, message })
+  await next.fill(`${TODAY}T09:00`)
+  for (const [key, input, value, flag, message] of [
+    ['end_date', end, '1999-12-31T23:59', 'under', END_MESSAGE],
+    ['end_date', end, `${tooLateEnd}T00:00`, 'over', END_MESSAGE],
+  ]) await refusedDate(page, form, sent, mark, { ...common, key, input, value, flag, message })
+
+  // The client's own check, with the browser's switched off.
+  await disableNative(next)
+  await disableNative(end)
+  await end.fill(`${TODAY}T00:00`)
+  await refusedDate(page, form, sent, mark, { ...common, key: 'next_occurrence', input: next, value: `${TOO_LATE}T00:00`, message: MESSAGE })
+  await next.fill(`${TODAY}T09:00`)
+  await refusedDate(page, form, sent, mark, { ...common, key: 'end_date', input: end, value: `${tooLateEnd}T00:00`, message: END_MESSAGE })
+
+  // Both bounds themselves save.
+  await next.fill(`${MAX}T09:00`)
+  await end.fill(`${END_MAX}T23:59`)
+  mark()
+  const saved = page.waitForResponse(isEntryWrite('POST'))
+  await form.getByRole('button', { name: 'Save Recurring Entry', exact: true }).click()
+  const response = await saved
+  check(`${scenario}: control: the last allowed dates save`, response.status(), 201)
+  const body = await response.json().catch(() => ({}))
+  check(`${scenario}: control: as sent`, [String(body.next_occurrence).slice(0, 10), String(body.end_date).slice(0, 10)], [MAX, END_MAX])
+  await ctx.close()
+}
+
+// j.recurring-legacy-dates: a stored entry with both dates out of range still saves.
+async function recurringLegacyDates(browser) {
+  const scenario = 'j.recurring-legacy-dates'
+  console.log(`\n=== (${scenario}) Edit an entry stored with out-of-range dates`)
+  const legacyEnd = `${Number(END_MAX.slice(0, 4)) + 1}-06-30`
+  const entry = await post(owner.token, '/budget-entries/', {
+    entry_type: 'expense', currency: 'PHP', cadence: 'weekly', name: 'Legacy laundry', amount: 90,
+    next_occurrence: wire(TODAY), end_mode: 'on_date', end_date: wire(TODAY), account_id: bank.id,
+  })
+  stack.psql(`UPDATE budget_entries SET next_occurrence = '1999-12-05 00:00', end_date = '${legacyEnd} 00:00' WHERE id = ${Number(entry.id)}`)
+  const stored = async () => {
+    const r = await api(owner.token, 'GET', `/budget-entries/${entry.id}`)
+    return [r.json.name, String(r.json.next_occurrence).slice(0, 10), String(r.json.end_date).slice(0, 10)]
+  }
+  const { ctx, page, sent, mark } = await openRecurring(browser)
+  const openEdit = async () => {
+    await page.goto(`${stack.webUrl}/allocations`)
+    await page.locator('article').filter({ has: page.getByText('Legacy laundry', { exact: true }) }).first().click()
+    const form = recurringForm(page, 'Update Recurring Entry')
+    await form.waitFor()
+    await waitQuiet(page)
+    return form
+  }
+  const update = async (form) => {
+    mark()
+    const saved = page.waitForResponse(isEntryWrite('PUT', entry.id))
+    await form.getByRole('button', { name: 'Update Recurring Entry', exact: true }).click()
+    return (await saved).status()
+  }
+
+  let form = await openEdit()
+  const next = recurringField(form, 'next_occurrence')
+  const end = recurringField(form, 'end_date')
+  check(`${scenario}: the stored dates load`, [await next.inputValue(), await end.inputValue()], ['1999-12-05T00:00', `${legacyEnd}T00:00`])
+  check(`${scenario}: untouched, the next occurrence has no min or max`, await bounds(next), [null, null])
+  check(`${scenario}: untouched, the end date has no min or max`, await bounds(end), [null, null])
+  await recurringField(form, 'name').fill('Legacy laundry')
+  await recurringField(form, 'amount').fill('95')
+  check(`${scenario}: an unrelated edit saves`, await update(form), 200)
+  check(`${scenario}: both dates kept`, await stored(), ['Legacy laundry', '1999-12-05', legacyEnd])
+
+  // Editing the end date checks it; the untouched next occurrence stays exempt.
+  form = await openEdit()
+  const end2 = recurringField(form, 'end_date')
+  const next2 = recurringField(form, 'next_occurrence')
+  await refusedDate(page, form, sent, mark, {
+    scenario, key: 'end_date', input: end2, value: `${addDays(END_MAX, 1)}T00:00`, flag: 'over', message: END_MESSAGE,
+    button: 'Update Recurring Entry', method: 'PUT', path: `/budget-entries/${entry.id}`,
+  })
+  check(`${scenario}: the next occurrence, untouched, still has no min or max`, await bounds(next2), [null, null])
+  await end2.fill(`${addDays(TODAY, 30)}T00:00`)
+  check(`${scenario}: an in-range end date saves beside the stored next occurrence`, await update(form), 200)
+  check(`${scenario}: next occurrence kept, end date moved`, await stored(), ['Legacy laundry', '1999-12-05', addDays(TODAY, 30)])
+
+  // Editing the next occurrence checks it.
+  form = await openEdit()
+  const next3 = recurringField(form, 'next_occurrence')
+  await refusedDate(page, form, sent, mark, {
+    scenario, key: 'next_occurrence', input: next3, value: '1999-12-12T00:00', flag: 'under', message: MESSAGE,
+    button: 'Update Recurring Entry', method: 'PUT', path: `/budget-entries/${entry.id}`,
+  })
+  await ctx.close()
+}
+
 ;(async () => {
   // Days come from the Manila today; wait out midnight so a run never straddles it.
   const untilMidnight = () => 86400000 - ((Date.now() + 8 * 3600 * 1000) % 86400000)
@@ -376,6 +532,8 @@ async function loanPayment(browser) {
   MAX = maxDay(TODAY)
   TOO_LATE = addDays(MAX, 1)
   MESSAGE = `Choose a date from Jan 1st, 2000 to ${fmt(MAX)}`
+  END_MAX = maxDay(TODAY, 30)
+  END_MESSAGE = `Choose a date from Jan 1st, 2000 to ${fmt(END_MAX)}`
   console.log(`    Manila today ${TODAY}; allowed 2000-01-01 to ${MAX}`)
 
   stack = await startLocalStack()
@@ -389,6 +547,8 @@ async function loanPayment(browser) {
   if (run('d')) await markPaid(browser)
   if (run('e')) await cardPay(browser)
   if (run('f')) await loanPayment(browser)
+  if (run('j') || only === 'j.recurring-bounds') await recurringBounds(browser)
+  if (run('j') || only === 'j.recurring-legacy-dates') await recurringLegacyDates(browser)
   check('no browser dialog fired in the whole script', dialogs, 0)
   await browser.close()
   stack.stop()
