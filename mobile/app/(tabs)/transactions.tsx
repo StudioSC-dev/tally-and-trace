@@ -136,6 +136,7 @@ export function TransactionFormModal({
   onClose,
   initial,
   accounts,
+  allAccounts,
   categories,
   defaultCurrency,
 }: {
@@ -143,6 +144,8 @@ export function TransactionFormModal({
   onClose: () => void
   initial?: FullTransaction | SharedFullTransaction
   accounts: Account[]
+  /** Every account the caller can see, to resolve an edited transfer's accounts that are not writable. */
+  allAccounts?: Account[]
   categories: Category[]
   defaultCurrency: CurrencyCode
 }) {
@@ -184,10 +187,15 @@ export function TransactionFormModal({
 
   // A transfer between two currencies also needs what the destination received.
   const isTransferType = form.transaction_type === 'transfer'
-  const sourceCurrency = eligibleAccounts.find((a) => String(a.id) === form.transfer_from_account_id)?.currency
-  const destinationCurrency = eligibleAccounts.find((a) => String(a.id) === form.transfer_to_account_id)?.currency
+  const knownAccounts = allAccounts ?? accounts
+  const sourceCurrency = knownAccounts.find((a) => String(a.id) === form.transfer_from_account_id)?.currency
+  const destinationCurrency = knownAccounts.find((a) => String(a.id) === form.transfer_to_account_id)?.currency
+  // When an account cannot be resolved, a stored received amount still marks the transfer as cross-currency.
+  const storedReceived = isEdit && initial?.transaction_type === 'transfer' && Number(initial.received_amount) > 0
   const crossCurrency =
-    isTransferType && !!sourceCurrency && !!destinationCurrency && sourceCurrency !== destinationCurrency
+    isTransferType &&
+    (sourceCurrency && destinationCurrency ? sourceCurrency !== destinationCurrency : storedReceived)
+  const receivedLabel = `Received amount${destinationCurrency ? ` (${destinationCurrency})` : ''}`
 
   const handleSubmit = async () => {
     const isTransfer = form.transaction_type === 'transfer'
@@ -203,7 +211,7 @@ export function TransactionFormModal({
         return Alert.alert('Error', 'Source and destination must be different accounts.')
       }
       if (crossCurrency && !(parseFloat(form.received_amount) > 0)) {
-        return Alert.alert('Error', `Enter the amount received in ${destinationCurrency}.`)
+        return Alert.alert('Error', `Enter the amount received${destinationCurrency ? ` in ${destinationCurrency}` : ''}.`)
       }
     } else if (!form.amount || !form.account_id) {
       return Alert.alert('Error', 'Amount and account are required.')
@@ -370,7 +378,7 @@ export function TransactionFormModal({
           {/* Amount received, only for a transfer between currencies */}
           {crossCurrency && (
             <Input
-              label={`Received amount (${destinationCurrency})`}
+              label={receivedLabel}
               placeholder="0.00"
               value={form.received_amount}
               onChangeText={(v) => update('received_amount', v)}
@@ -560,6 +568,7 @@ export default function TransactionsScreen() {
         onClose={() => setModalVisible(false)}
         initial={editing}
         accounts={writableAccounts}
+        allAccounts={accounts}
         categories={categories}
         defaultCurrency={currency}
       />

@@ -327,6 +327,31 @@ async function editKeepsReceivedAmount() {
   })
 }
 
+async function editKeepsReceivedAmountUnlistedAccount() {
+  const rec = { ...record('transfer'), transfer_from_account_id: 1, transfer_to_account_id: 2, received_amount: 46.25 }
+  const expected = {
+    description: 'old note', amount: 50, transaction_type: 'transfer', account_id: 1, category_id: 3,
+    transaction_date: '2026-03-01T00:00:00.000Z', currency: 'USD', transfer_from_account_id: 1, transfer_to_account_id: 2,
+    received_amount: 46.25,
+  }
+  const writable = ACCOUNTS.filter((a) => a.id !== 2) // the destination is not writable
+  // Resolved through the full account list: labelled with the destination currency.
+  let form = loadForm()
+  let ui = mountForm(form, props({ initial: rec, accounts: writable, allAccounts: ACCOUNTS }))
+  const field = ui.byLabel('Received amount (EUR)')
+  assert(field && field.props.value === '46.25', 'field must show, pre-filled, when the destination is only in the full list')
+  await ui.submit()
+  assert.deepStrictEqual(json(form.calls.update[0].data), expected)
+  // Not resolvable anywhere: the stored received amount still keeps the field and the payload.
+  form = loadForm()
+  ui = mountForm(form, props({ initial: rec, accounts: writable, allAccounts: writable }))
+  const bare = ui.byLabel('Received amount')
+  assert(bare && bare.props.value === '46.25', 'field must show, pre-filled, when the destination is unresolvable')
+  await ui.submit()
+  assert.strictEqual(form.calls.update.length, 1, `not submitted: ${JSON.stringify(form.calls.alerts)}`)
+  assert.deepStrictEqual(json(form.calls.update[0].data), expected)
+}
+
 // The diagnostics present on main 06a95a9, by file, code and message.
 const BASELINE = new Set([
   "app/(tabs)/more.tsx | TS2353 | Object literal may only specify known properties, and 'is_achieved' does not exist in type 'Partial<WishlistItem>'.",
@@ -373,6 +398,7 @@ async function main() {
     ['missing-received-amount-refused', missingReceivedAmountRefused],
     ['same-currency-payload-unchanged', sameCurrencyPayloadUnchanged],
     ['edit-keeps-received-amount', editKeepsReceivedAmount],
+    ['edit-keeps-received-amount-unlisted-account', editKeepsReceivedAmountUnlistedAccount],
     ['typecheck-baseline', typecheckBaseline],
     ['nontransfer-create-edit-regression', nonTransferRegression],
   ]
