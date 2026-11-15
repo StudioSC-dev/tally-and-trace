@@ -217,6 +217,13 @@ const HOUSEHOLD_SHARE_CHANGED = [
 ] as const
 
 /** One queued save as sent: `url` relative to the API root, `idempotencyKey` on creates. */
+/** An allocation edit: a date sent as null is cleared, one left out is kept. */
+export type AllocationUpdate = Omit<Partial<Allocation>, 'target_date' | 'period_start' | 'period_end'> & {
+  target_date?: string | null
+  period_start?: string | null
+  period_end?: string | null
+}
+
 export interface OutboxSendArgs {
   method: 'POST' | 'PUT' | 'DELETE'
   url: string
@@ -380,7 +387,7 @@ export const accountingApi = createApi({
       query: (allocation) => ({ url: 'allocations/', method: 'POST', body: allocation }),
       invalidatesTags: ['Allocation'],
     }),
-    updateAllocation: builder.mutation<Allocation, { id: number; data: Partial<Allocation> }>({
+    updateAllocation: builder.mutation<Allocation, { id: number; data: AllocationUpdate }>({
       query: ({ id, data }) => ({ url: `allocations/${id}`, method: 'PUT', body: data }),
       invalidatesTags: ['Allocation'],
     }),
