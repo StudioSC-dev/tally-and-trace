@@ -14,7 +14,7 @@
   two tables' ids overlap.
 - ``GET /users/lookup?email=``: ``{id, display_name}`` on an exact,
   case-insensitive match. Every other case (no such user, the caller, an
-  inactive or demo user) is the same 404 "No matching user". Rate-limited per
+  inactive, unverified or demo user) is the same 404 "No matching user". Rate-limited per
   caller (429).
 - A share is created by ``{email, role}``, resolved by that same lookup and
   counted against the same per-caller limit, never by a raw user id: a user
@@ -341,18 +341,20 @@ def _check_rate(user: User) -> None:
 
 
 def _match(db: Session, email: str) -> Optional[User]:
-    """The active, non-demo user with exactly this email (case-insensitive), else None.
+    """The active, verified, non-demo user with exactly this email
+    (case-insensitive), else None.
 
-    ``users.email`` is unique only as stored, so two accounts can differ by case
-    alone (registered before registration compared case-insensitively). Such
-    an email names no one: None, never whichever row comes first.
+    An unverified user may have registered someone else's email, under a name
+    they chose, so they name no one until they verify (STU-241). The database
+    refuses emails differing only by case (``uq_users_lower_email``); more than
+    one match still names no one, never whichever row comes first.
     """
     wanted = email.strip().lower()
     users = db.query(User).filter(func.lower(User.email) == wanted).limit(2).all()
     if len(users) != 1:
         return None
     user = users[0]
-    if not user.is_active or _is_demo(user):
+    if not user.is_active or not user.is_verified or _is_demo(user):
         return None
     return user
 
