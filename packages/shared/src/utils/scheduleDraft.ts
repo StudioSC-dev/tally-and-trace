@@ -60,6 +60,9 @@ export interface StoredSchedule extends StoredDayRow {
   billing_kind?: BillingKind | null
   kind?: RecurringKind | null
   account_id?: number
+  /** A semi-monthly entry's two days (the server's defaults, 1 and 15, when absent). */
+  semi_monthly_day_1?: number | null
+  semi_monthly_day_2?: number | null
 }
 
 export interface ScheduleContext {
@@ -430,6 +433,89 @@ export function schedulePreview(
     dates: dates.map((date) => formatEntryDate(date)),
     missed,
   }
+}
+
+/**
+ * The forecast's walk guard (the backend `iter_occurrences` default): at most this many
+ * steps from the next occurrence, or months for a semi-monthly schedule. The warning
+ * walks no further, so it names no date the forecast would not reach.
+ */
+const FORECAST_STEP_LIMIT = 2000
+const FORECAST_MONTH_LIMIT = 600
+/** Past the longest step of any cadence (a year, or a year and a day from Feb 29). */
+const FIRST_FROM_TODAY_REACH_MS = 400 * 86_400_000
+
+/** A next occurrence before today, in the recurring entry form (STU-630). */
+export interface PastStartWarning {
+  message: string
+  /**
+   * The day (`YYYY-MM-DD`) of the first occurrence the schedule will use: the first step on
+   * or after today, as the forecast and the Due card walk an open-ended entry; the first
+   * from the date on a capped entry, which owes it (overdue). Null when none is left (the
+   * schedule ends before today) or the day fields cannot be worked out.
+   */
+  firstDay: string | null
+}
+
+/**
+ * The warning for a next occurrence before `today` (Manila's), or null for today or later,
+ * an unreadable date and a fixed date (Repeat, whose preview counts the missed payments).
+ * The first date it names comes from the shared schedule walk (`generateOccurrences`), from
+ * the date a save would store, so it is the forecast's and the Due card's.
+ */
+export function pastStartWarning(
+  draft: ScheduleDraft,
+  ctx: ScheduleContext,
+  today: string = manilaToday(),
+): PastStartWarning | null {
+  if (ctx.dateFixed) return null
+  const built = draftSchedule(draft, ctx)
+  if (built === null) return null
+  let day: string
+  try {
+    day = toWireWallTime(draft.next_occurrence).slice(0, 10)
+  } catch {
+    return null
+  }
+  if ('error' in built) {
+    return day < today ? { message: 'This date is in the past.', firstDay: null } : null
+  }
+  const schedule = {
+    ...built.schedule,
+    // An edit keeps the stored twice-a-month days, which the form never sends.
+    semi_monthly_day_1: ctx.stored?.semi_monthly_day_1 ?? undefined,
+    semi_monthly_day_2: ctx.stored?.semi_monthly_day_2 ?? undefined,
+  }
+  if (schedule.next_occurrence.slice(0, 10) >= today) return null
+  const capped = schedule.end_mode === 'after_occurrences' && schedule.max_occurrences != null
+  // An open-ended entry drops the occurrences before today: the walk starts there. A capped
+  // one owes every occurrence from its date, so it walks from the date and shows those
+  // before today as overdue.
+  const start = parseEntryDate(capped ? schedule.next_occurrence : `${today}T00:00:00`)
+  const limit = schedule.cadence === 'semi_monthly' ? FORECAST_MONTH_LIMIT : FORECAST_STEP_LIMIT
+  const first = generateOccurrences(schedule, start, new Date(start.getTime() + FIRST_FROM_TODAY_REACH_MS), limit)[0]
+  if (first) {
+    const firstDay = first.toISOString().slice(0, 10)
+    return {
+      message: `This date is in the past. The first occurrence will be ${formatEntryDate(first)}${firstDay < today ? ', shown as overdue' : ''}.`,
+      firstDay,
+    }
+  }
+  return { message: 'This date is in the past, and the schedule has no occurrence left from today.', firstDay: null }
+}
+
+/**
+ * "Use next year": the `datetime-local` value with its year set to the year after
+ * `today`'s (Manila's), keeping its month, day and time; Feb 29 becomes Feb 28 when that
+ * year is not a leap year. An unreadable value is returned as it is.
+ */
+export function moveToNextYear(value: string, today: string = manilaToday()): string {
+  const match = /^\d{4}-(\d{2})-(\d{2})(.*)$/.exec(value)
+  if (!match) return value
+  const year = Number(today.slice(0, 4)) + 1
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0
+  const day = match[1] === '02' && match[2] === '29' && !leap ? '28' : match[2]
+  return `${String(year).padStart(4, '0')}-${match[1]}-${day}${match[3]}`
 }
 
 /**
