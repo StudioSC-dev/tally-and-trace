@@ -806,11 +806,15 @@ export interface WishlistReadiness {
   item_id: number
   name: string
   estimated_cost: number
+  /** The item's currency: `monthly_disposable` is that currency's disposable row. */
+  currency: string
   monthly_disposable: number
   savings_rate: number
   months_needed: number
   estimated_purchase_date: string
   affordable_now: boolean
+  /** Set when the projection has no row for the item's currency (never affordable). */
+  note: string | null
 }
 
 export interface WishlistPlanItem {
@@ -2154,7 +2158,9 @@ export interface DashboardSnapshot {
     name: string
     cost: number
     priority: WishlistItemPriority
-    affordable_by: string
+    /** Null when the projection has no row for the item's currency; `note` says so. */
+    affordable_by: string | null
+    note: string | null
   }>
   /** Pooled projection cash (card balances are owed, not held). */
   /** The default currency's pooled projection cash; see `balances.by_currency`. */
