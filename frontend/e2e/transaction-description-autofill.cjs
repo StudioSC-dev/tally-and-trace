@@ -877,6 +877,44 @@ async function scenarioTypeChange(browser, phone) {
   }
 }
 
+// ─── tags_slow ──────────────────────────────────────────────────────────────
+// STU-636: the page reads /tags only once the form is open, so a suggestion can be picked before
+// they arrive. Its tags must still be applied (PR #184 audit).
+async function scenarioTagsSlow(browser) {
+  console.log('\n=== (tags_slow) a suggestion picked before the tags load keeps its valid tags')
+  const seed = await seedUser('tagsslow')
+  await seedHistory(seed)
+  const { ctx, page, native } = await openPage(browser, seed.user)
+  try {
+    let release
+    const gate = new Promise((resolve) => { release = resolve })
+    let held = 0
+    await page.route(/\/api\/v1\/tags\/?(\?.*)?$/, async (route) => {
+      if (route.request().method() !== 'GET') return route.continue()
+      held += 1
+      await gate
+      return route.continue()
+    })
+    await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+    const modal = createModal(page)
+    await modal.waitFor()
+    await until(async () => held, (n) => n >= 1)
+    await typeDescription(modal, 'kopi')
+    await choose(modal, 'Kopi Roti')
+    await h.sleep(400)
+    await h.check('tags_slow.picked-while-tags-held', 'S', async () => held >= 1 || 'the /tags read was not held')
+    release()
+    await h.check('tags_slow.valid-tags-applied', 'B', async () => {
+      const got = await until(() => formState(modal), (s) => s.tags.length > 0 && starts(s.category, 'Auto Food'))
+      return (JSON.stringify(got.tags) === '["Auto Tag A"]' && starts(got.category, 'Auto Food') && got.description === 'Kopi Roti') ||
+        `form ${JSON.stringify(got)}`
+    })
+  } finally {
+    await d.checkNoNativeDialogs(h, 'tags_slow', native)
+    await ctx.close()
+  }
+}
+
 const SCENARIOS = [
   ['desktop', (b) => desktopOrPhone(b, false)],
   ['phone', (b) => desktopOrPhone(b, true)],
@@ -890,6 +928,7 @@ const SCENARIOS = [
   ['source', scenarioSource],
   ['sequence', scenarioSequence],
   ['currency', scenarioCurrency],
+  ['tags_slow', scenarioTagsSlow],
   ['type_change_desktop', (b) => scenarioTypeChange(b, false)],
   ['type_change_phone', (b) => scenarioTypeChange(b, true)],
 ]
