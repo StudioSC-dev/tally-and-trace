@@ -270,4 +270,30 @@ describe('sharedLimitTargets', () => {
     expect(ids(sharedLimitTargets([mine, theirs], { id: null, currency: 'PHP', ownerId: null }))).toEqual([1])
     expect(ids(sharedLimitTargets([mine, theirs], { id: 9, currency: 'PHP', ownerId: 2 }))).toEqual([2])
   })
+
+  it('shared_limit_targets_same_display_name', () => {
+    const ana = card(1, { my_role: 'admin', owner_name: 'Ana R.', owner_id: 2 })
+    const otherAna = card(2, { my_role: 'admin', owner_name: 'Ana R.', owner_id: 3 })
+    const all = [ana, otherAna]
+    expect(ids(sharedLimitTargets(all, { id: 9, currency: 'PHP', ownerId: 2 }))).toEqual([1])
+    expect(ids(sharedLimitTargets(all, { id: 9, currency: 'PHP', ownerId: 3 }))).toEqual([2])
+    // an unknown owner id (or an account without one) matches nothing
+    expect(ids(sharedLimitTargets(all, { id: 9, currency: 'PHP', ownerId: undefined }))).toEqual([])
+    expect(ids(sharedLimitTargets([card(4, { owner_id: undefined })], { id: 9, currency: 'PHP', ownerId: undefined }))).toEqual([])
+  })
+
+  // Expected values captured by running the name-matching version on main (0a9d9c7).
+  it('shared_limit_targets_distinct_names_unchanged', () => {
+    const all = [
+      card(1),
+      card(2, { my_role: 'admin', owner_name: 'Ana R.', owner_id: 2 }),
+      card(3, { my_role: 'admin', owner_name: 'Ana R.', owner_id: 2 }),
+      card(4),
+      card(5, { currency: 'USD' }),
+    ]
+    expect(ids(sharedLimitTargets(all, { id: null, currency: 'PHP', ownerId: null }))).toEqual([1, 4])
+    expect(ids(sharedLimitTargets(all, { id: 9, currency: 'PHP', ownerId: 1 }))).toEqual([1, 4])
+    expect(ids(sharedLimitTargets(all, { id: 3, currency: 'PHP', ownerId: 2 }))).toEqual([2])
+    expect(ids(sharedLimitTargets(all, { id: 9, currency: 'PHP', ownerId: 99 }))).toEqual([])
+  })
 })
