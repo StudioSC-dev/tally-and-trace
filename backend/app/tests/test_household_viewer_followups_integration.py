@@ -176,3 +176,81 @@ def test_tag_viewer_card_event_not_zero(hh, sw_client, sw_db):
     for row in rows:
         assert row["view"] == "limited" and row["cash_delta"] == 0
         assert row["face_amount"] == 100, row
+    # The approved Limited statement shows the same figure for that statement.
+    statements = _get(sw_client, c, f"/accounts/{hh['a_card']}/statements")["statements"]
+    assert 100 in [s["amount_due"] for s in statements]
+
+
+# --- Part 2: the Limited statement and loan schedule for a tag viewer ---------------------
+
+# The approved Limited shapes (the viewer's, ``GET /accounts/{id}/statements`` and
+# ``/loan-schedule``): a tag viewer gets nothing beyond them.
+LIMITED_STATEMENTS = {"view", "name", "currency", "statements"}
+LIMITED_STATEMENT = {"close_date", "due_date", "amount_due", "currency", "status", "lines"}
+LIMITED_LINE = {"date", "display_description", "amount"}
+LIMITED_SCHEDULE = {"view", "name", "currency", "owed", "next_due_date", "payments_left", "rows"}
+LIMITED_ROW = {"due_date", "amount", "status"}
+B_CHARGE, B_PAYMENT = 66.61, 311.37  # B's records on A's accounts: never in C's lines or rows
+
+
+def _pay(client, who, frm, to, amount, description):
+    return sw_post(client, who, "/transactions/", {
+        "account_id": frm, "transfer_from_account_id": frm, "transfer_to_account_id": to,
+        "amount": amount, "transaction_type": "transfer", "description": description,
+        "transaction_date": "2026-10-01T00:00:00", "is_posted": True})["id"]
+
+
+def test_tag_viewer_statements_limited_shape(hh, sw_client, sw_db, sw_people):
+    a, b, c = hh["a"], hh["b"], hh["c"]
+    viewer = sw_people("Vic", "Viewer")
+    sw_share(sw_db, hh["a_card"], viewer["id"], "viewer", a["id"])
+    sw_share(sw_db, hh["a_card"], b["id"], "editor", a["id"])
+    _tag(sw_client, hh, hh["a_card"])
+    _debit(sw_client, a, hh["a_card"], 45, "Card groceries")
+    _debit(sw_client, b, hh["a_card"], B_CHARGE, "Bea lunch")
+    path = f"/accounts/{hh['a_card']}/statements"
+    body = _get(sw_client, c, path)
+    approved = _get(sw_client, viewer, path)
+    assert body["view"] == approved["view"] == "limited"
+    assert set(body) == set(approved) == LIMITED_STATEMENTS
+    assert body["statements"], body
+    lines = []
+    for statement in body["statements"]:
+        assert set(statement) - {"incomplete"} == LIMITED_STATEMENT, statement
+        for line in statement["lines"]:
+            assert set(line) == LIMITED_LINE, line
+            lines.append(line)
+    # The sharer's own charge only (the tag-share invariant); the amount due is the
+    # whole statement's, B's charge included (README, Household).
+    assert [(line["amount"], line["display_description"]) for line in lines] == [
+        (45, "Card groceries")]
+    assert sum(s["amount_due"] for s in body["statements"]) == pytest.approx(45 + B_CHARGE)
+    for statement in approved["statements"]:
+        assert set(statement) - {"incomplete"} == LIMITED_STATEMENT
+        assert all(set(line) == LIMITED_LINE for line in statement["lines"])
+
+
+def test_tag_viewer_loan_schedule_limited_shape(hh, sw_client, sw_db, sw_people):
+    a, b, c = hh["a"], hh["b"], hh["c"]
+    viewer = sw_people("Vic", "Viewer")
+    sw_share(sw_db, hh["a_loan"], viewer["id"], "viewer", a["id"])
+    sw_share(sw_db, hh["a_loan"], b["id"], "editor", a["id"])
+    _tag(sw_client, hh, hh["a_loan"])
+    _pay(sw_client, a, hh["a_private"], hh["a_loan"], 1_000, "Loan payment A")
+    _pay(sw_client, b, hh["b_private"], hh["a_loan"], B_PAYMENT, "Loan payment B")
+    path = f"/accounts/{hh['a_loan']}/loan-schedule"
+    body = _get(sw_client, c, path)
+    approved = _get(sw_client, viewer, path)
+    assert body["view"] == approved["view"] == "limited"
+    assert set(body) == set(approved) == LIMITED_SCHEDULE
+    assert all(set(row) == LIMITED_ROW for row in [*body["rows"], *approved["rows"]])
+    paid = [row["amount"] for row in body["rows"] if row["status"] == "paid"]
+    assert paid == [1_000]
+    assert sorted(r["amount"] for r in approved["rows"] if r["status"] == "paid") == [
+        B_PAYMENT, 1_000]
+    assert body["owed"] == approved["owed"]
+    assert [r for r in body["rows"] if r["status"] == "open"] == [
+        r for r in approved["rows"] if r["status"] == "open"]
+    # A card the share does not reach (untagged) stays a 404.
+    assert _call(sw_client, c, "GET", f"/accounts/{hh['a_card']}/statements").status_code == 404
+

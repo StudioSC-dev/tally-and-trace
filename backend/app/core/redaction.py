@@ -29,9 +29,9 @@ received. The exception is a transfer into a loan the caller can view: its fee
 is that loan's interest, and a loan they can view is one whose interest they
 may see, so ``transfer_fee`` is shown and the source stays a neutral reference.
 With a direct role the loan's schedule and balance history show it too. A
-``tag_viewer`` of a Household-tagged loan gets no schedule (404), but such a
-loan is visible by the Household share (plan §1), so its interest is shown to
-them deliberately.
+``tag_viewer`` of a Household-tagged loan gets only the limited schedule (no
+principal and interest split, STU-253), but such a loan is visible by the
+Household share (plan §1), so its interest is shown to them deliberately.
 
 Tags are the caller's own, plus a sharer's Household tag where rule (c)
 applies (``attach_visible_tags``). Every record
