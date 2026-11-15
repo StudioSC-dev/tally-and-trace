@@ -292,3 +292,37 @@ def test_materialize_due_posts_a_clamped_semi_monthly_day_once(sw_client, sw_peo
     assert len(_linked(engine, rent)) == 5
     assert r.json()["next_occurrence"].startswith("2027-04-30")
     assert _balance(client, me, checking) == Decimal("45000.00")
+
+
+def test_paused_entry_refused(sw_client, sw_people, engine, monkeypatch):
+    """Post N due on a paused entry is refused (409, "This entry is paused"),
+    with due occurrences waiting: nothing is recorded and the schedule stays."""
+    client, me = sw_client, sw_people()
+    checking = _account(client, me)
+    rent = _entry(client, me, checking, "2026-09-01", 20_000, "Rent", is_active=False)
+    pin_clock(monkeypatch, REF)
+    before = _state(client, me, rent)
+
+    r = _due(client, me, rent)
+
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == "This entry is paused"
+    assert _linked(engine, rent) == []
+    assert _state(client, me, rent) == before
+    assert _balance(client, me, checking) == Decimal("50000.00")
+
+
+def test_active_entry_materializes_due(sw_client, sw_people, engine, monkeypatch):
+    """The same entry, active, posts its two due months and moves on."""
+    client, me = sw_client, sw_people()
+    checking = _account(client, me)
+    rent = _entry(client, me, checking, "2026-09-01", 20_000, "Rent")
+    pin_clock(monkeypatch, REF)
+
+    r = _due(client, me, rent)
+
+    assert r.status_code == 200, r.text
+    assert _summary(r.json()) == [("2026-09-01", "created"), ("2026-10-01", "created")]
+    assert [posted for _, posted in _linked(engine, rent)] == [True, True]
+    assert r.json()["next_occurrence"].startswith("2026-11-01")
+    assert _balance(client, me, checking) == Decimal("10000.00")
