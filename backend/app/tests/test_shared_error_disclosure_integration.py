@@ -94,3 +94,59 @@ def test_loan_currency_message_neutral(sw, sw_client, sw_db):
     assert got[0].json() == {"detail": NEUTRAL_CURRENCY_DETAIL}
     for code in ("PHP", "EUR", "USD"):
         assert code not in got[0].text
+
+
+# --- AC3: deleting a recurring entry with linked rows the caller cannot read ------------
+
+def test_recurring_delete_409_counts_only_readable(sw, sw_client, sw_db):
+    """The joint account's owner deletes the partner's entries: one with no linked
+    rows, one linked only from the partner's private account. Both succeed alike,
+    and the hidden row is unlinked as any other."""
+    from app.models.transaction import Transaction
+
+    a, b, joint = sw["a"], sw["b"], sw["joint"]
+    bare = _entry(sw_client, b, joint)
+    hidden_linked = _entry(sw_client, b, joint)
+    hidden = _linked_debit(sw_client, b, sw["b_private"], hidden_linked)
+    got = [_call(sw_client, a, "DELETE", f"/budget-entries/{entry}")
+           for entry in (bare, hidden_linked)]
+    assert got[0].status_code == 204, got[0].text
+    _same(*got)
+    sw_db.expire_all()
+    row = sw_db.get(Transaction, hidden)
+    assert (row.budget_entry_id, row.is_recurring, row.recurrence_frequency) == (
+        None, False, None)
+
+    # The partner deleting the owner's entry linked from the owner's private account.
+    a_bare = _entry(sw_client, a, joint)
+    a_hidden_linked = _entry(sw_client, a, joint)
+    _linked_debit(sw_client, a, sw["a_private"], a_hidden_linked)
+    got = [_call(sw_client, b, "DELETE", f"/budget-entries/{entry}")
+           for entry in (a_bare, a_hidden_linked)]
+    assert got[0].status_code == 204, got[0].text
+    _same(*got)
+
+
+def test_recurring_delete_readable_rows_still_block(sw, sw_client, sw_db):
+    """A readable linked row the caller may not edit still refuses the delete, with
+    the same 409 whether more hidden linked rows exist or not; nothing is unlinked."""
+    from app.models.budget_entry import BudgetEntry
+    from app.models.transaction import Transaction
+
+    a, b, joint = sw["a"], sw["b"], sw["joint"]
+    readable_only = _entry(sw_client, b, joint)
+    with_hidden = _entry(sw_client, b, joint)
+    rows = [_linked_debit(sw_client, b, joint, readable_only),
+            _linked_debit(sw_client, b, joint, with_hidden),
+            _linked_debit(sw_client, b, sw["b_private"], with_hidden)]
+    # The partner loses edit: the owner reads their joint rows but may not edit them.
+    _demote(sw_db, sw, "b", "viewer")
+    got = [_call(sw_client, a, "DELETE", f"/budget-entries/{entry}")
+           for entry in (readable_only, with_hidden)]
+    assert got[0].status_code == 409, got[0].text
+    _same(*got)
+    sw_db.expire_all()
+    for entry in (readable_only, with_hidden):
+        assert sw_db.get(BudgetEntry, entry) is not None
+    for txn in rows:
+        assert sw_db.get(Transaction, txn).budget_entry_id is not None

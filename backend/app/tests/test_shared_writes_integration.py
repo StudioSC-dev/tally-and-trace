@@ -403,6 +403,9 @@ def test_a_refused_entry_delete_leaves_the_recurring_flag(sw, sw_client, sw_db):
     entry = _entry(sw_client, a, joint)["id"]
     editable = _debit(sw_client, a, joint, budget_entry_id=entry)["id"]
     private = _debit(sw_client, a, sw["a_private"], budget_entry_id=entry)["id"]
+    # The partner reads the private row (a viewer) but may not edit it (STU-242:
+    # only rows the caller reads can refuse the delete).
+    sw_share(sw_db, sw["a_private"], b["id"], "viewer", a["id"])
     assert _call(sw_client, b, "DELETE", f"/budget-entries/{entry}").status_code == 409
     sw_db.expire_all()
     for txn_id in (editable, private):
@@ -432,6 +435,8 @@ def test_deleting_an_entry_never_changes_a_transaction_the_caller_cannot_edit(sw
     a, b, joint = sw["a"], sw["b"], sw["joint"]
     entry = _entry(sw_client, a, joint)["id"]
     private = _debit(sw_client, a, sw["a_private"], budget_entry_id=entry)["id"]
+    # Read-only to the partner: a row they cannot read does not count (STU-242).
+    sw_share(sw_db, sw["a_private"], b["id"], "viewer", a["id"])
     r = _call(sw_client, b, "DELETE", f"/budget-entries/{entry}")
     assert r.status_code == 409
     sw_db.expire_all()
@@ -443,6 +448,7 @@ def test_deleting_an_entry_never_changes_a_transaction_the_caller_cannot_edit(sw
     # private account is refused the same way.
     b_entry = _entry(sw_client, b, joint)["id"]
     _debit(sw_client, b, sw["b_private"], budget_entry_id=b_entry)
+    sw_share(sw_db, sw["b_private"], a["id"], "viewer", b["id"])
     assert _call(sw_client, a, "DELETE", f"/budget-entries/{b_entry}").status_code == 409
 
 

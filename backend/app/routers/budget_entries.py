@@ -937,11 +937,13 @@ def delete_budget_entry(
     Under the write rule, the account owner exemption, by its creator, or by
     an owner of any account it touches (an entry moves no balance). Deleting
     it unlinks the transactions linked to it, so it is
-    refused (409) while any of them is not one the caller may edit: a delete
-    never changes a transaction the caller could not change directly, whoever
-    created it (a creator demoted or revoked on the account their own linked
-    transaction sits on included). Deactivating the entry is the way to stop
-    it then. Locks follow the ledger's global order (``app.core.locking``): the
+    refused (409) while any of them the caller reads is not one they may
+    edit: a delete never changes a visible transaction the caller could not
+    change directly, whoever created it (a creator demoted or revoked on the
+    account their own linked transaction sits on included). Deactivating the
+    entry is the way to stop it then. Linked rows the caller cannot read are
+    unlinked without counting (STU-242): refusing on them would disclose
+    that they exist. Locks follow the ledger's global order (``app.core.locking``): the
     owner's budget lock, then the entry ``FOR UPDATE``, before its linked rows
     are unlinked and it is deleted. Unlinking mirrors the transaction update's
     unlink: ``is_recurring`` and ``recurrence_frequency`` are cleared here, and
@@ -958,7 +960,9 @@ def delete_budget_entry(
     if not access.permissions(entry)["can_delete"]:
         raise HTTPException(status_code=404, detail="Budget entry not found")
     linked = db.query(Transaction).filter(Transaction.budget_entry_id == entry.id).all()
-    if any(not access.permissions(txn)["can_edit"] for txn in linked):
+    # Only rows the caller reads count: a row they cannot read must not change the
+    # response, or a refusal would tell them it exists.
+    if any(access.readable(txn) and not access.permissions(txn)["can_edit"] for txn in linked):
         raise HTTPException(
             status_code=409,
             detail="This recurring entry has transactions you can't edit linked to it; "
