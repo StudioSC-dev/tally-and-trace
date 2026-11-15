@@ -304,6 +304,8 @@ export function AllocationsPage() {
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [editingAllocation, setEditingAllocation] = useState<Allocation | null>(null)
+  // The date inputs as the edit form first showed them, to tell a cleared or changed date from an untouched one.
+  const editDateBaseline = useRef<{ target_date?: string; period_start?: string; period_end?: string }>({})
   // The recurring entry form: null when closed, else the entry it edits (null to add one).
   // An entry the caller can edit is one they see in full or shared-full, never Limited.
   const [recurringModal, setRecurringModal] = useState<{ entry: FullBudgetEntry | SharedFullBudgetEntry | null } | null>(
@@ -810,9 +812,11 @@ export function AllocationsPage() {
   const handleBudgetPeriodStartChange = useCallback(
     (value: string) => {
       setAllocationForm((prev) => {
+        // A cleared start stays cleared, so Save names it instead of the field silently refilling.
+        if (!value) return { ...prev, period_start: '' }
         const cadence = prev.period_frequency ?? 'monthly'
         const defaults = getDefaultBudgetPeriod(cadence)
-        const sanitizedStart = value || prev.period_start || defaults.start
+        const sanitizedStart = value
         const next: AllocationFormState = {
           ...prev,
           period_start: sanitizedStart,
@@ -974,7 +978,27 @@ export function AllocationsPage() {
       }
       
       if (editingAllocation) {
-        await updateAllocation({ id: editingAllocation.id, data: allocationPayload }).unwrap()
+        // A date left as the form showed it is left out (the stored one stays); a cleared one is sent as null.
+        const editedDate = (
+          applies: boolean,
+          current: string | undefined,
+          baseline: string | undefined,
+        ): string | null | undefined => {
+          if (!applies || (current || undefined) === (baseline || undefined)) return undefined
+          return current ? dateInputToWire(current) : null
+        }
+        const fields: Partial<typeof allocationPayload> = { ...allocationPayload }
+        delete fields.target_date
+        delete fields.period_start
+        delete fields.period_end
+        const isBudget = allocationForm.allocation_type === 'budget'
+        const baseline = editDateBaseline.current
+        const dateChanges = {
+          target_date: editedDate(!isBudget, allocationForm.target_date, baseline.target_date),
+          period_start: editedDate(isBudget, allocationForm.period_start, baseline.period_start),
+          period_end: editedDate(isBudget, allocationForm.period_end, baseline.period_end),
+        }
+        await updateAllocation({ id: editingAllocation.id, data: { ...fields, ...dateChanges } }).unwrap()
         setEditingAllocation(null)
       } else {
         await createAllocation(allocationPayload).unwrap()
@@ -1008,6 +1032,12 @@ export function AllocationsPage() {
 
     const defaultPeriod = getDefaultBudgetPeriod(resolvedCadence)
 
+    editDateBaseline.current = {
+      target_date: normalizedType === 'savings' ? isoToDateInput(allocation.target_date ?? undefined) : undefined,
+      period_start: periodStartInput ?? defaultPeriod.start,
+      // A stored empty end stays empty: it is not refilled with the cadence's default.
+      period_end: periodEndInput,
+    }
     setAllocationForm({
       account_id: allocation.account_id,
       name: allocation.name,
@@ -1021,7 +1051,8 @@ export function AllocationsPage() {
       goal_mode: normalizedType === 'budget' ? 'target_balance' : derivedGoalMode,
       period_frequency: resolvedCadence,
       period_start: periodStartInput ?? defaultPeriod.start,
-      period_end: periodEndInput ?? defaultPeriod.end,
+      // A stored empty end stays empty: it is not refilled with the cadence's default.
+      period_end: periodEndInput,
     })
     if (normalizedType === 'budget') {
       const categoryIds = Array.isArray(config['category_ids'])
