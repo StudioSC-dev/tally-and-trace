@@ -192,14 +192,24 @@ async function eOldEditPayloadFails() {
   assert(failed, 'a.edit-keeps-currency passed against the old account-derived currency')
 }
 
-function tscDiagnostics() {
+// Runs tsc and returns the diagnostics. Anything but a clean run (exit 0) or a normal
+// diagnostics run (exit 2, every line a diagnostic or its continuation) is an error.
+function runTsc() {
   const r = spawnSync('pnpm', ['exec', 'tsc', '--noEmit'], { cwd: mobileDir, encoding: 'utf8', timeout: 300000 })
+  if (r.error) throw new Error(`tsc did not run: ${r.error.message}`)
+  if (r.signal) throw new Error(`tsc was killed by ${r.signal}`)
   const out = (r.stdout || '') + (r.stderr || '')
   const keys = new Set()
+  const unparsed = []
   for (const line of out.split('\n')) {
+    if (!line.trim()) continue
     const m = line.match(/^(.+?)\(\d+,\d+\): error (TS\d+): (.*)$/)
     if (m) keys.add(`${m[1]} | ${m[2]} | ${m[3]}`)
+    else if (!/^\s/.test(line)) unparsed.push(line)
   }
+  if (r.status !== 0 && r.status !== 2) throw new Error(`tsc exited ${r.status}:\n${out.slice(-1500)}`)
+  if (r.status === 2 && keys.size === 0) throw new Error(`tsc exited 2 with no recognised diagnostic:\n${out.slice(-1500)}`)
+  if (unparsed.length) throw new Error(`tsc printed unrecognised output:\n${unparsed.join('\n')}`)
   return { keys, out }
 }
 
@@ -218,11 +228,11 @@ function fTypecheckNoNewErrors() {
       saved.push([abs, fs.readFileSync(abs, 'utf8')])
       fs.writeFileSync(abs, baseText)
     }
-    baseRun = tscDiagnostics()
+    baseRun = runTsc()
   } finally {
     for (const [abs, text] of saved) fs.writeFileSync(abs, text)
   }
-  const headRun = tscDiagnostics()
+  const headRun = runTsc()
   console.log(`  base diagnostics (${base.slice(0, 7)}): ${baseRun.keys.size}; completed: ${headRun.keys.size}`)
   const added = [...headRun.keys].filter((k) => !baseRun.keys.has(k))
   assert.deepStrictEqual(added, [], `new diagnostics:\n${added.join('\n')}\n--- base output ---\n${baseRun.out}\n--- completed output ---\n${headRun.out}`)

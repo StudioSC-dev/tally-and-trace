@@ -255,14 +255,30 @@ const BASELINE = new Set([
   "app/(tabs)/more.tsx | TS2339 | Property 'is_achieved' does not exist on type 'WishlistItem'.",
 ])
 
-async function typecheckBaseline() {
+// Runs tsc and returns the diagnostics. Anything but a clean run (exit 0) or a normal
+// diagnostics run (exit 2, every line a diagnostic or its continuation) is an error.
+function runTsc() {
   const r = spawnSync('pnpm', ['exec', 'tsc', '--noEmit'], { cwd: mobileDir, encoding: 'utf8', timeout: 300000 })
+  if (r.error) throw new Error(`tsc did not run: ${r.error.message}`)
+  if (r.signal) throw new Error(`tsc was killed by ${r.signal}`)
   const out = (r.stdout || '') + (r.stderr || '')
-  const added = []
+  const keys = new Set()
+  const unparsed = []
   for (const line of out.split('\n')) {
+    if (!line.trim()) continue
     const m = line.match(/^(.+?)\(\d+,\d+\): error (TS\d+): (.*)$/)
-    if (m && !BASELINE.has(`${m[1]} | ${m[2]} | ${m[3]}`)) added.push(line)
+    if (m) keys.add(`${m[1]} | ${m[2]} | ${m[3]}`)
+    else if (!/^\s/.test(line)) unparsed.push(line)
   }
+  if (r.status !== 0 && r.status !== 2) throw new Error(`tsc exited ${r.status}:\n${out.slice(-1500)}`)
+  if (r.status === 2 && keys.size === 0) throw new Error(`tsc exited 2 with no recognised diagnostic:\n${out.slice(-1500)}`)
+  if (unparsed.length) throw new Error(`tsc printed unrecognised output:\n${unparsed.join('\n')}`)
+  return { keys, out }
+}
+
+async function typecheckBaseline() {
+  const { keys } = runTsc()
+  const added = [...keys].filter((k) => !BASELINE.has(k))
   assert.deepStrictEqual(added, [], `diagnostics beyond the baseline:\n${added.join('\n')}`)
 }
 
