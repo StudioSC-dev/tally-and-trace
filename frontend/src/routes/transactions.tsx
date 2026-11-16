@@ -2594,11 +2594,13 @@ export function TransactionsPage() {
       if (!prev.description && entry.description) {
         updated.description = entry.description
       }
-      if (entry.amount) {
+      // The next occurrence's own amount (the last of an installment bills its final_amount), from the API.
+      const occurrenceAmount = entry.next_occurrence_amount ?? entry.amount
+      if (occurrenceAmount) {
         if (prev.is_posted) {
-          updated.amount = prev.amount && prev.amount > 0 ? prev.amount : entry.amount
+          updated.amount = prev.amount && prev.amount > 0 ? prev.amount : occurrenceAmount
         } else {
-          updated.projected_amount = prev.projected_amount && prev.projected_amount > 0 ? prev.projected_amount : entry.amount
+          updated.projected_amount = prev.projected_amount && prev.projected_amount > 0 ? prev.projected_amount : occurrenceAmount
         }
       }
       return updated

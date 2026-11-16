@@ -31,6 +31,11 @@
 //   described by it, focused) and send nothing, so no transaction or installment is created;
 // invalid_split_creates_no_records (AC9): a total too small for its months (0.01 over 2, 0.02
 //   over 3) shows the field error and sends nothing.
+// link_prefill_uses_occurrence_amount (STU-660 AC2), 1280x800 and 390x844: choosing an installment in
+//   the "Recurring entry (optional)" select pre-fills the amount its next occurrence bills, from the
+//   API's `next_occurrence_amount`: the final_amount when that is the last payment, the amount for
+//   an entry with more payments left, one with no final_amount and an open-ended entry; the
+//   linked row saves at that amount.
 // Every scenario checks that no browser dialog fired.
 //
 // Starts its own API and web app against a throwaway database (./_local_stack.cjs) and seeds
@@ -432,6 +437,53 @@ async function savedOneMonthNoRepeat(browser, tag, viewport) {
   }
 }
 
+// STU-660 AC2: the link select pre-fills the next occurrence's own amount, as the API gives it.
+async function linkPrefillUsesOccurrenceAmount(browser, tag, viewport) {
+  const id = `link_prefill_uses_occurrence_amount.${tag}`
+  console.log(`\n=== ${id} (STU-660 AC2)`)
+  const user = await h.makeUser(stack, `iftl${tag[0]}`)
+  await consumePageOpen(client.api, user)
+  const bank = await account(user, 'IFL Checking')
+  const next = `${new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)}T00:00:00Z`
+  const make = (name, extra) => client.post(user.token, '/budget-entries/', {
+    name, entry_type: 'expense', amount: 100, currency: 'PHP', cadence: 'monthly', account_id: bank.id,
+    next_occurrence: next, ...extra,
+  })
+  const cases = [
+    ['last payment', await make('IFL Last', { end_mode: 'after_occurrences', max_occurrences: 1, final_amount: 133.34 }), '133.34'],
+    ['more left', await make('IFL More', { end_mode: 'after_occurrences', max_occurrences: 3, final_amount: 133.34 }), '100'],
+    ['no final_amount', await make('IFL Plain', { end_mode: 'after_occurrences', max_occurrences: 1 }), '100'],
+    ['open-ended', await make('IFL Open', {}), '100'],
+  ]
+  const { ctx, page, native, posts } = await openPage(browser, user, { viewport })
+  try {
+    for (const [label, entry, expected] of cases) {
+      const modal = await openAdd(page, bank.name)
+      await control(modal, 'description').fill(`IFL ${label}`)
+      await modal.getByText('Recurring entry (optional)', { exact: true }).locator('xpath=../select').selectOption(String(entry.id))
+      await h.check(`${id}.${label}`, 'B', async () => {
+        const shown = await control(modal, 'amount').inputValue()
+        return Number(shown) === Number(expected) || `amount ${shown}, expected ${expected}`
+      })
+      if (label === 'last payment') {
+        posts.length = 0
+        const response = await submit(page, modal)
+        await h.check(`${id}.saved`, 'B', async () => response.ok() || `status ${response.status()}`)
+        const rows = await transactionsNamed(user, 'IFL last payment')
+        await h.check(`${id}.saved-at-final-amount`, 'B', () =>
+          (rows.length === 1 && Number(rows[0].amount) === 133.34 && rows[0].budget_entry_id === entry.id) ||
+          `rows ${JSON.stringify(rows.map((t) => [t.amount, t.budget_entry_id]))}`)
+      } else {
+        await modal.getByRole('button', { name: 'Cancel' }).first().click()
+        await modal.waitFor({ state: 'detached' })
+      }
+    }
+  } finally {
+    await d.checkNoNativeDialogs(h, id, native)
+    await ctx.close()
+  }
+}
+
 // AC4
 async function perPaymentFlowUnchanged(browser) {
   console.log('\n=== per_payment_repeat_unchanged (AC4)')
@@ -546,6 +598,7 @@ const SCENARIOS = [
   saved('saved_last_lower', { total: '20,000.00', months: 3, monthly: 6666.67, last: 6666.66 }),
   saved('saved_two_months_final_amount', { total: '10000.01', months: 2, monthly: 5000.01, last: 5000 }),
   ['saved_one_month_no_repeat', atBothSizes(savedOneMonthNoRepeat)],
+  ['link_prefill_uses_occurrence_amount', atBothSizes(linkPrefillUsesOccurrenceAmount)],
   ['per_payment_repeat_unchanged', perPaymentFlowUnchanged],
   ['invalid_purchase_total', invalidPurchaseTotal],
   ['invalid_month_count', invalidMonthCount],
