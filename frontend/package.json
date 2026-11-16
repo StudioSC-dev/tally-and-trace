@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "tsc -p tsconfig.e2e.json --noEmit && playwright test"
   },
   "dependencies": {
     "@reduxjs/toolkit": "^2.0.1",
@@ -20,6 +21,8 @@
     "react-redux": "^9.0.4"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
+    "@playwright/test": "^1.65.1",
     "@tanstack/router-cli": "^1.131.35",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
