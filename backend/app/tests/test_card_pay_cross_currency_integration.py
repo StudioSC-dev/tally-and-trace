@@ -13,8 +13,8 @@ import pytest
 from sqlalchemy import text
 
 from app.tests.conftest import API, sw_db_reachable, sw_share
-from app.tests.test_cross_currency_card_payment_integration import (  # noqa: F401
-    RATE_TO_USD, _account, _balance, _payable, _statement, _upcoming, cc, frozen,
+from app.tests.test_cross_currency_card_payment_integration import (
+    RATE_TO_USD, _account, _balance, _payable, _statement, _upcoming,
 )
 
 pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="no database available")
@@ -34,7 +34,7 @@ def _rows(db, account_id) -> int:
     return db.query(Transaction).filter(Transaction.account_id == account_id).count()
 
 
-def test_pay_route_cross_currency_moves_sent_and_received(sw_client, sw_db, cc, frozen):
+def test_pay_route_cross_currency_moves_sent_and_received(sw_client, sw_db, cc, frozen_fx_ref):
     client, db, a = sw_client, sw_db, cc["a"]
     txn = _pay(client, a, cc["card"], cc["php"], 5_800, received_amount=100).json()
     assert (txn["amount"], txn["currency"], txn["received_amount"]) == (5_800, "PHP", 100)
@@ -50,7 +50,7 @@ def test_pay_route_cross_currency_moves_sent_and_received(sw_client, sw_db, cc, 
     pytest.param({"received_amount": 0}, 400, "Enter the amount received", id="zero"),
     pytest.param({"received_amount": -5}, 422, None, id="negative"),
 ])
-def test_pay_route_received_amount_validation(sw_client, sw_db, cc, frozen,
+def test_pay_route_received_amount_validation(sw_client, sw_db, cc, frozen_fx_ref,
                                               extra, status, detail):
     """A posted payment is refused with nothing moved; a planned one (see the
     next test) is allowed to wait, except a negative figure, refused by shape."""
@@ -70,7 +70,7 @@ def test_pay_route_received_amount_validation(sw_client, sw_db, cc, frozen,
         assert r.json()["received_amount"] is None
 
 
-def test_pay_route_planned_payment_uses_transfer_estimate(sw_client, sw_db, cc, frozen):
+def test_pay_route_planned_payment_uses_transfer_estimate(sw_client, sw_db, cc, frozen_fx_ref):
     client, db, a = sw_client, sw_db, cc["a"]
     txn = _pay(client, a, cc["card"], cc["php"], 5_800, day="2026-11-09",
                description="Planned PHP payment").json()
@@ -88,7 +88,7 @@ def test_pay_route_planned_payment_uses_transfer_estimate(sw_client, sw_db, cc, 
     assert _balance(db, cc["card"]) == Decimal("-300.00")
 
 
-def test_pay_route_same_currency_unchanged(sw_client, sw_db, cc, frozen):
+def test_pay_route_same_currency_unchanged(sw_client, sw_db, cc, frozen_fx_ref):
     client, db, a = sw_client, sw_db, cc["a"]
     # Omitted: as before. An equal figure is dropped; a different one refused.
     assert _pay(client, a, cc["card"], cc["usd"], 20).json()["received_amount"] is None
@@ -100,7 +100,7 @@ def test_pay_route_same_currency_unchanged(sw_client, sw_db, cc, frozen):
     assert _balance(db, cc["card"]) == Decimal("-250.00")
 
 
-def test_pay_route_other_rules_unchanged(sw_client, sw_db, sw_people, cc, frozen):
+def test_pay_route_other_rules_unchanged(sw_client, sw_db, sw_people, cc, frozen_fx_ref):
     client, db, a = sw_client, sw_db, cc["a"]
     card, php = cc["card"], cc["php"]
     other_card = _account(client, a, "Other card", "USD", 0, "credit", billing_cycle_start=10)

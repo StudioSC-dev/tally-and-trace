@@ -377,3 +377,42 @@ def hh(sw_client, sw_db, sw_people):
         "b_share": b_share,
         "a_to_c": hh_tag_share(db, a, c), "b_to_c": hh_tag_share(db, b, c),
     }
+
+
+# --- Cross-currency card payments (STU-303, STU-654) ---------------------------------------
+
+@pytest.fixture
+def frozen_fx_ref(monkeypatch):
+    """Every clock a projection or statement route reads, frozen at FX_REF."""
+    from app.core import time as time_module
+    from app.routers import accounts as accounts_router
+    from app.services import forecast as forecast_module
+
+    for module in (time_module, accounts_router, forecast_module):
+        monkeypatch.setattr(module, "naive_utc_now", lambda: FX_REF)
+    return FX_REF
+
+
+@pytest.fixture
+def cc(sw_client, sw_people):
+    """Owner A: PHP Checking 50,000, USD Savings 1,000, EUR Cash 1,000 (no EUR
+    rate is stored) and a USD card paid from PHP Checking, with a posted USD
+    300 charge on 25 Oct (statement closing 19 Nov, due 1 Dec)."""
+    client = sw_client
+    a = sw_people("Cass", "Card")
+
+    def make(name, currency, balance, account_type="checking", **extra):
+        return sw_post(client, a, "/accounts/", {
+            "name": name, "account_type": account_type, "currency": currency,
+            "balance": balance, **extra})["id"]
+
+    php = make("PHP Checking", "PHP", 50_000)
+    usd = make("USD Savings", "USD", 1_000)
+    eur = make("EUR Cash", "EUR", 1_000)
+    card = make("USD Card", "USD", 0, "credit", billing_cycle_start=20,
+                days_until_due_date=10, payment_account_id=php)
+    sw_post(client, a, "/transactions/", {
+        "account_id": card, "transaction_type": "debit", "amount": 300, "currency": "USD",
+        "transaction_date": "2026-10-25T00:00:00", "is_posted": True,
+        "description": "Diner"})
+    return {"a": a, "php": php, "usd": usd, "eur": eur, "card": card}
