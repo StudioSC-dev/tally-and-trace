@@ -279,7 +279,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
             <button
               type="submit"
               disabled={isLoading || !!emailError}
-              className="btn-primary w-full disabled:cursor-not-allowed disabled:opacity-50"
+              className="btn-primary min-h-11 w-full disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isLoading ? (
                 <>
