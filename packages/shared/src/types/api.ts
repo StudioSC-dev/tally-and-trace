@@ -444,6 +444,11 @@ interface RecurringEntryDetail {
    */
   final_amount?: number | null
   /**
+   * Read-only (STU-660): what the entry's next occurrence bills, `final_amount` when it is the
+   * last, else `amount`; null when none remains. Absent from an older API.
+   */
+  next_occurrence_amount?: number | null
+  /**
    * Installments: the "n" in "n of m" — occurrences materialised so far, counted
    * from linked transactions. `null` for open-ended entries. Payments entered by
    * hand rather than via "Mark paid" aren't linked, so they don't count.
@@ -505,6 +510,8 @@ export interface LimitedBudgetEntry {
   created_by: string | null
   display_name: string | null
   amount: number
+  /** What the next occurrence bills (STU-660); null when none remains. Absent from an older API. */
+  next_occurrence_amount?: number | null
   currency: CurrencyCode
   entry_type: BudgetEntryType
   cadence: RecurrenceFrequency
@@ -527,7 +534,7 @@ export type BudgetEntryInput = Partial<
   Omit<
     FullBudgetEntry,
     'id' | 'view' | 'tags' | 'permissions' | 'created_by' | 'created_at' | 'updated_at' | 'occurrences_paid' | 'kind'
-    | 'installment_reviewed' | 'auto_post_enabled' | 'settlement' | 'end_date'
+    | 'installment_reviewed' | 'auto_post_enabled' | 'settlement' | 'end_date' | 'next_occurrence_amount'
   >
 > &
   TagIdsInput & {

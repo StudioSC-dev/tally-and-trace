@@ -2261,6 +2261,20 @@ def occurrence_amount(entry, nominal, final_day=False):
     return entry.final_amount if day == final_day else entry.amount
 
 
+def next_occurrence_amount(entry):
+    """The amount ``entry`` bills on its next occurrence (``occurrence_amount``,
+    STU-660), in the entry's currency; None when none remains: an
+    ``after_occurrences`` entry with no payments left, or an ``on_date`` entry
+    whose ``next_occurrence`` falls after its ``end_date``."""
+    end_mode = getattr(entry, "end_mode", None)
+    nxt = entry.next_occurrence
+    if end_mode == "after_occurrences" and (entry.max_occurrences or 0) <= 0:
+        return None
+    if end_mode == "on_date" and entry.end_date is not None and _naive(nxt) > _naive(entry.end_date):
+        return None
+    return occurrence_amount(entry, nxt)
+
+
 def unrecorded_occurrences(db: Session, entries, through: date, *,
                            pending_records: bool = False) -> Dict[int, List[datetime]]:
     """``{entry id: [occurrence]}``: each entry's occurrences from its

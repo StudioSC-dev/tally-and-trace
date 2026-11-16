@@ -179,6 +179,9 @@ class BudgetEntryFields(BudgetEntryBase):
     occurrences_paid: Optional[int] = None
     # The last occurrence's amount when it differs (STU-658); null: every one is ``amount``.
     final_amount: Optional[float] = None
+    # Read-only, derived (forecast.next_occurrence_amount, STU-660): what the next occurrence
+    # bills, ``final_amount`` on the last; null when none remains. Never accepted on a write.
+    next_occurrence_amount: Optional[float] = None
     # Read-only, derived (services/recurring_kinds.py); null for income and transfers.
     kind: Optional[EntryKind] = None
     # Read-only, derived from the flag; null when the entry names no settlement.
@@ -231,6 +234,7 @@ class SharedFullRecurringEntry(BaseModel):
     occurrences_paid_offset: int = 0
     occurrences_paid: Optional[int] = None
     final_amount: Optional[float] = None
+    next_occurrence_amount: Optional[float] = None
     billing_kind: Optional[BillingKind] = None
     kind: Optional[EntryKind] = None
     settlement: Optional[Settlement] = None
@@ -250,6 +254,7 @@ class LimitedRecurringEntry(BaseModel):
     created_by: Optional[str] = None
     display_name: Optional[str] = None
     amount: float
+    next_occurrence_amount: Optional[float] = None
     currency: CurrencyType
     entry_type: BudgetEntryType
     cadence: RecurrenceFrequency
