@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test'
 import type { TokenResponse, User } from '@tally-trace/shared'
 import { a11y } from './support/a11y'
 import { landingStubs } from './support/landing'
-import { errorRoute, loginRoute, mockApi, meRoute } from './support/mockApi'
+import { apiRoute, errorRoute, loginRoute, mockApi, meRoute } from './support/mockApi'
 import { shot } from './support/shot'
 
 const user: User = {
@@ -39,15 +39,22 @@ test.describe('sign-in', () => {
   })
 
   test('malformed email shows inline error', async ({ page }) => {
-    const api = await mockApi(page, [loginRoute(token)])
+    // The error appears while typing (onChange), and submission is blocked because that error disables the submit button.
+    const probe = apiRoute('GET', '/e2e-probe', { ok: true })
+    const api = await mockApi(page, [loginRoute(token)], { allow: [probe] })
     await page.goto('/login')
     await page.getByLabel('Email address').fill('not-an-email')
     await page.getByLabel('Password').fill('any-password')
-    await page.getByLabel('Password').press('Enter')
 
     await expect(page.getByText(EMAIL_ERROR)).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeDisabled()
+    await page.getByLabel('Password').press('Enter')
+
+    // The probe goes through the same mock after Enter, so any login request fired by Enter would already be recorded.
+    const probeStatus = await page.evaluate(() => fetch('/api/v1/e2e-probe').then((r) => r.status))
+    expect(probeStatus).toBe(200)
     await expect(page).toHaveURL(/\/login$/)
-    expect(api.requests()).toEqual([])
+    expect(api.requests()).toEqual(['GET /e2e-probe'])
     expect(api.count('POST', '/auth/login')).toBe(0)
     const file = await shot(page, 'error')
     expect(fs.existsSync(file)).toBe(true)
