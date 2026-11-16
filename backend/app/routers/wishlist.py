@@ -1,6 +1,6 @@
 import math
 from datetime import timedelta
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
@@ -33,11 +33,13 @@ def no_projection_note(currency: str) -> str:
     return f"No projected income or expenses in {currency}, so this can't be judged yet."
 
 
-def item_currency_row(ctx: RequestContext, item) -> Optional[dict]:
+def item_currency_row(ctx: RequestContext, item, rows: Optional[List[dict]] = None) -> Optional[dict]:
     """The ``by_currency`` disposable row of the item's own currency, or None
-    when the projection has none (STU-304: never the default-currency scalars)."""
+    when the projection has none (STU-304: never the default-currency scalars).
+    Pass ``rows`` (the projection's ``by_currency``) to avoid recomputing it."""
     code = getattr(item.currency, "value", item.currency)
-    rows = forecast_svc.disposable_by_currency(ctx)["by_currency"]
+    if rows is None:
+        rows = forecast_svc.disposable_by_currency(ctx)["by_currency"]
     return next((r for r in rows if r["currency"] == code), None)
 
 
@@ -84,13 +86,16 @@ def create_wishlist_item(
 
 @router.get("/plan", response_model=WishlistPlanResponse)
 def get_wishlist_plan(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    ctx: RequestContext = Depends(request_context),
 ):
     """
-    Sequential purchase timeline for all unpurchased items ordered by priority.
-    Each item is scheduled after the previous one has been saved up for.
+    Purchase timeline for all unpurchased items ordered by priority. Each item
+    is timed against the disposable income of its own currency (STU-649), and
+    queues only behind earlier items in that same currency. An item whose
+    currency has no disposable row gets no date and says so in ``note``.
+    The top-level figures stay the default-currency ones.
     """
+    db, current_user = ctx.db, ctx.user
     disposable_data = forecast_svc.get_disposable_income(db, current_user.id)
     monthly_disposable = disposable_data["monthly_disposable"]
     savings_rate = max(monthly_disposable * SAVINGS_RATE_FACTOR, 0.01)
@@ -111,12 +116,29 @@ def get_wishlist_plan(
     )
 
     now = utc_now()
-    cumulative_months = 0
+    cumulative_by_currency: Dict[str, int] = {}
+    currency_rows = forecast_svc.disposable_by_currency(ctx)["by_currency"] if items else []
     plan: List[WishlistPlanItem] = []
 
     for item in items:
-        months_needed = math.ceil(float(item.estimated_cost) / savings_rate)
-        cumulative_months += months_needed
+        code = getattr(item.currency, "value", item.currency)
+        row = item_currency_row(ctx, item, currency_rows)
+        if row is None:
+            plan.append(
+                WishlistPlanItem(
+                    item_id=item.id,
+                    name=item.name,
+                    estimated_cost=item.estimated_cost,
+                    estimated_purchase_date=None,
+                    cumulative_months=cumulative_by_currency.get(code, 0),
+                    note=no_projection_note(code),
+                )
+            )
+            continue
+        item_rate = max(row["monthly_disposable"] * SAVINGS_RATE_FACTOR, 0.01)
+        months_needed = math.ceil(float(item.estimated_cost) / item_rate)
+        cumulative_months = cumulative_by_currency.get(code, 0) + months_needed
+        cumulative_by_currency[code] = cumulative_months
         purchase_date = now + timedelta(days=cumulative_months * 30)
         plan.append(
             WishlistPlanItem(

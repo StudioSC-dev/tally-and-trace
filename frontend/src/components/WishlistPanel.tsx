@@ -178,7 +178,9 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
                 </div>
                 <div className="text-right flex-shrink-0">
                   <p className="text-sm font-semibold text-ink">{format(p.estimated_cost)}</p>
-                  <p className="text-xs text-muted">~{longDate(p.estimated_purchase_date)} · {p.cumulative_months} mo</p>
+                  {p.estimated_purchase_date
+                    ? <p className="text-xs text-muted">~{longDate(p.estimated_purchase_date)} · {p.cumulative_months} mo</p>
+                    : <p className="text-xs text-warn">{p.note ?? 'No date yet'}</p>}
                 </div>
               </li>
             ))}

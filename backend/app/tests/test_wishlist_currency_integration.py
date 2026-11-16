@@ -75,3 +75,90 @@ def test_dashboard_wishlist_uses_item_currency(sw_client, cx, frozen):
     assert dollar["note"] is None
     # EUR: no row, so no date, and it says so.
     assert euro["affordable_by"] is None and "EUR" in euro["note"]
+
+
+# --- the purchase plan (STU-649) ---------------------------------------------------------
+
+def _plan(client, who):
+    body = _get(client, who, "/wishlist/plan")
+    return body, {i["name"]: i for i in body["items"]}
+
+
+def _due(months):
+    from datetime import timedelta
+
+    from app.core.time import utc_now
+    return (utc_now() + timedelta(days=months * 30)).date().isoformat()
+
+
+def test_plan_uses_item_currency_row(sw_client, cx, frozen):
+    a = cx["a"]
+    _item(sw_client, a, "Peso gadget", 50_000, "PHP", "critical")
+    _item(sw_client, a, "Dollar gadget", 100, "USD", "high")
+    body, items = _plan(sw_client, a)
+    # PHP: rate 21,420 a month, so 50,000 takes ceil(2.33) = 3 months.
+    assert items["Peso gadget"]["cumulative_months"] == 3
+    assert items["Peso gadget"]["estimated_purchase_date"] == _due(3)
+    # USD: the row is -2,050, so the rate floors at 0.01 and 100 takes 10,000 months.
+    assert items["Dollar gadget"]["cumulative_months"] == 10_000
+    assert items["Dollar gadget"]["estimated_purchase_date"] == _due(10_000)
+    assert items["Dollar gadget"]["note"] is None
+
+
+def test_plan_cumulative_per_currency(sw_client, cx, frozen):
+    a = cx["a"]
+    _item(sw_client, a, "Peso one", 21_420, "PHP", "critical")
+    _item(sw_client, a, "Dollar gadget", 100, "USD", "high")
+    _item(sw_client, a, "Peso two", 42_840, "PHP", "medium")
+    _, items = _plan(sw_client, a)
+    assert items["Peso one"]["cumulative_months"] == 1
+    # 1 + 2 months, with the USD item's 10,000 months ignored.
+    assert items["Peso two"]["cumulative_months"] == 3
+    assert items["Peso two"]["estimated_purchase_date"] == _due(3)
+    assert items["Dollar gadget"]["cumulative_months"] == 10_000
+
+
+def test_plan_no_row_for_currency(sw_client, cx, frozen):
+    a = cx["a"]
+    _item(sw_client, a, "Peso one", 21_420, "PHP", "critical")
+    _item(sw_client, a, "Euro gadget", 10, "EUR", "high")
+    _item(sw_client, a, "Peso two", 21_420, "PHP", "medium")
+    _, items = _plan(sw_client, a)
+    euro = items["Euro gadget"]
+    assert euro["estimated_purchase_date"] is None
+    assert euro["cumulative_months"] == 0
+    assert "EUR" in euro["note"]
+    assert (items["Peso one"]["cumulative_months"], items["Peso two"]["cumulative_months"]) == (1, 2)
+    assert items["Peso two"]["estimated_purchase_date"] == _due(2)
+    assert items["Peso one"]["note"] is None
+
+
+def test_plan_single_currency_unchanged(sw_client, cx, frozen):
+    a = cx["a"]
+    _item(sw_client, a, "Peso one", 21_420, "PHP", "critical")
+    _item(sw_client, a, "Peso two", 50_000, "PHP", "low")
+    body, items = _plan(sw_client, a)
+    assert (body["monthly_disposable"], body["savings_rate"]) == (42_840.0, 21_420.0)
+    assert [(i["name"], i["cumulative_months"], i["estimated_purchase_date"], i["note"])
+            for i in body["items"]] == [
+        ("Peso one", 1, _due(1), None), ("Peso two", 4, _due(4), None)]
+
+
+def test_plan_computes_currency_rows_once(sw_client, cx, frozen, monkeypatch):
+    from app.services import forecast as forecast_svc
+
+    a = cx["a"]
+    for n in range(4):
+        _item(sw_client, a, f"Peso {n}", 1_000, "PHP")
+    _item(sw_client, a, "Dollar gadget", 100, "USD")
+    _item(sw_client, a, "Euro gadget", 10, "EUR")
+    real, calls = forecast_svc.disposable_by_currency, []
+
+    def counting(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(forecast_svc, "disposable_by_currency", counting)
+    body = _get(sw_client, a, "/wishlist/plan")
+    assert len(body["items"]) == 6
+    assert len(calls) == 1

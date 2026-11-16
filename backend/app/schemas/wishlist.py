@@ -66,8 +66,9 @@ class WishlistPlanItem(BaseModel):
     item_id: int
     name: str
     estimated_cost: float
-    estimated_purchase_date: str
+    estimated_purchase_date: Optional[str] = None
     cumulative_months: int
+    note: Optional[str] = None
 
 
 class WishlistPlanResponse(BaseModel):
