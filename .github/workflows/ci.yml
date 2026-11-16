@@ -134,6 +134,51 @@ jobs:
           VITE_API_URL: https://tally-and-trace-api.onrender.com
 
   # ---------------------------------------------------------------------------
+  # E2E – Playwright suite (report-only: not in deploy.needs, not a required check)
+  # ---------------------------------------------------------------------------
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Report-only for the first 3-5 UI tickets; a failure must not turn the PR red.
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      # The workspace lockfile is at the repo root; frontend/pnpm-lock.yaml is stale.
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run e2e suite
+        run: pnpm test:e2e
+
+      - name: Upload e2e results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: frontend/test-results/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
   # Deploy (only on push to main)
   # ---------------------------------------------------------------------------
   deploy:
