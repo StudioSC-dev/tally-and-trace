@@ -109,8 +109,8 @@ from app.services.payment_dates import Moved, effective, extend, load_entry_over
 from app.services.recurring_kinds import entry_kind, is_card_installment, is_kind_eligible
 from app.services.walk_limit import walk_capped
 from app.services.statements import (
-    _split_card_rows, iter_cycles_from, load_due_overrides, resolve_cycle_fields,
-    statement_day, statement_history, statement_summaries,
+    _split_card_rows, iter_cycles_from, load_due_overrides, payment_received,
+    resolve_cycle_fields, statement_day, statement_history, statement_summaries,
 )
 
 CARD_FX_BUFFER = Decimal("0.03")
@@ -388,7 +388,13 @@ def _card_parts(card: Account, start: datetime, end: datetime, money: _Converter
         if is_payment:
             if record_view == LIMITED:
                 continue  # leaving it out only understates credit
-            amount = fc._money(transfer_sides(txn)[1])
+            # In the card's currency: a planned one from another currency at
+            # the statement engine's estimate, none with no stored rate
+            # (leaving it out only understates credit, STU-303).
+            received = payment_received(txn, money.currency, money.fx)
+            if received is None:
+                continue
+            amount = fc._money(received)
             reason = ("before_today" if day < s_day
                       else "after_window" if day >= e_day else None)
             planned.append({"date": day.isoformat(), "amount": _amount(amount),

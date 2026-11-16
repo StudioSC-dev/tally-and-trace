@@ -97,33 +97,29 @@ def _validate_payment_routing(db: Session, current_user: User, data: dict,
     default the caller), so a route never crosses owners. Without this, a caller
     could route a payment at an arbitrary account id and read that account's
     name back out of the timeline's ``account_shortfalls``. Also rejects
-    self-routing, which would make an account fund its own payment, and (except
-    for a loan, whose payer ``_validate_loan`` checks) a target in another
-    currency than the account's.
+    self-routing, which would make an account fund its own payment. A target
+    may be in another currency than the account's (STU-303: a card is paid
+    across currencies, its payable estimated in the payer's currency); a
+    loan's payer has its own currency rule (``_validate_loan``).
 
     On an update (``account``) only a target that changes is checked: an admin's
     form resending a stored route they may not use (the owner's private payer)
     still saves, and learns nothing it was not already shown.
     """
     account_id = account.id if account is not None else None
-    account_type = data.get("account_type", account.account_type if account else None)
-    currency = data.get("currency", account.currency if account else None)
     for field in ("payment_account_id", "payment_overflow_account_id"):
         target_id = data.get(field)
         if target_id is None:
             continue
         if account is not None and target_id == getattr(account, field):
             continue
-        target = _funding_account(db, current_user, target_id, field, account_id,
-                                  owner=owner if owner is not None else current_user)
-        # A loan's payer has its own currency rule (_validate_loan).
-        if account_type != AccountType.LOAN and target.currency != currency:
-            raise HTTPException(status_code=400, detail=ROUTING_CURRENCY_DETAIL)
+        _funding_account(db, current_user, target_id, field, account_id,
+                         owner=owner if owner is not None else current_user)
 
 
-# Payment and overflow routing never crosses currencies (a card is paid, and a
-# shortfall covered, in the paying account's own currency). Names no account:
-# the other side may be one the caller cannot access.
+# A recurring entry's overflow routing never crosses currencies (a shortfall is
+# covered in the paying account's own currency). Names no account: the other
+# side may be one the caller cannot access.
 ROUTING_CURRENCY_DETAIL = (
     "Payment and overflow routing must stay within one currency: "
     "this would pair accounts in different currencies")
@@ -132,12 +128,12 @@ ROUTING_CURRENCY_DETAIL = (
 def _validate_currency_routing(db: Session, data: dict, account: Account) -> None:
     """Refuse a currency change that would pair this account across currencies.
 
-    The pairings are a card's (or other non-loan account's) payment and
-    overflow accounts, and a recurring entry's account and overflow account,
-    whichever side this account is on (a loan's payer is ``_validate_loan`` and
-    ``_validate_loan_payer``). Only a change of currency is checked; the
-    routing fields themselves are checked when they change
-    (``_validate_payment_routing``, and the entry routes).
+    The pairing is a recurring entry's account and overflow account, whichever
+    side this account is on. A card's (or other non-loan account's) payment
+    and overflow accounts may be in any currency (STU-303); a loan's payer is
+    ``_validate_loan`` and ``_validate_loan_payer``. Only a change of currency
+    is checked; the entry's routing fields themselves are checked when they
+    change (the entry routes).
     """
     from app.models.budget_entry import BudgetEntry
 
@@ -149,17 +145,6 @@ def _validate_currency_routing(db: Session, data: dict, account: Account) -> Non
         other = db.get(Account, account_id) if account_id else None
         return other is not None and other.currency != currency
 
-    if data.get("account_type", account.account_type) != AccountType.LOAN and any(
-            differs(data.get(field, getattr(account, field)))
-            for field in ("payment_account_id", "payment_overflow_account_id")):
-        raise HTTPException(status_code=400, detail=ROUTING_CURRENCY_DETAIL)
-    routed = db.query(Account).filter(
-        Account.account_type != AccountType.LOAN,
-        or_(Account.payment_account_id == account.id,
-            Account.payment_overflow_account_id == account.id),
-    ).all()
-    if any(other.currency != currency for other in routed):
-        raise HTTPException(status_code=400, detail=ROUTING_CURRENCY_DETAIL)
     entries = db.query(BudgetEntry).filter(
         BudgetEntry.overflow_account_id.isnot(None),
         or_(BudgetEntry.account_id == account.id,

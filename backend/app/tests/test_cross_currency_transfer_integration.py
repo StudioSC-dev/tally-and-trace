@@ -9,8 +9,8 @@ moving by the stored figures even after an account's currency changes behind
 the API's back.
 
 Also covered: the write rules (same currency: dropped when equal, else 400;
-cross-currency posted: required; cards: refused), no payment or overflow
-routing across currencies, materialising a cross-currency transfer entry, the
+cross-currency posted: required; out of a card: refused; into one: allowed
+since STU-303), no entry overflow routing across currencies, materialising a cross-currency transfer entry, the
 editor's ``shared_full`` and the viewer's limited view, the Household and
 period-summary inbound figure, loan payments as they were, and the migration.
 """
@@ -272,38 +272,24 @@ def test_unposted_cross_currency_transfer_may_wait_for_the_amount(sw_client, sw_
     assert _balance(db, xc["usd"]) == Decimal("1100.00")
 
 
-def test_cross_currency_transfer_into_or_out_of_a_card_is_refused(sw_client, sw_db, xc):
+def test_cross_currency_transfer_out_of_a_card_is_refused(sw_client, sw_db, xc):
+    # Paying a card from another currency is allowed (STU-303,
+    # test_cross_currency_card_payment_integration.py); a card never sends
+    # money across currencies.
     client, a = sw_client, xc["a"]
     usd_card = _account(client, a, "USD Card", "USD", 0, "credit", billing_cycle_start=20,
                         days_until_due_date=10)
-    _transfer(client, a, xc["php"], usd_card, 5_800, received_amount=100, expect=(400,))
-    _transfer(client, a, usd_card, xc["php"], 100, received_amount=5_800, expect=(400,))
-    _transfer(client, a, xc["php"], usd_card, 5_800, received_amount=100, is_posted=False,
-              expect=(400,))
+    r = _transfer(client, a, usd_card, xc["php"], 100, received_amount=5_800, expect=(400,))
+    assert r.json()["detail"] == "A credit card only sends money in its own currency"
+    _transfer(client, a, usd_card, xc["php"], 100, is_posted=False, expect=(400,))
     # Same currency stays allowed.
-    _transfer(client, a, xc["usd"], usd_card, 100)
+    _transfer(client, a, usd_card, xc["usd"], 100)
     # An edit that makes it cross-currency is refused.
-    txn = _transfer(client, a, xc["usd"], usd_card, 50).json()["id"]
-    _put(client, a, txn, {"account_id": xc["php"], "transfer_from_account_id": xc["php"],
-                          "received_amount": 50}, expect=400)
-    assert _balance(sw_db, usd_card) == Decimal("150.00")
-
-
-def test_card_payment_and_overflow_routing_across_currencies_is_refused(sw_client, xc):
-    client, a = sw_client, xc["a"]
-    for field in ("payment_account_id", "payment_overflow_account_id"):
-        r = client.post(f"{API}/accounts/", headers=a["headers"], json={
-            "name": "USD Card", "account_type": "credit", "currency": "USD",
-            "billing_cycle_start": 20, "days_until_due_date": 10, field: xc["php"]})
-        assert r.status_code == 400, r.text
-    card = _account(client, a, "USD Card", "USD", 0, "credit", billing_cycle_start=20,
-                    days_until_due_date=10, payment_account_id=xc["usd"])
-    for field in ("payment_account_id", "payment_overflow_account_id"):
-        r = client.put(f"{API}/accounts/{card}", headers=a["headers"], json={field: xc["php"]})
-        assert r.status_code == 400, r.text
-    r = client.put(f"{API}/accounts/{card}", headers=a["headers"],
-                   json={"payment_overflow_account_id": xc["usd_spare"]})
-    assert r.status_code == 200, r.text
+    txn = _transfer(client, a, usd_card, xc["usd"], 50).json()["id"]
+    _put(client, a, txn, {"transfer_to_account_id": xc["php"], "received_amount": 2_900},
+         expect=400)
+    assert _balance(sw_db, usd_card) == Decimal("-150.00")
+    assert _balance(sw_db, xc["php"]) == Decimal("50000.00")
 
 
 def test_entry_overflow_across_currencies_is_refused(sw_client, xc):
@@ -324,15 +310,8 @@ def test_entry_overflow_across_currencies_is_refused(sw_client, xc):
 
 def test_account_currency_edit_that_would_pair_currencies_is_refused(sw_client, xc):
     client, a = sw_client, xc["a"]
-    card = _account(client, a, "PHP Card", "PHP", 0, "credit", billing_cycle_start=15,
-                    days_until_due_date=10, payment_account_id=xc["php"],
-                    payment_overflow_account_id=xc["php_sav"])
-    # The payer, the overflow account or the card itself changing currency.
-    for account_id in (xc["php"], xc["php_sav"], card):
-        r = client.put(f"{API}/accounts/{account_id}", headers=a["headers"],
-                       json={"currency": "USD"})
-        assert r.status_code == 400, (account_id, r.text)
-    # An entry's overflow pairing too.
+    # An entry's overflow pairing (a card's payment routing may cross
+    # currencies since STU-303: test_routing_allows_cross_currency).
     sw_post(client, a, "/budget-entries/", {
         "name": "USD rent", "entry_type": "expense", "amount": 1_500, "currency": "USD",
         "next_occurrence": "2026-11-10T00:00:00", "account_id": xc["usd"],
