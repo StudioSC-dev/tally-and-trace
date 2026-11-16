@@ -1,15 +1,19 @@
 """The demo under projections split by currency (STU-236, plan H, criterion 13).
 
-Shape 5 puts the demo's foreign rows in the form's convention (USD 55.00
-salary, the pending salary and Netflix rows at their foreign figure, the ended
-"Streaming Subscription" entry inactive), and every projection is split by
-account currency at the suite's rate (58.00 PHP per USD). Each test reseeds
-the demo first, so figures never depend on what other tests did to it, and
-freezes the clock at ``FX_REF`` (2026-11-02).
+Shape 5 puts the demo's foreign rows in the form's convention (the pending
+salary and Netflix rows at their foreign figure, the ended "Streaming
+Subscription" entry inactive), and every projection is split by account
+currency at the suite's rate (58.00 PHP per USD). Each test reseeds the demo
+first, so figures never depend on what other tests did to it, and freezes the
+clock at ``FX_REF`` (2026-11-02).
 
-``TODAY`` holds each figure as ``main`` gives it (recorded on main, shape 4,
-same clock); ``V4`` holds it now. Every figure that changes is listed, and is
-pinned as that explicit diff.
+``DIFF`` holds each figure that shape 8 (STU-308) changes, as (shape 7, shape 8),
+and is pinned as that explicit diff. ``v8`` reads the shape 8 figure.
+
+Shape 8 (STU-308) gives the demo a believable salary (USD 1,500.00 a month, 87,000.00
+PHP at the suite's rate) and a household budget to match: the Electric Bill, Gym
+Membership, Brokerage Auto-Deposit, Rent and Internet amounts are re-set so the demo's
+months still read as one November surplus and a December and January shortfall.
 
 Shape 6 (STU-217) moves the "Gym Membership" installment's next payment to
 2 Dec 2026, so its 45.00 is a December event: in the timeline, the 30-day
@@ -26,40 +30,49 @@ pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="no database avail
 
 RATE_AS_OF = "2026-11-01"
 
-# figure: (today on main, v4)
+# The shape 8 demo figures (STU-308), proposed in the PR for the owner's approval.
+SALARY_USD = 1_500.0  # Monthly Salary: 87,000.00 PHP at 58.00
+ELECTRIC = 4_800.0
+BROKERAGE = 30_000.0
+RENT = 48_000.0
+GYM = 2_800.0
+INTERNET = 2_500.0  # the card statement due 2026-11-23, and in the December statement
+PENDING_SALARY_USD = 1_500.0  # the seeded pending salary transaction, 87,000.00 PHP at 58.00
+
+# figure: (shape 7, shape 8)
 DIFF = {
-    "timeline opening (PHP scalar)": (21_850.0, 21_700.0),
-    "timeline closing, 60 days (PHP scalar)": (24_330.0, 24_335.58),
-    "overdue pending salary at window start": (2_950.0, 3_190.0),
-    "Monthly Salary, Nov 11": (3_200.0, 3_190.0),
-    "Monthly Salary, Dec 11": (3_200.0, 3_190.0),
-    "overdue card statement payable from the Joint Account": (850.0, 869.42),
-    "Netflix line, statement closing 2025-10-01": (850.0, 869.42),
-    "statement balance, closing 2025-10-01": (850.0, 869.42),
-    "cash-flow income, each month (PHP)": (3_200.0, 3_190.0),
-    "cash-flow net, November 2026 (PHP)": (3_540.0, 3_750.58),
-    "cash-flow net, December 2026 and January 2027 (PHP)": (-1_060.0, -1_115.0),
-    "Aug 2025 summary income": (3_000.0, 2_942.50),
-    "Aug 2025 summary net flow": (2_074.50, 2_017.00),
-    "disposable monthly_income": (3_200.0, 3_190.0),
-    "disposable monthly_expenses": (4_319.99, 4_305.00),
-    "disposable monthly_disposable": (-1_119.99, -1_115.00),
-    "snapshot balances.total (PHP)": (21_350.0, 21_200.0),
-    "snapshot available_cash (PHP)": (21_850.0, 21_700.0),
+    "timeline opening (PHP scalar)": (21_700.0, 21_700.0),
+    "timeline closing, 60 days (PHP scalar)": (24_335.58, 156_430.58),
+    "overdue pending salary at window start": (3_190.0, 87_000.0),
+    "Monthly Salary, Nov 11": (3_190.0, 87_000.0),
+    "Monthly Salary, Dec 11": (3_190.0, 87_000.0),
+    "overdue card statement payable from the Joint Account": (869.42, 869.42),
+    "Netflix line, statement closing 2025-10-01": (869.42, 869.42),
+    "statement balance, closing 2025-10-01": (869.42, 869.42),
+    "cash-flow income, each month (PHP)": (3_190.0, 87_000.0),
+    "cash-flow net, November 2026 (PHP)": (3_750.58, 135_830.58),
+    "cash-flow net, December 2026 and January 2027 (PHP)": (-1_115.0, -1_100.0),
+    "Aug 2025 summary income": (2_942.50, 80_250.00),
+    "Aug 2025 summary net flow": (2_017.00, 79_324.50),
+    "disposable monthly_income": (3_190.0, 87_000.0),
+    "disposable monthly_expenses": (4_305.00, 88_100.0),
+    "disposable monthly_disposable": (-1_115.00, -1_100.0),
+    "snapshot balances.total (PHP)": (21_200.0, 21_200.0),
+    "snapshot available_cash (PHP)": (21_700.0, 21_700.0),
 }
 
 
-def v4(name):
+def v8(name):
     return DIFF[name][1]
 
 
 # The demo's two card examples (the posted-date rule, ``statements.statement_day``).
 # The pending Netflix row (USD 14.99, 869.42 at 58.00) is dated on the reset day,
 # and an unposted row is read on the day anyway, so it sits on the open statement
-# closing 2026-12-01 (due 2026-12-22), beside that cycle's 60.00. The overdue
+# closing 2026-12-01 (due 2026-12-22), beside that cycle's Internet charge. The overdue
 # example is the posted Shopee charge of Sept 2025 on the statement closing
 # 2025-10-01 (due 2025-10-22, unpaid): 120.00.
-NETFLIX = v4("Netflix line, statement closing 2025-10-01")
+NETFLIX = v8("Netflix line, statement closing 2025-10-01")
 OVERDUE = 120.0
 OPEN_DUE = "2026-12-22"
 
@@ -99,10 +112,10 @@ def demo(demo_at):
     return demo_at(FX_REF)
 
 
-def test_the_shape_is_seven():
+def test_the_shape_is_eight():
     from app.core.seed import DEMO_SHAPE_VERSION
 
-    assert DEMO_SHAPE_VERSION == 7
+    assert DEMO_SHAPE_VERSION == 8
 
 
 def _estimated(item, original):
@@ -114,9 +127,9 @@ def _estimated(item, original):
 def test_timeline(demo):
     body = demo("/forecast/timeline", days=60)
     assert body["currencies"] == ["PHP", "USD"]
-    assert body["opening_balance"] == v4("timeline opening (PHP scalar)")
+    assert body["opening_balance"] == v8("timeline opening (PHP scalar)")
     assert body["closing_balance"] == round(
-        v4("timeline closing, 60 days (PHP scalar)") - OVERDUE, 2)
+        v8("timeline closing, 60 days (PHP scalar)") - OVERDUE, 2)
     php, usd = body["by_currency"]
     assert php["currency"] == "PHP" and php["opening_balance"] == 21_700.0
     assert (usd["currency"], usd["opening_balance"], usd["events"], usd["closing_balance"]) == (
@@ -125,68 +138,121 @@ def test_timeline(demo):
     salary = [e for e in body["events"] if "alary" in e["name"]]
     assert [(e["date"], e["name"], e["amount"]) for e in salary] == [
         ("2026-11-02", "Projected salary deposit (awaiting conversion)",
-         v4("overdue pending salary at window start")),
-        ("2026-11-11", "Monthly Salary", v4("Monthly Salary, Nov 11")),
-        ("2026-12-11", "Monthly Salary", v4("Monthly Salary, Dec 11"))]
-    assert all(_estimated(e, 55.0) for e in salary)
+         v8("overdue pending salary at window start")),
+        ("2026-11-11", "Monthly Salary", v8("Monthly Salary, Nov 11")),
+        ("2026-12-11", "Monthly Salary", v8("Monthly Salary, Dec 11"))]
+    assert _estimated(salary[0], PENDING_SALARY_USD)
+    assert all(_estimated(e, SALARY_USD) for e in salary[1:])
     (overdue,) = [e for e in body["events"]
                   if e["name"] == "Credit Card statement" and e["date"] == "2026-11-02"]
     assert overdue["amount"] == -OVERDUE
     (statement,) = [e for e in body["events"]
                     if e["name"] == "Credit Card statement" and e["date"] == OPEN_DUE]
-    assert statement["amount"] == -round(60.0 + NETFLIX, 2)
+    assert statement["amount"] == -round(INTERNET + NETFLIX, 2)
     assert _estimated(statement, 14.99)
     # Every other event is as on main.
     others = [(e["date"], e["name"], e["amount"]) for e in body["events"]
               if e not in salary and e is not statement and e is not overdue]
     assert others == [
         ("2026-11-02", "Projected September electric bill", 0.0),
-        ("2026-11-15", "Brokerage Auto-Deposit", -500.0),
-        ("2026-11-20", "Electric Bill", -1_200.0),
-        ("2026-11-23", "Credit Card statement", -60.0),
-        ("2026-12-01", "Rent", -2_500.0),
-        ("2026-12-02", "Gym Membership", -45.0),
-        ("2026-12-15", "Brokerage Auto-Deposit", -500.0),
-        ("2026-12-20", "Electric Bill", -1_200.0)]
+        ("2026-11-15", "Brokerage Auto-Deposit", -BROKERAGE),
+        ("2026-11-20", "Electric Bill", -ELECTRIC),
+        ("2026-11-23", "Credit Card statement", -INTERNET),
+        ("2026-12-01", "Rent", -RENT),
+        ("2026-12-02", "Gym Membership", -GYM),
+        ("2026-12-15", "Brokerage Auto-Deposit", -BROKERAGE),
+        ("2026-12-20", "Electric Bill", -ELECTRIC)]
     assert [(r["base"], r["quote"], r["rate"]) for r in body["fx"]["rates"]] == [
         ("USD", "PHP", 58.0)]
+
+
+def _sign(x):
+    return (x > 0) - (x < 0)
+
+
+def test_demo_rebalanced_projection_story(demo):
+    """STU-308: the believable salary and the rebalanced budget tell shape 7's story."""
+    timeline = demo("/forecast/timeline", days=60)
+    assert timeline["currencies"] == ["PHP", "USD"]
+    php, usd = timeline["by_currency"]
+    assert (usd["opening_balance"], usd["events"], usd["closing_balance"]) == (150.0, [], 150.0)
+    assert php["opening_balance"] == 21_700.0
+    snapshot = demo("/dashboard/snapshot")
+    assert snapshot["balances"]["total"] == 21_200.0
+    assert snapshot["balances"]["by_currency"][1] == {
+        "currency": "USD", "total": 150.0, "available_cash": 150.0}
+
+    # The same events on the same dates.
+    assert sorted((e["date"], e["name"]) for e in timeline["events"]) == [
+        ("2026-11-02", "Credit Card statement"),
+        ("2026-11-02", "Projected September electric bill"),
+        ("2026-11-02", "Projected salary deposit (awaiting conversion)"),
+        ("2026-11-11", "Monthly Salary"), ("2026-11-15", "Brokerage Auto-Deposit"),
+        ("2026-11-20", "Electric Bill"), ("2026-11-23", "Credit Card statement"),
+        ("2026-12-01", "Rent"), ("2026-12-02", "Gym Membership"),
+        ("2026-12-11", "Monthly Salary"), ("2026-12-15", "Brokerage Auto-Deposit"),
+        ("2026-12-20", "Electric Bill"), ("2026-12-22", "Credit Card statement")]
+    salary = [e for e in timeline["events"] if e["name"] == "Monthly Salary"]
+    assert [e["date"] for e in salary] == ["2026-11-11", "2026-12-11"]
+    assert all(_estimated(e, SALARY_USD) for e in salary)
+    assert all(e["amount"] == round(SALARY_USD * 58.0, 2) for e in salary)
+
+    # The overdue card statement and the card statement history are as in shape 7.
+    (overdue,) = [e for e in timeline["events"]
+                  if e["name"] == "Credit Card statement" and e["date"] == "2026-11-02"]
+    assert overdue["amount"] == -OVERDUE
+
+    # Each month's net keeps its sign: a November surplus, then a shortfall.
+    periods = demo("/forecast/cashflow", months=3)["periods"]
+    shape7_nets = [DIFF["cash-flow net, November 2026 (PHP)"][0] - OVERDUE + NETFLIX,
+                   DIFF["cash-flow net, December 2026 and January 2027 (PHP)"][0] - NETFLIX,
+                   DIFF["cash-flow net, December 2026 and January 2027 (PHP)"][0]]
+    assert [_sign(p["net"]) for p in periods] == [_sign(n) for n in shape7_nets] == [1, -1, -1]
+
+    # Disposable income: income is positive, and the figures keep shape 7's sign (a
+    # small shortfall: the January net is the monthly disposable figure).
+    body = demo("/forecast/disposable")
+    assert 0 < body["monthly_income"] == v8("disposable monthly_income")
+    assert body["monthly_disposable"] < body["monthly_income"]
+    assert _sign(body["monthly_disposable"]) == _sign(DIFF["disposable monthly_disposable"][0])
+    assert body["monthly_disposable"] == periods[2]["net"]
 
 
 def test_snapshot(demo):
     body = demo("/dashboard/snapshot")
     assert body["currencies"] == ["PHP", "USD"]
-    assert body["balances"]["total"] == v4("snapshot balances.total (PHP)")
-    assert body["available_cash"] == v4("snapshot available_cash (PHP)")
+    assert body["balances"]["total"] == v8("snapshot balances.total (PHP)")
+    assert body["available_cash"] == v8("snapshot available_cash (PHP)")
     assert body["balances"]["by_currency"] == [
         {"currency": "PHP", "total": 21_200.0, "available_cash": 21_700.0},
         {"currency": "USD", "total": 150.0, "available_cash": 150.0}]
     summary = body["monthly_summary"]
     assert (summary["monthly_income"], summary["monthly_expenses"],
             summary["monthly_disposable"]) == (
-        v4("disposable monthly_income"), v4("disposable monthly_expenses"),
-        v4("disposable monthly_disposable"))
+        v8("disposable monthly_income"), v8("disposable monthly_expenses"),
+        v8("disposable monthly_disposable"))
     # The overdue statement (Sept 2025 purchase) is first; the pending Netflix
     # row is on the statement due Dec 22, beyond these 30 days (test_timeline).
     assert [(p["due_date"], p["name"], p["amount"], p["account_name"], p["currency"])
             for p in body["payables"]] == [
         ("2026-11-02", "Credit Card statement", OVERDUE, "Joint Account", "PHP"),
-        ("2026-11-15", "Brokerage Auto-Deposit", 500.0, "Main Checking Account", "PHP"),
-        ("2026-11-20", "Electric Bill", 1_200.0, "Main Checking Account", "PHP"),
-        ("2026-11-23", "Credit Card statement", 60.0, "Joint Account", "PHP"),
-        ("2026-12-01", "Rent", 2_500.0, "Joint Account", "PHP"),
-        ("2026-12-02", "Gym Membership", 45.0, "Main Checking Account", "PHP")]
+        ("2026-11-15", "Brokerage Auto-Deposit", BROKERAGE, "Main Checking Account", "PHP"),
+        ("2026-11-20", "Electric Bill", ELECTRIC, "Main Checking Account", "PHP"),
+        ("2026-11-23", "Credit Card statement", INTERNET, "Joint Account", "PHP"),
+        ("2026-12-01", "Rent", RENT, "Joint Account", "PHP"),
+        ("2026-12-02", "Gym Membership", GYM, "Main Checking Account", "PHP")]
 
 
 def test_cashflow(demo):
     periods = demo("/forecast/cashflow", months=3)["periods"]
     # The Netflix line leaves in December, not November.
     assert [(p["period_label"], p["income"], p["expenses"], p["net"]) for p in periods] == [
-        ("November 2026", v4("cash-flow income, each month (PHP)"), 1_700.0,
-         round(v4("cash-flow net, November 2026 (PHP)") + NETFLIX - OVERDUE, 2)),
-        ("December 2026", v4("cash-flow income, each month (PHP)"), 4_245.0,
-         round(v4("cash-flow net, December 2026 and January 2027 (PHP)") - NETFLIX, 2)),
-        ("January 2027", v4("cash-flow income, each month (PHP)"), 4_245.0,
-         v4("cash-flow net, December 2026 and January 2027 (PHP)"))]
+        ("November 2026", v8("cash-flow income, each month (PHP)"), BROKERAGE + ELECTRIC,
+         round(v8("cash-flow net, November 2026 (PHP)") + NETFLIX - OVERDUE, 2)),
+        ("December 2026", v8("cash-flow income, each month (PHP)"), BROKERAGE + RENT + ELECTRIC + GYM,
+         round(v8("cash-flow net, December 2026 and January 2027 (PHP)") - NETFLIX, 2)),
+        ("January 2027", v8("cash-flow income, each month (PHP)"), BROKERAGE + RENT + ELECTRIC + GYM,
+         v8("cash-flow net, December 2026 and January 2027 (PHP)"))]
     for p in periods:
         usd = next(r for r in p["by_currency"] if r["currency"] == "USD")
         assert (usd["opening_balance"], usd["net"], usd["closing_balance"]) == (150.0, 0.0, 150.0)
@@ -195,8 +261,8 @@ def test_cashflow(demo):
 def test_disposable(demo):
     body = demo("/forecast/disposable")
     assert (body["monthly_income"], body["monthly_expenses"], body["monthly_disposable"]) == (
-        v4("disposable monthly_income"), v4("disposable monthly_expenses"),
-        v4("disposable monthly_disposable"))
+        v8("disposable monthly_income"), v8("disposable monthly_expenses"),
+        v8("disposable monthly_disposable"))
 
 
 def test_ended_streaming_subscription_does_not_affect_disposable(demo, sw_db):
@@ -224,9 +290,9 @@ def test_ended_streaming_subscription_does_not_affect_disposable(demo, sw_db):
                 body["by_currency"], {k: scalar[k] for k in keys})
 
     inactive = figures()
-    assert inactive[1] == dict(zip(keys, (v4("disposable monthly_income"),
-                                          v4("disposable monthly_expenses"),
-                                          v4("disposable monthly_disposable"))))
+    assert inactive[1] == dict(zip(keys, (v8("disposable monthly_income"),
+                                          v8("disposable monthly_expenses"),
+                                          v8("disposable monthly_disposable"))))
     entry.is_active = True
     sw_db.commit()
     assert figures() == inactive
@@ -259,8 +325,8 @@ def test_august_2025_summary(demo):
     body = demo("/transactions/summary/period", start_date="2025-08-01T00:00:00",
                 end_date="2025-08-31T23:59:59")
     assert body["summary"] == {
-        "total_income": v4("Aug 2025 summary income"), "total_expenses": 925.5,
-        "net_flow": v4("Aug 2025 summary net flow"), "transaction_count": 11}
+        "total_income": v8("Aug 2025 summary income"), "total_expenses": 925.5,
+        "net_flow": v8("Aug 2025 summary net flow"), "transaction_count": 11}
 
 
 

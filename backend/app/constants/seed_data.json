@@ -228,7 +228,7 @@
     {
       "name": "Monthly Salary",
       "entry_type": "INCOME",
-      "amount": 55.00,
+      "amount": 1500.00,
       "currency": "USD",
       "cadence": "MONTHLY",
       "next_occurrence": "2025-09-11T09:00:00",
@@ -257,7 +257,7 @@
     {
       "name": "Electric Bill",
       "entry_type": "EXPENSE",
-      "amount": 1200.00,
+      "amount": 4800.00,
       "currency": "PHP",
       "cadence": "MONTHLY",
       "next_occurrence": "2025-09-20T07:00:00",
@@ -271,7 +271,7 @@
     {
       "name": "Gym Membership",
       "entry_type": "EXPENSE",
-      "amount": 45.00,
+      "amount": 2800.00,
       "currency": "PHP",
       "cadence": "MONTHLY",
       "next_occurrence": "2026-12-02T07:00:00",
@@ -286,7 +286,7 @@
     {
       "name": "Brokerage Auto-Deposit",
       "entry_type": "EXPENSE",
-      "amount": 500.00,
+      "amount": 30000.00,
       "currency": "PHP",
       "cadence": "MONTHLY",
       "next_occurrence": "2025-09-15T09:00:00",
@@ -300,7 +300,7 @@
     {
       "name": "Rent",
       "entry_type": "EXPENSE",
-      "amount": 2500.0,
+      "amount": 48000.00,
       "currency": "PHP",
       "cadence": "MONTHLY",
       "next_occurrence": "2025-09-01T09:00:00",
@@ -314,7 +314,7 @@
     {
       "name": "Internet",
       "entry_type": "EXPENSE",
-      "amount": 60.0,
+      "amount": 2500.00,
       "currency": "PHP",
       "cadence": "MONTHLY",
       "next_occurrence": "2025-09-12T09:00:00",
@@ -352,13 +352,13 @@
     {
       "account_id": 1,
       "category_id": 9,
-      "amount": 2942.50,
+      "amount": 80250.00,
       "description": "Monthly salary deposit (converted from USD)",
       "transaction_type": "CREDIT",
       "transaction_date": "2025-08-11T09:00:00",
-      "original_amount": 55.00,
+      "original_amount": 1500.00,
       "original_currency": "USD",
-      "projected_amount": 55.00,
+      "projected_amount": 1500.00,
       "projected_currency": "USD",
       "exchange_rate": 53.50,
       "is_posted": true,
@@ -367,11 +367,11 @@
     {
       "account_id": 1,
       "category_id": 9,
-      "amount": 55.00,
+      "amount": 1500.00,
       "description": "Projected salary deposit (awaiting conversion)",
       "transaction_type": "CREDIT",
       "transaction_date": "2025-09-11T09:00:00",
-      "projected_amount": 55.00,
+      "projected_amount": 1500.00,
       "projected_currency": "USD",
       "is_posted": false,
       "budget_entry_id": 1

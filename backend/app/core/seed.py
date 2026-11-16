@@ -42,6 +42,11 @@ Shape 7: the pending Netflix charge is dated on the reset day (``days_before_res
 in the seed file), not a fixed day, so it reads as recent and sits on the open
 statement whenever the demo resets.
 
+Shape 8 (STU-308): a believable demo salary (USD 1,500.00 a month) and a household budget
+(electric, gym, brokerage, rent, internet) scaled to it, so the forecast keeps its story. The
+two seeded salary transactions follow it: the posted deposit is USD 1,500.00 (PHP 80,250.00
+at 53.5) and the pending one USD 1,500.00.
+
 Bump ``DEMO_SHAPE_VERSION`` whenever the demo data's shape changes.
 """
 
@@ -79,8 +84,9 @@ DEMO_PASSWORD = "password123"
 # 2: tags (STU-231); 3: the Demo Partner and joint share (STU-232); 4: the Household
 # tag share and the card routed to the joint account (STU-233); 5: foreign rows in the
 # form's convention, the ended streaming entry inactive (STU-236); 6: the gym
-# installment current (STU-217); 7: the pending Netflix charge dated on the reset day
-DEMO_SHAPE_VERSION = 7
+# installment current (STU-217); 7: the pending Netflix charge dated on the reset day;
+# 8: a believable salary and the budget rows scaled to it (STU-308)
+DEMO_SHAPE_VERSION = 8
 # One seeder at a time across workers (pg_advisory_xact_lock key).
 _LOCK_KEY = 229_0001
 _SEED_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "constants", "seed_data.json")
