@@ -16,7 +16,7 @@
 //   (c) entering the statement's minimum makes the dialog's Minimum read "from your statement"
 //   (d) after a Full Pay from the row the row is gone from every page, and the card
 //       still has an open cycle
-//   (e) a USD account is not offered, and a direct POST from it is 400
+//   (e) a USD account is offered (STU-654); a direct POST from it with no received amount is 400
 //   (f) an editor and a viewer get no credit panel, no statement row, and POST is 404
 //   (g) an amount above Full shows the "more than the <close> statement" note and is
 //       recorded in full
@@ -362,9 +362,9 @@ async function fullPayFromRow(browser) {
   await ctx.close()
 }
 
-// (e) A USD account can't pay a PHP card.
+// (e) A USD account may pay a PHP card (STU-654), with the amount the card receives.
 async function foreignPayer(browser) {
-  console.log('\n=== (e) a USD account is not offered, and a direct POST is 400')
+  console.log('\n=== (e) a USD account is offered, and a direct POST with no received amount is 400')
   const card = await makeCard(owner, 'Card E', { payer: bank })
   const { ctx, page } = await newPage(browser)
   await uiLogin(page, owner)
@@ -372,11 +372,11 @@ async function foreignPayer(browser) {
   const dialog = await openDialog(page)
   const options = await dialog.locator('[data-testid="card-pay-from"] option').allTextContents()
   check('(e) the PHP account is offered', options.includes(bank.name), true)
-  check('(e) the USD account is not', options.includes(usd.name), false)
+  check('(e) the USD account is offered too', options.includes(usd.name), true)
   await ctx.close()
   const direct = await api(owner.token, 'POST', `/cards/${card.id}/payments`, { amount: 100, from_account_id: usd.id, payment_date: today })
   check('(e) a direct POST from the USD account is 400', direct.status, 400)
-  check('(e) and says to pay from a PHP account', String(direct.json?.detail).startsWith('Pay this card from a PHP account'), true)
+  check('(e) and asks for the amount received', direct.json?.detail, 'Enter the amount received')
 }
 
 // (f) Only an owner or admin gets the panel and may Pay.
@@ -570,7 +570,6 @@ async function edgeStates(browser) {
   const inactive = await makeCard(owner, 'Card L inactive', { debits: [] })
   await put(owner.token, `/accounts/${inactive.id}`, { is_active: false })
   const solo = await makeUser('solo')
-  await account(solo, 'solo Dollars', 'USD', 1000)
   const lonely = await makeCard(solo, 'Card L lonely')
 
   const { ctx, page } = await newPage(browser)
@@ -587,7 +586,7 @@ async function edgeStates(browser) {
   const dialog = await openDialog(second.page)
   check('(l) with no eligible payer the dialog says so and cannot submit',
     [await text(dialog.locator('[data-testid="card-pay-no-payer"]')), await dialog.locator('[data-testid="card-pay-submit"]').isDisabled()],
-    ['No PHP account you can pay from.', true])
+    ['No account you can pay from.', true])
   await second.ctx.close()
 }
 

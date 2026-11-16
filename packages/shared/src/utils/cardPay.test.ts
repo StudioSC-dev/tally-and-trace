@@ -126,7 +126,7 @@ describe('cardPayers', () => {
     ...over,
   })
 
-  it('keeps same-currency, editable, active, non-credit, non-loan accounts, excluding the card', () => {
+  it('keeps editable, active, non-credit, non-loan accounts in any currency, excluding the card', () => {
     const card = account({ id: 1, account_type: 'credit' })
     const accounts = [
       card,
@@ -138,7 +138,7 @@ describe('cardPayers', () => {
       account({ id: 7, account_type: 'loan' }),
       account({ id: 8, permissions: { can_edit_settings: false, can_manage_shares: false, can_add_transactions: false, can_delete: false, can_view_details: false } }),
     ]
-    expect(cardPayers(accounts, card).map((a) => a.id)).toEqual([2, 3])
+    expect(cardPayers(accounts, card).map((a) => a.id)).toEqual([2, 3, 4])
   })
 })
 
@@ -193,6 +193,16 @@ describe('cardPaymentBody', () => {
       from_account_id: 2,
       payment_date: '2027-03-18',
     })
+  })
+
+  it('adds the received amount (the card\'s currency) only when given', () => {
+    expect(cardPaymentBody({ amount: 5800, fromAccountId: 2, paymentDate: '2027-03-18', receivedAmount: 100 })).toEqual({
+      amount: 5800,
+      from_account_id: 2,
+      payment_date: '2027-03-18',
+      received_amount: 100,
+    })
+    expect('received_amount' in cardPaymentBody({ amount: 10, fromAccountId: 2, paymentDate: '2027-03-18' })).toBe(false)
   })
 
   it('adds a trimmed description only when there is one', () => {

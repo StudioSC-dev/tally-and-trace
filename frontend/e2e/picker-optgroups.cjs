@@ -167,7 +167,7 @@ async function scenarioC(browser) {
     const s = await shape(sel)
     await h.check('c.groups', 'B', async () => same(labelsOf(s), ['Debit', 'E-wallet', 'Cash']))
     await h.check('c.no-placeholder', 'B', async () => same(s.loose, []))
-    await h.check('c.eligible-payers-only', 'B', async () => same(idsOf(s).sort(), [A.bank.id, A.bank2.id, A.wallet.id, A.cash.id].sort()))
+    await h.check('c.eligible-payers-only', 'B', async () => same(idsOf(s).sort(), [A.bank.id, A.bank2.id, A.wallet.id, A.cash.id, A.usd.id].sort()))
     await h.check('c.default-payer-kept', 'B', async () => (await sel.inputValue()) === String(A.bank.id) || `selected ${await sel.inputValue()}`)
   } finally {
     await ctx.close()
