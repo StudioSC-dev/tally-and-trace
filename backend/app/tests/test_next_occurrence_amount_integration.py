@@ -55,6 +55,7 @@ def users(client, db):
     from app.core.tags import ensure_household_tag
     from app.models.account import Account
     from app.models.budget_entry import BudgetEntry
+    from app.models.transaction import Transaction
     from app.models.user import User
 
     made, sides = [], {}
@@ -77,6 +78,7 @@ def users(client, db):
         sides[side] = {"id": u.id, "headers": h, "bank": r.json()["id"]}
     yield sides
     db.rollback()
+    db.query(Transaction).filter(Transaction.user_id.in_(made)).delete(synchronize_session=False)
     db.query(BudgetEntry).filter(BudgetEntry.user_id.in_(made)).delete(synchronize_session=False)
     db.query(Account).filter(Account.user_id.in_(made)).delete(synchronize_session=False)
     db.query(User).filter(User.id.in_(made)).delete(synchronize_session=False)
@@ -164,29 +166,50 @@ def test_next_occurrence_amount_follows_the_visibility_of_amount(client, db, use
 
 def test_next_occurrence_amount_is_read_only(client, db, users):
     from app.models.budget_entry import BudgetEntry
+    from app.models.transaction import Transaction
 
     owner = users["owner"]
     h = owner["headers"]
     entry = _make(client, owner, **_installment(2, final_amount=133.34))
     eid = entry["id"]
+    # One payment already linked to the entry, so there is payment state to keep.
+    r = client.post(f"{API}/transactions/", headers=h, json={
+        "account_id": owner["bank"], "amount": 100, "transaction_type": "debit",
+        "transaction_date": "2030-09-05T00:00:00", "description": "Noa plan paid",
+        "budget_entry_id": eid})
+    assert r.status_code in (200, 201), r.text
 
     def stored():
         db.expire_all()
         e = db.get(BudgetEntry, eid)
         return (e.amount, e.final_amount, e.max_occurrences, e.next_occurrence,
-                e.occurrences_paid_offset, e.updated_at)
+                e.occurrences_paid_offset, e.updated_at, e.is_active)
 
-    before = stored()
+    def payments():
+        """The entry's linked payment rows, with their amounts and posted state."""
+        db.expire_all()
+        rows = db.query(Transaction).filter(Transaction.budget_entry_id == eid).order_by(
+            Transaction.id).all()
+        return [(t.id, t.amount, t.is_posted, t.transaction_date, t.posting_date,
+                 t.updated_at) for t in rows]
+
+    before, before_payments = stored(), payments()
+    assert len(before_payments) == 1
+    paid = _get(client, owner, eid)["occurrences_paid"]
     for _ in range(2):
         assert _get(client, owner, eid)["next_occurrence_amount"] == 100
-    client.get(f"{API}/budget-entries/", headers=h)
+    r = client.get(f"{API}/budget-entries/", headers=h)
+    assert r.status_code == 200, r.text
     assert stored() == before, "reading changed the stored entry"
+    assert payments() == before_payments, "reading changed the entry's payment rows"
+    assert _get(client, owner, eid)["occurrences_paid"] == paid
 
     # A client-sent value is ignored (or rejected); the stored entry is unchanged.
     r = client.put(f"{API}/budget-entries/{eid}", json={"next_occurrence_amount": 999},
                    headers=h)
     assert r.status_code in (200, 400, 422), r.text
     assert stored()[:5] == before[:5]
+    assert payments() == before_payments
     assert _get(client, owner, eid)["next_occurrence_amount"] == 100
     r = client.post(f"{API}/budget-entries/", headers=h, json={
         "name": "Noa sneaky", "entry_type": "expense", "amount": 10, "next_occurrence": WHEN,
