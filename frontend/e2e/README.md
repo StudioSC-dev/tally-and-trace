@@ -1,8 +1,11 @@
 # Browser regression checks
 
-Standalone Playwright scripts that drive the real web app against a local API.
-They are not part of `pnpm build`, the lint, or CI, and the repo does not depend
-on Playwright. Run them by hand when you change the auth or session code.
+The `*.spec.ts` files are a Playwright suite run by `pnpm test:e2e`, against a
+mocked API, with Chromium and the desktop and phone projects.
+
+The standalone `*.cjs` scripts are unchanged and still run by hand against a local
+API. They are not part of `pnpm build`, the lint, or CI. Run them by hand when you
+change the auth or session code.
 
 | Script | Covers |
 |---|---|
