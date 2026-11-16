@@ -498,9 +498,11 @@ def _received_amount(source: Account, destination: Account, *, amount, received,
     The only place a transfer's account currencies are read (balances use the
     stored figures, ``transfer_sides``). Between accounts in one currency it is
     stored as null: a value equal to ``amount`` is dropped, any other is
-    refused. Across currencies a credit card may not take part (cards are paid
-    and drawn in their own currency), and a posted transfer needs a figure
-    greater than 0; an unposted one may leave it empty until it is posted.
+    refused. Across currencies a credit card may be paid (STU-303: the card
+    takes the figure received, in its own currency) but never draws money (a
+    cash advance stays in the card's currency), and a posted transfer needs a
+    figure greater than 0; an unposted one may leave it empty until it is
+    posted (its card side is then estimated, ``statements.payment_received``).
     """
     if source.currency == destination.currency:
         if received is None or _D(received) == _D(amount):
@@ -509,10 +511,10 @@ def _received_amount(source: Account, destination: Account, *, amount, received,
             status_code=400,
             detail="Both accounts are in the same currency, so the amount received is the "
                    "amount sent; leave it empty")
-    if AccountType.CREDIT in (source.account_type, destination.account_type):
+    if source.account_type == AccountType.CREDIT:
         raise HTTPException(
             status_code=400,
-            detail="A credit card only sends or receives money in its own currency")
+            detail="A credit card only sends money in its own currency")
     if received is None or _D(received) <= 0:
         if posted:
             raise HTTPException(status_code=400, detail=RECEIVED_AMOUNT_REQUIRED)

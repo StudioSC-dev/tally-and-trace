@@ -389,7 +389,8 @@ def _card_household_cover(db: Session, card: Account, paying_ids: set, start: da
     when it comes from an account of ``paying_ids`` (a cash account or spending
     wallet of the view scope) and ``readable`` (the caller's read rule) accepts
     its record. Everything is settled once, in
-    the card's currency (plan D4): a pending line's figure is its
+    the card's currency (plan D4): a planned payment from another currency is
+    its estimate (``statements.payment_received``), a pending line's figure is its
     ``pending_face`` estimated at the stored rate (``statements.normalise_lines``;
     one with no stored rate is left out), a projected entry charge is the
     entry's amount estimated likewise, and a recurring transfer into the card
@@ -407,8 +408,11 @@ def _card_household_cover(db: Session, card: Account, paying_ids: set, start: da
     rows = by_card.get(card.id, [])
     if recorded:
         rows = [r for r in rows if r.is_posted]
-    lines, payments = _split_card_rows(card.id, rows, unbilled, payment_sources=True)
     money = money or Money(db)
+    # A planned payment from another currency nets at its estimate, as in the
+    # statement engine (``statements.payment_received``, STU-303).
+    lines, payments = _split_card_rows(card.id, rows, unbilled, payment_sources=True,
+                                       currency=card.currency, fx=money.fx)
     card_currency = _currency(card.currency)
     lines, amount_of, _, _ = normalise_lines(db, card, lines, money.fx)
     household_txns = _household_ids(db, Transaction, [r.id for r in rows], card.user_id)
