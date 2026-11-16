@@ -437,6 +437,13 @@ interface RecurringEntryDetail {
   /** Installments: the "m" in "n of m". */
   max_occurrences?: number
   /**
+   * The last occurrence's amount when it differs from `amount` (STU-658: a card installment
+   * split from its total puts the rounding difference on the last payment). Only with
+   * `end_mode` "after_occurrences"; null (or absent) bills every occurrence `amount`. On
+   * PUT, `null` clears it.
+   */
+  final_amount?: number | null
+  /**
    * Installments: the "n" in "n of m" — occurrences materialised so far, counted
    * from linked transactions. `null` for open-ended entries. Payments entered by
    * hand rather than via "Mark paid" aren't linked, so they don't count.
@@ -662,6 +669,11 @@ export interface RepeatScheduleInput {
    * currency (STU-631: an installment split from its total). Omitted: the transaction's.
    */
   amount?: number
+  /**
+   * The entry's last payment when it differs from `amount` (STU-658: the bank rule puts the
+   * rounding difference on the last). Needs a finite `max_occurrences`. Omitted: none.
+   */
+  final_amount?: number
 }
 
 /**
@@ -1818,7 +1830,10 @@ export interface InstallmentPlan {
   entry_id: number
   name: string
   account_name: string | null
+  /** The next charge's own amount: `final_amount` when it is the last payment (STU-658). */
   amount: number
+  /** What the remaining payments sum to, the last at its own amount (STU-658). Absent from an older API. */
+  remaining_total?: number
   currency: string
   /** The oldest scheduled month with no recorded row (`YYYY-MM-DD`); null once every remaining month has one. */
   next_charge: string | null
