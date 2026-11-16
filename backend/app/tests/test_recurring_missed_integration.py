@@ -239,7 +239,7 @@ def test_visibility(sw, sw_client, sw_db, monkeypatch):
     assert bodies["s"]["missed"] == []
     for k in ("b", "d", "v", "s"):
         assert PRIVATE not in json.dumps(bodies[k]["missed"])
-        assert sw_leaks(bodies[k]["missed"], private_ids=[private]) == []
+        assert sw_leaks(bodies[k]["missed"], private_ids={"entry": [private]}) == []
 
     assert [r["entry_id"] for r in _snapshot(client, a, tag=tag)["missed"]] == [joint_rent]
     assert _snapshot(client, a, tag=999_999_999)["missed"] == []

@@ -625,15 +625,9 @@ def test_review_envelope_is_creator_only(world):
         body = _get(w, w[who], tablet)
         assert body["envelope"] is None
         assert "SW-ENVELOPE" not in str(body)
-        # A row's own id comes from another sequence and may equal the
-        # allocation's by chance: ``entry_id`` and a candidate's ``id`` are let
-        # through; nothing else may carry it.
-        own = {"$.entry_id": tablet}
-        for i, month in enumerate(body["candidates"]):
-            for j, row in enumerate(month["transactions"]):
-                own[f"$.candidates[{i}].transactions[{j}].id"] = row["id"]
-        leaks = [(where, value) for where, value in sw_leaks(body, private_ids=[allocation])
-                 if own.get(where) != value]
+        # Typed: a row's own id (``entry_id``, a candidate's ``id``) comes from another
+        # sequence and may equal the allocation's by chance; only ``allocation_id`` is one.
+        leaks = sw_leaks(body, private_ids={"allocation": [allocation]})
         assert leaks == []
 
 

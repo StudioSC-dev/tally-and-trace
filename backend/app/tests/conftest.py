@@ -257,37 +257,106 @@ def sw_money(value) -> Decimal:
     return Decimal(str(value)).quantize(Decimal("0.01"))
 
 
-def sw_leaks(body, private_ids=(), numbers=(), path="$"):
+# Keys whose object, or list of objects, is a record of a kind: an account named as
+# ``counterpart``, and the export's and the responses' lists under their plural.
+SW_REFS = {
+    "counterpart": "account", "accounts": "account", "shared_accounts": "account",
+    "transactions": "transaction", "others_transactions": "transaction",
+    "budget_entries": "entry", "others_budget_entries": "entry",
+    "categories": "category", "allocations": "allocation", "tags": "tag",
+}
+
+
+def sw_idish(key) -> bool:
+    return key is not None and (key == "id" or key.endswith("_id") or key.endswith("_ids"))
+
+
+def sw_kind_matches(kind, key, own) -> bool:
+    """Whether a number under ``key`` is an id of ``kind`` (typed private ids).
+
+    ``kind`` ids appear under ``<kind>_id``, ``*_<kind>_id``, ``<kind>_ids`` and
+    ``*_<kind>_ids``, and as ``id`` where ``own`` (the kinds the enclosing object
+    or list row stands for) holds ``kind``. Any other ``id`` is some other table's.
+    """
+    if key == "id":
+        return kind in own
+    return (key in (f"{kind}_id", f"{kind}_ids")
+            or key.endswith((f"_{kind}_id", f"_{kind}_ids")))
+
+
+def sw_leaks(body, private_ids=(), numbers=(), path="$", rows=None, refs=None):
     """Every leak in a JSON tree, envelopes included.
 
-    A leak is a string containing ``PRIVATE``, a private id under any id key
-    (``id``, ``*_id``, ``*_ids``), or one of ``numbers`` anywhere (a sentinel
-    amount such as a hidden loan's interest).
+    A leak is a string containing ``PRIVATE``, a private id, or one of
+    ``numbers`` anywhere (a sentinel amount such as a hidden loan's interest).
+
+    ``private_ids`` is either a plain collection, matched under any id key
+    (``id``, ``*_id``, ``*_ids``) whatever table it came from, or a dict of kind
+    to ids (``{"account": [...], "transaction": [...]}``), matched only where
+    that kind appears (``sw_kind_matches``): an id of a different table that
+    happens to be equal is not a leak. For a typed call:
+
+    - an object under a ``<kind>`` or ``*_<kind>`` key has its own ``id`` of that kind;
+    - ``rows`` names the kind of the rows when ``body`` is a list of rows or an
+      ``{"items": [...]}`` envelope: their own ``id`` only, not nested objects;
+    - ``refs`` maps further keys to a kind (``SW_REFS``): an object, or each
+      object of a list, under it has its own ``id`` of that kind (kinds the call
+      holds no ids of are skipped);
+    - any other ``id`` is ignored.
     """
-    private_ids = set(private_ids)
+    typed = isinstance(private_ids, dict)
+    if typed:
+        by_kind = {kind: set(ids) for kind, ids in private_ids.items()}
+    else:
+        private_ids = set(private_ids)
+        by_kind = {}
+    if (rows is not None or refs) and not typed:
+        raise ValueError("rows and refs need typed private_ids")
+    # A shared refs map (``SW_REFS``) may name kinds this call holds no ids of.
+    refs = {k: kind for k, kind in (refs or {}).items() if kind in by_kind}
     numbers = {round(float(n), 2) for n in numbers}
     found = []
 
-    def walk(node, where, key=None):
+    def context(key, value, at_root):
+        kinds = set()
+        if isinstance(value, dict):
+            kinds |= {k for k in by_kind if key == k or key.endswith(f"_{k}")}
+        if key in refs:
+            kinds.add(refs[key])
+        if at_root and rows is not None and key == "items" and isinstance(value, list):
+            kinds.add(rows)
+        return kinds
+
+    def walk(node, where, key=None, own=frozenset(), at_root=False):
         if isinstance(node, dict):
             for k, v in node.items():
                 if PRIVATE in str(k):
                     found.append((where, k))
-                walk(v, f"{where}.{k}", k)
+                name = str(k)  # a dict keyed by id has int keys
+                if isinstance(v, (dict, list)):
+                    child = context(name, v, at_root)
+                else:
+                    child = own
+                walk(v, f"{where}.{k}", name, child)
         elif isinstance(node, list):
             for i, v in enumerate(node):
-                walk(v, f"{where}[{i}]", key)
+                walk(v, f"{where}[{i}]", key, own)
         elif isinstance(node, str):
             if PRIVATE in node:
                 found.append((where, node))
         elif isinstance(node, (int, float)) and not isinstance(node, bool):
-            idish = key is not None and (key == "id" or key.endswith("_id") or key.endswith("_ids"))
-            if idish and node in private_ids:
+            if typed:
+                hit = any(node in ids and sw_kind_matches(kind, key, own)
+                          for kind, ids in by_kind.items())
+            else:
+                hit = sw_idish(key) and node in private_ids
+            if hit:
                 found.append((where, node))
             if round(float(node), 2) in numbers:
                 found.append((where, node))
 
-    walk(body, path)
+    own_root = frozenset({rows}) if rows is not None and isinstance(body, list) else frozenset()
+    walk(body, path, own=own_root, at_root=True)
     return found
 
 

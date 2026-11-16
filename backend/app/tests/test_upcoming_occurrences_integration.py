@@ -321,7 +321,7 @@ def test_limited_views_are_dropped_and_shared_editors_listed(sw, sw_client, sw_d
     assert bodies["s"]["items"] == []
     for k in ("b", "d", "v", "s"):
         assert PRIVATE not in json.dumps(bodies[k])
-        assert sw_leaks(bodies[k], private_ids=[private]) == []
+        assert sw_leaks(bodies[k], private_ids={"entry": [private]}) == []
 
 
 def test_a_tag_viewer_gets_nothing(hh, sw_client, monkeypatch):

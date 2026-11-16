@@ -11,7 +11,7 @@ import zipfile
 
 import pytest
 
-from app.tests.conftest import API, PRIVATE, sw_db_reachable, sw_leaks, sw_post
+from app.tests.conftest import API, PRIVATE, SW_REFS, sw_db_reachable, sw_leaks, sw_post
 from app.tests.test_shared_redaction_integration import INTEREST, house  # noqa: F401
 
 pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
@@ -37,7 +37,7 @@ def _all_exports(client, who):
 
 
 def _clean(body, texts, private_ids):
-    assert sw_leaks(body, private_ids, numbers=[INTEREST]) == []
+    assert sw_leaks(body, private_ids, numbers=[INTEREST], refs=SW_REFS) == []
     for text in texts:
         assert PRIVATE not in text
         assert not re.search(rf"(?<![\d.]){re.escape(str(INTEREST))}(?!\d)", text)
@@ -96,7 +96,8 @@ def test_exports_stay_clean_after_a_revocation(sw, sw_client, house):  # noqa: F
     assert r.status_code == 204
 
     body, texts = _all_exports(sw_client, b)
-    _clean(body, texts, house["private_ids"] | {sw["joint"]})
+    private = house["private_ids"]
+    _clean(body, texts, {**private, "account": [*private["account"], sw["joint"]]})
     assert "Joint account" not in str(body) and all("Joint account" not in t for t in texts)
     assert {a["id"] for a in body["shared_accounts"]} == {house["card"], house["shared_loan"]}
     # Bea's own records on the joint account are limited for her now.
@@ -116,7 +117,8 @@ def test_exports_stay_clean_after_a_revocation(sw, sw_client, house):  # noqa: F
     assert theirs[moved]["display_description"] == "Transfer"
     assert theirs[spent]["display_description"] == "Bea snacks"
     assert theirs[spent]["created_by"] == "Bea P."
-    assert sw_leaks(owner["others_transactions"], {sw["b_private"]}) == []
+    assert sw_leaks(owner["others_transactions"], {"account": [sw["b_private"]]},
+                    refs=SW_REFS) == []
 
 
 def test_a_shared_limit_link_stays_out_of_another_users_export(sw, sw_client, sw_db):
@@ -134,7 +136,7 @@ def test_a_shared_limit_link_stays_out_of_another_users_export(sw, sw_client, sw
     shared = {x["id"]: x for x in body["shared_accounts"]}
     assert set(shared[platinum]) == {"id", "name", "account_type", "currency", "my_role",
                                      "owner_name"}
-    assert sw_leaks(body, {sw["a_card"], sw["a_private"]}) == []
+    assert sw_leaks(body, {"account": [sw["a_card"], sw["a_private"]]}, refs=SW_REFS) == []
     assert all(PRIVATE not in t for t in texts)
     owner = {x["id"]: x for x in _get(sw_client, a, "/data/export.json").json()["accounts"]}
     assert owner[platinum]["shares_limit_with_account_id"] == sw["a_card"]

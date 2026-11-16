@@ -150,8 +150,8 @@ def test_i2_totals_are_unchanged_by_rule_c_rows(hh, sw_client, utilities):
 
 def test_i3_the_line_leaks_nothing_about_the_hidden_accounts(hh, sw_client, private_world):
     body = _summary(sw_client, hh["c"])
-    private_ids = [hh["a_private"], hh["a_card"], hh["a_loan"], hh["a_wallet"],
-                   private_world["usd"]]
+    private_ids = {"account": [hh["a_private"], hh["a_card"], hh["a_loan"], hh["a_wallet"],
+                               private_world["usd"]]}
     assert sw_leaks(body, private_ids=private_ids, numbers=SENTINELS) == []
     assert PRIVATE not in str(body)
     assert body["household_private"]
@@ -302,14 +302,62 @@ def _neutral(t):
     return t["view"] == "limited" and t["account"]["id"] is None
 
 
-def test_i13_category_names_matches_the_household_row(hh, sw_client, private_world):
-    found = _list(sw_client, hh["c"], category_names="Utilities")
+def _check_i13(hh, client, private_world):
+    found = _list(client, hh["c"], category_names="Utilities")
     # The Household debit, and the Household credit (listed, never on the line).
     assert {t["id"] for t in found} == {private_world["hh"], private_world["hh_credit"]}
     row = next(t for t in found if t["id"] == private_world["hh"])
     assert row["account"]["id"] is None
     assert row["category_name"] == "Utilities"
-    assert sw_leaks(found, private_ids=[hh["a_private"], private_world["usd"]]) == []
+    leaks = sw_leaks(found, private_ids={"account": [hh["a_private"], private_world["usd"]]})
+    assert leaks == [], leaks
+
+
+def test_i13_category_names_matches_the_household_row(hh, sw_client, private_world):
+    _check_i13(hh, sw_client, private_world)
+
+
+@pytest.fixture
+def colliding_row_id(sw_db):
+    """The account and transaction sequences set so ``private_world``'s first
+    transaction, the Household row, gets the id ``hh``'s ``a_private`` account gets.
+    Request it before ``hh``. Put back afterwards."""
+    from sqlalchemy import text
+
+    def seq(table):
+        return sw_db.execute(text(f"SELECT pg_get_serial_sequence('{table}', 'id')")).scalar()
+
+    accounts, txns = seq("accounts"), seq("transactions")
+    before = {name: sw_db.execute(text(f"SELECT last_value FROM {name}")).scalar()
+              for name in (accounts, txns)}
+    # Above every id and both sequences, so they only ever move forward.
+    top = max(
+        *before.values(),
+        sw_db.execute(text("SELECT COALESCE(MAX(id), 0) FROM accounts")).scalar(),
+        sw_db.execute(text("SELECT COALESCE(MAX(id), 0) FROM transactions")).scalar(),
+    ) + 100
+    # ``a_private`` is the second account ``hh`` creates; the Household row is the first
+    # transaction ``private_world`` creates.
+    target = top + A_PRIVATE_ACCOUNT_OFFSET
+    sw_db.execute(text("SELECT setval(:seq, :v)"), {"seq": accounts, "v": top})
+    sw_db.execute(text("SELECT setval(:seq, :v)"), {"seq": txns, "v": target - 1})
+    sw_db.commit()
+    yield target
+    sw_db.rollback()
+    for table, name in (("accounts", accounts), ("transactions", txns)):
+        sw_db.execute(
+            text(f"SELECT setval(:seq, GREATEST(:before, (SELECT COALESCE(MAX(id), 1) FROM {table})))"),
+            {"seq": name, "before": before[name]})
+    sw_db.commit()
+
+
+A_PRIVATE_ACCOUNT_OFFSET = 2
+
+
+def test_i13_forced_collision(colliding_row_id, hh, sw_client, private_world):
+    """The listed Household row's id equals the private account's: not a leak."""
+    assert private_world["hh"] == hh["a_private"] == colliding_row_id
+    _check_i13(hh, sw_client, private_world)
 
 
 def test_i14_the_untagged_private_row_never_matches(hh, sw_client, private_world):

@@ -12,7 +12,7 @@ import zipfile
 
 import pytest
 
-from app.tests.conftest import API, PRIVATE, sw_db_reachable, sw_leaks, sw_post
+from app.tests.conftest import API, PRIVATE, SW_REFS, sw_db_reachable, sw_leaks, sw_post
 
 pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
 
@@ -37,14 +37,11 @@ def _all_exports(client, who):
 
 
 def _clean(body, texts, private_ids):
-    # private_ids are account ids. A row's own id in any other table (a
-    # transaction's, an entry's, a tag's) comes from another sequence and can
-    # equal one by chance, so only those row ids are let through; every account
-    # reference (accounts, shared_accounts, account, counterpart, *_account_id)
-    # is still checked.
-    leaks = [(where, value) for where, value in sw_leaks(body, private_ids, numbers=SENTINELS)
-             if not (re.fullmatch(r"\$\.(?!(?:shared_)?accounts\[)[a-z_]+\[\d+\]\.id", where)
-                     and isinstance(value, int) and value in private_ids)]
+    # private_ids are account ids: typed, so a row's own id in another table (a
+    # transaction's, an entry's, a tag's), from another sequence, never matches one by
+    # chance; every account reference (accounts, shared_accounts, account,
+    # counterpart, *_account_id) is still checked.
+    leaks = sw_leaks(body, {"account": private_ids}, numbers=SENTINELS, refs=SW_REFS)
     assert leaks == []
     for text in texts:
         assert PRIVATE not in text

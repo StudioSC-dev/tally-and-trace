@@ -10,7 +10,6 @@ Reference: Thursday 2027-03-18, 02:00 UTC (10:00 in Manila); the window is
 Mar 18 to Apr 17 inclusive. Rates: USD 1, PHP 63.00, fresh.
 """
 import json
-import re
 from datetime import datetime, timedelta
 from decimal import Decimal
 
@@ -141,33 +140,29 @@ def _section(body, card):
 def _leaks(body, entries=(), transactions=(), numbers=()):
     """Leaks in ``body`` of the private budget entries and transactions.
 
-    A check's ``source_id`` is its own row's id from its ``source`` table, so it
-    can equal a private id of the other table by chance: that one is let
-    through. The same id on a check of the private id's own table, any other
-    field, and any string or sentinel number is still a leak. An ``account_id``
-    is an account's id, never a private record's, so it passes too.
+    Typed ids (``entry_id``, ``transaction_id`` and so on), so an id of another table,
+    an ``account_id`` among them, never matches. A check's ``source_id`` is its own
+    row's id from its ``source`` table, so it can equal a private id of the other
+    table by chance: only one of the private id's own table is a leak. Any other
+    field, and any string or sentinel number, is still a leak.
     """
-    private = {}
-    for table, ids in (("budget_entry", entries), ("transaction", transactions)):
-        for i in ids:
-            private.setdefault(i, set()).add(table)
-    leaks = sw_leaks(body, private_ids=list(private), numbers=numbers)
+    private = {"entry": list(entries), "transaction": list(transactions)}
+    table = {"budget_entry": "entry", "transaction": "transaction"}
+    leaks = sw_leaks(body, private_ids=private, numbers=numbers)
 
-    def node(where):
-        found = body
-        for key, index in re.findall(r"\.([a-z_]+)|\[(\d+)\]", where):
-            found = found[int(index)] if index else found[key]
-        return found
+    def sources(node, where):
+        if isinstance(node, dict):
+            if table.get(node.get("source")) and isinstance(node.get("source_id"), int):
+                if node["source_id"] in private[table[node["source"]]]:
+                    leaks.append((f"{where}.source_id", node["source_id"]))
+            for key, value in node.items():
+                sources(value, f"{where}.{key}")
+        elif isinstance(node, list):
+            for i, value in enumerate(node):
+                sources(value, f"{where}[{i}]")
 
-    def own_row_of_the_other_table(where, value):
-        if not isinstance(value, int) or not where.endswith(".source_id"):
-            return False
-        sibling = node(where.rsplit(".", 1)[0])["source"]
-        return sibling not in private.get(value, set())
-
-    return [(where, value) for where, value in leaks
-            if not own_row_of_the_other_table(where, value)
-            and not (where.endswith(".account_id") and isinstance(value, int))]
+    sources(body, "$")
+    return leaks
 
 
 def test_leaks_keeps_a_private_id_shared_by_both_tables_per_table():

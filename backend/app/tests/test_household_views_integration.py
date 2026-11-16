@@ -143,7 +143,7 @@ def test_transactions_view_never_leaks_partner_or_private_records(hh, sw_client,
     assert body["total"] == 2
     [shown] = [t for t in body["items"] if t["id"] == internet]
     assert shown["display_description"] == "Household internet" and shown["view"] == "limited"
-    assert sw_leaks(body, private_ids=[hh["a_private"], hh["a_card"], hh["b_private"]],
+    assert sw_leaks(body, private_ids={"account": [hh["a_private"], hh["a_card"], hh["b_private"]]},
                     numbers=(66.61, 77.17)) == []
     # B, a direct editor holding no share from A, has no view of A; A's own view
     # holds every record on the joint account and A's occurrence, not A's privates.
@@ -191,7 +191,8 @@ def test_upcoming_view_lists_the_occurrence_once_and_no_private_spending(hh, sw_
         ("2026-10-12", "Household internet", 100.0, 0.0),
         ("2026-10-15", "Household rent", 120.0, -120.0),
     ]
-    assert sw_leaks(items, private_ids=[hh["a_private"], hh["a_card"]], numbers=(66.61,)) == []
+    assert sw_leaks(items, private_ids={"account": [hh["a_private"], hh["a_card"]]},
+                    numbers=(66.61,)) == []
 
 
 # --- Monthly totals: the money cases, posted and projected -------------------------------------
