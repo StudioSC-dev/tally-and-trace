@@ -19,13 +19,18 @@ Only a test that ran and failed on an assertion counts as a failure; an error
 missing test fails the check. Exits 0 when every step holds, 1 when one does
 not, 2 for setup errors.
 
-Needs ``DATABASE_URL`` pointing at a local throwaway Postgres (the test
-suite's guard applies; migrations are run to head on it), the backend's Python
+Needs ``DATABASE_URL`` pointing at a local throwaway Postgres. Before anything
+else runs, the URL and the environment are vetted by the test suite's own guard
+(``backend/app/tests/_db_guard.py``: a local host, a ``tt_test_*`` or
+``tally_trace_test`` database, no libpq routing variable); anything else exits 2
+with no database command run. Migrations are then run to head on it. Also needs
+the backend's Python
 (run this script with it), and pnpm with the workspace's packages in its store.
 
 Usage, from the repo root:
   DATABASE_URL=postgresql://... SECRET_KEY=... python scripts/installment_final_amount_revert_and_fail.py
 """
+import importlib.util
 import json
 import os
 import subprocess
@@ -63,6 +68,15 @@ SPLIT_TO = """  // AC7 revert: STU-631's rule, rounded down with the remainder o
 
 class SetupError(Exception):
     pass
+
+
+def db_guard():
+    """The test suite's throwaway-database guard (stdlib-only, so loading it touches no database)."""
+    spec = importlib.util.spec_from_file_location(
+        "_db_guard", ROOT / "backend" / "app" / "tests" / "_db_guard.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def run(cmd, cwd, env=None, check=True):
@@ -141,8 +155,12 @@ def split_outcome(tree: Path, scratch: Path, label: str) -> str:
 
 
 def main() -> int:
-    if not os.environ.get("DATABASE_URL"):
-        print("DATABASE_URL is not set (a local throwaway database)", file=sys.stderr)
+    # The conftest's rule, on the URL and the environment every database command runs with.
+    guard = db_guard()
+    refusal = (guard.check_test_database_url(os.environ.get("DATABASE_URL", ""))
+               or guard.check_environment(backend_env()))
+    if refusal:
+        print(f"refusing to run: {refusal} (a local throwaway database is required)", file=sys.stderr)
         return 2
     own_status = run(["git", "status", "--porcelain"], cwd=ROOT).stdout
     head = run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT).stdout.strip()
