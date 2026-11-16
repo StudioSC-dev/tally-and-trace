@@ -35,8 +35,10 @@ import type { ScheduleFieldKey } from '../components/RecurringScheduleFields'
 import { RepeatSection } from '../components/transactions/RepeatSection'
 import { DescriptionAutofillInput } from '../components/transactions/DescriptionAutofillInput'
 import type { RepeatErrorKey } from '../components/transactions/RepeatSection'
-import { InstallmentSection } from '../components/transactions/InstallmentSection'
-import type { InstallmentField, InstallmentPreview } from '../components/transactions/InstallmentSection'
+import { InstallmentSection, InstallmentFieldError } from '../components/transactions/InstallmentSection'
+import type { InstallmentPreview } from '../components/transactions/InstallmentSection'
+import { installmentErrorProps } from '../components/transactions/installmentField'
+import type { InstallmentField } from '../components/transactions/installmentField'
 import { AccountPicker, CategoryPicker } from '../components/GroupedPicker'
 import { useRecentPicks } from '../hooks/useRecentPicks'
 import { DueAndOverdueSection } from '../components/transactions/DueAndOverdueSection'
@@ -1115,8 +1117,18 @@ export function TransactionsPage() {
     setInstallmentError(null)
     setInstallment((prev) => ({ ...prev, ...update }))
   }
+  // The Amount box holds the purchase total while Installment is on: an amount typed before
+  // becomes the total, and the total is kept as the amount when it is turned off (STU-656).
   const toggleInstallment = (on: boolean) => {
-    changeInstallment({ on })
+    const amountKey = formData.is_posted ? 'amount' : 'projected_amount'
+    if (on) {
+      const typed = formData[amountKey]
+      changeInstallment({ on, total: typed === undefined ? installment.total : String(typed) })
+    } else {
+      const total = Number(installment.total.trim().replace(/,/g, ''))
+      changeInstallment({ on })
+      setFormData((prev) => ({ ...prev, [amountKey]: installment.total.trim() !== '' && Number.isFinite(total) ? total : undefined }))
+    }
     if (on) {
       // One new entry at a time, and a transaction that starts its own entry links to no other.
       setRepeatOn(false)
@@ -1528,7 +1540,9 @@ export function TransactionsPage() {
     setFieldErrors({})
     setRepeatErrors({})
     setInstallmentErrors({ [key]: message })
-    focusField(transactionForm.current?.querySelector<HTMLElement>(`[data-field="${key}"]`) ?? null)
+    // The total is the Amount box's.
+    const selector = key === 'installment_total' ? '[data-installment-total]' : `[data-field="${key}"]`
+    focusField(transactionForm.current?.querySelector<HTMLElement>(selector) ?? null)
   }
 
   // A refused save's field takes focus once its form has reopened.
@@ -4031,13 +4045,27 @@ export function TransactionsPage() {
 
               {!formData.is_posted && (
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  {!installmentActive && (
                   <div>
-                    <label className="label">{crossCurrencyTransfer ? `Amount sent (${formData.currency})` : 'Amount'}</label>
+                    <label className="label" htmlFor="transaction-projected-amount">{installmentActive ? 'Purchase total' : crossCurrencyTransfer ? `Amount sent (${formData.currency})` : 'Amount'}</label>
                     <div className="relative">
                       <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-muted text-sm">
                         {projectedCurrencySymbol}
                       </span>
+                      {installmentActive ? (
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          autoComplete="off"
+                          value={installment.total}
+                          onChange={(e) => changeInstallment({ total: e.target.value })}
+                          className="input-field pl-7 focus-ring"
+                          placeholder="0.00"
+                          id="transaction-projected-amount"
+                          data-field="projected_amount"
+                          data-installment-total
+                          {...installmentErrorProps('installment_total', installmentErrors.installment_total)}
+                        />
+                      ) : (
                       <input
                         type="number"
                         step="0.01"
@@ -4053,14 +4081,17 @@ export function TransactionsPage() {
                         }}
                         className="input-field pl-7 focus-ring"
                         placeholder="0.00"
+                        id="transaction-projected-amount"
                         data-field="projected_amount"
                         {...fieldErrorProps(fieldErrors, 'projected_amount', fieldErrorId('projected_amount'))}
                   required
                       />
+                      )}
                     </div>
-                    <FieldErrorText field="projected_amount" message={fieldErrors.projected_amount} />
+                    {installmentActive
+                      ? <InstallmentFieldError field="installment_total" message={installmentErrors.installment_total} />
+                      : <FieldErrorText field="projected_amount" message={fieldErrors.projected_amount} />}
                   </div>
-                  )}
                   <div>
                     <label className="label">Currency</label>
                     <select
@@ -4153,13 +4184,28 @@ export function TransactionsPage() {
                 </div>
               )}
               
-              {formData.is_posted && !installmentActive && (
+              {formData.is_posted && (
               <div>
-                  <label className="label">{crossCurrencyTransfer ? `Amount sent (${formData.currency})` : 'Amount'}</label>
+                  <label className="label" htmlFor="transaction-amount">{installmentActive ? 'Purchase total' : crossCurrencyTransfer ? `Amount sent (${formData.currency})` : 'Amount'}</label>
                   <div className="relative">
                     <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-muted text-sm">
                       {formCurrencySymbol}
                     </span>
+                {installmentActive ? (
+                <input
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      value={installment.total}
+                      onChange={(e) => changeInstallment({ total: e.target.value })}
+                      className="input-field pl-7 focus-ring"
+                      placeholder="0.00"
+                      id="transaction-amount"
+                      data-field="amount"
+                      data-installment-total
+                      {...installmentErrorProps('installment_total', installmentErrors.installment_total)}
+                />
+                ) : (
                 <input
                       type="number"
                       step="0.01"
@@ -4175,12 +4221,16 @@ export function TransactionsPage() {
                       }}
                       className="input-field pl-7 focus-ring"
                       placeholder="0.00"
+                      id="transaction-amount"
                       data-field="amount"
                       {...fieldErrorProps(fieldErrors, 'amount', fieldErrorId('amount'))}
                   required
                 />
+                )}
               </div>
-                  <FieldErrorText field="amount" message={fieldErrors.amount} />
+                  {installmentActive
+                    ? <InstallmentFieldError field="installment_total" message={installmentErrors.installment_total} />
+                    : <FieldErrorText field="amount" message={fieldErrors.amount} />}
                 </div>
               )}
               
@@ -4286,9 +4336,7 @@ export function TransactionsPage() {
                   onToggle={toggleInstallment}
                   total={installment.total}
                   months={installment.months}
-                  onTotalChange={(total) => changeInstallment({ total })}
                   onMonthsChange={(months) => changeInstallment({ months })}
-                  symbol={getCurrencySymbol(installmentCurrency)}
                   errors={installmentErrors}
                   error={installmentError}
                   preview={installmentPreview}
