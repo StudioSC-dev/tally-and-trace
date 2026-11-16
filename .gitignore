@@ -127,3 +127,7 @@ temp/
 
 # Claude Code working docs
 HANDOVER.md
+
+# Playwright (frontend e2e)
+frontend/test-results/
+frontend/playwright-report/
