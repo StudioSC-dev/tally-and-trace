@@ -64,6 +64,24 @@ ZERO_REMAINING_MESSAGE = (
 )
 
 
+FINAL_AMOUNT_MESSAGE = (
+    "final_amount is only allowed on an entry with a set number of payments "
+    "(end_mode 'after_occurrences' with max_occurrences)"
+)
+
+
+def final_amount_allowed(final_amount, end_mode: Optional[str],
+                         max_occurrences: Optional[int]) -> bool:
+    """A last payment's own amount needs a last payment: a finite count (STU-658)."""
+    return final_amount is None or (end_mode == "after_occurrences"
+                                    and max_occurrences is not None)
+
+
+def final_amount_field():
+    """``final_amount`` as a request takes it: more than 0, at most two decimal places."""
+    return Field(None, gt=0, max_digits=15, decimal_places=2, allow_inf_nan=False)
+
+
 def zero_remaining_allowed(end_mode: str, max_occurrences: Optional[int], is_active: Optional[bool]) -> bool:
     """0 remaining means a completed installment: only valid when inactive."""
     if max_occurrences != 0:
@@ -73,6 +91,9 @@ def zero_remaining_allowed(end_mode: str, max_occurrences: Optional[int], is_act
 
 class BudgetEntryCreate(BudgetEntryBase):
     tag_ids: TagIds = tag_ids_create_field()
+    # The last occurrence's amount when it differs from ``amount`` (STU-658): only
+    # with a finite count. Omitted or null, every occurrence is ``amount``.
+    final_amount: Optional[Decimal] = final_amount_field()
 
     # STU-427: a new entry's dates are bounded (app/core/record_dates.py). An
     # edit checks only the dates it changes (routers/budget_entries.py
@@ -91,6 +112,12 @@ class BudgetEntryCreate(BudgetEntryBase):
     def _zero_remaining_only_when_completed(self):
         if not zero_remaining_allowed(self.end_mode, self.max_occurrences, self.is_active):
             raise ValueError(ZERO_REMAINING_MESSAGE)
+        return self
+
+    @model_validator(mode="after")
+    def _final_amount_needs_a_count(self):
+        if not final_amount_allowed(self.final_amount, self.end_mode, self.max_occurrences):
+            raise ValueError(FINAL_AMOUNT_MESSAGE)
         return self
 
 
@@ -119,6 +146,9 @@ class BudgetEntryUpdate(BaseModel):
     max_occurrences: Optional[int] = Field(None, ge=0, le=360)
     occurrences_paid_offset: Optional[int] = Field(None, ge=0, le=360)
     billing_kind: Optional[BillingKind] = None
+    # Null clears it, so every occurrence is ``amount`` (STU-658); the stored entry
+    # as edited must have a finite count (routers/budget_entries.py).
+    final_amount: Optional[Decimal] = final_amount_field()
     tag_ids: Optional[TagIds] = tag_ids_update_field()
     # The ``updated_at`` of the copy the edit was made from, sent back unchanged.
     # When sent (null included) it must equal the stored value exactly, or the
@@ -147,6 +177,8 @@ class BudgetEntryFields(BudgetEntryBase):
     # Installments only ("n of m"): occurrences materialised so far, counted from the
     # linked transactions. None for open-ended entries, where the notion doesn't apply.
     occurrences_paid: Optional[int] = None
+    # The last occurrence's amount when it differs (STU-658); null: every one is ``amount``.
+    final_amount: Optional[float] = None
     # Read-only, derived (services/recurring_kinds.py); null for income and transfers.
     kind: Optional[EntryKind] = None
     # Read-only, derived from the flag; null when the entry names no settlement.
@@ -198,6 +230,7 @@ class SharedFullRecurringEntry(BaseModel):
     max_occurrences: Optional[int] = None
     occurrences_paid_offset: int = 0
     occurrences_paid: Optional[int] = None
+    final_amount: Optional[float] = None
     billing_kind: Optional[BillingKind] = None
     kind: Optional[EntryKind] = None
     settlement: Optional[Settlement] = None

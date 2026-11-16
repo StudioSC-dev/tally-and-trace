@@ -155,6 +155,10 @@ def _entry_in(source: _EntrySource, repeat: RepeatSchedule) -> BudgetEntryCreate
         "allocation_id": source.allocation_id,
         "tag_ids": source.tag_ids,
     }
+    if repeat.final_amount is not None:
+        # The last payment's own amount (STU-658); the entry's rules refuse it
+        # without a finite count.
+        fields["final_amount"] = repeat.final_amount
     for name in ("anchor_day", "day_rule", "billing_kind"):
         if name in repeat.model_fields_set:
             fields[name] = getattr(repeat, name)
