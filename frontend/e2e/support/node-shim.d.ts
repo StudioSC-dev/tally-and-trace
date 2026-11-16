@@ -15,8 +15,13 @@ declare module 'node:path' {
 declare module 'node:fs' {
   const fs: {
     existsSync(p: string): boolean
+    readFileSync(p: string, encoding: 'utf8'): string
   }
   export default fs
+}
+
+declare module 'node:url' {
+  export function fileURLToPath(url: URL | string): string
 }
 
 declare module 'node:child_process' {

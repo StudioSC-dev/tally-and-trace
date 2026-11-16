@@ -1,4 +1,6 @@
+import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { expect, test } from '@playwright/test'
 import type { User } from '@tally-trace/shared'
@@ -56,7 +58,13 @@ test.describe('support', () => {
 
   test('e2e typecheck rejects invalid mock types', () => {
     test.setTimeout(120_000)
-    const frontend = path.resolve(test.info().config.rootDir, '..')
+    // This spec lives in <frontend>/e2e, so the frontend package dir is one level up from this file.
+    const frontend = fileURLToPath(new URL('..', import.meta.url))
+    const pkgFile = path.join(frontend, 'package.json')
+    const pkgName = fs.existsSync(pkgFile) ? (JSON.parse(fs.readFileSync(pkgFile, 'utf8')) as { name?: string }).name : undefined
+    expect(pkgName, `expected ${pkgFile} to exist with name "tally-and-trace-frontend"; the frontend dir was resolved wrongly`).toBe(
+      'tally-and-trace-frontend',
+    )
     const run = (project: string) =>
       spawnSync('pnpm', ['exec', 'tsc', '-p', project, '--noEmit'], { cwd: frontend, encoding: 'utf8' })
 
