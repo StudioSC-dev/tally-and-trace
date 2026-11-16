@@ -73,7 +73,7 @@ def test_household_occurrences_on_a_private_card_wallet_and_accountless_entry(hh
         ("2026-11-20", "Household water", 45.0, 0.0, None),  # monthly
     ]
     assert all(set(i) == LIMITED_EVENT_KEYS for i in items)
-    assert sw_leaks(_upcoming(sw_db, c), private_ids=[hh["a_card"], hh["a_wallet"]]) == []
+    assert sw_leaks(_upcoming(sw_db, c), private_ids={"account": [hh["a_card"], hh["a_wallet"]]}) == []
     # Never cash: no payable, no unassigned cash, the same closings.
     assert not [p for p in payable_rows(sw_db, c["id"], days=60, reference=REF)
                 if p.get("kind") == "household"]

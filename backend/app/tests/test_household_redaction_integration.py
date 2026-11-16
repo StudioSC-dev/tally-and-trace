@@ -70,7 +70,7 @@ def test_an_explicit_household_record_on_a_hidden_account_shows_its_description(
     assert body["account"] == {"id": None, "name": "Other account"}
     assert _tag_ids(body) == [hh["hh_a"]]
     assert not any(body["permissions"].values())
-    assert sw_leaks(body, private_ids=[hh["a_private"]]) == []
+    assert sw_leaks(body, private_ids={"account": [hh["a_private"]]}) == []
 
 
 def test_an_explicit_household_payment_into_a_hidden_loan_shows_its_text_not_the_split(

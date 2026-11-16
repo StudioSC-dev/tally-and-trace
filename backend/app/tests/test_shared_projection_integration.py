@@ -8,7 +8,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.tests.conftest import API, PRIVATE, sw_db_reachable, sw_leaks, sw_post, sw_share
+from app.tests.conftest import API, PRIVATE, SW_REFS, sw_db_reachable, sw_leaks, sw_post, sw_share
 
 pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
 
@@ -79,7 +79,7 @@ def test_owners_private_loan_paid_from_joint_is_a_neutral_loan_payment(sw, sw_cl
     assert _legs(e) == [(sw["joint"], Decimal("-4500.00"), True)]
     assert e["amount"] == Decimal("-4500.00") and e["face_amount"] == Decimal("4500.00")
     assert e["kind"] == "loan_payment" and e["loan_payment"] is True
-    assert sw_leaks(e, {sw["a_loan"], sw["a_private"]}) == []
+    assert sw_leaks(e, {"account": [sw["a_loan"], sw["a_private"]]}, refs=SW_REFS) == []
 
 
 def test_discovered_loan_routed_to_joint_is_a_neutral_payable(sw, sw_client, sw_db):
@@ -192,7 +192,7 @@ def test_owners_private_card_routed_to_joint_is_a_neutral_card_payment(sw, sw_cl
     assert _legs(e) == [(sw["joint"], Decimal("-300.00"), True)]
     for key in ("statement_close", "statement_balance"):
         assert key not in e
-    assert sw_leaks(e, {sw["a_card"], sw["a_private"]}) == []
+    assert sw_leaks(e, {"account": [sw["a_card"], sw["a_private"]]}, refs=SW_REFS) == []
 
 
 def test_hidden_primary_with_joint_overflow_gets_no_leg(sw, sw_client, sw_db):
@@ -223,7 +223,7 @@ def test_visible_card_with_a_hidden_payment_account_has_no_leg(sw, sw_client, sw
     assert e["source_id"] == card and e["legs"] == []
     assert e["funding_account_id"] is None and e["overflow_account_id"] is None
     assert e["amount"] == 0 and e["face_amount"] == Decimal("120.00")
-    assert sw_leaks(e, {sw["a_private"]}) == []
+    assert sw_leaks(e, {"account": [sw["a_private"]]}, refs=SW_REFS) == []
     [owner] = [e for e in _events(sw_db, sw["a"]) if e["source"] == "statement"]
     assert _legs(owner) == [(sw["a_private"], Decimal("-120.00"), True)]
 
@@ -250,7 +250,7 @@ def test_transfer_into_the_partners_loan_is_neutral_for_the_owner(sw, sw_client,
     assert e["amount"] == Decimal("-730.00")
     assert _legs(e) == [(sw["joint"], Decimal("-730.00"), True)]
     assert "Bea student loan" not in str(e)
-    assert sw_leaks(e, {b_loan}) == []
+    assert sw_leaks(e, {"account": [b_loan]}, refs=SW_REFS) == []
 
 
 def test_accountless_entries_never_reach_a_sharees_cash(sw, sw_client, sw_db):
@@ -318,9 +318,9 @@ def test_limited_events_have_the_allowlist_shape(sw, sw_client, sw_db):
     assert card == {**card, "display_name": "Card payment", "cash_delta": -300.0,
                     "face_amount": 300.0, "date": "2026-11-05",
                     "account": {"id": sw["joint"], "name": "Joint account"}}
-    secret = {sw["a_card"], sw["a_loan"], sw["a_private"]}
+    secret = {"account": [sw["a_card"], sw["a_loan"], sw["a_private"]]}
     for body in (upcoming, payables, timeline):
-        assert sw_leaks(body, secret, numbers=[500]) == []
+        assert sw_leaks(body, secret, numbers=[500], refs=SW_REFS) == []
 
 
 @pytest.mark.parametrize("who", ["b", "v", "d"])
@@ -338,13 +338,13 @@ def test_projection_endpoints_carry_no_sentinel(sw, sw_client, sw_db, who):
         "name": f"{PRIVATE} insurance", "entry_type": "expense", "amount": 60,
         "next_occurrence": soon, "account_id": sw["joint"],
         "overflow_account_id": sw["a_private"]})
-    secret = {sw["a_card"], sw["a_loan"], sw["a_private"]}
+    secret = {"account": [sw["a_card"], sw["a_loan"], sw["a_private"]]}
     for path in ("/forecast/upcoming?days=60", "/forecast/timeline?days=60",
                  "/forecast/cashflow?months=3", "/forecast/disposable",
                  "/dashboard/snapshot"):
         r = sw_client.get(f"{API}{path}", headers=sw[who]["headers"])
         assert r.status_code == 200, r.text
-        assert sw_leaks(r.json(), secret, numbers=[500]) == [], path
+        assert sw_leaks(r.json(), secret, numbers=[500], refs=SW_REFS) == [], path
 
 
 # --- Statement legs: viewable accounts keep theirs (audit round 2, 7) --------------------
@@ -581,7 +581,7 @@ def test_a_hidden_wallet_flag_changes_nothing_the_sharee_is_shown(sw, sw_client,
     after = shown()
     for path in before:
         assert after[path] == before[path], path
-    assert sw_leaks(after, {hidden}) == []
+    assert sw_leaks(after, {"account": [hidden]}, refs=SW_REFS) == []
     # The owner, who sees the account, gets it as a wallet: a top-up each month.
     sw_db.expire_all()
     own = sw_client.get(f"{API}/forecast/disposable", headers=a["headers"]).json()
@@ -636,7 +636,7 @@ def test_a_hidden_cards_billing_settings_change_nothing_the_sharee_is_shown(
             assert unbilled[path] == billed[path], (who, path)
         events = [e for e in _events(sw_db, sw[who]) if e["counts_as_cash"]]
         assert [e["amount"] for e in events] == [Decimal(str(expected))], (who, events)
-        assert sw_leaks(unbilled, {card}) == []
+        assert sw_leaks(unbilled, {"account": [card]}, refs=SW_REFS) == []
 
 
 # --- A hidden card's billing settings change no statement (audit round 4, 2) -------------
@@ -697,7 +697,7 @@ def test_a_hidden_cards_billing_settings_change_no_shared_statement(sw, sw_clien
         for path in billed:
             assert unbilled[path] == billed[path], (who, path)
         assert payable(who) == [Decimal("-900.00")], who
-        assert sw_leaks(unbilled, {private_card}) == []
+        assert sw_leaks(unbilled, {"account": [private_card]}, refs=SW_REFS) == []
 
     cycle(True)
     assert due(shown("a")) == 900.0

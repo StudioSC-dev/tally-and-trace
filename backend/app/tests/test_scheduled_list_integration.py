@@ -388,7 +388,8 @@ def test_scheduled_access(sw, sw_client, sw_db, monkeypatch):
     assert summary(bodies["s"]) == []
     for k in ("b", "d", "v", "s"):
         assert PRIVATE not in json.dumps(bodies[k])
-        assert sw_leaks(bodies[k], private_ids=[private, private_row]) == []
+        assert sw_leaks(bodies[k], private_ids={"entry": [private],
+                                                    "transaction": [private_row]}) == []
 
     # An account id the caller can't view matches nothing.
     assert _scheduled(client, s, account_ids=[sw["joint"]], **params)["items"] == []

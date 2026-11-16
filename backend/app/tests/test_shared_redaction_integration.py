@@ -7,7 +7,9 @@ bodies for it, for private ids and for a hidden loan's interest.
 """
 import pytest
 
-from app.tests.conftest import API, PRIVATE, sw_db_reachable, sw_leaks, sw_post, sw_share
+from app.tests.conftest import (
+    API, PRIVATE, SW_REFS, sw_db_reachable, sw_leaks, sw_post, sw_share,
+)
 
 pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
 
@@ -112,8 +114,9 @@ def house(sw, sw_client, sw_db):
         "joint_entry": joint_entry, "joint_txn": joint_txn, "private_txn": private_txn,
         "deposit": deposit, "loan_payment": loan_payment, "overflow_entry": overflow_entry,
         "private_entry": private_entry, "card": card, "shared_loan": shared_loan,
-        "private_ids": {private, loan, sw["a_card"], secret_cat, goal, secret_tag,
-                        private_txn, private_entry},
+        "private_ids": {"account": [private, loan, sw["a_card"]], "category": [secret_cat],
+                        "allocation": [goal], "tag": [secret_tag],
+                        "transaction": [private_txn], "entry": [private_entry]},
     }
 
 
@@ -143,7 +146,7 @@ def test_creator_gets_full_editor_shared_full_viewer_limited(sw, sw_client, hous
 
 def test_non_creator_editor_response_has_no_owner_private_ids(sw, sw_client, house):
     body = _get(sw_client, sw["b"], f"/transactions/{house['joint_txn']}")
-    assert sw_leaks(body, house["private_ids"]) == []
+    assert sw_leaks(body, house["private_ids"], refs=SW_REFS) == []
     assert not OWNER_PRIVATE & set(body)
     entry = _get(sw_client, sw["b"], f"/budget-entries/{house['joint_entry']}")
     assert entry["view"] == "shared_full"
@@ -160,7 +163,7 @@ def test_limited_entry_allowlist(sw, sw_client, house):
         assert body["display_name"] == "Recurring expense"
         assert body["category_name"] is None
         assert body["account"] == {"id": sw["joint"], "name": "Joint account"}
-        assert sw_leaks(body, house["private_ids"]) == []
+        assert sw_leaks(body, house["private_ids"], refs=SW_REFS) == []
 
 
 def test_transfer_from_a_hidden_account_is_neutral(sw, sw_client, house):
@@ -182,7 +185,7 @@ def test_payment_to_a_hidden_loan_shows_no_interest(sw, sw_client, house):
         assert body["amount"] == pytest.approx(4000 + INTEREST)
         assert body["display_description"] == "Loan payment"
         assert body["counterpart"] == {"id": None, "name": "Loan payment"}
-        assert sw_leaks(body, house["private_ids"], numbers=[INTEREST]) == []
+        assert sw_leaks(body, house["private_ids"], refs=SW_REFS, numbers=[INTEREST]) == []
 
 
 def test_balance_history_entries(sw, sw_client, house):
@@ -190,14 +193,14 @@ def test_balance_history_entries(sw, sw_client, house):
     assert body["balance_history"]
     for entry in body["balance_history"]:
         assert set(entry) == LIMITED_BALANCE_KEYS
-    assert sw_leaks(body, house["private_ids"], numbers=[INTEREST]) == []
+    assert sw_leaks(body, house["private_ids"], refs=SW_REFS, numbers=[INTEREST]) == []
     own = _get(sw_client, sw["a"], f"/accounts/{sw['joint']}/balance")
     assert {e["view"] for e in own["balance_history"]} == {"full"}
     assert all("transaction_id" in e for e in own["balance_history"])
     editor = _get(sw_client, sw["b"], f"/accounts/{sw['joint']}/balance")
     views = {e["view"] for e in editor["balance_history"]}
     assert views == {"shared_full", "limited"}
-    assert sw_leaks(editor, house["private_ids"], numbers=[INTEREST]) == []
+    assert sw_leaks(editor, house["private_ids"], refs=SW_REFS, numbers=[INTEREST]) == []
 
 
 def test_viewer_gets_the_limited_loan_schedule(sw, sw_client, house):
@@ -242,12 +245,12 @@ def test_viewer_gets_limited_statements(sw, sw_client, house):
         "Card groceries", "Transfer"]
     for line in statement["lines"]:
         assert set(line) == {"date", "display_description", "amount"}
-    assert sw_leaks(body, house["private_ids"]) == []
+    assert sw_leaks(body, house["private_ids"], refs=SW_REFS) == []
     full = _get(sw_client, sw["b"], f"/accounts/{house['card']}/statements")
     assert full["view"] == "full"
     assert full["statements"][0]["statement_balance"] == 505.0
     assert all("transaction_id" in line for line in full["statements"][0]["lines"])
-    assert sw_leaks(full, house["private_ids"]) == []
+    assert sw_leaks(full, house["private_ids"], refs=SW_REFS) == []
 
 
 def test_statements_need_a_role_on_the_card(sw, sw_client, house):
@@ -278,7 +281,7 @@ def test_account_role_permissions_and_field_visibility(sw, sw_client, house):
             for field in ("description", "credit_limit", "payment_account_id",
                           "payment_overflow_account_id"):
                 assert body[field] is None, field
-            assert sw_leaks(body, house["private_ids"]) == []
+            assert sw_leaks(body, house["private_ids"], refs=SW_REFS) == []
         loan = _get(sw_client, sw[who], f"/accounts/{house['shared_loan']}")
         if not manage:
             for field in ("loan_annual_rate", "loan_term_months", "loan_payment_amount",
@@ -302,7 +305,7 @@ def test_whole_responses_carry_no_sentinel(sw, sw_client, house, who):
                           {"start_date": "2026-01-01T00:00:00",
                            "end_date": "2026-12-31T00:00:00"})):
         body = _get(sw_client, caller, path, **params)
-        assert sw_leaks(body, house["private_ids"], numbers=[INTEREST]) == [], path
+        assert sw_leaks(body, house["private_ids"], refs=SW_REFS, numbers=[INTEREST]) == [], path
 
 
 @pytest.mark.parametrize("who", ["b", "v", "d"])
@@ -616,7 +619,7 @@ def test_a_transfer_from_a_hidden_card_into_a_shared_loan_shows_its_interest(
         assert (exported["amount"], exported["transfer_fee"]) == ("4000.00", "777.77")
         assert exported["account"] == {"id": None, "name": "Card payment"}
         for tree in (got, listed, schedule, history, summary, body):
-            assert sw_leaks(tree, private_ids=[sw["a_card"]]) == [], who
+            assert sw_leaks(tree, private_ids={"account": [sw["a_card"]]}, refs=SW_REFS) == [], who
         for text in texts:
             assert PRIVATE not in text
     # The owner sees the same interest, under the same loan.
