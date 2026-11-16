@@ -534,7 +534,7 @@ export type BudgetEntryInput = Partial<
   Omit<
     FullBudgetEntry,
     'id' | 'view' | 'tags' | 'permissions' | 'created_by' | 'created_at' | 'updated_at' | 'occurrences_paid' | 'kind'
-    | 'installment_reviewed' | 'auto_post_enabled' | 'settlement' | 'end_date'
+    | 'installment_reviewed' | 'auto_post_enabled' | 'settlement' | 'end_date' | 'next_occurrence_amount'
   >
 > &
   TagIdsInput & {
