@@ -76,14 +76,14 @@ export function payChoices(
 }
 
 /**
- * The accounts a card can be paid from: same currency, the caller can add transactions,
- * active, and not a credit card or loan (and not the card itself).
+ * The accounts a card can be paid from: the caller can add transactions, active, and not a
+ * credit card or loan (and not the card itself). Any currency (STU-654): a payer in another
+ * currency sends its own amount and the card receives `received_amount`.
  */
-export function cardPayers(accounts: readonly Account[], card: Pick<Account, 'id' | 'currency'>): Account[] {
+export function cardPayers(accounts: readonly Account[], card: Pick<Account, 'id'>): Account[] {
   return accounts.filter(
     (a) =>
       a.id !== card.id &&
-      a.currency === card.currency &&
       a.permissions.can_add_transactions &&
       a.is_active !== false &&
       a.account_type !== 'credit' &&
@@ -96,12 +96,14 @@ export function isPlannedPayment(paymentDate: string, today: string): boolean {
   return paymentDate > today
 }
 
-/** The POST /cards/{id}/payments body; `payment_date` stays a `YYYY-MM-DD` day. */
+/** The POST /cards/{id}/payments body (`amount` is the payer's currency); `payment_date` stays a `YYYY-MM-DD` day. */
 export function cardPaymentBody(input: {
   amount: number
   fromAccountId: number
   paymentDate: string
   description?: string
+  /** The card's currency; only for a payer in another currency. */
+  receivedAmount?: number
 }): CardPaymentInput {
   const description = input.description?.trim()
   return {
@@ -109,6 +111,7 @@ export function cardPaymentBody(input: {
     from_account_id: input.fromAccountId,
     payment_date: input.paymentDate.slice(0, 10),
     ...(description ? { description } : {}),
+    ...(input.receivedAmount !== undefined ? { received_amount: cents(input.receivedAmount) } : {}),
   }
 }
 

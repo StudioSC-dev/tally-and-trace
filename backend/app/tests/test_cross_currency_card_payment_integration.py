@@ -22,18 +22,6 @@ REF = FX_REF  # 2026-11-02 00:00, naive UTC
 RATE_TO_USD = 0.017241
 
 
-@pytest.fixture
-def frozen(monkeypatch):
-    """Every clock a projection or statement route reads, frozen at REF."""
-    from app.core import time as time_module
-    from app.routers import accounts as accounts_router
-    from app.services import forecast as forecast_module
-
-    for module in (time_module, accounts_router, forecast_module):
-        monkeypatch.setattr(module, "naive_utc_now", lambda: REF)
-    return REF
-
-
 def _account(client, who, name, currency, balance=0, account_type="checking", **extra):
     return sw_post(client, who, "/accounts/", {
         "name": name, "account_type": account_type, "currency": currency,
@@ -84,25 +72,6 @@ def _upcoming(client, who, name):
     return [i for i in r.json()["items"] if i.get("name") == name]
 
 
-@pytest.fixture
-def cc(sw_client, sw_people):
-    """Owner A: PHP Checking 50,000, USD Savings 1,000, EUR Cash 1,000 (no EUR
-    rate is stored) and a USD card paid from PHP Checking, with a posted USD
-    300 charge on 25 Oct (statement closing 19 Nov, due 1 Dec)."""
-    client = sw_client
-    a = sw_people("Cass", "Card")
-    php = _account(client, a, "PHP Checking", "PHP", 50_000)
-    usd = _account(client, a, "USD Savings", "USD", 1_000)
-    eur = _account(client, a, "EUR Cash", "EUR", 1_000)
-    card = _account(client, a, "USD Card", "USD", 0, "credit", billing_cycle_start=20,
-                    days_until_due_date=10, payment_account_id=php)
-    sw_post(client, a, "/transactions/", {
-        "account_id": card, "transaction_type": "debit", "amount": 300, "currency": "USD",
-        "transaction_date": "2026-10-25T00:00:00", "is_posted": True,
-        "description": "Diner"})
-    return {"a": a, "php": php, "usd": usd, "eur": eur, "card": card}
-
-
 # --- AC1: balances --------------------------------------------------------------------------
 
 def test_balances_move_by_sent_and_received(sw_client, sw_db, cc):
@@ -139,7 +108,7 @@ def test_balances_move_by_sent_and_received(sw_client, sw_db, cc):
 
 # --- AC2: a planned payment's estimate -----------------------------------------------------
 
-def test_pending_payment_shows_estimate(sw_client, sw_db, cc, frozen):
+def test_pending_payment_shows_estimate(sw_client, sw_db, cc, frozen_fx_ref):
     client, db, a = sw_client, sw_db, cc["a"]
     _pay(client, a, cc["php"], cc["card"], 5_800, day="2026-11-09", posted=False,
          description="Planned PHP payment")
@@ -162,7 +131,7 @@ def test_pending_payment_shows_estimate(sw_client, sw_db, cc, frozen):
 
 
 def test_pending_payment_with_no_rate_is_unconverted_and_pays_nothing(sw_client, sw_db, cc,
-                                                                      frozen):
+                                                                      frozen_fx_ref):
     client, a = sw_client, cc["a"]
     _pay(client, a, cc["eur"], cc["card"], 50, day="2026-11-09", posted=False,
          description="Planned EUR payment")
@@ -178,7 +147,7 @@ def test_pending_payment_with_no_rate_is_unconverted_and_pays_nothing(sw_client,
 
 # --- AC3: statements settle in the card's currency ----------------------------------------
 
-def test_statement_settles_in_card_currency(sw_client, sw_db, cc, frozen):
+def test_statement_settles_in_card_currency(sw_client, sw_db, cc, frozen_fx_ref):
     client, a = sw_client, cc["a"]
     assert _statement(client, a, cc["card"])["amount_due"] == 300.0
     _pay(client, a, cc["php"], cc["card"], 5_800, transfer_fee=20, received_amount=100)
@@ -195,7 +164,7 @@ def test_statement_settles_in_card_currency(sw_client, sw_db, cc, frozen):
     assert _payable(client, a, "USD Card") == []
 
 
-def test_card_credit_counts_a_planned_payment_at_its_estimate(sw_client, cc, frozen):
+def test_card_credit_counts_a_planned_payment_at_its_estimate(sw_client, cc, frozen_fx_ref):
     client, a = sw_client, cc["a"]
     card = _account(client, a, "Limit card", "USD", 0, "credit", billing_cycle_start=20,
                     days_until_due_date=10, payment_account_id=cc["php"], credit_limit=1_000)
@@ -210,7 +179,7 @@ def test_card_credit_counts_a_planned_payment_at_its_estimate(sw_client, cc, fro
 
 # --- AC4: routing ---------------------------------------------------------------------------
 
-def test_routing_allows_cross_currency(sw_client, sw_db, cc, frozen):
+def test_routing_allows_cross_currency(sw_client, sw_db, cc, frozen_fx_ref):
     client, a = sw_client, cc["a"]
     for field in ("payment_account_id", "payment_overflow_account_id"):
         r = client.post(f"{API}/accounts/", headers=a["headers"], json={
@@ -237,7 +206,7 @@ def test_routing_allows_cross_currency(sw_client, sw_db, cc, frozen):
 
 # --- AC6: same currency ---------------------------------------------------------------------
 
-def test_same_currency_payment_unchanged(sw_client, sw_db, cc, frozen):
+def test_same_currency_payment_unchanged(sw_client, sw_db, cc, frozen_fx_ref):
     client, db, a = sw_client, sw_db, cc["a"]
     txn = _pay(client, a, cc["usd"], cc["card"], 100, transfer_fee=1).json()
     assert (txn["currency"], txn["received_amount"]) == ("USD", None)
@@ -270,7 +239,7 @@ POSTED_CASES = [
 
 
 @pytest.mark.parametrize("extra, status", POSTED_CASES)
-def test_received_amount_validation_and_atomic_failure(sw_client, sw_db, cc, frozen,
+def test_received_amount_validation_and_atomic_failure(sw_client, sw_db, cc, frozen_fx_ref,
                                                        extra, status):
     client, db, a = sw_client, sw_db, cc["a"]
     before = _statement(client, a, cc["card"])

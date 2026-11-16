@@ -56,6 +56,8 @@ export interface CardPayDraft {
   amount: string
   payerId: number
   paymentDate: string
+  /** The amount sent, in the payer's currency, when it differs from the card's (`amount` is then the card's). */
+  sent?: string
 }
 
 /**

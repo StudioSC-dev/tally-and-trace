@@ -61,8 +61,9 @@ interface Props {
 }
 
 /**
- * Pay a credit card: one transfer from a same-currency account into the card, for any
- * amount. Payments settle the oldest statement first, so the dialog only suggests: Full
+ * Pay a credit card: one transfer from an account into the card, for any amount. From an
+ * account in another currency (STU-654) the dialog also asks for the amount sent, in the
+ * payer's currency; the amount field is then what the card receives, in the card's. Payments settle the oldest statement first, so the dialog only suggests: Full
  * (prefilled) clears the latest closed statement and every one before it; Minimum is
  * that statement's remaining minimum due. A day after Manila's today is a planned
  * payment. The statements and the day come from the server's Manila calendar, rechecked
@@ -96,6 +97,7 @@ export function CardPayDialog({ cardId, onClose, onPaid, background = false, res
 
   const [amountInput, setAmountInput] = useState<string | null>(restore?.draft.amount ?? null)
   const [payerInput, setPayerInput] = useState<number | null>(restore?.draft.payerId ?? null)
+  const [sentInput, setSentInput] = useState<string>(restore?.draft.sent ?? '')
   const [dateInput, setDateInput] = useState<string | null>(restore?.draft.paymentDate ?? null)
   const [error, setError] = useState<string | null>(restore?.error ?? null)
 
@@ -148,12 +150,19 @@ export function CardPayDialog({ cardId, onClose, onPaid, background = false, res
 
   const accounts = useMemo(() => accountsData?.items ?? [], [accountsData])
   const payers = useMemo(
-    () => (detail ? cardPayers(accounts, { id: cardId, currency: detail.currency }) : []),
+    () => (detail ? cardPayers(accounts, { id: cardId }) : []),
     [accounts, cardId, detail],
   )
   const card = accounts.find((a) => a.id === cardId)
-  const defaultPayer = payers.find((a) => a.id === card?.payment_account_id)?.id ?? payers[0]?.id ?? null
+  // The card's own payment account, else a payer in the card's currency, else the first.
+  const defaultPayer =
+    payers.find((a) => a.id === card?.payment_account_id)?.id ??
+    payers.find((a) => a.currency === detail?.currency)?.id ??
+    payers[0]?.id ??
+    null
   const payerId = payerInput !== null && payers.some((a) => a.id === payerInput) ? payerInput : defaultPayer
+  const payer = payers.find((a) => a.id === payerId)
+  const crossCurrency = payer !== undefined && detail !== undefined && payer.currency !== detail.currency
 
   const statements = detail?.statements ?? []
   const base = detail ? payChoices(statements, today) : null
@@ -200,8 +209,13 @@ export function CardPayDialog({ cardId, onClose, onPaid, background = false, res
 
   const handleSubmit = async () => {
     if (payerId === null) return
+    const sent = parseFloat(sentInput)
+    if (crossCurrency && !(sent > 0)) {
+      setError(`Enter the amount to send in ${payer.currency}`)
+      return
+    }
     if (!(amount > 0)) {
-      setError(`Enter the amount to pay in ${currency}`)
+      setError(crossCurrency ? `Enter the amount the card receives in ${currency}` : `Enter the amount to pay in ${currency}`)
       return
     }
     if (!validDate) {
@@ -214,10 +228,15 @@ export function CardPayDialog({ cardId, onClose, onPaid, background = false, res
       return
     }
     setError(null)
+    // Across currencies `amount` is what is sent and `received_amount` what the card gets.
+    const paymentBody = (sentFigure: number) =>
+      crossCurrency
+        ? cardPaymentBody({ amount: sentFigure, fromAccountId: payerId, paymentDate, receivedAmount: amount })
+        : cardPaymentBody({ amount, fromAccountId: payerId, paymentDate })
     if (background) {
       const cardName = detail?.name ?? 'card'
-      const body = cardPaymentBody({ amount, fromAccountId: payerId, paymentDate })
-      const draft: CardPayDraft = { cardId, amount: amountShown, payerId, paymentDate }
+      const body = paymentBody(sent)
+      const draft: CardPayDraft = { cardId, amount: amountShown, payerId, paymentDate, ...(crossCurrency ? { sent: sentInput } : {}) }
       dispatch(outboxActions.enqueued(dueAction(CARD_PAY_FORM, cardId, `Paying ${formatCurrency(amount, currency)} to ${cardName}…`, `Pay ${cardName}`, `cards/${cardId}/payments`, draft, body)))
       onClose()
       return
@@ -225,7 +244,7 @@ export function CardPayDialog({ cardId, onClose, onPaid, background = false, res
     try {
       await payCard({
         accountId: cardId,
-        data: cardPaymentBody({ amount, fromAccountId: payerId, paymentDate }),
+        data: paymentBody(sent),
       }).unwrap()
       onPaid?.()
       onClose()
@@ -275,7 +294,9 @@ export function CardPayDialog({ cardId, onClose, onPaid, background = false, res
           {!loading && !loadError && !notFound && detail && choices && (
             <>
               <div>
-                <label className="label" htmlFor={`${titleId}-amount`}>Amount ({currency})</label>
+                <label className="label" htmlFor={`${titleId}-amount`} data-testid="card-pay-amount-label">
+                  {crossCurrency ? `Amount received by the card (${currency})` : `Amount (${currency})`}
+                </label>
                 <div className="relative">
                   <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-muted text-sm">{getCurrencySymbol(currency)}</span>
                   <input
@@ -352,7 +373,7 @@ export function CardPayDialog({ cardId, onClose, onPaid, background = false, res
               <div>
                 <label className="label" htmlFor={`${titleId}-from`}>Pay from</label>
                 {payers.length === 0 ? (
-                  <p className="text-sm text-warn" data-testid="card-pay-no-payer">No {currency} account you can pay from.</p>
+                  <p className="text-sm text-warn" data-testid="card-pay-no-payer">No account you can pay from.</p>
                 ) : (
                   <select
                     id={`${titleId}-from`}
@@ -368,6 +389,32 @@ export function CardPayDialog({ cardId, onClose, onPaid, background = false, res
                   </select>
                 )}
               </div>
+
+              {crossCurrency && payer && (
+                <div>
+                  <label className="label" htmlFor={`${titleId}-sent`} data-testid="card-pay-sent-label">Amount sent ({payer.currency})</label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-muted text-sm">{getCurrencySymbol(payer.currency)}</span>
+                    <input
+                      id={`${titleId}-sent`}
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={sentInput}
+                      onChange={(e) => {
+                        setSentInput(e.target.value)
+                        setError(null)
+                      }}
+                      className="input-field pl-7 focus-ring"
+                      placeholder="0.00"
+                      data-testid="card-pay-sent"
+                    />
+                  </div>
+                  <p className="mt-1 text-xs text-muted" data-testid="card-pay-cross-note">
+                    {payer.name} is in {payer.currency}; {card?.name ?? 'the card'} is in {currency}. Enter what leaves {payer.name} and what the card receives.
+                  </p>
+                </div>
+              )}
 
               <div>
                 <label className="label" htmlFor={`${titleId}-date`}>Payment date</label>

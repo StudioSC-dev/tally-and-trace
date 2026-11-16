@@ -1,6 +1,6 @@
 """Pay a card (STU-343 Plan C, 2.6 and 4.1 commit 6).
 
-``POST /cards/{id}/payments`` records one transfer from a same-currency bank,
+``POST /cards/{id}/payments`` records one transfer from a bank,
 cash or e-wallet account into the card, for any amount. Payments settle the
 oldest statement first, so no statement is targeted. Owner and admin only. A
 day after Manila's today is a planned (pending) payment. The endpoint takes
@@ -25,9 +25,6 @@ from app.tests.test_statement_minimum_integration import (
 )
 
 pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
-
-USD_REFUSAL = ("Pay this card from a PHP account. Card payments are in the card's currency; "
-               "move the money into a PHP account first.")
 
 
 @pytest.fixture
@@ -130,18 +127,6 @@ def test_pay_full_clears_the_statement(world):
 
 
 # --- who and what may pay ---------------------------------------------------------------------
-
-def test_foreign_paying_account_is_refused(world):
-    w = world
-    client, me, card = w["client"], w["me"], w["card"]
-    usd = _account(client, me, "USD savings", "savings", balance=1_000, currency="USD")
-    r = client.post(f"{API}/cards/{card}/payments", json={
-        "amount": 100, "from_account_id": usd, "payment_date": "2027-03-18"},
-        headers=me["headers"])
-    assert r.status_code == 400, r.text
-    assert r.json()["detail"] == USD_REFUSAL
-    assert _rows_from(w["db"], usd) == 0
-
 
 def test_payer_rules(world):
     w = world

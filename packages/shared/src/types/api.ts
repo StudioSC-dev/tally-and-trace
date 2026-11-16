@@ -2117,13 +2117,15 @@ export interface CardCreditDetail {
   unposted: CardUnposted | null
 }
 
-/** POST /cards/{id}/payments. Money has at most 2 decimals. */
+/** POST /cards/{id}/payments. `amount` is in the payer's currency. Money has at most 2 decimals. */
 export interface CardPaymentInput {
   amount: number
   from_account_id: number
   /** `YYYY-MM-DD`; a later day than today is a planned payment. */
   payment_date: string
   description?: string | null
+  /** What the card receives, in its currency, when the payer is in another one. */
+  received_amount?: number | null
 }
 
 /** PUT /cards/{id}/statements/{close_date}/minimum-due. */
