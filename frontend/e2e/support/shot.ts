@@ -10,6 +10,6 @@ export async function shot(page: Page, name: string): Promise<string> {
   const info = test.info()
   const spec = path.basename(info.file).replace(/\.spec\.ts$/, '')
   const file = path.join(info.project.outputDir, 'screens', `${spec}-${name}-${info.project.name}.png`)
-  await page.screenshot({ path: file, fullPage: true })
+  await page.screenshot({ path: file, fullPage: true, animations: 'disabled' })
   return file
 }
