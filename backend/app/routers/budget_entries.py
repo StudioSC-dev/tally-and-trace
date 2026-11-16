@@ -78,7 +78,8 @@ from app.services import missed as missed_svc
 from app.services import payment_dates
 from app.services import posting
 from app.services.forecast import (
-    _clamp_day, _linked_rows, _naive, capped_distinct_days, iter_occurrences, occurrences_paid,
+    _clamp_day, _linked_rows, _naive, capped_distinct_days, iter_occurrences, next_occurrence_amount,
+    occurrences_paid,
 )
 from app.services.recurring_kinds import (
     auto_post_block, default_billing_kind, entry_kind, installment_close_day, is_capped,
@@ -124,6 +125,7 @@ def _attach_occurrence_counts(db: Session, entries: list) -> list:
     paid = occurrences_paid(db, entries)
     for entry in entries:
         entry.occurrences_paid = paid[entry.id]
+        entry.next_occurrence_amount = next_occurrence_amount(entry)
     return entries
 
 

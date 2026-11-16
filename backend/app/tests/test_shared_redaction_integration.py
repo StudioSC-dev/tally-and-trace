@@ -21,7 +21,7 @@ LIMITED_TRANSACTION_KEYS = {
     "counterpart",
 }
 LIMITED_ENTRY_KEYS = {
-    "view", "permissions", "tags", "created_by", "id", "display_name", "amount", "currency",
+    "view", "permissions", "tags", "created_by", "id", "display_name", "amount", "next_occurrence_amount", "currency",
     "entry_type", "cadence", "next_occurrence", "end_date", "category_name", "account",
     "counterpart",
 }
