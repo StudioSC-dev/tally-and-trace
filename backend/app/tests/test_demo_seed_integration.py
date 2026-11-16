@@ -597,6 +597,12 @@ REBALANCE_PHP = {"Gym Membership": Decimal("2800.00"), "Brokerage Auto-Deposit":
 # then (canonical JSON), so any other change to the seed shows up.
 SHAPE_7_AMOUNTS = {"Monthly Salary": 55.0, "Electric Bill": 1200.0, "Gym Membership": 45.0,
                    "Brokerage Auto-Deposit": 500.0, "Rent": 2500.0, "Internet": 60.0}
+# The two seeded transactions linked to the salary entry carried USD 55 in shape 7 (the
+# posted one as 2,942.50 PHP at 53.50); shape 8 follows the salary at USD 1,500.00.
+SHAPE_7_SALARY_TRANSACTIONS = {
+    "Monthly salary deposit (converted from USD)": {
+        "amount": 2942.50, "original_amount": 55.0, "projected_amount": 55.0},
+    "Projected salary deposit (awaiting conversion)": {"amount": 55.0, "projected_amount": 55.0}}
 SHAPE_7_SEED_SHA256 = "3f187b1b8c9d937285f4c1dd1e9cbefccd3e78407dbfdc62bc96cb85b30d1abf"
 
 
@@ -678,6 +684,12 @@ def test_demo_rebalance_changes_only_listed_rows():
     for entry in data["budget_entries"]:
         if entry["name"] in SHAPE_7_AMOUNTS:
             entry["amount"] = SHAPE_7_AMOUNTS[entry["name"]]
+    reverted = 0
+    for tx in data["transactions"]:
+        if tx.get("budget_entry_id") == 1:
+            tx.update(SHAPE_7_SALARY_TRANSACTIONS[tx["description"]])
+            reverted += 1
+    assert reverted == len(SHAPE_7_SALARY_TRANSACTIONS)
     canonical = json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
     assert hashlib.sha256(canonical).hexdigest() == SHAPE_7_SEED_SHA256
 

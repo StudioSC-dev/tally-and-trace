@@ -37,23 +37,23 @@ BROKERAGE = 30_000.0
 RENT = 48_000.0
 GYM = 2_800.0
 INTERNET = 2_500.0  # the card statement due 2026-11-23, and in the December statement
-PENDING_SALARY_USD = 55.0  # the seeded pending salary transaction, unchanged by shape 8
+PENDING_SALARY_USD = 1_500.0  # the seeded pending salary transaction, 87,000.00 PHP at 58.00
 
 # figure: (shape 7, shape 8)
 DIFF = {
     "timeline opening (PHP scalar)": (21_700.0, 21_700.0),
-    "timeline closing, 60 days (PHP scalar)": (24_335.58, 72_620.58),
-    "overdue pending salary at window start": (3_190.0, 3_190.0),
+    "timeline closing, 60 days (PHP scalar)": (24_335.58, 156_430.58),
+    "overdue pending salary at window start": (3_190.0, 87_000.0),
     "Monthly Salary, Nov 11": (3_190.0, 87_000.0),
     "Monthly Salary, Dec 11": (3_190.0, 87_000.0),
     "overdue card statement payable from the Joint Account": (869.42, 869.42),
     "Netflix line, statement closing 2025-10-01": (869.42, 869.42),
     "statement balance, closing 2025-10-01": (869.42, 869.42),
     "cash-flow income, each month (PHP)": (3_190.0, 87_000.0),
-    "cash-flow net, November 2026 (PHP)": (3_750.58, 52_020.58),
+    "cash-flow net, November 2026 (PHP)": (3_750.58, 135_830.58),
     "cash-flow net, December 2026 and January 2027 (PHP)": (-1_115.0, -1_100.0),
-    "Aug 2025 summary income": (2_942.50, 2_942.50),
-    "Aug 2025 summary net flow": (2_017.00, 2_017.00),
+    "Aug 2025 summary income": (2_942.50, 80_250.00),
+    "Aug 2025 summary net flow": (2_017.00, 79_324.50),
     "disposable monthly_income": (3_190.0, 87_000.0),
     "disposable monthly_expenses": (4_305.00, 88_100.0),
     "disposable monthly_disposable": (-1_115.00, -1_100.0),

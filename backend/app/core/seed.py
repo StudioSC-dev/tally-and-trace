@@ -43,7 +43,9 @@ in the seed file), not a fixed day, so it reads as recent and sits on the open
 statement whenever the demo resets.
 
 Shape 8 (STU-308): a believable demo salary (USD 1,500.00 a month) and a household budget
-(electric, gym, brokerage, rent, internet) scaled to it, so the forecast keeps its story.
+(electric, gym, brokerage, rent, internet) scaled to it, so the forecast keeps its story. The
+two seeded salary transactions follow it: the posted deposit is USD 1,500.00 (PHP 80,250.00
+at 53.5) and the pending one USD 1,500.00.
 
 Bump ``DEMO_SHAPE_VERSION`` whenever the demo data's shape changes.
 """
