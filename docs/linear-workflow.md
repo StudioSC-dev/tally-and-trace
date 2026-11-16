@@ -41,6 +41,23 @@ repo's `CLAUDE.md`.
 
 ---
 
+## UI tickets (repos with ui-verify enabled)
+
+Tally & Trace is the only repo with ui-verify enabled today. Other repos are not bound by
+this section.
+
+- **Every AC has a test:** every acceptance criterion of a UI ticket has at least one
+  Playwright scenario that asserts it.
+- **Before Ready for QA,** the orchestrator runs ui-verify on the PR head. A script runs the
+  suite, a fresh read-only model judges the results and screenshots against the AC, and a
+  checker validates every citation in its report.
+- **Outcomes:** PASS allows Ready for QA. FLAGGED sends the listed rows to the owner. FAIL
+  goes back to the writer. An invalid report never reaches Ready for QA.
+- **Owner QA** on these tickets covers the FAIL and FLAG rows and matters of taste. The owner
+  may still check anything.
+
+---
+
 ## Issue templates
 
 The team has templates configured in Linear. **Always use the matching template** when
