@@ -148,7 +148,7 @@ def case_statement_engine(w, entry):
     row, card = db.get(BudgetEntry, entry["id"]), db.get(Account, w["a_card"])
     start, end = datetime(2026, 11, 16), datetime(2027, 6, 1)
     charges = fc._card_entry_charges(db, [row], {card.id: card}, start, end, None)
-    assert [(l.transaction_date.date(), abs(float(l.amount))) for l in charges[card.id]] == [
+    assert [(line.transaction_date.date(), abs(float(line.amount))) for line in charges[card.id]] == [
         (CLOSES[0], MONTHLY), (CLOSES[1], MONTHLY), (CLOSES[2], LAST)]
     payables = get_statement_payables(db, [card], start, end, charges,
                                       viewable_ids={card.id, w["a_private"]})
