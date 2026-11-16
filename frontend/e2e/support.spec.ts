@@ -66,5 +66,6 @@ test.describe('support', () => {
     const bad = run('e2e/fixtures/tsconfig.json')
     expect(bad.status).not.toBe(0)
     expect(bad.stdout + bad.stderr).toContain('e2e/fixtures/bad-mock.ts')
+    expect(bad.stdout + bad.stderr).toContain('TS2322')
   })
 })
