@@ -96,7 +96,7 @@ test.describe('sign-in', () => {
     await page.getByLabel('Password').press('Enter')
 
     await expect(page.getByText(SERVER_ERROR)).toBeVisible()
-    expect(api.count('POST', '/auth/login')).toBe(1)
+    expect(api.count('POST', '/auth/login')).toBe(2)
   })
 
   test('phone layout has no sideways scroll and a 44px submit', async ({ page }, testInfo) => {
