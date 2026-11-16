@@ -7,7 +7,7 @@ export default defineConfig({
   testDir: 'e2e',
   testMatch: '**/*.spec.ts',
   outputDir: 'test-results',
-  reporter: [['list']],
+  reporter: [['list'], ['json', { outputFile: 'test-results/report.json' }]],
   use: { baseURL },
   projects: [
     {
