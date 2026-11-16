@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { INSTALLMENT_MONTH_PICKS, formatEntryDate, parseInstallmentMonths, parseInstallmentTotal } from '@tally-trace/shared'
 
 import { installmentErrorId, installmentErrorProps } from './installmentField'
@@ -52,6 +52,9 @@ export function InstallmentSection({
   // such as 12 is valid at "1").
   const [changing, setChanging] = useState(false)
   const [typing, setTyping] = useState(false)
+  // A press inside the section (a pick): the custom box's blur it causes must not fold the
+  // section before the press is a tap. Safari gives the blur no `relatedTarget`, so the press is noted instead.
+  const pressInside = useRef(false)
   // The payments after the first at the monthly amount (the last is shown on its own when it differs).
   const monthlyCount = preview ? preview.months - 1 - (preview.last !== null ? 1 : 0) : 0
   const monthsChosen = parseInstallmentMonths(months)
@@ -77,7 +80,13 @@ export function InstallmentSection({
         Enter the purchase total and the number of months; the monthly payments are worked out for you.
       </p>
       {active && (
-        <fieldset className="min-w-0 space-y-4 border-l-2 border-line pl-3" data-testid="installment-fields">
+        <fieldset
+          className="min-w-0 space-y-4 border-l-2 border-line pl-3"
+          data-testid="installment-fields"
+          onPointerDown={() => { pressInside.current = true }}
+          onPointerUp={() => { pressInside.current = false }}
+          onPointerCancel={() => { pressInside.current = false }}
+        >
           <legend className="sr-only">Installment</legend>
           {collapsed ? (
             <div className="flex flex-wrap items-center justify-between gap-2" data-testid="installment-summary">
@@ -115,7 +124,7 @@ export function InstallmentSection({
                     <button
                       key={count}
                       type="button"
-                      onClick={() => { onMonthsChange(String(count)); setChanging(false) }}
+                      onClick={() => { onMonthsChange(String(count)); setChanging(false); setTyping(false) }}
                       aria-pressed={selected}
                       className={`min-h-11 min-w-11 rounded-full px-3 py-1.5 text-sm font-medium transition ${selected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken'}`}
                       data-testid={`installment-months-${count}`}
@@ -133,9 +142,9 @@ export function InstallmentSection({
                 value={months}
                 onChange={(e) => onMonthsChange(e.target.value)}
                 onFocus={() => setTyping(true)}
-                onBlur={(e) => {
-                  // Leaving for a pick keeps the section; leaving for elsewhere folds it.
-                  if (e.relatedTarget instanceof Node && e.currentTarget.closest('fieldset')?.contains(e.relatedTarget)) return
+                onBlur={() => {
+                  // Pressing a pick keeps the section until the tap lands (it folds then); leaving for elsewhere folds it.
+                  if (pressInside.current) return
                   setTyping(false)
                   setChanging(false)
                 }}

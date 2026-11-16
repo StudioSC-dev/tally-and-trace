@@ -17,6 +17,9 @@
 // errors_never_hidden (AC4): the picks are visible before any months are chosen; invalid months
 //   and a split STU-658 rejects keep or open the section with the error visible, an invalid total
 //   shows its error on the Amount box, and nothing is saved;
+// custom_months_then_pick_one_tap: a pick tapped right after typing a custom count registers on
+//   the first tap and folds the section to the right summary (Safari's blur has no relatedTarget),
+//   in Chromium and WebKit (ENGINES=chromium,webkit; WebKit needs `playwright install webkit`);
 // stu631_unchanged (AC5): runs the STU-631 and STU-658 scenarios below, whose amount, date and
 //   saved-record assertions are unchanged.
 //
@@ -64,9 +67,10 @@ const { pick } = require('./_picker.cjs')
 const { useDueCheck, readTab } = require('./_due_pages.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
-let chromium
+let chromium, pw
 try {
-  ;({ chromium } = require(playwrightPath))
+  pw = require(playwrightPath)
+  ;({ chromium } = pw)
 } catch {
   console.error(`Cannot load Playwright from "${playwrightPath}". Set PLAYWRIGHT_PATH (see frontend/e2e/README.md).`)
   process.exit(2)
@@ -727,6 +731,59 @@ async function errorsNeverHidden(browser) {
   await invalidSplit(browser)
 }
 
+// Safari: a pick tapped right after typing a custom count registers on the first tap (the custom
+// box's blur must not fold the section under the press). Runs in Chromium and, when installed, WebKit.
+async function customMonthsThenPickOneTap(browser, engine) {
+  const id = `custom_months_then_pick_one_tap.${engine}`
+  console.log(`\n=== ${id} (STU-656)`)
+  const user = await h.makeUser(stack, `ifto${engine[0]}`)
+  const bank = await account(user, 'IFT Checking')
+  const cc = await card(user, bank, 'IFT Card')
+  const { ctx, page, native } = await openPage(browser, user, { viewport: { width: 390, height: 844 } })
+  try {
+    const modal = await openAdd(page, cc.name)
+    await control(modal, 'description').fill('One tap')
+    await toggle(modal).check()
+    await totalBox(modal).fill('10,000.00')
+    await control(modal, 'installment_months').click()
+    await control(modal, 'installment_months').pressSequentially('4')
+    await h.check(`${id}.typing-keeps-open`, 'B', async () =>
+      (await control(modal, 'installment_months').isVisible()) || 'section folded while typing')
+    await fields(modal).locator('[data-testid="installment-months-6"]').click()
+    await h.check(`${id}.one-tap-folds`, 'B', async () => {
+      const shown = (await summary(modal).count()) ? await readSummary(modal) : null
+      return (shown && shown.months === 6 && shown.monthly === '₱1,666.67' && shown.last === '₱1,666.65') || `summary ${JSON.stringify(shown)}`
+    })
+    await changeButton(modal).click()
+    await h.check(`${id}.months-are-the-pick`, 'B', async () =>
+      (await control(modal, 'installment_months').inputValue()) === '6' || `months ${await control(modal, 'installment_months').inputValue()}`)
+  } finally {
+    await d.checkNoNativeDialogs(h, id, native)
+    await ctx.close()
+  }
+}
+
+async function customMonthsThenPick(browser) {
+  const wanted = (process.env.ENGINES || 'chromium,webkit').split(',')
+  for (const engine of wanted) {
+    if (engine === 'chromium') await customMonthsThenPickOneTap(browser, 'chromium')
+    else {
+      let other
+      try {
+        other = await pw[engine].launch()
+      } catch (e) {
+        await h.check(`custom_months_then_pick_one_tap.${engine}.launch`, 'G', async () => `${engine} not available: ${String(e.message).split('\n')[0]}`)
+        continue
+      }
+      try {
+        await customMonthsThenPickOneTap(other, engine)
+      } finally {
+        await other.close()
+      }
+    }
+  }
+}
+
 /** Runs a scenario at both AC5 sizes. */
 const atBothSizes = (run) => async (browser) => {
   for (const [tag, viewport] of VIEWPORTS) await run(browser, tag, viewport)
@@ -739,6 +796,7 @@ const SCENARIOS = [
   ['amount_carries_over', amountCarriesOver],
   ['collapsed_summary_and_change', collapsedSummaryAndChange],
   ['errors_never_hidden', errorsNeverHidden],
+  ['custom_months_then_pick_one_tap', customMonthsThenPick],
   ['offered_on_card_expense', offeredOnCardExpense],
   ['hidden_elsewhere', hiddenElsewhere],
   ['preview_shows_last_payment', atBothSizes(previewShowsLastPayment)],
