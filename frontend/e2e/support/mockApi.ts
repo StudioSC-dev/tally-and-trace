@@ -97,8 +97,9 @@ export async function addRoutes(page: Page, routes: ApiRoute[]): Promise<ApiMock
 }
 
 /**
- * Fakes the API in the browser. Anything under `/api/v1` that is neither in `routes`
- * nor in `allow` fails the test. No request ever leaves the browser.
+ * Fakes the API in the browser. Only requests whose URL path contains `/api/v1/` are intercepted; anything
+ * there that is neither in `routes` nor in `allow` fails the test. Requests to other paths or
+ * origins are not intercepted.
  */
 export async function mockApi(page: Page, routes: ApiRoute[], options: MockOptions = {}): Promise<ApiMock> {
   return addRoutes(page, [...(options.allow ?? []), ...routes])
