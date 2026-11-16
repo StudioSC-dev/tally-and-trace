@@ -90,7 +90,7 @@ TRANSACTION_FIELDS = (
 )
 
 BUDGET_ENTRY_FIELDS = (
-    "id", "entry_type", "name", "description", "amount", "currency", "cadence",
+    "id", "entry_type", "name", "description", "amount", "final_amount", "currency", "cadence",
     "next_occurrence", "lead_time_days", "semi_monthly_day_1", "semi_monthly_day_2",
     "anchor_day", "day_rule", "end_mode", "end_date", "max_occurrences",
     "occurrences_paid_offset", "account_id", "overflow_account_id",
@@ -145,8 +145,8 @@ LIMITED_TRANSACTION_FIELDS = (
 )
 
 LIMITED_BUDGET_ENTRY_FIELDS = (
-    "id", "display_name", "amount", "currency", "entry_type", "cadence", "next_occurrence",
-    "end_date", "category_name", "created_by", "account", "counterpart",
+    "id", "display_name", "amount", "final_amount", "currency", "entry_type", "cadence",
+    "next_occurrence", "end_date", "category_name", "created_by", "account", "counterpart",
 )
 
 TABLES = (

@@ -214,6 +214,50 @@ def test_records_by_others_on_the_owners_accounts_are_limited(client, world):
     assert "name" not in entry and "category_id" not in entry
 
 
+def test_export_includes_final_amount(client, db, world):
+    """STU-660: an installment's last-payment figure survives the export, for the
+    caller's own entries in full and for others' entries wherever ``amount`` shows."""
+    from app.models.budget_entry import BudgetEntry
+
+    owner, other = world["owner"], world["other"]
+    plan = _post(client, owner["headers"], "/budget-entries/", {
+        "name": f"{OWNER_MARK} Phone plan", "entry_type": "expense", "amount": 333.33,
+        "final_amount": 333.34, "end_mode": "after_occurrences", "max_occurrences": 3,
+        "next_occurrence": WHEN, "account_id": owner["bank"]})
+    db.query(BudgetEntry).filter(BudgetEntry.id == world["legacy_entry"]).update(
+        {"final_amount": Decimal("55.55")})
+    db.commit()
+
+    body = _export(client, owner).json()
+    rows = {e["id"]: e for e in body["budget_entries"]}
+    # Own entries: the figure with its value, and null when there is none.
+    assert rows[plan]["final_amount"] == "333.34"
+    assert rows[plan]["amount"] == "333.33"
+    assert rows[owner["entry"]]["final_amount"] is None
+    # Another user's entry on the owner's account: limited, shown where amount is.
+    (limited,) = body["others_budget_entries"]
+    assert (limited["amount"], limited["final_amount"]) == ("50.00", "55.55")
+    # The csv carries the column too.
+    r = client.get(f"{API}/data/export.csv", params={"table": "budget_entries"},
+                   headers=owner["headers"])
+    csv_rows = {row["id"]: row for row in csv.DictReader(io.StringIO(r.text))}
+    assert csv_rows[str(plan)]["final_amount"] == "333.34"
+    assert csv_rows[str(owner["entry"])]["final_amount"] == ""
+
+    # Visibility: the other user cannot read the owner's plan, so neither of its
+    # figures is in their export; their own entries' figure is not the owner's either.
+    theirs = _export(client, other).json()
+    assert plan not in [e["id"] for e in theirs["budget_entries"]]
+    assert plan not in [e["id"] for e in theirs["others_budget_entries"]]
+    assert "333.34" not in json.dumps(theirs) and "333.33" not in json.dumps(theirs)
+    assert [(e["id"], e["final_amount"]) for e in theirs["others_budget_entries"]] == [
+        (world["legacy_entry"], "55.55")]
+    assert all(e["final_amount"] is None for e in theirs["budget_entries"])
+    # A record the caller cannot read at all is absent from the owner's export too.
+    assert "55.55" not in json.dumps({k: v for k, v in body.items()
+                                      if k != "others_budget_entries"})
+
+
 def test_the_export_never_carries_another_users_details_or_unlisted_columns(client, world):
     for who, foreign in (("owner", OTHER_MARK), ("other", OWNER_MARK)):
         raw = _export(client, world[who]).text

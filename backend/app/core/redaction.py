@@ -326,6 +326,8 @@ class Redactor:
             "id": entry.id,
             "display_name": self.display_description(entry, facts),
             "amount": entry.amount,
+            # Shown with ``amount``; the Limited API model has no such field, so only exports read it.
+            "final_amount": entry.final_amount,
             "currency": entry.currency,
             "entry_type": entry.entry_type,
             "cadence": entry.cadence,
