@@ -3,7 +3,8 @@
 A **candidate** for occurrence ``o`` of entry ``e`` is a transaction that is a
 DEBIT on ``e``'s account (a card, or a cash entry's bank account), owned by
 ``e``'s creator, linked to no entry, in the account's currency for exactly
-``e.amount``, dated within three days of ``o``'s
+``o``'s own amount (``forecast.occurrence_amount``: ``e.amount``, or the last
+month's ``final_amount``, STU-658), dated within three days of ``o``'s
 effective date (a forced date, services/payment_dates.py, is where the charge is
 expected; the keys stay nominal), posted or pending. Candidates are the creator's rows only: a link counts only
 for a row the entry's creator owns (``forecast._linked_rows``).
@@ -41,9 +42,13 @@ def duplicate_candidates(db: Session, entry, occurrences: Iterable[datetime],
     Days with no candidate are left out. Each list is in id order; a
     transaction may be listed under two days.
     """
+    from app.services.forecast import final_occurrence_day, occurrence_amount
+
     days = {occ.date(): effective(moved, occ.date()) for occ in sorted(occurrences)}
     if not days or entry.account_id is None:
         return {}
+    final_day = final_occurrence_day(entry)
+    amounts = {day: occurrence_amount(entry, day, final_day) for day in days}
     card = db.get(Account, entry.account_id)
     if card is None:
         return {}
@@ -58,7 +63,7 @@ def duplicate_candidates(db: Session, entry, occurrences: Iterable[datetime],
                 Transaction.user_id == entry.user_id,
                 Transaction.budget_entry_id.is_(None),
                 Transaction.currency == card.currency,
-                Transaction.amount == entry.amount,
+                Transaction.amount.in_(set(amounts.values())),
                 Transaction.transaction_date >= low,
                 Transaction.transaction_date < high)
         .order_by(Transaction.id)
@@ -67,7 +72,8 @@ def duplicate_candidates(db: Session, entry, occurrences: Iterable[datetime],
     out: Dict[date, List[Transaction]] = {}
     for day, centre in days.items():
         found = [txn for txn in rows
-                 if abs((txn.transaction_date.date() - centre).days) <= WINDOW_DAYS]
+                 if txn.amount == amounts[day]
+                 and abs((txn.transaction_date.date() - centre).days) <= WINDOW_DAYS]
         if found:
             out[day] = found
     return out
@@ -211,15 +217,20 @@ def _candidates(db: Session, entries: List[BudgetEntry], wanted: Dict[int, tuple
         .order_by(Transaction.id)
         .all()
     )
+    from app.services.forecast import final_occurrence_day, occurrence_amount
+
     out: Dict[int, Dict[date, List[Transaction]]] = {}
     for entry_id, entry_days in days.items():
         entry, card = by_id[entry_id], cards[entry_id]
+        final_day = final_occurrence_day(entry)
         mine = [txn for txn in rows
                 if txn.account_id == entry.account_id and txn.user_id == entry.user_id
-                and txn.currency == card.currency and txn.amount == entry.amount]
+                and txn.currency == card.currency]
         for day, centre in entry_days.items():
+            amount = occurrence_amount(entry, day, final_day)
             found = [txn for txn in mine
-                     if abs((txn.transaction_date.date() - centre).days) <= WINDOW_DAYS]
+                     if txn.amount == amount
+                     and abs((txn.transaction_date.date() - centre).days) <= WINDOW_DAYS]
             if found:
                 out.setdefault(entry_id, {})[day] = found
     return out

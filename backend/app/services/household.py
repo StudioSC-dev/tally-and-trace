@@ -190,6 +190,7 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
     from app.core.redaction import LIMITED, redactor_for
     from app.services.forecast import (
         Money, _billed_card_occurrences, _linked_occurrence_days, effective_window_occurrences,
+        final_occurrence_day, occurrence_amount,
     )
     from app.services.payment_dates import load_entry_overrides
 
@@ -298,18 +299,20 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
     linked = _linked_occurrence_days(db, [e.id for e in entries])
     forced = load_entry_overrides(db, [e.id for e in entries])
     for entry in entries:
+        final_day = final_occurrence_day(entry)
         if entry.account_id in billed and entry.transfer_to_account_id is None:
             card = billed[entry.account_id]
             for _, when, nominal in _billed_card_occurrences(db, [entry], billed, start, end):
                 if when < start:
                     continue  # billed on its statement, but not listed: before the window
-                occ = Occurrence(when, entry, _money(entry.amount), _money(entry.amount),
+                amount = occurrence_amount(entry, nominal, final_day)
+                occ = Occurrence(when, entry, _money(amount), _money(amount),
                                  {"occurrence": nominal})
                 out.append(occ)
                 if entry.entry_type != BudgetEntryType.EXPENSE:
                     # Income on a billed card is never covered: in its account's currency.
-                    account_fx(occ, entry.amount, entry.currency)
-                elif card_fx(occ, card, entry.amount, entry.currency):
+                    account_fx(occ, amount, entry.currency)
+                elif card_fx(occ, card, amount, entry.currency):
                     card_lines.setdefault(entry.account_id, []).append(
                         (occ, ("e", entry.id, when)))
             continue
@@ -324,10 +327,11 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
             extra = {"occurrence": nominal,
                      **({"overdue": True, "original_date": original}
                         if original is not None else {})}
-            occ = Occurrence(when, entry, _money(entry.amount), _money(entry.amount), extra)
+            amount = occurrence_amount(entry, nominal, final_day)
+            occ = Occurrence(when, entry, _money(amount), _money(amount), extra)
             out.append(occ)
             if entry.account_id not in billed and entry.transfer_to_account_id is None:
-                account_fx(occ, entry.amount, entry.currency)
+                account_fx(occ, amount, entry.currency)
 
     for card_id, lines in card_lines.items():
         card = billed[card_id]
@@ -394,6 +398,7 @@ def _card_household_cover(db: Session, card: Account, paying_ids: set, start: da
     """
     from app.services.forecast import (
         Money, _card_entry_charges, _linked_occurrence_days, effective_window_occurrences,
+        final_occurrence_day, occurrence_amount,
     )
     from app.services.payment_dates import load_entry_overrides
     from app.services.statements import _card_rows, _split_card_rows, normalise_lines
@@ -435,6 +440,7 @@ def _card_household_cover(db: Session, card: Account, paying_ids: set, start: da
         linked = _linked_occurrence_days(db, [e.id for e in transfers])
         forced = load_entry_overrides(db, [e.id for e in transfers])
         for entry in transfers:
+            final_day = final_occurrence_day(entry)
             # An installment's overdue occurrence pays on ``start``, as the
             # projection dates it; it is suppressed on its own day.
             for when, _, nominal in effective_window_occurrences(
@@ -443,7 +449,8 @@ def _card_household_cover(db: Session, card: Account, paying_ids: set, start: da
                 if linked[key]:
                     linked[key] -= 1
                     continue
-                amount, _ = money.to(entry.amount, entry.currency, card_currency)
+                amount, _ = money.to(occurrence_amount(entry, nominal, final_day),
+                                     entry.currency, card_currency)
                 if amount is not None:
                     recurring.append((when, amount,
                                       entry.account_id in paying_ids and readable(entry)))

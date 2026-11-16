@@ -585,7 +585,8 @@ InstallmentBlockReason = Literal["foreign_currency", "no_statement_cycle", "ambi
 class UpcomingOccurrence(BaseModel):
     """One occurrence after Manila's today that no row stands for yet
     (services/missed.py ``upcoming_occurrences``). ``amount`` and ``currency``
-    are the entry's face values, unconverted. The account names are null for
+    are the occurrence's face values, unconverted: an installment's last
+    occurrence bills its ``final_amount`` (STU-658). The account names are null for
     an account the caller cannot view. ``recordable``: Mark paid can record
     this occurrence now. ``auto_post``, ``block_reason`` and ``can_review`` are
     a card installment's, as on its missed row; null, null and false otherwise."""
@@ -660,12 +661,16 @@ class InstallmentPlan(BaseModel):
     day it is due on (its forced date when moved, else ``next_charge``), null
     with no next charge; ``missed`` counts such months before Manila's today. "N of M left" is ``payments_left`` of
     ``payments_total`` (``occurrences_paid + max_occurrences``). ``recordable``:
-    Mark paid can record ``next_charge`` now."""
+    Mark paid can record ``next_charge`` now. ``amount`` is ``next_charge``'s
+    own amount (the entry's with no next charge); ``remaining_total`` sums
+    every remaining payment's own amount, the last's ``final_amount`` included
+    (STU-658)."""
     view: Literal["full", "shared_full"]
     entry_id: int
     name: str
     account_name: Optional[str] = None
     amount: float
+    remaining_total: float
     currency: CurrencyType
     next_charge: Optional[date] = None
     effective_date: Optional[date] = None

@@ -455,24 +455,37 @@ def _card_parts(card: Account, start: datetime, end: datetime, money: _Converter
                 uncounted_shared += 1
                 walk.append((inside[0], _MARK, (1, entry.id), None))
             continue
-        each = money.to_card(entry.amount, entry.currency)
+        # Each occurrence's own amount (``forecast.occurrence_amount``, STU-658):
+        # an installment's last one may differ from the rest.
+        # The entry's amount is converted whether or not it occurs, as before, so
+        # the rates used stay the same.
+        converted = {entry.amount: money.to_card(entry.amount, entry.currency)}
+        final_day = fc.final_occurrence_day(entry)
+        each_of = {}
+        for _, nominal in occurrences:
+            face = fc.occurrence_amount(entry, nominal, final_day)
+            if face not in converted:
+                converted[face] = money.to_card(face, entry.currency)
+            each_of[nominal] = converted[face]
         if installment:
             if occurrences:
-                if each is None:
+                if any(each_of[nominal] is None for _, nominal in occurrences):
                     unknown += 1
                     opening_uncounted = True
                 else:
-                    hold += each * len(occurrences)
+                    hold += sum((each_of[nominal] for _, nominal in occurrences), _ZERO)
             for d, nominal in occurrences:
                 if s_day <= d < e_day:
                     walk.append((d, _CHARGE, (1, entry.id), {
                         "source": "budget_entry", "source_id": entry.id, "date": d,
-                        "occurrence_date": nominal, "kind": "installment", "amount": each,
-                        "subtract": False}))
+                        "occurrence_date": nominal, "kind": "installment",
+                        "amount": each_of[nominal], "subtract": False}))
             continue
-        before = [d for d, _ in occurrences if d < s_day]
+        before = [(d, nominal) for d, nominal in occurrences if d < s_day]
         if before:
-            total = each * len(before) if each is not None else None
+            figures = [each_of[nominal] for _, nominal in before]
+            total = (None if any(figure is None for figure in figures)
+                     else sum(figures, _ZERO))
             if total is None:
                 unknown += 1
                 opening_uncounted = True
@@ -484,7 +497,7 @@ def _card_parts(card: Account, start: datetime, end: datetime, money: _Converter
             if s_day <= d < e_day:
                 walk.append((d, _CHARGE, (1, entry.id), {
                     "source": "budget_entry", "source_id": entry.id, "date": d,
-                    "occurrence_date": nominal, "kind": kind, "amount": each,
+                    "occurrence_date": nominal, "kind": kind, "amount": each_of[nominal],
                     "subtract": True}))
 
     for _, phase, _, item in walk:

@@ -1442,6 +1442,7 @@ def collect_events(
     for entry in entries:
         # Overflow routing only onto a scoped account, on every entry type.
         overflow_id = entry.overflow_account_id if entry.overflow_account_id in scoped_ids else None
+        final_day = final_occurrence_day(entry)
         if entry.transfer_to_account_id is not None:
             # Only the scoped legs are kept (see _transfer_event).
             for occ, original, nominal in effective_window_occurrences(
@@ -1458,7 +1459,7 @@ def collect_events(
                         account_id=entry.account_id,
                         transfer_from_account_id=entry.account_id,
                         transfer_to_account_id=entry.transfer_to_account_id,
-                        amount=entry.amount,
+                        amount=occurrence_amount(entry, nominal, final_day),
                         transfer_fee=0,
                         transaction_type=TransactionType.TRANSFER,
                         description=entry.name,
@@ -1482,17 +1483,28 @@ def collect_events(
         # a cash leg with no account (unassigned cash). Any other account is
         # outside the scope, so the occurrence is listed with no leg.
         # An entry in another currency than its account's is estimated (plan B6).
-        legs, leg_currencies = [], []
-        if entry.account_id in scoped_ids or (
-                entry.account_id is None and entry.user_id == user_id):
-            leg_currency = money.currency_of(entry.account_id) or _code(entry.currency)
-            figure, estimate = money.to(entry.amount, entry.currency, leg_currency)
-            rows = [_row(leg_currency, figure, estimate)]
-            if figure is not None:
-                legs, leg_currencies = [_leg(entry.account_id, sign * figure, overflow_id)], [
-                    leg_currency]
-        else:
-            rows = [_row(entry.currency, _money(entry.amount))]
+        cash_leg = (entry.account_id in scoped_ids
+                    or (entry.account_id is None and entry.user_id == user_id))
+        figures: dict = {}
+
+        def figured(amount, entry=entry, sign=sign, overflow_id=overflow_id,
+                    cash_leg=cash_leg, figures=figures):
+            """``(legs, leg_currencies, rows)`` for an occurrence of ``amount``,
+            worked out once per amount (an entry has at most two, STU-658)."""
+            if amount not in figures:
+                legs, leg_currencies = [], []
+                if cash_leg:
+                    leg_currency = money.currency_of(entry.account_id) or _code(entry.currency)
+                    figure, estimate = money.to(amount, entry.currency, leg_currency)
+                    rows = [_row(leg_currency, figure, estimate)]
+                    if figure is not None:
+                        legs, leg_currencies = [_leg(entry.account_id, sign * figure,
+                                                     overflow_id)], [leg_currency]
+                else:
+                    rows = [_row(entry.currency, _money(amount))]
+                figures[amount] = (legs, leg_currencies, rows)
+            return figures[amount]
+
         for occ, original, nominal in effective_window_occurrences(
                 entry, start, end, forced.get(entry.id)):
             key = (entry.id, nominal.date())
@@ -1501,13 +1513,15 @@ def collect_events(
                 continue  # already recorded (e.g. advance=False)
             overdue = ({"overdue": True, "original_date": original}
                        if original is not None else {})
+            amount = occurrence_amount(entry, nominal, final_day)
+            legs, leg_currencies, rows = figured(amount)
             events.append(_meta(_event(
                 date=occ,
                 name=entry.name,
                 type=entry.entry_type.value,
                 source="budget_entry",
                 source_id=entry.id,
-                face_amount=entry.amount,
+                face_amount=amount,
                 legs=legs,
                 origin=(BudgetEntry, entry.id),
                 occurrence=nominal,
@@ -1707,6 +1721,7 @@ def collect_events(
     forced_covers = load_entry_overrides(db, [e.id for e in loan_entries])
     projected_covers: dict = {}
     for entry in loan_entries:
+        final_day = final_occurrence_day(entry)
         for _, _, nominal in effective_window_occurrences(
                 entry, start, end + COVER_HORIZON + OVERRIDE_REACH, forced_covers.get(entry.id)):
             day = nominal.date()  # an overdue cover is dated its own day
@@ -1715,7 +1730,7 @@ def collect_events(
                 linked_covers[key] -= 1
                 continue
             projected_covers.setdefault(entry.transfer_to_account_id, []).append(
-                (day, _money(entry.amount), entry))
+                (day, _money(occurrence_amount(entry, nominal, final_day)), entry))
     loans_by_id = {a.id: a for a in payable_loans}
     # A legacy cover from another currency is normalised into the loan's first;
     # one with no stored rate is not netted (plan B6, services/loans.py).
@@ -2211,6 +2226,41 @@ def capped_schedule_end(entry) -> date:
     return last.date()
 
 
+def final_occurrence_day(entry) -> Optional[date]:
+    """The nominal day of the occurrence that bills the entry's ``final_amount``
+    (STU-658), or None when every occurrence bills ``amount``: no
+    ``final_amount``, no finite count, or nothing left.
+
+    The last occurrence is counted as the app counts payments: an installment's
+    payments are its paid ones (linked rows plus ``occurrences_paid_offset``,
+    ``occurrences_paid``) and then its remaining ``max_occurrences`` from
+    ``next_occurrence``, so the last is the ``max_occurrences``-th distinct day
+    from ``next_occurrence`` (``capped_schedule_end``). Recording a payment
+    advances the schedule and uses one up, so the same day stays the last; a
+    forced date moves when it is billed, never which occurrence it is."""
+    if getattr(entry, "final_amount", None) is None:
+        return None
+    count = getattr(entry, "max_occurrences", None)
+    if getattr(entry, "end_mode", None) != "after_occurrences" or count is None or count <= 0:
+        return None
+    return capped_schedule_end(entry)
+
+
+def occurrence_amount(entry, nominal, final_day=False):
+    """The amount ``entry`` bills on its occurrence ``nominal`` (its schedule date,
+    a ``date`` or ``datetime``), in the entry's currency: ``final_amount`` on its
+    last occurrence (``final_occurrence_day``), ``amount`` on every other. The
+    one rule every reader of a recurring occurrence's amount goes through
+    (STU-658). A caller walking many occurrences may pass ``final_day``, the
+    entry's ``final_occurrence_day``, to walk the schedule once."""
+    if final_day is False:
+        final_day = final_occurrence_day(entry)
+    if final_day is None:
+        return entry.amount
+    day = nominal.date() if isinstance(nominal, datetime) else nominal
+    return entry.final_amount if day == final_day else entry.amount
+
+
 def unrecorded_occurrences(db: Session, entries, through: date, *,
                            pending_records: bool = False) -> Dict[int, List[datetime]]:
     """``{entry id: [occurrence]}``: each entry's occurrences from its
@@ -2296,13 +2346,15 @@ def _card_recurring_payments(db: Session, cards: dict, start: datetime, end: dat
     out: dict = {}
     for entry in entries:
         card = cards[entry.transfer_to_account_id]
+        final_day = final_occurrence_day(entry)
         for when, _, nominal in effective_window_occurrences(
                 entry, start, end, forced.get(entry.id)):
             key = (entry.id, nominal.date())
             if linked[key]:
                 linked[key] -= 1
                 continue
-            amount, _ = money.to(entry.amount, entry.currency, card.currency)
+            amount, _ = money.to(occurrence_amount(entry, nominal, final_day), entry.currency,
+                                 card.currency)
             if amount is not None:
                 out.setdefault(card.id, []).append((when, amount, entry.account_id))
     return out
@@ -2380,11 +2432,15 @@ def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime
         return {}
     money = money or Money(db)
     charges: dict = {}
+    final_days: dict = {}
     for entry, occ, nominal in _billed_card_occurrences(db, entries, cards, start, end):
         income = entry.entry_type == BudgetEntryType.INCOME
         card = cards[entry.account_id]
         card_currency = _code(card.currency)
-        amount, estimate = money.to(entry.amount, entry.currency, card_currency)
+        if entry.id not in final_days:
+            final_days[entry.id] = final_occurrence_day(entry)
+        face = occurrence_amount(entry, nominal, final_days[entry.id])
+        amount, estimate = money.to(face, entry.currency, card_currency)
         if amount is not None:
             settles = (occ.date() <= start.date()
                        and reviewed_card_installment(entry, card))
@@ -2404,7 +2460,7 @@ def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime
                 type=entry.entry_type.value,
                 source="budget_entry",
                 source_id=entry.id,
-                face_amount=entry.amount,
+                face_amount=face,
                 legs=legs,
                 origin=(BudgetEntry, entry.id),
                 occurrence=nominal,
