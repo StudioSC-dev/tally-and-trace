@@ -18,6 +18,7 @@
     "payments_left": 12,
     "payments_total": 15,
     "recordable": true,
+    "remaining_total": 30000.0,
     "view": "shared_full"
    },
    {
@@ -36,6 +37,7 @@
     "payments_left": 12,
     "payments_total": 12,
     "recordable": false,
+    "remaining_total": 49200.0,
     "view": "shared_full"
    }
   ],
