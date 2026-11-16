@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { INSTALLMENT_MONTH_PICKS, formatEntryDate, parseInstallmentMonths, parseInstallmentTotal } from '@tally-trace/shared'
 
 import { installmentErrorId, installmentErrorProps } from './installmentField'
@@ -55,6 +55,31 @@ export function InstallmentSection({
   // A press inside the section (a pick): the custom box's blur it causes must not fold the
   // section before the press is a tap. Safari gives the blur no `relatedTarget`, so the press is noted instead.
   const pressInside = useRef(false)
+  const fieldsetRef = useRef<HTMLFieldSetElement>(null)
+  const stopListening = useRef<(() => void) | null>(null)
+  useEffect(() => () => stopListening.current?.(), [])
+  // The press ends wherever it is released (even outside the section): the note is dropped, and a
+  // section whose custom box lost focus to something outside it folds then.
+  const onPress = () => {
+    stopListening.current?.()
+    pressInside.current = true
+    const release = () => {
+      stop()
+      if (!fieldsetRef.current?.contains(document.activeElement)) {
+        setTyping(false)
+        setChanging(false)
+      }
+    }
+    const stop = () => {
+      pressInside.current = false
+      window.removeEventListener('pointerup', release)
+      window.removeEventListener('pointercancel', release)
+      stopListening.current = null
+    }
+    window.addEventListener('pointerup', release)
+    window.addEventListener('pointercancel', release)
+    stopListening.current = stop
+  }
   // The payments after the first at the monthly amount (the last is shown on its own when it differs).
   const monthlyCount = preview ? preview.months - 1 - (preview.last !== null ? 1 : 0) : 0
   const monthsChosen = parseInstallmentMonths(months)
@@ -83,9 +108,8 @@ export function InstallmentSection({
         <fieldset
           className="min-w-0 space-y-4 border-l-2 border-line pl-3"
           data-testid="installment-fields"
-          onPointerDown={() => { pressInside.current = true }}
-          onPointerUp={() => { pressInside.current = false }}
-          onPointerCancel={() => { pressInside.current = false }}
+          ref={fieldsetRef}
+          onPointerDown={onPress}
         >
           <legend className="sr-only">Installment</legend>
           {collapsed ? (

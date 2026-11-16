@@ -20,6 +20,8 @@
 // custom_months_then_pick_one_tap: a pick tapped right after typing a custom count registers on
 //   the first tap and folds the section to the right summary (Safari's blur has no relatedTarget),
 //   in Chromium and WebKit (ENGINES=chromium,webkit; WebKit needs `playwright install webkit`);
+// press_released_outside_still_folds: a press that starts inside the section and is released
+//   outside it does not leave the section stuck open;
 // stu631_unchanged (AC5): runs the STU-631 and STU-658 scenarios below, whose amount, date and
 //   saved-record assertions are unchanged.
 //
@@ -796,6 +798,44 @@ async function customMonthsThenPick(browser) {
   }
 }
 
+// A press that starts inside the section and is released outside it must not leave the section open.
+async function pressReleasedOutsideStillFolds(browser) {
+  const id = 'press_released_outside_still_folds'
+  console.log(`\n=== ${id} (STU-656)`)
+  const user = await h.makeUser(stack, 'iftp')
+  const bank = await account(user, 'IFT Checking')
+  const cc = await card(user, bank, 'IFT Card')
+  const { ctx, page, native } = await openPage(browser, user)
+  try {
+    const modal = await openAdd(page, cc.name)
+    await control(modal, 'description').fill('Drag out')
+    await toggle(modal).check()
+    await totalBox(modal).fill('10,000.00')
+    await control(modal, 'installment_months').click()
+    await control(modal, 'installment_months').pressSequentially('6')
+    await fields(modal).scrollIntoViewIfNeeded()
+    const box = await fields(modal).boundingBox()
+    // Press on the section's empty left edge, release outside the dialog, then leave the months box.
+    await page.mouse.move(box.x + 6, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(2, 2)
+    await page.mouse.up()
+    await control(modal, 'description').focus()
+    await h.check(`${id}.folds`, 'B', async () => {
+      const shown = (await summary(modal).count()) ? await readSummary(modal) : null
+      return (shown && shown.months === 6) || `summary ${JSON.stringify(shown)}`
+    })
+    // And a later blur still folds normally.
+    await changeButton(modal).click()
+    await control(modal, 'installment_months').click()
+    await control(modal, 'description').focus()
+    await h.check(`${id}.folds-again`, 'B', async () => (await summary(modal).count()) === 1 || 'section stayed open')
+  } finally {
+    await d.checkNoNativeDialogs(h, id, native)
+    await ctx.close()
+  }
+}
+
 /** Runs a scenario at both AC5 sizes. */
 const atBothSizes = (run) => async (browser) => {
   for (const [tag, viewport] of VIEWPORTS) await run(browser, tag, viewport)
@@ -809,6 +849,7 @@ const SCENARIOS = [
   ['collapsed_summary_and_change', collapsedSummaryAndChange],
   ['errors_never_hidden', errorsNeverHidden],
   ['custom_months_then_pick_one_tap', customMonthsThenPick],
+  ['press_released_outside_still_folds', pressReleasedOutsideStillFolds],
   ['offered_on_card_expense', offeredOnCardExpense],
   ['hidden_elsewhere', hiddenElsewhere],
   ['preview_shows_last_payment', atBothSizes(previewShowsLastPayment)],
