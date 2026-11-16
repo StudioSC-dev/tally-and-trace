@@ -87,11 +87,14 @@ class Budget(NamedTuple):
 # STU-658 added ``final_amount`` to every full entry (20 bytes each as null) and
 # ``remaining_total`` to every installment plan (26 bytes at these figures): the
 # budget-entries and installment-plans byte ceilings rose by exactly those bytes.
+# STU-660 added ``next_occurrence_amount`` to every full entry (a figure or null, computed from
+# the entry already loaded: no statement, no instance): the budget-entries byte ceilings rose
+# to the measured result (owner 14,748 to 15,293, editor 4,287 to 4,447).
 BUDGETS: Dict[Tuple[str, str], Budget] = {
     ("owner", "snapshot"): Budget(66, 111_157, 328, 1, 929),
     ("owner", "due"): Budget(60, 173_828, 308, 1, 992),
     ("owner", "installment-plans"): Budget(15, 2_119, 0, 0, 21),
-    ("owner", "budget-entries"): Budget(16, 14_748, 0, 0, 29),
+    ("owner", "budget-entries"): Budget(16, 15_293, 0, 0, 29),
     ("owner", "accounts"): Budget(12, 10_380, 0, 0, 16),
     ("owner", "transactions"): Budget(13, 20_829, 0, 0, 38),
     ("owner", SUGGESTIONS): Budget(4, 1_506, 0, 0, 1),
@@ -100,7 +103,7 @@ BUDGETS: Dict[Tuple[str, str], Budget] = {
     ("editor", "snapshot"): Budget(64, 36_062, 54, 1, 197),
     ("editor", "due"): Budget(60, 50_386, 45, 1, 223),
     ("editor", "installment-plans"): Budget(17, 765, 0, 0, 7),
-    ("editor", "budget-entries"): Budget(16, 4_287, 0, 0, 10),
+    ("editor", "budget-entries"): Budget(16, 4_447, 0, 0, 10),
     ("editor", "accounts"): Budget(10, 1_749, 0, 0, 5),
     ("editor", "transactions"): Budget(14, 8_878, 0, 0, 27),
     ("editor", SUGGESTIONS): Budget(4, 1_492, 0, 0, 1),
