@@ -30,6 +30,8 @@ class CardPaymentCreate(BaseModel):
     """``POST /cards/{account_id}/payments``: one transfer into the card.
 
     ``payment_date`` after Manila's today records a planned (pending) payment.
+    ``amount`` is in the payer's currency; ``received_amount`` (the card's
+    currency) is for a payer in another currency.
     """
     model_config = ConfigDict(extra="forbid")
 
@@ -38,6 +40,10 @@ class CardPaymentCreate(BaseModel):
     from_account_id: int = Field(..., gt=0)
     payment_date: date
     description: Optional[str] = Field(None, max_length=255)
+    # What the card receives, in its own currency, when the payer is in another
+    # one; the cash-transfer rules judge it (``transactions._received_amount``).
+    received_amount: Optional[Annotated[Decimal, Field(ge=0, max_digits=15, decimal_places=2,
+                                                       allow_inf_nan=False)]] = None
 
     @field_validator("payment_date")
     @classmethod

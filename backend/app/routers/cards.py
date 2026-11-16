@@ -524,7 +524,8 @@ def _check_payment(user: User, card: Optional[Account], payer: Optional[Account]
 
     The card: an owner or admin (404), a credit card (400), active (400). The
     paying account: an edit role (404), not the card, active, not a credit or
-    loan account (spending wallets may pay), in the card's currency (400).
+    loan account (spending wallets may pay). A payer in another currency is
+    allowed (STU-654): the cash-transfer rules judge ``received_amount``.
     """
     def role(account: Account) -> str:
         return roles.get(account.id, NONE) if roles is not None else account_role(user, account)
@@ -544,12 +545,6 @@ def _check_payment(user: User, card: Optional[Account], payer: Optional[Account]
     if payer.account_type in (AccountType.CREDIT, AccountType.LOAN):
         raise HTTPException(status_code=400,
                             detail="Pay a card from a bank, cash or e-wallet account")
-    currency = fc._code(card.currency)
-    if fc._code(payer.currency) != currency:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Pay this card from a {currency} account. Card payments are in the "
-                   f"card's currency; move the money into a {currency} account first.")
 
 
 @router.post("/{account_id}/payments", response_model=TransactionOut, status_code=201)
@@ -560,7 +555,7 @@ def record_card_payment(
     current_user: User = Depends(get_current_active_user),
     idem: Idempotency = Depends(idempotency),
 ):
-    """Pay a card: one transfer from a same-currency account into the card (201).
+    """Pay a card: one transfer from an account into the card (201).
 
     Any amount; the server targets no statement, since payments settle the
     oldest statement first. Owner or admin of the card only (404 otherwise);
@@ -594,6 +589,8 @@ def record_card_payment(
         transfer_from_account_id=payer.id,
         transfer_to_account_id=card.id,
         amount=float(payment.amount),
+        received_amount=(float(payment.received_amount)
+                         if payment.received_amount is not None else None),
         description=payment.description or "Card payment",
         transaction_date=datetime.combine(payment.payment_date, time()),
         is_posted=payment.payment_date <= manila_today(),
