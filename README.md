@@ -320,12 +320,13 @@ covers a bill in your view, since it isn't in your expense). A payment covers
 only bills in its own currency, never converted. A posted Household charge on
 a card statement that is not yet settled is left to the projection: it counts
 as covered by the planned and routed payments from the Household's accounts,
-which the projection shows as expense, so the joint outflow plus the
-remainder is always the charge, across recorded and projected months
-together. Planned recurring payments are counted up to the statement's due
-date; recorded and planned one-off payments count whenever they are dated, as
-in the statement engine, so a late payment still covers the bill once. This
-holds whatever range you ask for, so a month's figure is the same in every
+which the projection shows as expense. Planned recurring payments are counted
+up to the statement's due date; recorded and planned one-off payments count
+whenever they are dated, as in the statement engine, so a one-off payment made
+after the due date still covers the bill, and is counted only once. For the
+payments counted as above, the joint outflow plus the remainder equals the
+charge, across recorded and projected months together. This holds whatever
+range you ask for, so a month's figure is the same in every
 range, on the dashboard and in Upcoming (a payment in a month outside the
 range still covers the charge); a planned Household card charge is covered the
 same way. A statement already settled, or past due with no further

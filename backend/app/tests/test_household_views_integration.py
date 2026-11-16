@@ -536,6 +536,18 @@ def test_routed_cover_counts_only_payments_the_viewer_can_read(hh, sw_client, sw
     assert (totals["expense"], totals["paid_from_other_accounts"]) == (expense, remainder)
 
 
+def test_household_total_nets_recurring_transfer(hh, sw_client, sw_db):
+    # STU-249: A's card is routed to the joint account, which also pays it 100 by
+    # a recurring transfer on November 1, before the 100 statement is due
+    # (November 5). The statement nets the transfer, so the bill leaves the
+    # joint account once: expense 100, nothing left paid from other accounts.
+    _put(sw_client, hh["a"], f"/accounts/{hh['a_card']}", {"payment_account_id": hh["joint"]})
+    _charge(sw_client, hh, "projected")
+    _recurring_payment(sw_db, hh["a"], hh["joint"], hh["a_card"], 100, datetime(2026, 11, 1))
+    totals = _sum(_monthly(sw_db, hh["c"], hh["a"], PROJECTED))
+    assert (totals["expense"], totals["paid_from_other_accounts"]) == (100.0, 0.0)
+
+
 # --- Cover settles in the card's currency (STU-236) ----------------------------------------------
 
 @pytest.mark.parametrize("mode", list(MODES))
@@ -652,7 +664,7 @@ def test_projected_month_does_not_depend_on_the_requested_range(hh, sw_client, s
 def test_two_statements_with_different_due_dates_each_keep_their_remainder(
         hh, sw_client, sw_db, monkeypatch):
     # Household charges on two statements in one call: October 14 (due
-    # November 5) and November 14 (due December 5), each with a recurring joint
+    # November 5) and November 14 (due December 6), each with a recurring joint
     # payment before its due date (November 3 and December 3). Each line keeps
     # its own remainder whatever the range, and the dashboard agrees.
     import app.core.time as time_module
@@ -680,6 +692,70 @@ def test_two_statements_with_different_due_dates_each_keep_their_remainder(
     dashboard = _get(sw_client, hh["c"], f"/household/{hh['a']['id']}/dashboard")
     assert dashboard["month"]["month"] == "2026-10"
     assert dashboard["month"]["currencies"] == to_dec["2026-10"]
+
+
+# --- The projected cover stops at the statement's due date (STU-267) ----------------------------
+#
+# A Household charge of 100 on A's private card on October 14 is on the statement
+# closing October 15, due November 5. A recurring joint payment of 100 into the
+# card counts toward that statement's cover only up to its due date (the horizon
+# ``due + 1 day`` in ``household_occurrences``): one after it leaves October's
+# remainder, and is still the joint account's expense in its own month.
+
+
+def _cover_by_month(hh, sw_client, sw_db, paid_on):
+    _charge(sw_client, hh, "projected", when="2026-10-14T00:00:00")
+    _recurring_payment(sw_db, hh["a"], hh["joint"], hh["a_card"], 100, paid_on)
+    months = _monthly(sw_db, hh["c"], hh["a"], PROJECTED, OCT, DEC)
+    return {m["month"]: _sum([m]) for m in months}
+
+
+def test_cover_stops_at_due_date(hh, sw_client, sw_db):
+    months = _cover_by_month(hh, sw_client, sw_db, datetime(2026, 11, 20))
+    assert months["2026-10"]["paid_from_other_accounts"] == 100.0
+    assert months["2026-11"]["expense"] == 100.0
+
+
+def test_cover_includes_due_date(hh, sw_client, sw_db):
+    months = _cover_by_month(hh, sw_client, sw_db, datetime(2026, 11, 5))
+    assert months["2026-10"]["paid_from_other_accounts"] == 0.0
+    assert months["2026-11"]["expense"] == 100.0
+
+
+def test_cover_excludes_day_after_due_date(hh, sw_client, sw_db):
+    months = _cover_by_month(hh, sw_client, sw_db, datetime(2026, 11, 6))
+    assert months["2026-10"]["paid_from_other_accounts"] == 100.0
+    assert months["2026-11"]["expense"] == 100.0
+
+
+def test_household_cover_matches_engine_for_late_occurrence(hh, sw_client, sw_db):
+    # STU-249: Household charges of 100 on the statements closing October 15
+    # (due November 5) and November 15 (due December 6, payable Monday December
+    # 7), and a recurring joint payment of 100 on November 20. The October
+    # statement is still owing when the payment comes, but it is already due, so
+    # the payment pays the November statement, in the engine and in the
+    # Household cover alike: October keeps its 100, November is covered.
+    from datetime import timedelta
+    from decimal import Decimal
+
+    from app.services.forecast import collect_events
+
+    _charge(sw_client, hh, "projected", when="2026-10-14T00:00:00")
+    _charge(sw_client, hh, "projected", when="2026-11-10T00:00:00")
+    _recurring_payment(sw_db, hh["a"], hh["joint"], hh["a_card"], 100, datetime(2026, 11, 20))
+
+    sw_db.expire_all()
+    events = collect_events(sw_db, PROJECTED, PROJECTED + timedelta(days=120),
+                            user_id=hh["a"]["id"])
+    payables = {e["statement_close"].date().isoformat(): e["amount"] for e in events
+                if e["source"] == "statement" and e["source_id"] == hh["a_card"]}
+    assert payables == {"2026-10-15": Decimal("-100.00")}
+
+    months = _monthly(sw_db, hh["c"], hh["a"], PROJECTED, OCT, DEC)
+    totals = {m["month"]: _sum([m]) for m in months}
+    assert totals["2026-10"]["paid_from_other_accounts"] == 100.0
+    assert (totals["2026-11"]["expense"], totals["2026-11"]["paid_from_other_accounts"]) == (
+        100.0, 0.0)
 
 
 # --- A Household wallet's card payment counts once (STU-342) ------------------------------------

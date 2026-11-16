@@ -72,3 +72,24 @@ def test_the_stranger_sees_nothing(captured):
             assert got["status"] == 404, (name, got["status"])
         else:
             assert got["status"] == 200, (name, got["status"])
+
+
+@needs_db
+def test_no_shares_parity_recurring_card_transfers(captured):
+    """STU-249 nets recurring transfers into a card against its statements. The
+    realistic dataset has no such transfer (none of the owner's entries pays a
+    card), so no golden figure is affected by the netting and every response,
+    the owner's projections and statements included, still equals its file."""
+    import json
+
+    def body(caller, name):
+        return json.loads(captured[(caller, name)])["body"]
+
+    cards = {a["id"] for a in body("owner", "accounts")["items"]
+             if a["account_type"] == "credit"}
+    entries = body("owner", "budget-entries")
+    assert cards and not entries["has_more"] and len(entries["items"]) == entries["total"]
+    assert not [e for e in entries["items"] if e.get("transfer_to_account_id") in cards]
+    for (caller, name), text in captured.items():
+        assert text == golden.golden_file(caller, name).read_text(encoding="utf-8"), (
+            caller, name)
