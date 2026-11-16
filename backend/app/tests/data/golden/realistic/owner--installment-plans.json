@@ -18,6 +18,7 @@
     "payments_left": 12,
     "payments_total": 15,
     "recordable": true,
+    "remaining_total": 30000.0,
     "view": "full"
    },
    {
@@ -36,6 +37,7 @@
     "payments_left": 12,
     "payments_total": 28,
     "recordable": false,
+    "remaining_total": 39600.0,
     "view": "full"
    },
    {
@@ -54,6 +56,7 @@
     "payments_left": 12,
     "payments_total": 14,
     "recordable": false,
+    "remaining_total": 34800.0,
     "view": "full"
    },
    {
@@ -72,6 +75,7 @@
     "payments_left": 12,
     "payments_total": 14,
     "recordable": false,
+    "remaining_total": 44400.0,
     "view": "full"
    },
    {
@@ -90,6 +94,7 @@
     "payments_left": 12,
     "payments_total": 12,
     "recordable": false,
+    "remaining_total": 49200.0,
     "view": "full"
    },
    {
@@ -108,6 +113,7 @@
     "payments_left": 12,
     "payments_total": 13,
     "recordable": false,
+    "remaining_total": 54000.0,
     "view": "full"
    }
   ],

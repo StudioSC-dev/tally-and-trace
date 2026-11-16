@@ -51,7 +51,7 @@ from app.schemas.transaction import TransactionUpdate
 from app.services import loans as loan_svc
 from app.services.forecast import (
     _linked_rows, _naive, _next_occurrence, capped_distinct_days, iter_occurrences,
-    occurrence_links,
+    final_occurrence_day, occurrence_amount, occurrence_links,
 )
 from app.services.payment_dates import (
     CLEAR_OUT_OF_ORDER, OVERRIDE_REACH, Moved, clear_all, clear_override, effective, effective_at,
@@ -611,13 +611,15 @@ def date_options(db: Session, entry, day: date, chosen: date, account: Optional[
                "payments": [], "total": None, "currency": entry.currency,
                "statement_close": None}
     if reason is None:
+        final_day = final_occurrence_day(entry)
         payments = [{"occurrence_date": day, "effective_date": following,
-                     "amount": entry.amount}]
+                     "amount": occurrence_amount(entry, day, final_day)}]
         payments += [{"occurrence_date": occ.date(), "effective_date": following,
-                      "amount": entry.amount}
+                      "amount": occurrence_amount(entry, occ, final_day)}
                      for occ in schedule_walk(entry, following + OVERRIDE_REACH)
                      if occ.date() > day and effective(moved, occ.date()) == following]
-        overlap.update(payments=payments, total=entry.amount * len(payments),
+        overlap.update(payments=payments,
+                       total=sum((Decimal(str(p["amount"])) for p in payments), Decimal("0")),
                        statement_close=statement_close(card, following) if card else None)
 
     plan = None
@@ -739,6 +741,8 @@ def _create(db: Session, entry, actor: User, payload: BudgetEntryMaterialize,
     # source's) posts the figure the account was actually charged, which only
     # the caller knows; the entry's own figure is kept as the face.
     account = db.get(Account, entry.account_id)
+    # The occurrence's own amount: an installment's last bills ``final_amount`` (STU-658).
+    face = occurrence_amount(entry, occurrence)
     if account is not None and entry.currency != account.currency:
         if payload.amount is None:
             raise HTTPException(
@@ -746,15 +750,15 @@ def _create(db: Session, entry, actor: User, payload: BudgetEntryMaterialize,
                 detail=f"Enter the amount charged in {account.currency.value}")
         currency_fields = {
             "currency": account.currency,
-            "projected_amount": entry.amount,
+            "projected_amount": face,
             "projected_currency": entry.currency,
-            "original_amount": entry.amount,
+            "original_amount": face,
             "original_currency": entry.currency,
-            "exchange_rate": exchange_rate(payload.amount, entry.amount),
+            "exchange_rate": exchange_rate(payload.amount, face),
         }
     else:
         currency_fields = {"currency": entry.currency}
-    amount = payload.amount if payload.amount is not None else entry.amount
+    amount = payload.amount if payload.amount is not None else face
     if entry.transfer_to_account_id:
         # A recurring transfer posts as a transfer: -(amount + fee) on the source,
         # +amount on the destination, like any other transfer transaction.
@@ -1050,10 +1054,11 @@ def _funded(db: Session, entry, account: Account, walk: List[datetime]) -> List[
              in _linked_rows(db, [entry.id], occurrence_match=True)}
     balance = Decimal(str(account.balance))
     funded = []
+    final_day = final_occurrence_day(entry)
     for occ in walk:
         txn_id, is_posted = links.get(occ.date(), (None, False))
         amount = (0 if is_posted else db.get(Transaction, txn_id).amount if txn_id
-                  else entry.amount)
+                  else occurrence_amount(entry, occ, final_day))
         cost = Decimal(str(amount))
         if cost > 0 and cost > balance:
             break
@@ -1805,6 +1810,8 @@ def review_state(db: Session, entry, caller: User, today: date) -> ReviewState:
         "is_active": bool(entry.is_active),
         "account_id": entry.account_id,
         "amount": _money(entry.amount),
+        "final_amount": (_money(entry.final_amount)
+                         if entry.final_amount is not None else None),
         "currency": getattr(entry.currency, "value", entry.currency),
         "reviewed": reviewed,
         "auto_post_enabled": bool(entry.auto_post_enabled),

@@ -84,11 +84,14 @@ class Budget(NamedTuple):
 # ceilings rose by exactly its bytes (18 per account); the household list is unchanged.
 # The accounts lists carry both ``owner_id`` and ``can_view_details``: their ceilings are
 # the measured result with both fields (STU-244's rise plus STU-253's).
+# STU-658 added ``final_amount`` to every full entry (20 bytes each as null) and
+# ``remaining_total`` to every installment plan (26 bytes at these figures): the
+# budget-entries and installment-plans byte ceilings rose by exactly those bytes.
 BUDGETS: Dict[Tuple[str, str], Budget] = {
     ("owner", "snapshot"): Budget(66, 111_157, 328, 1, 929),
     ("owner", "due"): Budget(60, 173_828, 308, 1, 992),
-    ("owner", "installment-plans"): Budget(15, 1_963, 0, 0, 21),
-    ("owner", "budget-entries"): Budget(16, 14_408, 0, 0, 29),
+    ("owner", "installment-plans"): Budget(15, 2_119, 0, 0, 21),
+    ("owner", "budget-entries"): Budget(16, 14_748, 0, 0, 29),
     ("owner", "accounts"): Budget(12, 10_380, 0, 0, 16),
     ("owner", "transactions"): Budget(13, 20_829, 0, 0, 38),
     ("owner", SUGGESTIONS): Budget(4, 1_506, 0, 0, 1),
@@ -96,8 +99,8 @@ BUDGETS: Dict[Tuple[str, str], Budget] = {
     ("owner", "card-credit"): Budget(29, 9_374, 431, 0, 543),
     ("editor", "snapshot"): Budget(64, 36_062, 54, 1, 197),
     ("editor", "due"): Budget(60, 50_386, 45, 1, 223),
-    ("editor", "installment-plans"): Budget(17, 713, 0, 0, 7),
-    ("editor", "budget-entries"): Budget(16, 4_187, 0, 0, 10),
+    ("editor", "installment-plans"): Budget(17, 765, 0, 0, 7),
+    ("editor", "budget-entries"): Budget(16, 4_287, 0, 0, 10),
     ("editor", "accounts"): Budget(10, 1_749, 0, 0, 5),
     ("editor", "transactions"): Budget(14, 8_878, 0, 0, 27),
     ("editor", SUGGESTIONS): Budget(4, 1_492, 0, 0, 1),

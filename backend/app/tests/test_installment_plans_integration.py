@@ -24,7 +24,9 @@ pytestmark = [pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not
 T = date(2026, 10, 18)
 KEYS = {"view", "entry_id", "name", "account_name", "amount", "currency", "next_charge",
         "effective_date", "missed", "payments_left", "payments_total", "can_mark_paid", "auto_post",
-        "block_reason", "can_review", "recordable"}
+        "block_reason", "can_review", "recordable",
+        # STU-658: the sum of the remaining payments' own amounts.
+        "remaining_total"}
 
 
 def _day(offset: int) -> str:
@@ -93,7 +95,8 @@ def test_a_plan_reads_its_next_charge_and_n_of_m(w):
     assert body["today"] == T.isoformat()
     assert body["items"] == [{
         "view": "full", "entry_id": sofa, "name": "Sofa", "account_name": "Card C",
-        "amount": 5000.0, "currency": "PHP", "next_charge": _day(3), "effective_date": _day(3), "missed": 0,
+        "amount": 5000.0, "remaining_total": 50000.0,  # STU-658: 10 payments of 5,000
+        "currency": "PHP", "next_charge": _day(3), "effective_date": _day(3), "missed": 0,
         "payments_left": 10, "payments_total": 12, "can_mark_paid": True, "auto_post": "off",
         "block_reason": None, "can_review": True, "recordable": True}]
 

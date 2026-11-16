@@ -5,47 +5,87 @@ import {
   parseInstallmentMonths,
   parseInstallmentTotal,
   splitInstallment,
+  trySplitInstallment,
 } from './installmentSplit'
 import { cappedPaymentDays, installmentScheduleDraft, repeatScheduleOf, scheduleRequest, type ScheduleContext } from './scheduleDraft'
 
 const sum = (values: number[]) => values.reduce((total, value) => total + value, 0)
 
-// STU-631 AC1: the split sums to the total, every payment but the first is the total ÷ N
-// rounded down to centavos, and the remainder goes on the first.
+// STU-658 AC1: the bank rule (Metrobank, HSBC). Each payment but the last is the total ÷ N
+// rounded half-up to the centavo, the last absorbs the difference, and they sum to the total.
 describe('installment_split', () => {
   it('even_split: 12,000.00 over 12 is twelve payments of 1,000.00', () => {
     const split = splitInstallment(1_200_000, 12)
-    expect(split).toMatchObject({ months: 12, first: 100_000, rest: 100_000 })
+    expect(split).toMatchObject({ months: 12, first: 100_000, monthly: 100_000, last: 100_000 })
     expect(split.payments).toEqual(Array(12).fill(100_000))
     expect(sum(split.payments)).toBe(1_200_000)
   })
 
-  it('remainder_on_first: 10,000.00 over 3 is 3,333.34 then 3,333.33 twice', () => {
+  it('last_higher: 10,000.00 over 3 is 3,333.33 twice then 3,333.34', () => {
     const split = splitInstallment(1_000_000, 3)
-    expect(split.payments).toEqual([333_334, 333_333, 333_333])
+    expect(split.payments).toEqual([333_333, 333_333, 333_334])
     expect(sum(split.payments)).toBe(1_000_000)
-    expect(centavosToAmount(split.first)).toBe(3333.34)
-    expect(centavosToAmount(split.rest)).toBe(3333.33)
+    expect(centavosToAmount(split.first)).toBe(3333.33)
+    expect(centavosToAmount(split.monthly)).toBe(3333.33)
+    expect(centavosToAmount(split.last)).toBe(3333.34)
   })
 
-  it('remainder_on_first: the rest are the total ÷ N rounded down, for many totals and counts', () => {
-    for (const total of [1, 7, 99, 100, 101, 999_999, 1_000_000, 123_456_789]) {
+  it('last_lower: 20,000.00 over 3 is 6,666.67 twice then 6,666.66', () => {
+    const split = splitInstallment(2_000_000, 3)
+    expect(split.payments).toEqual([666_667, 666_667, 666_666])
+    expect(sum(split.payments)).toBe(2_000_000)
+    expect(centavosToAmount(split.monthly)).toBe(6666.67)
+    expect(centavosToAmount(split.last)).toBe(6666.66)
+  })
+
+  it('rounds half-up and puts the difference on the last, for many totals and counts', () => {
+    for (const total of [7, 99, 100, 101, 150, 999_999, 1_000_000, 2_000_000, 123_456_789]) {
       for (const months of [1, 2, 3, 6, 7, 12, 24, 36, 360]) {
-        if (total < months) continue
-        const split = splitInstallment(total, months)
+        const split = trySplitInstallment(total, months)
         const floor = Math.floor(total / months)
+        const monthly = (total - floor * months) * 2 >= months ? floor + 1 : floor
+        const last = total - monthly * (months - 1)
+        if (monthly <= 0 || last <= 0) {
+          expect(split).toBeNull()
+          continue
+        }
+        if (split === null) throw new Error(`no split for ${total} over ${months}`)
         expect(split.payments).toHaveLength(months)
         expect(sum(split.payments)).toBe(total)
-        expect(split.payments.slice(1).every((payment) => payment === floor)).toBe(true)
-        expect(split.first).toBe(floor + (total - floor * months))
-        expect(split.first - floor).toBeLessThan(months)
+        expect(split.payments.slice(0, -1).every((payment) => payment === monthly)).toBe(true)
+        expect(split.last).toBe(last)
+        expect(split.first).toBe(split.payments[0])
       }
     }
   })
 
   it('one_month: the whole total is the first and only payment', () => {
-    expect(splitInstallment(1_000_000, 1)).toEqual({ months: 1, first: 1_000_000, rest: 1_000_000, payments: [1_000_000] })
+    expect(splitInstallment(1_000_000, 1)).toEqual({ months: 1, first: 1_000_000, monthly: 1_000_000, last: 1_000_000, payments: [1_000_000] })
     expect(splitInstallment(1, 1).payments).toEqual([1])
+  })
+
+  it('two_months: the first is the rounded half and the last the rest', () => {
+    expect(splitInstallment(1_000_001, 2)).toMatchObject({ first: 500_001, monthly: 500_001, last: 500_000, payments: [500_001, 500_000] })
+    expect(splitInstallment(1_000_000, 2).payments).toEqual([500_000, 500_000])
+  })
+
+  it('nonpositive_payment_rejected: a monthly or last payment of zero or less is no split', () => {
+    // Last zero: 0.01 over 2 rounds to 0.01 a month, leaving nothing for the last.
+    expect(trySplitInstallment(1, 2)).toBeNull()
+    expect(() => splitInstallment(1, 2)).toThrow(RangeError)
+    // Monthly zero: 0.01 over 3 rounds to 0.00 a month.
+    expect(trySplitInstallment(1, 3)).toBeNull()
+    // Last negative: 0.05 over 8 rounds to 0.01 a month, seven of them more than the total.
+    expect(trySplitInstallment(5, 8)).toBeNull()
+    // Last zero with a total above the count: 0.06 over 4 is 0.02 a month, 0.06 for three.
+    expect(trySplitInstallment(6, 4)).toBeNull()
+    expect(installmentInput('0.01', '2')).toEqual({
+      ok: false,
+      field: 'installment_total',
+      message: 'The purchase total is too small to split into 2 payments.',
+    })
+    expect(installmentInput('0.05', '8')).toMatchObject({ ok: false, field: 'installment_total' })
+    expect(installmentInput('0.06', '4')).toMatchObject({ ok: false, field: 'installment_total' })
   })
 
   it('refuses a total or a count that is not a positive whole number', () => {

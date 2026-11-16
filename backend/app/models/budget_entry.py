@@ -36,6 +36,8 @@ class BudgetEntry(Base):
                         name="ck_budget_entries_anchor_day_range"),
         CheckConstraint("billing_kind IN ('subscription','bill')",
                         name="ck_budget_entries_billing_kind"),
+        CheckConstraint("final_amount IS NULL OR final_amount > 0",
+                        name="ck_budget_entries_final_amount_positive"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -48,6 +50,11 @@ class BudgetEntry(Base):
     description = Column(Text, nullable=True)
 
     amount = Column(Numeric(15, 2), nullable=False)
+    # The last occurrence's amount when it differs (STU-658): a card installment split
+    # from its total bills the rounding difference on its last payment, as the banks
+    # do. Null: every occurrence is ``amount``. Only on an entry with a finite count
+    # (``end_mode`` "after_occurrences"); read through ``forecast.occurrence_amount``.
+    final_amount = Column(Numeric(15, 2), nullable=True)
     currency = Column(Enum(CurrencyType), nullable=False, default=CurrencyType.PHP)
     cadence = Column(
         Enum(RecurrenceFrequency, values_callable=_enum_values, name="recurrencefrequency"),

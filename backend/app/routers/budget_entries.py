@@ -67,7 +67,9 @@ from app.schemas.budget_entry import (
     ReviewInstallmentsRequest,
     ReviewInstallmentsResult,
     UpcomingOccurrences,
+    FINAL_AMOUNT_MESSAGE,
     ZERO_REMAINING_MESSAGE,
+    final_amount_allowed,
     zero_remaining_allowed,
 )
 from app.schemas.transaction import TransactionOut
@@ -882,6 +884,13 @@ def update_budget_entry(
         prospective_data.get("is_active", entry.is_active),
     ):
         raise HTTPException(status_code=422, detail=ZERO_REMAINING_MESSAGE)
+    # A last payment's own amount needs a finite count, as the row will be (STU-658).
+    if not final_amount_allowed(
+        prospective_data.get("final_amount", entry.final_amount),
+        prospective_data.get("end_mode", entry.end_mode),
+        prospective_data.get("max_occurrences", entry.max_occurrences),
+    ):
+        raise HTTPException(status_code=422, detail=FINAL_AMOUNT_MESSAGE)
 
     # The day fields as the row will be: the request merged over the stored row.
     prospective_data.update(_day_fields(

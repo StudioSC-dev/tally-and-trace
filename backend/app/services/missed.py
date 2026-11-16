@@ -33,6 +33,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Dict, FrozenSet, Iterable, List, Optional, Sequence
 
 from sqlalchemy import and_, or_
@@ -619,9 +620,12 @@ def upcoming_occurrences(ctx: RequestContext, *, start: Optional[date],
             "can_review": bool(info is not None and info.can_edit
                                and auto_post_block(entry, account) is None),
         }
+        final_day = fc.final_occurrence_day(entry)
         for day, when in days:
             items.append({
                 **shared,
+                # The occurrence's own amount: an installment's last may differ (STU-658).
+                "amount": float(fc.occurrence_amount(entry, day, final_day)),
                 "occurrence_date": day,
                 "effective_date": when,
                 "recordable": (can_mark_paid and (not capped or day == first_day)
@@ -676,13 +680,22 @@ def installment_plans(ctx: RequestContext) -> dict:
         due_on = effective(forced.get(entry.id), next_charge) if next_charge is not None else None
         can_mark_paid = bool(access.permissions(entry)["can_post"])
         auto_post = info.state if info is not None else None
+        # Every remaining payment's own amount (STU-658): the last may differ.
+        final_day = fc.final_occurrence_day(entry)
+        left = max(entry.max_occurrences or 0, 0)
+        remaining_total = (Decimal(str(entry.amount)) * left if final_day is None else
+                           Decimal(str(entry.amount)) * (left - 1)
+                           + Decimal(str(fc.occurrence_amount(entry, final_day, final_day))))
         items.append({
             "view": redactor.view(entry),
             "entry_id": entry.id,
             "name": entry.name,
             "account_name": account.name if account is not None
             and redactor.can_view(account.id) else None,
-            "amount": float(entry.amount),
+            # The next charge's amount; the entry's when every month has a row.
+            "amount": float(fc.occurrence_amount(entry, next_charge, final_day)
+                            if next_charge is not None else entry.amount),
+            "remaining_total": float(remaining_total),
             "currency": entry.currency.value,
             "next_charge": next_charge,
             "effective_date": due_on,

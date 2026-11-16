@@ -79,8 +79,11 @@ class RepeatSchedule(BaseModel):
     same commit. A semi-monthly cadence is not offered: its two days are not
     the transaction's date. ``amount``, when sent, is the entry's amount in the
     transaction's face currency, so the payments after the first can differ from
-    it (an installment split from its total, the remainder on the first, STU-631);
-    omitted, the entry takes the transaction's face amount."""
+    it (an installment split from its total, STU-631); omitted, the entry takes
+    the transaction's face amount. ``final_amount``, when sent, is the entry's
+    last occurrence's amount (STU-658: the last payment absorbs the rounding
+    difference, as the banks bill it); it needs ``end_mode``
+    "after_occurrences"."""
     model_config = ConfigDict(extra="forbid")
 
     cadence: RecurrenceFrequency
@@ -93,6 +96,8 @@ class RepeatSchedule(BaseModel):
     settlement: Literal["manual", "autopay"] = "manual"
     amount: Optional[Decimal] = Field(None, gt=0, max_digits=15, decimal_places=2,
                                       allow_inf_nan=False)
+    final_amount: Optional[Decimal] = Field(None, gt=0, max_digits=15, decimal_places=2,
+                                            allow_inf_nan=False)
 
     @field_validator("cadence")
     @classmethod
