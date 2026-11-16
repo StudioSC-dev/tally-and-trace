@@ -1,25 +1,36 @@
-// Browser checks for STU-631: a card purchase recorded as an installment from its total and
-// number of months, in the Add Transaction dialog.
+// Browser checks for STU-631 and STU-658: a card purchase recorded as an installment from its
+// total and number of months, in the Add Transaction dialog. The split follows the banks' rule
+// (STU-658): each payment is the total ÷ months rounded half-up to the centavo, and the last
+// absorbs the difference, so it can be higher or lower.
 //
-// offered_on_card_expense (AC2): an expense on a credit card offers Installment; turning it on
-//   shows the total and months (quick picks 3, 6, 12, 24 and a typed count), hides the Amount
-//   field, the Repeat section and the recurring link;
-// hidden_elsewhere (AC2): income and a transfer on the card, an expense on a bank account and
-//   Edit of a saved card expense show no Installment option;
-// preview_matches_saved (AC3): 10,000.00 over 3 previews a first payment of 3,333.34, then
-//   3,333.33 a month, on the statement closes; once saved, the first payment's amount, the
-//   installment's amount and its payment dates (the forecast's) are the ones previewed;
-// saved_installment_from_total (AC4), desktop and 390px: one POST /transactions/repeating whose
-//   transaction is the first payment (with the remainder) and whose `repeat` is Repeat's card
-//   installment for all the months plus `amount` (each later payment); the transaction and
-//   the installment are saved, the forecast lists the later payments on the statement closes
-//   at the split amount, and the Due card's Installments tab shows "2 of 3 left" on the next
-//   close. At 390px the section has no horizontal scroll and 44px targets;
-// per_payment_flow_unchanged (AC5): Repeat with After runs on the card still sends the
-//   per-payment schedule with no `amount`, and the installment's amount is the one typed;
-// invalid_purchase_total, invalid_month_count (AC7): blank, non-numeric, zero, negative,
+// offered_on_card_expense (STU-631 AC2): an expense on a credit card offers Installment; turning
+//   it on shows the total and months (quick picks 3, 6, 12, 24 and a typed count), hides the
+//   Amount field, the Repeat section and the recurring link;
+// hidden_elsewhere (STU-631 AC2): income and a transfer on the card, an expense on a bank account
+//   and Edit of a saved card expense show no Installment option;
+// preview_shows_last_payment (AC5), 1280x800 and 390x844: 12,000.00 over 3 previews 4,000.00 a
+//   month and no last payment; 10,000.00 over 3 previews a first payment of 3,333.33, then
+//   3,333.33 for one month and a last payment of 3,333.34, on the statement closes; once saved,
+//   the transaction, the installment's amount and final_amount and its payment days (the
+//   forecast's) are the ones previewed;
+// saved_last_higher (10,000.00/3), saved_last_lower (20,000.00/3), saved_two_months_final_amount
+//   (10,000.01/2) (AC5), 1280x800 and 390x844: one POST /transactions/repeating whose transaction
+//   is the first payment at the monthly amount and whose `repeat` is the card installment for
+//   all the months plus `amount` (the monthly amount) and `final_amount` (the last payment); the
+//   transaction and the installment are saved, the forecast lists the later payments on the
+//   statement closes, the last at its own amount, and the Due card's Installments tab shows
+//   "N-1 of N left" on the next close. At 390px the section has no horizontal scroll and 44px
+//   targets;
+// saved_one_month_no_repeat (AC5), 1280x800 and 390x844: one month saves the transaction at the
+//   total through POST /transactions, with no installment entry;
+// per_payment_repeat_unchanged (AC4): Repeat with After runs on the card still sends the
+//   per-payment schedule with no `amount` or `final_amount`, and the installment's amount is the
+//   one typed, with no final_amount;
+// invalid_purchase_total, invalid_month_count (STU-631 AC7): blank, non-numeric, zero, negative,
 //   fractional-centavo totals and fractional months show a field error (aria-invalid,
-//   described by it, focused) and send nothing, so no transaction or installment is created.
+//   described by it, focused) and send nothing, so no transaction or installment is created;
+// invalid_split_creates_no_records (AC9): a total too small for its months (0.01 over 2, 0.02
+//   over 3) shows the field error and sends nothing.
 // Every scenario checks that no browser dialog fired.
 //
 // Starts its own API and web app against a throwaway database (./_local_stack.cjs) and seeds
@@ -46,6 +57,10 @@ try {
 
 const only = process.argv[2]
 let stack, client
+
+/** The two sizes AC5's scenarios run at. */
+const VIEWPORTS = [['desktop', { width: 1280, height: 800 }], ['phone', { width: 390, height: 844 }]]
+const money = (value) => `₱${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
 useDueCheck((what, actual, expected) =>
   h.check(what, 'S', () => JSON.stringify(actual) === JSON.stringify(expected) || `actual ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`))
@@ -112,15 +127,19 @@ async function fillInstallment(modal, description, total, months) {
   await control(modal, 'installment_months').fill(months)
 }
 
-/** The preview: the first payment's figure and day, each later payment's figure, every day. */
+/** The preview: the first payment's figure and day, the monthly figure and count, the last payment's figure and day, every day. */
 async function readPreview(modal) {
   const first = (await preview(modal).locator('[data-testid="installment-preview-first"]').innerText()).trim()
   const rest = (await preview(modal).locator('[data-testid="installment-preview-rest"]').count())
     ? (await preview(modal).locator('[data-testid="installment-preview-rest"]').innerText()).trim()
     : null
+  const last = (await preview(modal).locator('[data-testid="installment-preview-last"]').count())
+    ? (await preview(modal).locator('[data-testid="installment-preview-last"]').innerText()).trim()
+    : null
   const dates = (await preview(modal).locator('[data-testid="installment-preview-dates"]').innerText()).trim()
   const firstMatch = /^First payment (\S+) on (.+)$/.exec(first)
   const restMatch = rest && /^Then (\S+) a month for (\d+) months?, /.exec(rest)
+  const lastMatch = last && /^Last payment (\S+) on (.+)$/.exec(last)
   // "On the statement closes: Nov 28th, 2026, Dec 28th, 2026, ..." — each label has one comma.
   const labels = dates.replace(/^[^:]+:\s*/, '').match(/[A-Z][a-z]{2} \d{1,2}(?:st|nd|rd|th), \d{4}/g) ?? []
   return {
@@ -128,6 +147,8 @@ async function readPreview(modal) {
     firstDay: firstMatch ? dayOfLabel(firstMatch[2]) : null,
     rest: restMatch ? restMatch[1] : null,
     restCount: restMatch ? Number(restMatch[2]) : 0,
+    last: lastMatch ? lastMatch[1] : null,
+    lastDay: lastMatch ? dayOfLabel(lastMatch[2]) : null,
     onClose: dates.startsWith('On the statement closes'),
     days: labels.map(dayOfLabel),
   }
@@ -235,77 +256,96 @@ async function hiddenElsewhere(browser) {
   }
 }
 
-// AC3
-async function previewMatchesSaved(browser) {
-  console.log('\n=== preview_matches_saved (AC3)')
-  const user = await h.makeUser(stack, 'iftc')
+/** The days are the card's 28th closes, a month apart, the first on the transaction's day. */
+const onCloses = (shown, months) =>
+  shown.onClose && shown.days.length === months && shown.firstDay === shown.days[0] &&
+  shown.days.every((day, i) => day && day.endsWith('-28') && (i === 0 || day === addMonths28(shown.days[0], i)))
+
+// AC5
+async function previewShowsLastPayment(browser, tag, viewport) {
+  const id = `preview_shows_last_payment.${tag}`
+  console.log(`\n=== ${id} (AC5)`)
+  const user = await h.makeUser(stack, `iftc${tag[0]}`)
   await consumePageOpen(client.api, user)
   const bank = await account(user, 'IFT Checking')
   const cc = await card(user, bank, 'IFT Card')
-  const { ctx, page, native } = await openPage(browser, user)
+  const { ctx, page, native } = await openPage(browser, user, { viewport })
+  const name = `Sofa ${tag}`
   try {
     const modal = await openAdd(page, cc.name)
-    await fillInstallment(modal, 'Sofa preview', '10,000.00', '3')
+    await fillInstallment(modal, name, '12,000.00', '3')
     await preview(modal).waitFor()
+    const even = await readPreview(modal)
+    await h.check(`${id}.even-no-last`, 'B', () =>
+      (even.first === '₱4,000.00' && even.rest === '₱4,000.00' && even.restCount === 2 && even.last === null) || `preview ${JSON.stringify(even)}`)
+    await control(modal, 'installment_total').fill('10,000.00')
+    await h.waitQuiet(page)
     const shown = await readPreview(modal)
-    await h.check('preview_matches_saved.figures', 'B', () =>
-      (shown.first === '₱3,333.34' && shown.rest === '₱3,333.33' && shown.restCount === 2) || `preview ${JSON.stringify(shown)}`)
-    await h.check('preview_matches_saved.on-closes', 'B', () =>
-      (shown.onClose && shown.days.length === 3 && shown.days.every((day) => day && day.endsWith('-28')) &&
-        shown.days[1] === addMonths28(shown.days[0], 1) && shown.days[2] === addMonths28(shown.days[0], 2) && shown.firstDay === shown.days[0]) ||
-      `days ${JSON.stringify(shown)}`)
+    await h.check(`${id}.figures`, 'B', () =>
+      (shown.first === '₱3,333.33' && shown.rest === '₱3,333.33' && shown.restCount === 1 && shown.last === '₱3,333.34') ||
+      `preview ${JSON.stringify(shown)}`)
+    await h.check(`${id}.on-closes`, 'B', () =>
+      (onCloses(shown, 3) && shown.lastDay === shown.days[2]) || `days ${JSON.stringify(shown)}`)
     await submit(page, modal)
-    const [txn] = await transactionsNamed(user, 'Sofa preview')
-    const [entry] = await entryNamed(user, 'Sofa preview')
-    await h.check('preview_matches_saved.first-amount', 'B', () => (txn && Number(txn.amount) === 3333.34) || `transaction ${JSON.stringify(txn && txn.amount)}`)
-    await h.check('preview_matches_saved.rest-amount', 'B', () => (entry && Number(entry.amount) === 3333.33) || `entry ${JSON.stringify(entry && entry.amount)}`)
-    await h.check('preview_matches_saved.next-day', 'B', () =>
+    const [txn] = await transactionsNamed(user, name)
+    const [entry] = await entryNamed(user, name)
+    await h.check(`${id}.first-amount`, 'B', () => (txn && Number(txn.amount) === 3333.33) || `transaction ${JSON.stringify(txn && txn.amount)}`)
+    await h.check(`${id}.entry-amounts`, 'B', () =>
+      (entry && Number(entry.amount) === 3333.33 && Number(entry.final_amount) === 3333.34) ||
+      `entry ${JSON.stringify(entry && [entry.amount, entry.final_amount])}`)
+    await h.check(`${id}.next-day`, 'B', () =>
       (entry && entry.next_occurrence.slice(0, 10) === shown.days[1]) || `entry next ${entry && entry.next_occurrence}, preview ${shown.days[1]}`)
-    await h.check('preview_matches_saved.forecast-days', 'B', async () => {
-      const forecast = await forecastOf(user, 'Sofa preview')
-      const expected = shown.days.slice(1).map((day) => [day, 3333.33])
+    await h.check(`${id}.forecast-days`, 'B', async () => {
+      const forecast = await forecastOf(user, name)
+      const expected = [[shown.days[1], 3333.33], [shown.days[2], 3333.34]]
       return JSON.stringify(forecast) === JSON.stringify(expected) || `forecast ${JSON.stringify(forecast)}, preview ${JSON.stringify(expected)}`
     })
   } finally {
-    await d.checkNoNativeDialogs(h, 'preview_matches_saved', native)
+    await d.checkNoNativeDialogs(h, id, native)
     await ctx.close()
   }
 }
 
-// AC4
-async function savedInstallmentFromTotal(browser, width) {
-  const tag = width ? 'phone' : 'desktop'
-  console.log(`\n=== saved_installment_from_total.${tag} (AC4)`)
+/** The 390px checks: no horizontal scroll, every target at least 44px. */
+async function phoneLayout(page, modal, id) {
+  await h.check(`${id}.no-page-scroll`, 'B', async () => {
+    const [scroll, clientWidth] = await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth])
+    return scroll <= clientWidth || `page ${scroll} > ${clientWidth}`
+  })
+  await h.check(`${id}.no-section-scroll`, 'B', async () => {
+    const [scroll, clientWidth] = await fields(modal).evaluate((el) => [el.scrollWidth, el.clientWidth])
+    return scroll <= clientWidth || `fieldset ${scroll} > ${clientWidth}`
+  })
+  await h.check(`${id}.targets-44px`, 'B', async () => {
+    const small = await section(modal).evaluate((el) =>
+      [...el.querySelectorAll('button, input:not([type="checkbox"]), label:has(input[type="checkbox"])')]
+        .filter((node) => node.getClientRects().length > 0)
+        .map((node) => [node.tagName, node.textContent.trim().slice(0, 20), Math.round(node.getBoundingClientRect().height)])
+        .filter(([, , height]) => height < 44))
+    return small.length === 0 || `under 44px: ${JSON.stringify(small)}`
+  })
+}
+
+// AC5: `total` over `months` (2 or more) saves the first payment at `monthly` and an installment
+// for the rest at `monthly` with `final_amount` `last`.
+async function savedInstallmentFromTotal(browser, scenario, tag, viewport, { total, months, monthly, last }) {
+  const id = `${scenario}.${tag}`
+  console.log(`\n=== ${id} (AC5)`)
   const user = await h.makeUser(stack, `iftd${tag[0]}`)
   await consumePageOpen(client.api, user)
   const bank = await account(user, 'IFT Checking')
   const cc = await card(user, bank, 'IFT Card')
-  const { ctx, page, native, posts } = await openPage(browser, user, width ? { viewport: { width, height: 844 } } : {})
-  const id = `saved_installment_from_total.${tag}`
-  const name = `Laptop ${tag}`
+  const { ctx, page, native, posts } = await openPage(browser, user, { viewport })
+  const name = `Laptop ${scenario} ${tag}`
   try {
     const modal = await openAdd(page, cc.name)
-    await fillInstallment(modal, name, '10000', '3')
+    await fillInstallment(modal, name, total, String(months))
     await preview(modal).waitFor()
     const shown = await readPreview(modal)
-    if (width) {
-      await h.check(`${id}.no-page-scroll`, 'B', async () => {
-        const [scroll, clientWidth] = await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth])
-        return scroll <= clientWidth || `page ${scroll} > ${clientWidth}`
-      })
-      await h.check(`${id}.no-section-scroll`, 'B', async () => {
-        const [scroll, clientWidth] = await fields(modal).evaluate((el) => [el.scrollWidth, el.clientWidth])
-        return scroll <= clientWidth || `fieldset ${scroll} > ${clientWidth}`
-      })
-      await h.check(`${id}.targets-44px`, 'B', async () => {
-        const small = await section(modal).evaluate((el) =>
-          [...el.querySelectorAll('button, input:not([type="checkbox"]), label:has(input[type="checkbox"])')]
-            .filter((node) => node.getClientRects().length > 0)
-            .map((node) => [node.tagName, node.textContent.trim().slice(0, 20), Math.round(node.getBoundingClientRect().height)])
-            .filter(([, , height]) => height < 44))
-        return small.length === 0 || `under 44px: ${JSON.stringify(small)}`
-      })
-    }
+    await h.check(`${id}.preview`, 'B', () =>
+      (shown.first === money(monthly) && shown.last === (last === monthly ? null : money(last)) &&
+        shown.restCount === months - 1 - (last === monthly ? 0 : 1) && onCloses(shown, months)) || `preview ${JSON.stringify(shown)}`)
+    if (viewport.width < 500) await phoneLayout(page, modal, id)
     posts.length = 0
     const response = await submit(page, modal)
     await h.check(`${id}.created-201`, 'B', async () => response.status() === 201 || `status ${response.status()} ${await response.text()}`)
@@ -314,30 +354,38 @@ async function savedInstallmentFromTotal(browser, width) {
       (sent.length === 1 && sent[0].path === '/transactions/repeating') || `posts ${JSON.stringify(sent.map((p) => p.path))}`)
     const body = sent[0]?.body ?? {}
     await h.check(`${id}.first-payment-sent`, 'B', () =>
-      (body.transaction && body.transaction.amount === 3333.34 && body.transaction.projected_amount === 3333.34 && !('budget_entry_id' in body.transaction)) ||
+      (body.transaction && body.transaction.amount === monthly && body.transaction.projected_amount === monthly && !('budget_entry_id' in body.transaction)) ||
       `transaction ${JSON.stringify(body.transaction)}`)
     await h.check(`${id}.repeat-sent`, 'B', () => {
-      const expected = { cadence: 'monthly', end_mode: 'after_occurrences', max_occurrences: 3, billing_kind: null, settlement: 'manual', amount: 3333.33 }
+      const expected = {
+        cadence: 'monthly', end_mode: 'after_occurrences', max_occurrences: months, billing_kind: null, settlement: 'manual',
+        amount: monthly, final_amount: last,
+      }
       return JSON.stringify(body.repeat) === JSON.stringify(expected) || `repeat ${JSON.stringify(body.repeat)}`
     })
     const txns = await transactionsNamed(user, name)
     const entries = await entryNamed(user, name)
     await h.check(`${id}.one-transaction`, 'B', () =>
-      (txns.length === 1 && Number(txns[0].amount) === 3333.34 && txns[0].budget_entry_id === entries[0]?.id) || `transactions ${JSON.stringify(txns.map((t) => [t.amount, t.budget_entry_id]))}`)
+      (txns.length === 1 && Number(txns[0].amount) === monthly && txns[0].budget_entry_id === entries[0]?.id) ||
+      `transactions ${JSON.stringify(txns.map((t) => [t.amount, t.budget_entry_id]))}`)
     await h.check(`${id}.one-installment`, 'B', () =>
-      (entries.length === 1 && entries[0].kind === 'installment' && Number(entries[0].amount) === 3333.33 && entries[0].max_occurrences === 2) ||
-      `entries ${JSON.stringify(entries.map((e) => [e.kind, e.amount, e.max_occurrences]))}`)
-    await h.check(`${id}.sums-to-total`, 'B', () =>
-      Math.round(Number(txns[0]?.amount) * 100) + 2 * Math.round(Number(entries[0]?.amount) * 100) === 1_000_000 || 'payments do not sum to 10,000.00')
+      (entries.length === 1 && entries[0].kind === 'installment' && Number(entries[0].amount) === monthly &&
+        Number(entries[0].final_amount) === last && entries[0].max_occurrences === months - 1) ||
+      `entries ${JSON.stringify(entries.map((e) => [e.kind, e.amount, e.final_amount, e.max_occurrences]))}`)
+    await h.check(`${id}.sums-to-total`, 'B', () => {
+      const cents = (v) => Math.round(Number(v) * 100)
+      const sum = cents(txns[0]?.amount) + (months - 2) * cents(entries[0]?.amount) + cents(entries[0]?.final_amount)
+      return sum === cents(total.replace(/,/g, '')) || `payments sum to ${sum} centavos`
+    })
     await h.check(`${id}.forecast-on-closes`, 'B', async () => {
       const forecast = await forecastOf(user, name)
-      const expected = shown.days.slice(1).map((day) => [day, 3333.33])
+      const expected = shown.days.slice(1).map((day, i) => [day, i === months - 2 ? last : monthly])
       return (JSON.stringify(forecast) === JSON.stringify(expected) && expected.every(([day]) => day.endsWith('-28'))) ||
         `forecast ${JSON.stringify(forecast)}, expected ${JSON.stringify(expected)}`
     })
     const plans = (await readTab(page, 'installments')).filter((r) => r.name === name)
     await h.check(`${id}.due-card`, 'B', () =>
-      (plans.length === 1 && plans[0].left === '2 of 3 left' && plans[0].day === shown.days[1]) ||
+      (plans.length === 1 && plans[0].left === `${months - 1} of ${months} left` && plans[0].day === shown.days[1]) ||
       `rows ${JSON.stringify(plans.map((r) => [r.left, r.day]))}, next close ${shown.days[1]}`)
   } finally {
     await d.checkNoNativeDialogs(h, id, native)
@@ -345,9 +393,48 @@ async function savedInstallmentFromTotal(browser, width) {
   }
 }
 
-// AC5
+// AC5: one month is the purchase alone: the transaction at the total and no installment.
+async function savedOneMonthNoRepeat(browser, tag, viewport) {
+  const id = `saved_one_month_no_repeat.${tag}`
+  console.log(`\n=== ${id} (AC5)`)
+  const user = await h.makeUser(stack, `iftg${tag[0]}`)
+  await consumePageOpen(client.api, user)
+  const bank = await account(user, 'IFT Checking')
+  const cc = await card(user, bank, 'IFT Card')
+  const { ctx, page, native, posts } = await openPage(browser, user, { viewport })
+  const name = `Headphones ${tag}`
+  try {
+    const modal = await openAdd(page, cc.name)
+    await fillInstallment(modal, name, '4,999.99', '1')
+    await preview(modal).waitFor()
+    const shown = await readPreview(modal)
+    await h.check(`${id}.preview`, 'B', () =>
+      (shown.first === '₱4,999.99' && shown.rest === null && shown.last === null && shown.days.length === 1) || `preview ${JSON.stringify(shown)}`)
+    if (viewport.width < 500) await phoneLayout(page, modal, id)
+    posts.length = 0
+    const response = await submit(page, modal)
+    // POST /transactions answers 200 (POST /transactions/repeating 201).
+    await h.check(`${id}.created`, 'B', async () => response.ok() || `status ${response.status()} ${await response.text()}`)
+    const sent = posts.filter((p) => p.path.startsWith('/transactions'))
+    await h.check(`${id}.no-repeat-request`, 'B', () =>
+      (sent.length === 1 && sent[0].path === '/transactions' && !('repeat' in (sent[0].body ?? {}))) || `posts ${JSON.stringify(sent.map((p) => p.path))}`)
+    const txns = await transactionsNamed(user, name)
+    await h.check(`${id}.one-transaction`, 'B', () =>
+      (txns.length === 1 && Number(txns[0].amount) === 4999.99 && txns[0].budget_entry_id == null) ||
+      `transactions ${JSON.stringify(txns.map((t) => [t.amount, t.budget_entry_id]))}`)
+    await h.check(`${id}.no-installment`, 'B', async () => {
+      const entries = await entryNamed(user, name)
+      return entries.length === 0 || `entries ${entries.length}`
+    })
+  } finally {
+    await d.checkNoNativeDialogs(h, id, native)
+    await ctx.close()
+  }
+}
+
+// AC4
 async function perPaymentFlowUnchanged(browser) {
-  console.log('\n=== per_payment_flow_unchanged (AC5)')
+  console.log('\n=== per_payment_repeat_unchanged (AC4)')
   const user = await h.makeUser(stack, 'ifte')
   await consumePageOpen(client.api, user)
   const bank = await account(user, 'IFT Checking')
@@ -361,30 +448,31 @@ async function perPaymentFlowUnchanged(browser) {
     const repeatFields = modal.locator('[data-testid="repeat-fields"]')
     await repeatFields.getByRole('button', { name: 'After runs', exact: true }).click()
     await repeatFields.locator('[data-field="max_occurrences"]').fill('12')
-    await h.check('per_payment_flow_unchanged.help', 'B', async () => {
+    await h.check('per_payment_repeat_unchanged.help', 'B', async () => {
       const text = (await modal.locator('[data-testid="repeat-help"]').innerText()).trim()
       return text.includes('The amount is each payment') || `help ${JSON.stringify(text)}`
     })
     posts.length = 0
     const response = await submit(page, modal)
-    await h.check('per_payment_flow_unchanged.created-201', 'B', async () => response.status() === 201 || `status ${response.status()}`)
+    await h.check('per_payment_repeat_unchanged.created-201', 'B', async () => response.status() === 201 || `status ${response.status()}`)
     const body = posts.find((p) => p.path === '/transactions/repeating')?.body ?? {}
-    await h.check('per_payment_flow_unchanged.repeat-sent', 'B', () => {
+    await h.check('per_payment_repeat_unchanged.repeat-sent', 'B', () => {
       const expected = { cadence: 'monthly', end_mode: 'after_occurrences', max_occurrences: 12, billing_kind: null, settlement: 'manual' }
       return JSON.stringify(body.repeat) === JSON.stringify(expected) || `repeat ${JSON.stringify(body.repeat)}`
     })
     const [entry] = await entryNamed(user, 'Phone plan')
-    await h.check('per_payment_flow_unchanged.amount-each', 'B', () =>
-      (entry && Number(entry.amount) === 5000 && entry.max_occurrences === 11) || `entry ${JSON.stringify(entry && [entry.amount, entry.max_occurrences])}`)
+    await h.check('per_payment_repeat_unchanged.amount-each', 'B', () =>
+      (entry && Number(entry.amount) === 5000 && entry.max_occurrences === 11 && entry.final_amount == null) ||
+      `entry ${JSON.stringify(entry && [entry.amount, entry.max_occurrences, entry.final_amount])}`)
   } finally {
-    await d.checkNoNativeDialogs(h, 'per_payment_flow_unchanged', native)
+    await d.checkNoNativeDialogs(h, 'per_payment_repeat_unchanged', native)
     await ctx.close()
   }
 }
 
 /** Each bad value shows its field's error and sends nothing; nothing is written. */
-async function invalidCases(browser, scenario, key, good, cases) {
-  console.log(`\n=== ${scenario} (AC7)`)
+async function invalidCases(browser, scenario, key, good, cases, ac = 'STU-631 AC7') {
+  console.log(`\n=== ${scenario} (${ac})`)
   const user = await h.makeUser(stack, `iftf${key === 'installment_total' ? 't' : 'm'}`)
   const bank = await account(user, 'IFT Checking')
   const cc = await card(user, bank, 'IFT Card')
@@ -392,7 +480,8 @@ async function invalidCases(browser, scenario, key, good, cases) {
   try {
     const modal = await openAdd(page, cc.name)
     await fillInstallment(modal, 'Bad input', key === 'installment_total' ? '' : good, key === 'installment_months' ? '' : good)
-    for (const [label, value, message] of cases) {
+    for (const [label, value, message, months] of cases) {
+      if (months !== undefined) await control(modal, 'installment_months').fill(months)
       await control(modal, key).fill(value)
       posts.length = 0
       await modal.getByRole('button', { name: 'Create Transaction', exact: true }).click()
@@ -436,17 +525,31 @@ const invalidMonthCount = (browser) => invalidCases(browser, 'invalid_month_coun
   ['fractional', '1.5', 'The number of months must be a whole number.'],
 ])
 
+// AC9: rounding that leaves a payment at zero or below is refused before anything is sent.
+const invalidSplit = (browser) => invalidCases(browser, 'invalid_split_creates_no_records', 'installment_total', '2', [
+  ['one-centavo-over-2', '0.01', 'The purchase total is too small to split into 2 payments.'],
+  ['two-centavos-over-3', '0.02', 'The purchase total is too small to split into 3 payments.', '3'],
+], 'AC9')
+
+/** Runs a scenario at both AC5 sizes. */
+const atBothSizes = (run) => async (browser) => {
+  for (const [tag, viewport] of VIEWPORTS) await run(browser, tag, viewport)
+}
+const saved = (scenario, split) =>
+  [scenario, atBothSizes((browser, tag, viewport) => savedInstallmentFromTotal(browser, scenario, tag, viewport, split))]
+
 const SCENARIOS = [
   ['offered_on_card_expense', offeredOnCardExpense],
   ['hidden_elsewhere', hiddenElsewhere],
-  ['preview_matches_saved', previewMatchesSaved],
-  ['saved_installment_from_total', async (browser) => {
-    await savedInstallmentFromTotal(browser, null)
-    await savedInstallmentFromTotal(browser, 390)
-  }],
-  ['per_payment_flow_unchanged', perPaymentFlowUnchanged],
+  ['preview_shows_last_payment', atBothSizes(previewShowsLastPayment)],
+  saved('saved_last_higher', { total: '10000', months: 3, monthly: 3333.33, last: 3333.34 }),
+  saved('saved_last_lower', { total: '20,000.00', months: 3, monthly: 6666.67, last: 6666.66 }),
+  saved('saved_two_months_final_amount', { total: '10000.01', months: 2, monthly: 5000.01, last: 5000 }),
+  ['saved_one_month_no_repeat', atBothSizes(savedOneMonthNoRepeat)],
+  ['per_payment_repeat_unchanged', perPaymentFlowUnchanged],
   ['invalid_purchase_total', invalidPurchaseTotal],
   ['invalid_month_count', invalidMonthCount],
+  ['invalid_split_creates_no_records', invalidSplit],
 ]
 
 ;(async () => {

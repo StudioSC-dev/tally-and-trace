@@ -6,9 +6,11 @@ const installmentErrorId = (key: InstallmentField) => `transaction-${key}-error`
 
 /** What the preview shows: the payments a save would record, and their days. */
 export interface InstallmentPreview {
-  /** The first payment (with any remainder) and each later one, formatted with the currency. */
+  /** The first payment and each later one but the last, formatted with the currency. */
   first: string
-  rest: string
+  monthly: string
+  /** The last payment when it differs from `monthly` (the rounding difference), else null. */
+  last: string | null
   months: number
   /** Every payment day (`YYYY-MM-DD`), first to last. */
   days: string[]
@@ -33,12 +35,15 @@ interface InstallmentSectionProps {
 
 /**
  * Add Transaction's Installment option for an expense on a credit card (STU-631): the
- * purchase total and the number of months, split into the first payment (this transaction,
- * carrying any rounding remainder) and a card installment for the rest.
+ * purchase total and the number of months, split into the first payment (this transaction)
+ * and a card installment for the rest, whose last payment absorbs any rounding difference
+ * (STU-658).
  */
 export function InstallmentSection({
   active, onToggle, total, months, onTotalChange, onMonthsChange, symbol, errors, error, preview,
 }: InstallmentSectionProps) {
+  // The payments after the first at the monthly amount (the last is shown on its own when it differs).
+  const monthlyCount = preview ? preview.months - 1 - (preview.last !== null ? 1 : 0) : 0
   const describedBy = (key: InstallmentField) => (errors[key] ? { 'aria-invalid': true, 'aria-describedby': installmentErrorId(key) } : {})
   const fieldError = (key: InstallmentField) =>
     errors[key] ? (
@@ -123,12 +128,17 @@ export function InstallmentSection({
               <p data-testid="installment-preview-first">
                 First payment {preview.first} on {formatEntryDate(preview.days[0])}
               </p>
-              {preview.months > 1 && (
+              {monthlyCount > 0 && (
                 <p data-testid="installment-preview-rest">
-                  Then {preview.rest} a month for {preview.months - 1} {preview.months - 1 === 1 ? 'month' : 'months'},{' '}
-                  {preview.months > 2
-                    ? `${formatEntryDate(preview.days[1])} to ${formatEntryDate(preview.days[preview.days.length - 1])}`
+                  Then {preview.monthly} a month for {monthlyCount} {monthlyCount === 1 ? 'month' : 'months'},{' '}
+                  {monthlyCount > 1
+                    ? `${formatEntryDate(preview.days[1])} to ${formatEntryDate(preview.days[monthlyCount])}`
                     : formatEntryDate(preview.days[1])}
+                </p>
+              )}
+              {preview.last !== null && (
+                <p data-testid="installment-preview-last">
+                  Last payment {preview.last} on {formatEntryDate(preview.days[preview.days.length - 1])}
                 </p>
               )}
               <p className="text-muted" data-testid="installment-preview-dates">

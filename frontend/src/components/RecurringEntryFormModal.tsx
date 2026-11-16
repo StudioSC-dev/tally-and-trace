@@ -63,6 +63,8 @@ type SubscriptionFormState = {
   end_mode: 'indefinite' | 'on_date' | 'after_occurrences'
   end_date?: string
   max_occurrences?: number
+  /** The last payment as typed (STU-658), shown only for an entry that has one; blank clears it. */
+  final_amount: string
   /** Card expenses: the pick in the kind select (what `billingKindChoices` offers). */
   kind_choice: BillingKindChoice['id']
   /** Open-ended bank (non-card) expenses: Subscription stores `billing_kind: 'subscription'`; Other stores null. */
@@ -92,6 +94,7 @@ const createSubscriptionDefaults = (currency: CurrencyCode): SubscriptionFormSta
   end_mode: 'indefinite',
   end_date: undefined,
   max_occurrences: undefined,
+  final_amount: '',
   kind_choice: 'automatic',
   bank_kind: 'other',
   settlement: DEFAULT_SETTLEMENT,
@@ -99,7 +102,23 @@ const createSubscriptionDefaults = (currency: CurrencyCode): SubscriptionFormSta
   tag_ids: [],
 })
 
-type RecurringFieldKey = 'name' | 'account_id' | 'amount' | 'next_occurrence' | 'end_date' | 'max_occurrences' | 'day' | 'day_of_month' | 'lead_time_days'
+type RecurringFieldKey =
+  | 'name' | 'account_id' | 'amount' | 'final_amount' | 'next_occurrence' | 'end_date' | 'max_occurrences' | 'day' | 'day_of_month'
+  | 'lead_time_days'
+
+const LAST_PAYMENT_ERROR = 'The last payment must be more than zero, with at most two decimal places (centavos).'
+
+/**
+ * The last payment typed, as the API takes it: null when blank (clearing it), undefined when it
+ * is not a positive amount with at most two decimal places.
+ */
+const parseLastPayment = (text: string): number | null | undefined => {
+  const typed = text.trim().replace(/,/g, '')
+  if (typed === '') return null
+  if (!/^(\d+(\.\d{0,2})?|\.\d{1,2})$/.test(typed)) return undefined
+  const value = Number(typed)
+  return value > 0 ? value : undefined
+}
 
 /** The bounded dates (STU-427), each with how many years past the Manila today it may be. */
 const DATE_REACH = { next_occurrence: ENTRY_NEXT_YEARS_AHEAD, end_date: ENTRY_END_YEARS_AHEAD } as const
@@ -251,6 +270,7 @@ export function RecurringEntryFormModal({
       end_mode: (entry.end_mode as SubscriptionFormState['end_mode']) ?? 'indefinite',
       end_date: entry.end_date ? fromWireWallTime(entry.end_date) : undefined,
       max_occurrences: entry.max_occurrences ?? undefined,
+      final_amount: entry.final_amount != null ? entry.final_amount.toFixed(2) : '',
       kind_choice: kindChoiceFor(isCappedEnd(entry.end_mode, entry.max_occurrences), entry.billing_kind),
       bank_kind: bankKindOf(entry.billing_kind),
       settlement: entry.settlement === 'autopay' ? 'autopay' : DEFAULT_SETTLEMENT,
@@ -281,6 +301,10 @@ export function RecurringEntryFormModal({
   const { turnOn, turnOff } = useAutopayActions()
   // What the save could not finish (autopay refused after the entry was saved); the form then only offers Close.
   const [savedNote, setSavedNote] = useState<string | null>(null)
+  // An entry saved with a last payment (STU-658) shows it as an editable field while it runs a
+  // set number of payments.
+  const hadLastPayment = !!editingBudgetEntry && editingBudgetEntry.final_amount != null
+  const showLastPayment = hadLastPayment && subscriptionForm.end_mode === 'after_occurrences'
   // The date input as loaded. A paused entry turned active with this date untouched is resumed: the
   // server moves it to the first scheduled date on or after today, so the date is left out of the save.
   const [loadedNextOccurrence] = useState(() => (editingBudgetEntry ? fromWireWallTime(editingBudgetEntry.next_occurrence) : null))
@@ -370,6 +394,12 @@ export function RecurringEntryFormModal({
         fail('amount', 'Please enter an amount greater than zero.')
         return
       }
+      // The last payment (STU-658): kept only while the entry runs a set number of payments.
+      const lastPayment = showLastPayment ? parseLastPayment(subscriptionForm.final_amount) : null
+      if (lastPayment === undefined) {
+        fail('final_amount', LAST_PAYMENT_ERROR)
+        return
+      }
       // A changed date outside its range (STU-427), the next occurrence first.
       for (const key of ['next_occurrence', 'end_date'] as const) {
         if (key === 'end_date' && subscriptionForm.end_mode !== 'on_date') continue
@@ -411,6 +441,9 @@ export function RecurringEntryFormModal({
         // An edit that leaves "On date" clears the stored end date: the update keeps an
         // omitted field, and the schedule walk applies an end date in every end mode.
         ...(editingBudgetEntry && subscriptionForm.end_mode !== 'on_date' ? { end_date: null } : {}),
+        // An entry with a last payment sends it as edited; null clears it (and leaving
+        // "After runs" must, as the API keeps it only on a set number of payments).
+        ...(hadLastPayment ? { final_amount: lastPayment } : {}),
         lead_time_days: subscriptionForm.lead_time_days,
         is_active: subscriptionForm.is_active,
         // An edit sends the tags only when they changed; omitting them keeps them.
@@ -681,6 +714,31 @@ export function RecurringEntryFormModal({
             />
             {renderFieldError('amount')}
               </div>
+              {showLastPayment && (
+                <div>
+                  <label className="block text-sm font-medium text-body" htmlFor="recurring-final-amount">
+                    Last payment ({subscriptionForm.currency})
+                  </label>
+                  <input
+                    id="recurring-final-amount"
+                    type="text"
+                    inputMode="decimal"
+                    value={subscriptionForm.final_amount}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      setSubscriptionForm((prev) => ({ ...prev, final_amount: value }))
+                    }}
+                    className="mt-1 block w-full border border-line px-3 py-2"
+                    ref={bindField('final_amount')}
+                    data-field="final_amount"
+                    {...fieldProps('final_amount')}
+                  />
+                  <p className="mt-1 text-xs text-muted" data-testid="last-payment-help">
+                    The bank puts the rounding difference on the last payment. Clear it to bill every payment the amount above.
+                  </p>
+                  {renderFieldError('final_amount')}
+                </div>
+              )}
           
               <RecurringScheduleFields
                 draft={subscriptionForm}

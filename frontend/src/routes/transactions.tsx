@@ -1086,7 +1086,8 @@ export function TransactionsPage() {
     })
   }
   // Installment from a total: an expense on a credit card, in Add only. It is the same card
-  // installment Repeat starts, with the first payment (and any remainder) as this transaction.
+  // installment Repeat starts, with the first payment as this transaction (STU-658: the last
+  // payment absorbs the rounding difference).
   const offerInstallment =
     !editingTransaction && formData.transaction_type === 'debit' && selectedFormAccount?.account_type === 'credit'
   const installmentActive = installment.on && offerInstallment
@@ -1102,7 +1103,8 @@ export function TransactionsPage() {
     if (!days || days.length !== split.months) return null
     return {
       first: formatCurrency(centavosToAmount(split.first), installmentCurrency),
-      rest: formatCurrency(centavosToAmount(split.rest), installmentCurrency),
+      monthly: formatCurrency(centavosToAmount(split.monthly), installmentCurrency),
+      last: split.months > 1 && split.last !== split.monthly ? formatCurrency(centavosToAmount(split.last), installmentCurrency) : null,
       months: split.months,
       days,
       onClose: scheduleState(draft, repeatContext).chargedOnClose,
@@ -1680,7 +1682,7 @@ export function TransactionsPage() {
       }
 
       // Installment from a total: the total and months are checked, and this transaction is the
-      // first payment, carrying any remainder, in place of the amount field it hides.
+      // first payment, in place of the amount field it hides (the whole total over one month).
       const installmentSplit = installmentActive ? installmentInput(installment.total, installment.months) : null
       if (installmentSplit && !installmentSplit.ok) {
         failInstallment(installmentSplit.field, installmentSplit.message)
@@ -1833,9 +1835,10 @@ export function TransactionsPage() {
       // request that commits both or neither. It links to no other entry. In Edit the row
       // itself becomes the first occurrence: POST /transactions/{id}/repeat replaces the PUT.
       let repeatBody: RepeatingTransactionInput | null = null
-      if (installmentSplit?.ok) {
+      if (installmentSplit?.ok && installmentSplit.split.months > 1) {
         // The card installment Repeat starts, for all the months: the server links this
-        // transaction as the first payment, and the entry's amount is each later payment.
+        // transaction as the first payment, the entry's amount is each later payment and its
+        // final_amount the last (STU-658). One month is the transaction alone, with no entry.
         const { split } = installmentSplit
         const schedule = scheduleRequest(installmentScheduleDraft(`${formData.transaction_date}T00:00`, split.months), repeatContext)
         if (!schedule.ok) {
@@ -1851,8 +1854,15 @@ export function TransactionsPage() {
         delete transaction.budget_entry_id
         repeatBody = {
           transaction,
-          repeat: { ...repeatScheduleOf(schedule.fields, 'manual'), amount: centavosToAmount(split.rest) },
+          repeat: {
+            ...repeatScheduleOf(schedule.fields, 'manual'),
+            amount: centavosToAmount(split.monthly),
+            final_amount: centavosToAmount(split.last),
+          },
         }
+      } else if (installmentSplit?.ok) {
+        // One month: the purchase is this one transaction, linked to no entry.
+        delete payload.budget_entry_id
       } else if (repeatActive) {
         const schedule = scheduleRequest(repeatSchedule, repeatContext)
         if (!schedule.ok) {

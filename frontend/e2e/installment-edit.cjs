@@ -17,10 +17,18 @@
 //   (d) a date after the plan's last payment is refused with the server's reason
 //       inline, the form stays open, and changing the count too saves
 //
+// STU-658 AC6, on a plan saved with a last payment (3,333.33 a month, the last 3,333.34):
+//   edit_last_payment: the form shows "Last payment" as 3333.34; changing it to 3,333.40
+//       saves it, and the forecast bills the last occurrence 3,333.40 and the others 3,333.33
+//   clear_last_payment: clearing it saves null; every occurrence is 3,333.33 again, and the
+//       reopened form has no Last payment field
+//   invalid_last_payment_edit: zero, a negative, three decimal places and text each show the
+//       field's error, keep the form open and leave the entry unchanged
+//
 // Every request-starting action is followed by waitQuiet(page) (the screen loader
 // blocks input while a request is in flight; see ./README.md).
 //
-// Usage: node frontend/e2e/installment-edit.cjs [a|b|c|d]
+// Usage: node frontend/e2e/installment-edit.cjs [a|b|c|d|edit_last_payment|clear_last_payment|invalid_last_payment_edit]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
 
@@ -68,6 +76,7 @@ const wire = (day) => `${day}T00:00:00`
 
 const FINAL_MONTH_HELP = 'Moving the next date keeps the last payment; change this number to lengthen or shorten the plan.'
 const STALE = 'This entry changed since you opened it; reopen it to edit'
+const LAST_PAYMENT_ERROR = 'The last payment must be more than zero, with at most two decimal places (centavos).'
 
 let stack, API
 async function api(token, method, url, body) {
@@ -104,12 +113,12 @@ async function makeUser(tag) {
 }
 
 /** A capped monthly expense on a checking account: `count` payments from the first date. */
-async function seed(u, count) {
+async function seed(u, count, extra = {}) {
   const bank = await post(u.token, '/accounts/', { name: `${u.tag} Checking`, account_type: 'checking', balance: 100000, currency: 'PHP' })
   const start = firstDate()
   const plan = await post(u.token, '/budget-entries/', {
     entry_type: 'expense', currency: 'PHP', cadence: 'monthly', name: 'Gadget plan', amount: 1500,
-    account_id: bank.id, next_occurrence: wire(start), end_mode: 'after_occurrences', max_occurrences: count,
+    account_id: bank.id, next_occurrence: wire(start), end_mode: 'after_occurrences', max_occurrences: count, ...extra,
   })
   return { bank, plan, start }
 }
@@ -145,6 +154,14 @@ const updateButton = (page) => page.getByRole('button', { name: 'Update Recurrin
 const editForm = (page) => page.locator('form').filter({ has: updateButton(page) })
 const nextInput = (form) => form.locator('input[type="datetime-local"]').first()
 const runsInput = (form) => form.getByText('Number of runs', { exact: true }).locator('xpath=following-sibling::input')
+const lastPaymentInput = (form) => form.locator('[data-field="final_amount"]')
+/** The forecast's amounts for the plan, in order. */
+const forecastAmounts = async (u, id) =>
+  (await get(u.token, '/forecast/upcoming?days=365')).items
+    .filter((i) => i.source === 'budget_entry' && i.source_id === id)
+    .map((i) => Number(i.amount))
+/** A three-month plan split by the bank rule: 3,333.33 twice, then 3,333.34. */
+const seedSplit = (u) => seed(u, 3, { amount: 3333.33, final_amount: 3333.34 })
 
 async function openEdit(page, card = planCard(page)) {
   await card.click()
@@ -276,6 +293,69 @@ async function pastFinal(browser) {
   await ctx.close()
 }
 
+async function editLastPayment(browser) {
+  console.log('edit_last_payment: the Last payment field saves a corrected figure')
+  const me = await makeUser('e')
+  const { plan } = await seedSplit(me)
+  check('edit_last_payment: the forecast before', await forecastAmounts(me, plan.id), [3333.33, 3333.33, 3333.34])
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, me)
+  await openAllocations(page)
+  const form = await openEdit(page)
+  check('edit_last_payment: the field shows the stored last payment', await lastPaymentInput(form).inputValue(), '3333.34')
+  await lastPaymentInput(form).fill('3,333.40')
+  await save(page)
+  await modalClose(page).waitFor({ state: 'detached' })
+  await waitQuiet(page)
+  const after = await entryNow(me, plan.id)
+  check('edit_last_payment: the entry saved it', [after.amount, after.final_amount], [3333.33, 3333.4])
+  check('edit_last_payment: the last occurrence bills it', await forecastAmounts(me, plan.id), [3333.33, 3333.33, 3333.4])
+  await ctx.close()
+}
+
+async function clearLastPayment(browser) {
+  console.log('clear_last_payment: clearing the field bills every payment the amount')
+  const me = await makeUser('f')
+  const { plan } = await seedSplit(me)
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, me)
+  await openAllocations(page)
+  const form = await openEdit(page)
+  await lastPaymentInput(form).fill('')
+  await save(page)
+  await modalClose(page).waitFor({ state: 'detached' })
+  await waitQuiet(page)
+  check('clear_last_payment: the entry has none', (await entryNow(me, plan.id)).final_amount, null)
+  check('clear_last_payment: every occurrence is the amount', await forecastAmounts(me, plan.id), [3333.33, 3333.33, 3333.33])
+  const again = await openEdit(page)
+  check('clear_last_payment: the reopened form has no Last payment field', await lastPaymentInput(again).count(), 0)
+  await ctx.close()
+}
+
+async function invalidLastPaymentEdit(browser) {
+  console.log('invalid_last_payment_edit: a bad last payment is refused and nothing changes')
+  const me = await makeUser('g')
+  const { plan } = await seedSplit(me)
+  const before = await entryNow(me, plan.id)
+  const { ctx, page } = await newPage(browser)
+  const puts = []
+  page.on('request', (r) => { if (r.method() === 'PUT' && r.url().includes('/budget-entries/')) puts.push(r.url()) })
+  await uiLogin(page, me)
+  await openAllocations(page)
+  const form = await openEdit(page)
+  for (const value of ['0', '-5', '12.345', 'abc']) {
+    await lastPaymentInput(form).fill(value)
+    await save(page)
+    const error = form.getByTestId('field-error-final_amount')
+    check(`invalid_last_payment_edit: ${value} shows the error`, (await error.count()) ? await error.innerText() : null, LAST_PAYMENT_ERROR)
+    check(`invalid_last_payment_edit: ${value} keeps the form open`, await modalClose(page).count(), 1)
+  }
+  check('invalid_last_payment_edit: nothing was sent', puts, [])
+  const after = await entryNow(me, plan.id)
+  check('invalid_last_payment_edit: the entry is unchanged', [after.amount, after.final_amount, after.updated_at], [before.amount, before.final_amount, before.updated_at])
+  await ctx.close()
+}
+
 ;(async () => {
   stack = await startLocalStack()
   API = `${stack.apiUrl}/api/v1`
@@ -285,6 +365,9 @@ async function pastFinal(browser) {
   if (run('b')) await staleForm(browser)
   if (run('c')) await help(browser)
   if (run('d')) await pastFinal(browser)
+  if (run('edit_last_payment')) await editLastPayment(browser)
+  if (run('clear_last_payment')) await clearLastPayment(browser)
+  if (run('invalid_last_payment_edit')) await invalidLastPaymentEdit(browser)
   await browser.close()
   stack.stop()
   console.log(`\nRESULT: ${pass}/${total} assertions passed`)
