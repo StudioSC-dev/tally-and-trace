@@ -653,6 +653,17 @@ async function amountCarriesOver(browser) {
     await totalBox(modal).fill('')
     await toggle(modal).uncheck()
     await h.check('amount_carries_over.blank-stays-blank', 'B', async () => (await amountInputs(modal).inputValue()) === '' || 'amount not blank')
+    // Saved after Installment is turned off: the persisted amount is the carried total.
+    await control(modal, 'description').fill('Carried over')
+    await toggle(modal).check()
+    await totalBox(modal).fill('7,500.25')
+    await toggle(modal).uncheck()
+    await submit(page, modal)
+    const txns = await transactionsNamed(user, 'Carried over')
+    await h.check('amount_carries_over.saved-amount', 'B', async () =>
+      (txns.length === 1 && Number(txns[0].amount) === 7500.25 && txns[0].budget_entry_id == null) ||
+      `saved ${JSON.stringify(txns.map((t) => [t.amount, t.budget_entry_id]))}`)
+    await h.check('amount_carries_over.no-installment', 'B', async () => (await entryNamed(user, 'Carried over')).length === 0 || 'an installment was saved')
   } finally {
     await d.checkNoNativeDialogs(h, 'amount_carries_over', native)
     await ctx.close()
@@ -700,7 +711,8 @@ async function collapsedSummaryAndChange(browser) {
       const cents = (text) => Math.round(Number(text.replace(/[₱,]/g, '')) * 100)
       await h.check(`${id}.matches-saved`, 'B', () =>
         (txn && entry && cents(monthly) === Math.round(Number(txn.amount) * 100) && cents(monthly) === Math.round(Number(entry.amount) * 100) &&
-          (last === null || Math.round(Number(entry.final_amount) * 100) === cents(last))) ||
+          // The saved last payment is the monthly amount when the split is even.
+          Math.round(Number(entry.final_amount) * 100) === cents(last ?? monthly)) ||
         `transaction ${txn && txn.amount}, entry ${entry && [entry.amount, entry.final_amount]}, expected ${monthly} / ${entryFinal}`)
     }
   } finally {
