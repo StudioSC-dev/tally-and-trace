@@ -221,7 +221,7 @@ def _statement_rows(db: Session, user: User, card: Account, fx: Optional[FxRates
     summaries = statement_summaries(db, card, manila_midnight(), viewable, fx=fx,
                                     with_counts=True)
     if not summaries:  # no line item yet: the open cycle, at zero
-        open_cycle = open_cycle_summary(db, card, manila_midnight(), viewable)
+        open_cycle = open_cycle_summary(db, card, manila_midnight(), viewable, fx=fx)
         summaries = [open_cycle] if open_cycle is not None else []
     return [s for s in summaries if s["window_start"].date() < today]
 

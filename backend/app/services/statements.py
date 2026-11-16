@@ -65,6 +65,13 @@ the card is charged the amount plus the transfer fee, placed by the transfer's
 Payments keep their ``transaction_date``: when money was paid decides what it
 pays and whether it was on time.
 
+A payment nets in the card's own currency (STU-303): by what the card received
+(``received_amount``, else ``amount`` for a same-currency one). A planned
+payment from another currency with no ``received_amount`` yet is estimated at
+the stored rate, as the projection estimates a pending cross-currency
+transfer's inbound leg; with no stored rate it pays nothing
+(``payment_received``).
+
 All money is Decimal end to end; dates are naive UTC to match the naive
 transaction_date column (see app/core/time.py for the naive/aware split).
 """
@@ -388,9 +395,39 @@ def settle_projected(cycles: List[dict], owed: List[Decimal], pool: Decimal,
     return owed
 
 
+def payment_received(row, card_currency=None, fx=None) -> Optional[Decimal]:
+    """What a payment into a card gives it, in the card's currency, or None.
+
+    The stored figure (``transfer_sides``: ``received_amount``, else
+    ``amount``), except for an unposted payment from another currency (its
+    ``currency`` is the source account's, by rule) with no ``received_amount``
+    yet (STU-303): its ``amount`` estimated at the stored rate of ``fx`` into
+    ``card_currency``, as ``forecast._transfer_event`` estimates a pending
+    cross-currency transfer's inbound leg, or None when no rate is stored
+    (unconverted: it pays nothing). A posted cross-currency payment always has
+    a ``received_amount`` (``routers.transactions._received_amount``), so
+    posted payments always net by their stored figure. Without
+    ``card_currency`` and ``fx`` nothing is estimated.
+    """
+    received = transfer_sides(row)[1]
+    if (card_currency is None or fx is None or getattr(row, "is_posted", True)
+            or getattr(row, "received_amount", None) is not None):
+        return received
+    sent_in = getattr(getattr(row, "currency", None), "value", getattr(row, "currency", None))
+    card_currency = getattr(card_currency, "value", card_currency)
+    if sent_in is None or sent_in == card_currency:
+        return received
+    from app.services.fx import convert
+
+    rate = fx.rate(sent_in, card_currency)
+    if rate is None:
+        return None
+    return convert(Decimal(str(row.amount)), rate.rate)
+
+
 def _split_card_rows(card_id: int, rows: list, unbilled_ids: frozenset = frozenset(),
-                     keep_source: bool = False, payment_sources: bool = False
-                     ) -> Tuple[list, List[tuple]]:
+                     keep_source: bool = False, payment_sources: bool = False,
+                     currency=None, fx=None) -> Tuple[list, List[tuple]]:
     """Separate a card's rows into statement line items and payments into the card.
 
     Only a transfer's ``transfer_*`` fields are meaningful (a row edited from a
@@ -404,6 +441,11 @@ def _split_card_rows(card_id: int, rows: list, unbilled_ids: frozenset = frozens
 
     With ``keep_source`` a cash advance's line keeps its row as ``source``.
     With ``payment_sources`` each payment is ``(date, amount, paying account id, row)``.
+
+    A payment's amount is what the card received (``payment_received``): with
+    the card's ``currency`` and the stored rates ``fx`` a planned payment from
+    another currency is estimated into the card's, and one with no stored rate
+    is left out (it pays nothing).
     """
     lines: list = []
     payments: List[Tuple[datetime, Decimal]] = []
@@ -412,10 +454,9 @@ def _split_card_rows(card_id: int, rows: list, unbilled_ids: frozenset = frozens
             amount = Decimal(str(row.amount))
             if getattr(row, "transfer_to_account_id", None) == card_id:
                 source = getattr(row, "transfer_from_account_id", None) or row.account_id
-                # What the card received (card payments are same-currency by
-                # rule; a legacy row's stored received amount still wins).
-                received = transfer_sides(row)[1]
-                if source not in unbilled_ids:
+                # What the card received, in its own currency (STU-303).
+                received = payment_received(row, currency, fx)
+                if received is not None and source not in unbilled_ids:
                     payments.append((row.transaction_date, received, source, row)
                                     if payment_sources else (row.transaction_date, received))
             elif (getattr(row, "transfer_from_account_id", None) or row.account_id) == card_id:
@@ -689,8 +730,12 @@ def build_statement_payables(
     due_overrides_by_card: Optional[Mapping[int, Mapping[date, date]]] = None,
     stored_by_card: Optional[Mapping[int, StoredCycles]] = None,
     recurring_by_card: Optional[Mapping[int, Sequence[tuple]]] = None,
+    fx=None,
 ) -> List[dict]:
     """Pure core: turn cards + their transactions into dated payable events.
+
+    ``fx`` (stored rates) puts a planned payment from another currency into
+    the card's (``payment_received``); without it payments net as stored.
 
     ``recurring_by_card`` holds each card's recurring transfer occurrences into
     it (STU-249) as ``(date, amount in the card's currency, source account id)``:
@@ -766,7 +811,8 @@ def build_statement_payables(
         c.id for c in cards if resolve_cycle_fields(c) is None)
     for card in cards:
         lines, payments = _split_card_rows(
-            card.id, transactions_by_card.get(card.id, []), unbilled_ids)
+            card.id, transactions_by_card.get(card.id, []), unbilled_ids,
+            currency=getattr(card, "currency", None), fx=fx)
         stored = (stored_by_card or {}).get(card.id)
         known: Dict[int, date] = {}
         filled: List[date] = []
@@ -933,7 +979,12 @@ def _cycles_of(db: Optional[Session], card: Account, today: datetime,
     by_card, unbilled_sources = (card_rows if card_rows is not None
                                  else _card_rows(db, [card.id], viewable_ids))
     rows = by_card.get(card.id, [])
-    lines, payments = _split_card_rows(card.id, rows, unbilled_sources, keep_source=True)
+    if fx is None and db is not None:
+        from app.services.fx import FxRates
+
+        fx = FxRates.offline(db)
+    lines, payments = _split_card_rows(card.id, rows, unbilled_sources, keep_source=True,
+                                       currency=getattr(card, "currency", None), fx=fx)
     lines, amount_of, estimates, unconverted = normalise_lines(db, card, lines, fx)
     day = today.date()
     line_days = [statement_day(row, day) for row in lines]
@@ -1015,15 +1066,20 @@ def _unconverted_items(left_out: list) -> List[dict]:
 
 
 def open_cycle_summary(db: Session, card: Account, today: datetime,
-                       viewable_ids: Iterable[int]) -> Optional[dict]:
+                       viewable_ids: Iterable[int], fx=None) -> Optional[dict]:
     """The cycle open on ``today`` as a statement with no line items (balance 0),
     in ``statement_summaries(..., with_counts=True)``'s shape, with the payments
     into the card counted as there. For a card with no line item at all, where
     ``statement_summaries`` lists nothing; None when the card has no cycle."""
     if resolve_cycle_fields(card) is None:
         return None
+    if fx is None:
+        from app.services.fx import FxRates
+
+        fx = FxRates.offline(db)
     by_card, unbilled = _card_rows(db, [card.id], viewable_ids)
-    _, payments = _split_card_rows(card.id, by_card.get(card.id, []), unbilled)
+    _, payments = _split_card_rows(card.id, by_card.get(card.id, []), unbilled,
+                                   currency=getattr(card, "currency", None), fx=fx)
     payments = sorted(payments, key=lambda p: p[0].date())
     day = today.date()
     cycle = next(iter_cycles_from(card, day, datetime.min, through=day,
@@ -1135,13 +1191,19 @@ def statement_history(db: Session, card: Account, today: datetime,
                       with_lines=True)
 
 
-def card_payments(db: Session, card: Account, viewable_ids: Iterable[int]
+def card_payments(db: Session, card: Account, viewable_ids: Iterable[int], fx=None
                   ) -> List[Tuple[datetime, Decimal]]:
     """Every payment into the card, posted or planned, as ``(date, received amount)``
     in date order: the payments ``statement_history`` nets (one from a card
-    without cycle settings is not a payment, see ``_split_card_rows``)."""
+    without cycle settings is not a payment, see ``_split_card_rows``; a
+    planned one from another currency is estimated, ``payment_received``)."""
+    if fx is None:
+        from app.services.fx import FxRates
+
+        fx = FxRates.offline(db)
     by_card, unbilled_sources = _card_rows(db, [card.id], viewable_ids)
-    return _split_card_rows(card.id, by_card.get(card.id, []), unbilled_sources)[1]
+    return _split_card_rows(card.id, by_card.get(card.id, []), unbilled_sources,
+                            currency=getattr(card, "currency", None), fx=fx)[1]
 
 
 def get_statement_payables(
@@ -1207,4 +1269,4 @@ def get_statement_payables(
                                     due_overrides_by_card=load_due_overrides(
                                         db, [c.id for c in cards]),
                                     stored_by_card=stored_by_card,
-                                    recurring_by_card=recurring_payments)
+                                    recurring_by_card=recurring_payments, fx=fx)
