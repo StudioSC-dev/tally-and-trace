@@ -293,6 +293,10 @@ async function scenarioG(browser) {
   console.log('\n=== (g) day of month 45 (above max): the browser\'s message shown inline, nothing sent')
   const { ctx, page, native, log } = await openAllocations(browser)
   try {
+    // The form's Day of month defaults to today's. Pin the clock to the 15th so the field
+    // starts at the value the typing check used to fill, whatever the real date is.
+    const fifteenth = new Date(); fifteenth.setDate(15); fifteenth.setHours(12, 0, 0, 0)
+    await page.clock.setFixedTime(fifteenth)
     const form = await openAddForm(page)
     await fillValid(form, 'Dialog G Entry')
     await field(form, 'day').selectOption('day')
@@ -303,7 +307,10 @@ async function scenarioG(browser) {
     await form.getByRole('button', { name: 'Save Recurring Entry' }).click()
     await checkFieldError(page, form, log, 'g', 'day_of_month', null, before)
     await h.check('g.typing-clears', 'B', async () => {
-      await field(form, 'day_of_month').fill('15')
+      // A value the field does not already hold, so the fill is an edit on any date
+      // (the default day is today's, and on the 15th the field already holds 15).
+      const current = Number(await field(form, 'day_of_month').inputValue())
+      await field(form, 'day_of_month').fill(String(current === 15 ? 16 : 15))
       return (await page.locator('[data-testid="field-error-day_of_month"]').count()) === 0 || 'the error stayed after an edit'
     })
   } finally {

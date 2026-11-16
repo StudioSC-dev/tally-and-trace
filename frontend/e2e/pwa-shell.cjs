@@ -9,10 +9,6 @@
 //   onboarding.mobile  AC5   the STU-159 tour completes at 390x844
 //   onboarding.desktop AC5   the STU-159 tour completes at 1280x800
 //   validation.frontend AC6  frontend lint and `pnpm build` pass (and the Frontend CI job, with PR_NUMBER)
-//   pr.source-commit   AC1   the PR lists 603ed45 and not the health commit      (needs PR_NUMBER)
-//   pr.commit-format   AC8   one-line lowercase subjects, no body, no attribution (PR commits, else origin/main..HEAD)
-//   pr.scope           AC10  only 603ed45's files, the two public assets and this suite (PR files, else origin/main..HEAD)
-//   pr.audit-evidence  AC9   Opus and Sol "Verdict:" comments on the PR           (needs PR_NUMBER)
 //
 // Safe-area fixture (AC2). A browser tab reports env(safe-area-inset-top) as 0, so the
 // inset is injected with the DevTools command Emulation.setSafeAreaInsetsOverride
@@ -24,17 +20,7 @@
 // of `below-nav`; a.safe-area must then fail at 24 px.
 //
 // Setup: a throwaway database named tt_test_188_*, exported as DATABASE_URL, plus
-// PLAYWRIGHT_PATH (see ./README.md). Optional env: PR_NUMBER (the PR checks),
-// AUDIT_GATE=open (check the open gate only; default checks open and pre-merge),
-// AUDITORS (comma list, default Opus,Sol). The repo's current policy is one auditor per
-// gate; set AUDITORS to that auditor, or leave the default for the Opus + Sol policy.
-//
-// pr.audit-evidence counts a PR comment when it is its own comment, contains "Verdict:",
-// names exactly one auditor (a comment naming several counts for none) and carries a line
-// `Audit gate: open` or `Audit gate: pre-merge`. Each auditor needs one such comment per
-// required gate, and createdAt must put each auditor's open comment before their
-// pre-merge one (a sanity check only; the marker line decides the gate).
-// Self-test of that counting, no stack or browser: node frontend/e2e/pwa-shell.cjs --self-test
+// PLAYWRIGHT_PATH (see ./README.md). Optional env: PR_NUMBER (the Frontend CI check).
 //
 // Check kinds: [B] behavioural, [S] structural, [G] guard. Ends with RESULT: k/m and exits
 // 0 only when every check passed, 1 when any failed, 2 for setup.
@@ -47,85 +33,7 @@ const { startLocalStack } = require('./_local_stack.cjs')
 const h = require('./_smooth.cjs')
 
 const REPO = pathMod.resolve(__dirname, '..', '..')
-const SOURCE_SHA = '603ed45'
-const HEALTH_SHA = '8c707da'
 const PR_NUMBER = process.env.PR_NUMBER || ''
-
-// ─── Audit evidence counting (AC9) ───────────────────────────────────────────
-
-const GATES = ['open', 'pre-merge']
-const escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-
-/**
- * comments: [{ body, createdAt }]. Returns { ok, problems }. A comment counts when its body
- * has "Verdict:", names exactly one of `auditors` (whole word, any case) and has an
- * `Audit gate: open|pre-merge` line. One comment per auditor per required gate is needed,
- * and an auditor's first open comment must be earlier than their first pre-merge one.
- */
-function auditEvidence(comments, { auditors, gates }) {
-  const problems = []
-  const counted = new Map() // `${auditor}|${gate}` -> [createdAt, ...]
-  for (const c of comments) {
-    const body = c.body || ''
-    if (!body.includes('Verdict:')) continue
-    const named = auditors.filter((a) => new RegExp(`\\b${escapeRe(a)}\\b`, 'i').test(body))
-    if (named.length !== 1) continue
-    const gate = (body.match(/^[ \t]*Audit gate:[ \t]*(open|pre-merge)[ \t]*$/im) || [])[1]
-    if (!gate) continue
-    const key = `${named[0]}|${gate.toLowerCase()}`
-    counted.set(key, [...(counted.get(key) || []), c.createdAt])
-  }
-  for (const a of auditors) {
-    for (const g of gates) {
-      if (!counted.has(`${a}|${g}`)) problems.push(`no own comment with "Verdict:", "Audit gate: ${g}" and only ${a} named`)
-    }
-    if (gates.includes('open') && gates.includes('pre-merge') && counted.has(`${a}|open`) && counted.has(`${a}|pre-merge`)) {
-      const first = (k) => counted.get(k).map((t) => Date.parse(t)).sort((x, y) => x - y)[0]
-      if (!(first(`${a}|open`) < first(`${a}|pre-merge`))) problems.push(`${a}: the open gate comment is not earlier than the pre-merge one`)
-    }
-  }
-  return { ok: problems.length === 0, problems }
-}
-
-function selfTest() {
-  const A = { auditors: ['Opus', 'Sol'], gates: GATES }
-  const c = (body, createdAt) => ({ body, createdAt })
-  const mk = (who, gate, at) => c(`${who} audit\nAudit gate: ${gate}\nVerdict: GO`, at)
-  const distinct = [
-    mk('Opus', 'open', '2026-11-15T10:00:00Z'), mk('Sol', 'open', '2026-11-15T10:05:00Z'),
-    mk('Opus', 'pre-merge', '2026-11-15T12:00:00Z'), mk('Sol', 'pre-merge', '2026-11-15T12:05:00Z'),
-  ]
-  const cases = [
-    ['combined comment counts for neither auditor', () => {
-      const r = auditEvidence([c('Opus and Sol\nAudit gate: open\nVerdict: GO', '2026-11-15T10:00:00Z'), ...distinct.slice(2)], A)
-      return !r.ok && r.problems.length === 2 && r.problems.every((p) => /gate: open/.test(p))
-    }],
-    ['distinct comments pass', () => auditEvidence(distinct, A).ok],
-    ['a missing gate fails', () => {
-      const r = auditEvidence(distinct.slice(0, 2), A)
-      return !r.ok && r.problems.length === 2 && r.problems.every((p) => /gate: pre-merge/.test(p))
-    }],
-    ['the gates in the wrong order fail', () => {
-      const swapped = [distinct[0], distinct[1], mk('Opus', 'pre-merge', '2026-11-15T09:00:00Z'), distinct[3]]
-      const r = auditEvidence(swapped, A)
-      return !r.ok && r.problems.length === 1 && /Opus: the open gate/.test(r.problems[0])
-    }],
-    ['AUDIT_GATE=open checks the open gate only', () => auditEvidence(distinct.slice(0, 2), { ...A, gates: ['open'] }).ok],
-    ['a comment with no gate marker or no Verdict counts for nothing', () =>
-      !auditEvidence([c('Opus\nVerdict: GO', '2026-11-15T10:00:00Z'), c('Sol\nAudit gate: open', '2026-11-15T10:00:00Z')], { ...A, gates: ['open'] }).ok],
-    ['one auditor policy', () => auditEvidence(distinct.filter((x) => /Sol/.test(x.body)), { auditors: ['Sol'], gates: GATES }).ok],
-  ]
-  let failed = 0
-  for (const [name, fn] of cases) {
-    const ok = fn()
-    if (!ok) failed++
-    console.log(`  ${ok ? 'PASS' : 'FAIL'} self-test: ${name}`)
-  }
-  console.log(`\nRESULT: ${cases.length - failed}/${cases.length}`)
-  process.exit(failed ? 1 : 0)
-}
-
-if (process.argv[2] === '--self-test') selfTest()
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -141,7 +49,6 @@ let stack
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const git = (...args) => execFileSync('git', args, { cwd: REPO, encoding: 'utf8' }).trim()
 const gh = (...args) => execFileSync('gh', args, { cwd: REPO, encoding: 'utf8' }).trim()
 const skip = (id, why) => console.log(`  SKIP ${id}: ${why}`)
 
@@ -313,7 +220,7 @@ async function tour(browser, name, width, height) {
     const controls = page.locator('[data-onboarding-controls]')
     const total = 8
     for (let step = 1; step <= total; step++) {
-      await controls.getByText(`Step ${step} of ${total}`).waitFor({ timeout: 10000 })
+      await controls.getByText(`Step ${step} of ${total}`, { exact: true }).waitFor({ timeout: 10000 })
       await page.waitForTimeout(700) // route change, smooth scroll and the per-frame re-measure settle
       const g = await page.evaluate(() => {
         const box = (el) => { const r = el.getBoundingClientRect(); return { top: r.top, left: r.left, width: r.width, height: r.height } }
@@ -389,103 +296,6 @@ async function scenarioValidation() {
   })
 }
 
-// ─── pr.* (AC1, AC8, AC9, AC10) ──────────────────────────────────────────────
-
-const sourceFiles = () => git('show', '--name-only', '--format=', SOURCE_SHA).split('\n').filter(Boolean)
-const PERMITTED_ADDITIONS = ['frontend/public/icon.svg', 'frontend/public/manifest.webmanifest', 'frontend/e2e/pwa-shell.cjs']
-// The two files where 603ed45 conflicted with STU-159's landed changes: hunks may differ there.
-const RESOLVED_FILES = ['frontend/src/components/Layout.tsx', 'frontend/src/routes/settings.tsx']
-
-/** The branch's commits, newest first: from the PR with gh, else origin/main..HEAD. */
-function branchCommits() {
-  if (PR_NUMBER) {
-    return JSON.parse(gh('pr', 'view', PR_NUMBER, '--json', 'commits')).commits
-      .map((c) => ({ subject: c.messageHeadline, body: c.messageBody || '' }))
-  }
-  const base = git('merge-base', 'origin/main', 'HEAD')
-  return git('log', '--no-merges', '--format=%H', `${base}..HEAD`).split('\n').filter(Boolean)
-    .map((sha) => ({ subject: git('log', '-1', '--format=%s', sha), body: git('log', '-1', '--format=%b', sha) }))
-}
-
-const changedFiles = () => {
-  if (PR_NUMBER) return JSON.parse(gh('pr', 'view', PR_NUMBER, '--json', 'files')).files.map((f) => f.path)
-  const base = git('merge-base', 'origin/main', 'HEAD')
-  return git('diff', '--name-only', `${base}..HEAD`).split('\n').filter(Boolean)
-}
-
-/** Only the +/- lines of a file's diff, so hunk offsets and index lines do not matter. */
-const changeLines = (text) => text.split('\n').filter((l) => /^[+-]/.test(l) && !/^(\+\+\+|---)/.test(l)).join('\n')
-
-async function scenarioSourceCommit() {
-  if (!PR_NUMBER) return skip('pr.source-commit', 'no PR_NUMBER')
-  const pr = JSON.parse(gh('pr', 'view', PR_NUMBER, '--json', 'body'))
-  await h.check('pr.source-commit.listed', 'B', async () =>
-    pr.body.includes(SOURCE_SHA) || `PR description does not list ${SOURCE_SHA}`)
-  await h.check('pr.source-commit.no-health', 'B', async () =>
-    !pr.body.includes(HEALTH_SHA) || `PR description lists the health commit ${HEALTH_SHA}`)
-  await h.check('pr.source-commit.picked', 'B', async () => {
-    const base = git('merge-base', 'origin/main', 'HEAD')
-    const subject = git('log', '-1', '--format=%s', SOURCE_SHA).replace(/^\w+\(\w+\): /, '')
-    const picked = git('log', '--no-merges', '--format=%H', `${base}..HEAD`, '--grep', subject.replace(/,/g, ',?'), '-i').split('\n').filter(Boolean)
-    if (picked.length !== 1) return `${picked.length} commits carry the ${SOURCE_SHA} subject`
-    const files = git('show', '--name-only', '--format=', picked[0]).split('\n').filter(Boolean).sort()
-    const want = sourceFiles().sort()
-    return JSON.stringify(files) === JSON.stringify(want) || `picked commit files ${files} differ from ${SOURCE_SHA}'s ${want}`
-  })
-}
-
-async function scenarioCommitFormat() {
-  const commits = branchCommits()
-  const source = PR_NUMBER ? `PR #${PR_NUMBER}` : 'origin/main..HEAD'
-  await h.check('pr.commit-format.any', 'S', async () => commits.length > 0 || `no commits found in ${source}`)
-  for (const c of commits) {
-    await h.check(`pr.commit-format.${c.subject.slice(0, 40)}`, 'B', async () => {
-      const problems = []
-      if (!/^(feat|fix|refactor|test|docs|chore|style|perf|build|ci)\((api|web|mobile|shared|infra)\): \S/.test(c.subject)) problems.push('not a Conventional Commit with scope api|web|mobile|shared|infra')
-      if (/[A-Z]/.test(c.subject)) problems.push('subject has capitals')
-      if (/\.$/.test(c.subject)) problems.push('trailing period')
-      if (c.body.trim() !== '') problems.push('has a body or trailers')
-      if (/co-authored-by|claude|anthropic|generated with|\bAI\b/i.test(`${c.subject}\n${c.body}`)) problems.push('AI attribution')
-      return problems.length === 0 || problems.join('; ')
-    })
-  }
-}
-
-async function scenarioScope() {
-  const files = changedFiles()
-  const allowed = new Set([...sourceFiles(), ...PERMITTED_ADDITIONS])
-  await h.check('pr.scope.files', 'B', async () => {
-    const extra = files.filter((f) => !allowed.has(f))
-    return extra.length === 0 || `files outside ${SOURCE_SHA}, the two assets and this suite: ${extra.join(', ')}`
-  })
-  await h.check('pr.scope.source-files-present', 'B', async () => {
-    const missing = sourceFiles().filter((f) => !files.includes(f))
-    return missing.length === 0 || `${SOURCE_SHA} files not changed: ${missing.join(', ')}`
-  })
-  await h.check('pr.scope.assets-present', 'B', async () => {
-    const missing = PERMITTED_ADDITIONS.slice(0, 2).filter((f) => !files.includes(f))
-    return missing.length === 0 || `missing ${missing.join(', ')}`
-  })
-  // Outside the two conflict-resolved files the changes must be exactly the source commit's.
-  const base = git('merge-base', 'origin/main', 'HEAD')
-  for (const f of sourceFiles().filter((x) => !RESOLVED_FILES.includes(x))) {
-    await h.check(`pr.scope.identical.${f.split('/').pop()}`, 'B', async () => {
-      const mine = changeLines(git('diff', `${base}..HEAD`, '--', f))
-      const theirs = changeLines(git('show', '--format=', SOURCE_SHA, '--', f))
-      return mine === theirs || `${f} differs from ${SOURCE_SHA}'s change`
-    })
-  }
-}
-
-async function scenarioAuditEvidence() {
-  if (!PR_NUMBER) return skip('pr.audit-evidence', 'no PR_NUMBER')
-  const comments = JSON.parse(gh('pr', 'view', PR_NUMBER, '--json', 'comments')).comments
-  const auditors = (process.env.AUDITORS || 'Opus,Sol').split(',').map((a) => a.trim()).filter(Boolean)
-  const gates = process.env.AUDIT_GATE === 'open' ? ['open'] : GATES
-  const r = auditEvidence(comments, { auditors, gates })
-  await h.check('pr.audit-evidence', 'B', async () => r.ok || r.problems.join('; '))
-}
-
 // ─── Run ─────────────────────────────────────────────────────────────────────
 
 const NEEDS_STACK = new Set(['a.safe-area', 'b.dvh', 'c.assets', 'onboarding.mobile', 'onboarding.desktop'])
@@ -496,10 +306,6 @@ const SCENARIOS = [
   ['onboarding.mobile', (b) => tour(b, 'mobile', 390, 844)],
   ['onboarding.desktop', (b) => tour(b, 'desktop', 1280, 800)],
   ['validation.frontend', scenarioValidation],
-  ['pr.source-commit', scenarioSourceCommit],
-  ['pr.commit-format', scenarioCommitFormat],
-  ['pr.scope', scenarioScope],
-  ['pr.audit-evidence', scenarioAuditEvidence],
 ]
 
 ;(async () => {

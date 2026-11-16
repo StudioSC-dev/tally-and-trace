@@ -195,12 +195,13 @@ async function scenarioB(browser) {
     page.on('response', (r) => { if (isAllocationsList(r.request()) && offsetOf(r.url()) === 10) staleDelivered = true })
     await submit.click()
     await h.check('b.post-held', 'S', async () => (await post.waitHits(1)) || 'no POST')
-    // The overlay blocks clicks, not scrolling: the sentinel fires a load-more under it.
-    await page.mouse.move(640, 500)
-    await page.mouse.wheel(0, 20000)
+    // The overlay blocks clicks and the backdrop does not chain wheel scrolls to the page
+    // (overscroll-behavior: contain), so scroll the page itself to the end of the list:
+    // the sentinel comes into view and fires a load-more under the dialog.
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
     await h.check('b.page2-held', 'S', async () => (await stale.waitHits(1)) || 'no offset=10 request')
     // Back to the top, so the reset's landing re-arms the sentinel out of view.
-    await page.mouse.wheel(0, -20000)
+    await page.evaluate(() => window.scrollTo(0, 0))
     await page.waitForFunction(() => window.scrollY === 0, null, { timeout: 3000 }).catch(() => null)
     const resetDone = waitResponse(page, (r) => isAllocationsList(r.request()) && offsetOf(r.url()) === 0)
     const releasedAt = Date.now()
