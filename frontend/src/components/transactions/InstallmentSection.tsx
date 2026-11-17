@@ -3,6 +3,7 @@ import { INSTALLMENT_MONTH_PICKS, formatEntryDate, parseInstallmentMonths, parse
 
 import { installmentErrorId, installmentErrorProps } from './installmentField'
 import type { InstallmentField } from './installmentField'
+import { Segment } from '../SegmentedControl'
 
 /** An Installment field's error, shown under its field (the total's is shown on the Amount box). */
 export function InstallmentFieldError({ field, message }: { field: InstallmentField; message: string | undefined }) {
@@ -143,18 +144,16 @@ export function InstallmentSection({
               <label className="label" htmlFor="installment-months" id="installment-months-label">Months</label>
               <div className="mb-2 flex flex-wrap gap-2" role="group" aria-labelledby="installment-months-label">
                 {INSTALLMENT_MONTH_PICKS.map((count) => {
-                  const selected = months.trim() === String(count)
                   return (
-                    <button
+                    <Segment
                       key={count}
-                      type="button"
+                      selected={months.trim() === String(count)}
                       onClick={() => { onMonthsChange(String(count)); setChanging(false); setTyping(false) }}
-                      aria-pressed={selected}
-                      className={`min-h-11 min-w-11 rounded-full px-3 py-1.5 text-sm font-medium transition ${selected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken'}`}
+                      className="min-h-11 min-w-11 px-3 py-1.5 text-sm"
                       data-testid={`installment-months-${count}`}
                     >
                       {count}
-                    </button>
+                    </Segment>
                   )
                 })}
               </div>

@@ -24,6 +24,7 @@ import { Skeleton } from '../components/Loading'
 import { apiErrorMessage } from '../utils/apiError'
 import { useConfirm } from '../hooks/useConfirm'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
+import { withSelection } from '../utils/selection'
 
 export const Route = createFileRoute('/accounts')({
   component: AccountsPage,
@@ -1535,16 +1536,20 @@ export function AccountsPage() {
                   <span className="text-sm text-body">{formData.is_active ? 'Active' : 'Inactive'}</span>
                   <button
                     type="button"
+                    role="switch"
+                    aria-checked={formData.is_active}
+                    aria-label="Active"
                     onClick={() =>
                       setFormData((prev) => ({
                         ...prev,
                         is_active: !prev.is_active,
                       }))
                     }
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${ formData.is_active ? 'bg-ink' : 'bg-sunken' }`}
+                    className={withSelection(formData.is_active, 'relative inline-flex h-6 w-11 items-center border border-line-strong')}
+                    data-testid="account-active-switch"
                   >
                     <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-surface transition-transform duration-200 ${ formData.is_active ? 'translate-x-5' : 'translate-x-1' }`}
+                      className={`inline-block h-4 w-4 transform transition-transform duration-fast ${ formData.is_active ? 'translate-x-5 bg-accent' : 'translate-x-1 bg-line-strong' }`}
                     />
                   </button>
                 </div>

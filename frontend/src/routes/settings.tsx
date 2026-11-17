@@ -17,6 +17,7 @@ import type { Category, Tag } from '../store/api'
 import { downloadAuthed } from '../utils/download'
 import { HouseholdShares } from '../components/HouseholdShares'
 import { SkeletonRows } from '../components/Loading'
+import { Swatch } from '../components/SegmentedControl'
 import { useConfirm } from '../hooks/useConfirm'
 import { localToday } from '@tally-trace/shared'
 import { accountPickerGroups } from '@tally-trace/shared'
@@ -354,9 +355,9 @@ function SettingsPage() {
                 </div>
                 <div>
                   <label className="label">Colour</label>
-                  <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 flex-wrap" role="group" aria-label="Colour">
                     {SWATCHES.map(({ n, stored }) => (
-                      <button key={n} type="button" onClick={() => setTagForm({ ...tagForm, color: stored })} aria-pressed={swatchOf(tagForm.color) === n} className={`h-7 w-7 rounded-full border-2 ${swatchOf(tagForm.color) === n ? 'border-ink' : 'border-transparent'}`} style={{ backgroundColor: tokenColor(`swatch-${n}`) }} aria-label={`Colour ${stored}`} />
+                      <Swatch key={n} selected={swatchOf(tagForm.color) === n} color={tokenColor(`swatch-${n}`)} onClick={() => setTagForm({ ...tagForm, color: stored })} aria-label={`Colour ${stored}`} />
                     ))}
                     <input type="color" value={tagForm.color} onChange={(e) => setTagForm({ ...tagForm, color: e.target.value })} className="h-7 w-10 border border-line bg-transparent" aria-label="Custom colour" />
                   </div>
@@ -392,9 +393,9 @@ function SettingsPage() {
                 </div>
                 <div>
                   <label className="label">Colour</label>
-                  <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 flex-wrap" role="group" aria-label="Colour">
                     {SWATCHES.map(({ n, stored }) => (
-                      <button key={n} type="button" onClick={() => setCategoryForm({ ...categoryForm, color: stored })} aria-pressed={swatchOf(categoryForm.color) === n} className={`h-7 w-7 rounded-full border-2 ${swatchOf(categoryForm.color) === n ? 'border-ink' : 'border-transparent'}`} style={{ backgroundColor: tokenColor(`swatch-${n}`) }} aria-label={`Colour ${stored}`} />
+                      <Swatch key={n} selected={swatchOf(categoryForm.color) === n} color={tokenColor(`swatch-${n}`)} onClick={() => setCategoryForm({ ...categoryForm, color: stored })} aria-label={`Colour ${stored}`} />
                     ))}
                     <input type="color" value={categoryForm.color} onChange={(e) => setCategoryForm({ ...categoryForm, color: e.target.value })} className="h-7 w-10 border border-line bg-transparent" />
                   </div>

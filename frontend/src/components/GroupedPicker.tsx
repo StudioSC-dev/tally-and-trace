@@ -10,6 +10,7 @@ import {
   stepPickerRow,
 } from '@tally-trace/shared'
 import type { Account, Category, PickerGroup, PickerId, PickerOption } from '@tally-trace/shared'
+import { Segment } from './SegmentedControl'
 
 /** A fixed chip ahead of the options, such as "Uncategorized" or "All accounts". */
 export interface PickerLeadingChip {
@@ -60,9 +61,8 @@ interface MultiPickerProps extends PickerCommon {
 
 export type GroupedPickerProps = SinglePickerProps | MultiPickerProps
 
-const CHIP = 'inline-flex min-h-11 max-w-full items-center rounded-full px-3 py-1.5 text-left text-sm font-medium break-words transition'
-const chipClass = (selected: boolean, italic = false): string =>
-  `${CHIP} ${italic ? 'italic ' : ''}${selected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken'}`
+const CHIP = 'inline-flex min-h-11 max-w-full items-center px-3 py-1.5 text-left text-sm break-words'
+const chipClass = (italic = false): string => `${CHIP}${italic ? ' italic' : ''}`
 
 function flatten(groups: readonly PickerGroup[]): PickerOption[] {
   const out: PickerOption[] = []
@@ -80,8 +80,8 @@ function uniqueById(options: readonly PickerOption[]): PickerOption[] {
 }
 
 /** A full-width row in the compact panel; the ✓ sits in the right padding. */
-const rowClass = (selected: boolean, italic = false): string =>
-  `focus-ring relative block w-full min-h-11 rounded-lg py-3 pl-3 pr-9 text-left text-sm font-medium break-words transition disabled:opacity-50 ${italic ? 'italic ' : ''}${selected ? 'bg-sunken text-ink' : 'text-body hover:bg-sunken'}`
+const rowClass = (italic = false): string =>
+  `focus-ring relative block w-full min-h-11 py-3 pl-3 pr-9 text-left text-sm break-words disabled:opacity-50${italic ? ' italic' : ''}`
 
 /**
  * Chips for picking accounts or categories. With `FLAT_LIMIT` options or fewer every chip
@@ -197,36 +197,34 @@ export function GroupedPicker(props: GroupedPickerProps) {
   const chip = (option: PickerOption, fromPanel: boolean): ReactNode => {
     const isSelected = selectedSet.has(option.id)
     return (
-      <button
-        type="button"
+      <Segment
         key={String(option.id)}
+        selected={isSelected}
         data-picker-id={String(option.id)}
         data-selected={isSelected ? 'true' : undefined}
-        aria-pressed={isSelected}
         aria-describedby={describedBy}
         onClick={() => choose(option.id, fromPanel)}
-        className={chipClass(isSelected)}
+        className={chipClass()}
       >
         {option.label}
         {option.hint !== undefined && <span className="ml-2 text-xs font-normal">({option.hint})</span>}
-      </button>
+      </Segment>
     )
   }
 
   const leadingChips = leading.map((l) => (
-    <button
-      type="button"
+    <Segment
       key={`leading:${l.key}`}
+      selected={l.selected}
       data-picker-leading={l.key}
       data-selected={l.selected ? 'true' : undefined}
-      aria-pressed={l.selected}
       aria-describedby={describedBy}
       disabled={l.disabled}
       onClick={l.onClick}
-      className={chipClass(l.selected, l.italic)}
+      className={chipClass(l.italic)}
     >
       {l.label}
-    </button>
+    </Segment>
   ))
 
   // Compact: the panel's enabled rows, in order.
@@ -251,35 +249,33 @@ export function GroupedPicker(props: GroupedPickerProps) {
     const isSelected = selectedSet.has(option.id)
     const text = option.hint !== undefined ? `${option.label} (${option.hint})` : option.label
     return (
-      <button
-        type="button"
+      <Segment
         key={`${section}:${String(option.id)}`}
+        selected={isSelected}
         data-picker-id={String(option.id)}
         data-picker-option=""
         data-selected={isSelected ? 'true' : undefined}
-        aria-pressed={isSelected}
         aria-describedby={describedBy}
         title={text}
         onClick={() => choose(option.id, true)}
         onKeyDown={onRowKeyDown}
-        className={rowClass(isSelected)}
+        className={rowClass()}
       >
         {option.label}
         {option.hint !== undefined && <span className="ml-2 text-xs font-normal text-muted">({option.hint})</span>}
         {isSelected && <span aria-hidden="true" data-picker-check="" className="absolute right-3 top-3">✓</span>}
-      </button>
+      </Segment>
     )
   }
 
   const leadingRows = compact
     ? leading.map((l) => (
-        <button
-          type="button"
+        <Segment
           key={`leading:${l.key}`}
+          selected={l.selected}
           data-picker-leading={l.key}
           data-picker-option=""
           data-selected={l.selected ? 'true' : undefined}
-          aria-pressed={l.selected}
           aria-describedby={describedBy}
           title={l.label}
           disabled={l.disabled}
@@ -288,11 +284,11 @@ export function GroupedPicker(props: GroupedPickerProps) {
             closeField()
           }}
           onKeyDown={onRowKeyDown}
-          className={rowClass(l.selected, l.italic)}
+          className={rowClass(l.italic)}
         >
           {l.label}
           {l.selected && <span aria-hidden="true" data-picker-check="" className="absolute right-3 top-3">✓</span>}
-        </button>
+        </Segment>
       ))
     : []
 

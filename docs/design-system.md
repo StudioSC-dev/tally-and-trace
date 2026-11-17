@@ -182,6 +182,17 @@ Fields have no box. They are written on a ruled line (an underline in `line-stro
 - **Field:** underline only, `line-strong` at rest, spine on focus.
 - **Selection rule (tabs and segments):** selected is a leaf background, ink 600, and a
   2px spine rule underneath. Never a fill.
+  - Selected (`.seg.is-selected`): `background: surface; color: ink; font-weight: 600;
+    box-shadow: inset 0 -2px 0 accent; border-radius: 0`.
+  - Unselected (`.seg`): transparent background, `body` colour, weight 500, square; hover
+    turns the text `ink`.
+  - `SegmentedControl` (a single-select `role="group"` of `aria-pressed` buttons), `Segment`
+    (one pressable choice, also used for multi-select toggles such as tags) and `Tabs` /
+    `Tab` (`role="tab"`, `aria-selected`) in `frontend/src/components/` apply it. A control
+    that marks its choice another way uses `selectionClass` from
+    `frontend/src/utils/selection.ts`: the pager's current page (`aria-current="page"`) and
+    the Add Account Active switch (`role="switch"`, selected when on).
+  - The rule is keyed on the class, never on an ARIA attribute selector.
 - **Ledger and Row:**
   - The sheet is leaf, `radius-md`, one `line` border, no shadow.
   - Rows are ruled, radius 0.

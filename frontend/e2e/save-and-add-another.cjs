@@ -262,7 +262,7 @@ async function scenarioA(browser) {
     await h.check('a.kept', 'B', async () => {
       const got = {
         account: await chosen(control(modal, 'account_id'), 'Sav Checking'),
-        type: await chip(modal, 'Expense').evaluate((el) => el.classList.contains('bg-ink')),
+        type: (await chip(modal, 'Expense').getAttribute('aria-pressed')) === 'true',
         category: await chosen(control(modal, 'category_id'), 'Sav Food'),
         date: await control(modal, 'transaction_date').inputValue(),
         posted: await postedBox(modal).isChecked(),

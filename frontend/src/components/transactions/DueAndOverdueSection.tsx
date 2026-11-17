@@ -102,6 +102,7 @@ import { useOccurrenceDialogs } from './useOccurrenceDialogs'
 import { CARD_PAY_FORM, DUE_ENTRY_FORM } from '../../store/outboxForms'
 import type { CardPayDraft } from '../../store/outboxForms'
 import { outboxActions } from '../../store/outbox'
+import { Tab, Tabs } from '../Tabs'
 
 /**
  * "Due and overdue": every recurring occurrence the caller can record and every pending
@@ -1428,35 +1429,31 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
         >
           {open ? 'Hide' : 'Show'}
         </button>
-        <div role="tablist" aria-labelledby={titleId} className="flex min-w-[min(16rem,100%)] flex-1 flex-wrap gap-1 bg-sunken p-1">
+        <Tabs aria-labelledby={titleId} className="flex min-w-[min(16rem,100%)] flex-1 flex-wrap gap-1 bg-sunken p-1">
           {TABS.map(({ id, label, slug, badgeTestId }, index) => {
             const selectedTab = tab === id
             const badge = badges[id]
             return (
-              <button
+              <Tab
                 key={id}
                 ref={(el) => {
                   tabRefs.current[index] = el
                 }}
-                type="button"
-                role="tab"
+                selected={selectedTab}
                 id={tabId(id)}
-                aria-selected={selectedTab}
                 aria-controls={tabPanelId(id)}
                 tabIndex={selectedTab ? 0 : -1}
                 onClick={() => selectTab(id)}
                 onKeyDown={(event) => onTabKey(event, index)}
-                className={`flex min-w-0 flex-auto items-center justify-between gap-2 px-3 py-1.5 text-left text-sm font-medium transition-colors duration-200 focus-ring ${
-                  selectedTab ? 'bg-surface text-ink' : 'text-body hover:text-ink'
-                }`}
+                className="flex min-w-0 flex-auto items-center justify-between gap-2 px-3 py-1.5 text-left text-sm focus-ring"
                 data-testid={`due-tab-${slug}`}
               >
                 <span>{label}</span>
                 <span className="badge" data-testid={badgeTestId}>{badge.pending ? '…' : badge.count}</span>
-              </button>
+              </Tab>
             )
           })}
-        </div>
+        </Tabs>
       </div>
       {open && snapshotError && (
         <p className="border-t border-line px-4 py-3 text-sm text-danger" role="alert">Could not load what is due.</p>
