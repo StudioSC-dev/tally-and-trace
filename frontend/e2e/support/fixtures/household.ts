@@ -6,11 +6,13 @@
  * the design audit's scratch spec and is the one source later specs draw from: when a spec
  * needs a state this file lacks, extend this file rather than copying data into the spec.
  *
- * Three variants:
+ * Four variants:
  * - `household`: the busy month. Shared-account rows, recurring entries, an overdue payable,
  *   a card with a closed statement, 18 upcoming occurrences and quick balances.
  * - `calmHousehold`: the same household with nothing overdue, negative or failed.
  * - `emptyHousehold`: the accounts only, with no transactions or recurring entries.
+ * - `allUpcomingHousehold`: the busy month with all 18 occurrences on the Due card's Upcoming tab, so that
+ *   tab's count badge reads 18 (in `household` it reads 16, with 2 more under Subscriptions).
  *
  * `householdRoutes(data)` answers every call the dashboard, Transactions and Allocations make
  * on load; `mockHousehold(page, data)` signs in, freezes the clock on `HOUSEHOLD_TODAY` and
@@ -802,6 +804,16 @@ export const emptyHousehold: HouseholdData = build({
   cardStatements: [],
   occurrences: [],
 })
+
+/** The busy month with every occurrence listed as Upcoming: the Upcoming tab's count badge reads 18, a two-digit count. */
+export const allUpcomingHousehold: HouseholdData = {
+  ...household,
+  due: {
+    ...household.due,
+    upcoming_occurrences: { items: household.occurrences, total: household.occurrences.length, auto_post_scheduled: true },
+    subscription_occurrences: { items: [], total: 0, auto_post_scheduled: true },
+  },
+}
 
 const pageOf = <T>(items: T[]): PaginatedResponse<T> => ({ items, total: items.length, has_more: false })
 
