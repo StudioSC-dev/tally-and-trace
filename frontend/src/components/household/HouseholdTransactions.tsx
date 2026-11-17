@@ -8,6 +8,7 @@ import { useToday } from '../../hooks/useToday'
 import { TagChips } from '../TagChips'
 import { formatDay, money } from './format'
 import type { CurrencyCode } from '../../utils/currency'
+import { Button } from '../Button'
 
 const PAGE_SIZE = 20
 
@@ -138,24 +139,24 @@ export function HouseholdTransactionsTab({ sharerId }: { sharerId: number }) {
             : `${page * PAGE_SIZE + 1}-${page * PAGE_SIZE + data.items.length} of ${data.total}`}
         </span>
         <span className="flex gap-2">
-          <button
-            type="button"
-            className="btn-secondary focus-ring text-sm"
+          <Button
+            variant="secondary"
+            className="text-sm"
             disabled={page === 0 || isFetching}
             onClick={() => setPage((current) => Math.max(0, current - 1))}
             data-testid="household-transactions-prev"
           >
             Previous
-          </button>
-          <button
-            type="button"
-            className="btn-secondary focus-ring text-sm"
+          </Button>
+          <Button
+            variant="secondary"
+            className="text-sm"
             disabled={!data.has_more || isFetching}
             onClick={() => setPage((current) => current + 1)}
             data-testid="household-transactions-next"
           >
             Next
-          </button>
+          </Button>
         </span>
       </div>
     </section>

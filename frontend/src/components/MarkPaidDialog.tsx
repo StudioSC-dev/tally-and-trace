@@ -54,6 +54,7 @@ import type { AppDispatch } from '../store'
 import { outboxActions } from '../store/outbox'
 import { DUE_ENTRY_FORM, dueAction } from '../store/outboxForms'
 import type { MarkPaidDraft } from '../store/outboxForms'
+import { Button } from './Button'
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -398,9 +399,9 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, o
             <div>
               <h2 id={titleId} className="text-lg font-semibold text-ink">{recurringDialogTitle(name, actionRow)}</h2>
             </div>
-            <button ref={closeRef} type="button" onClick={onClose} className="btn-secondary focus-ring">
+            <Button variant="secondary" ref={closeRef} onClick={onClose}>
               Close
-            </button>
+            </Button>
           </div>
 
           {loading && !loadError && (
@@ -557,31 +558,29 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, o
 
           <div className="flex flex-wrap gap-2">
             {actions.map((a, index) => (
-              <button
+              <Button
                 key={a}
-                type="button"
+                variant={index === 0 ? 'primary' : 'secondary'}
                 onClick={() => void handleSubmit(a)}
                 disabled={!canSubmit}
-                className={`${index === 0 ? 'btn-primary' : 'btn-secondary'} focus-ring disabled:opacity-50`}
                 data-testid={a === 'charged' ? 'mark-paid-charged' : 'mark-paid-submit'}
               >
                 {submitting && submittingAction === a ? 'Posting…' : RECURRING_ACTION_LABELS[a]}
-              </button>
+              </Button>
             ))}
             {showPostAll && dueRange && (
-              <button
-                type="button"
+              <Button
+                variant="secondary"
                 onClick={() => void handlePostAll()}
                 disabled={busy}
-                className="btn-secondary focus-ring disabled:opacity-50"
                 data-testid="mark-paid-post-all"
               >
                 {postingAll
                   ? 'Posting…'
                   : `Post all ${listing.due_unposted} due (${formatEntryDate(dueRange.oldest)} – ${formatEntryDate(dueRange.latest)})`}
-              </button>
+              </Button>
             )}
-            <button type="button" onClick={onClose} className="btn-secondary focus-ring">Cancel</button>
+            <Button variant="quiet" onClick={onClose}>Cancel</Button>
           </div>
         </div>
       </div>

@@ -11,6 +11,7 @@ import type { CurrencyCode } from '../../utils/currency'
 import { UpcomingOccurrenceRow } from './UpcomingOccurrenceRow'
 import { UpcomingTransactionRow } from './UpcomingTransactionRow'
 import { useOccurrenceDialogs } from './useOccurrenceDialogs'
+import { Button } from '../Button'
 
 const TOUCH = 'min-h-11'
 
@@ -105,14 +106,14 @@ export function ScheduledView({
       {result.isError && (
         <div className="card p-4 space-y-3" role="alert" data-testid="scheduled-error">
           <p className="text-sm text-danger">Could not load the scheduled list.</p>
-          <button
-            type="button"
-            className={`btn-secondary focus-ring ${TOUCH}`}
+          <Button
+            variant="secondary"
+            className={TOUCH}
             onClick={() => void result.refetch()}
             data-testid="scheduled-retry"
           >
             Retry
-          </button>
+          </Button>
         </div>
       )}
       {data !== undefined && data.items.length === 0 && !busy && (
@@ -170,24 +171,24 @@ export function ScheduledView({
         >
           <p className="text-xs text-muted" data-testid="scheduled-range-text">{pageText}</p>
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
+            <Button
+              variant="secondary"
               onClick={goPrevious}
               disabled={cursors.length === 0 || busy}
-              className={`btn-secondary focus-ring disabled:opacity-50 disabled:cursor-not-allowed ${TOUCH}`}
+              className={TOUCH}
               data-testid="scheduled-previous"
             >
               Previous
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="secondary"
               onClick={goNext}
               disabled={next === null || busy}
-              className={`btn-secondary focus-ring disabled:opacity-50 disabled:cursor-not-allowed ${TOUCH}`}
+              className={TOUCH}
               data-testid="scheduled-next"
             >
               Next
-            </button>
+            </Button>
             <label className="flex items-center gap-2 text-xs text-muted">
               Per page
               <select

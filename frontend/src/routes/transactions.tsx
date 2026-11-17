@@ -50,6 +50,7 @@ import { keepsRetainedActual } from '../utils/retainedActual'
 import { SlowReload, Spinner } from '../components/Loading'
 import { Segment, SegmentedControl } from '../components/SegmentedControl'
 import { withSelection } from '../utils/selection'
+import { Button } from '../components/Button'
 
 const TRANSACTION_TYPE_LABELS: Record<Transaction['transaction_type'], string> = {
   credit: 'Income',
@@ -2888,12 +2889,13 @@ export function TransactionsPage() {
         </p>
       </div>
       {canAddTransactions && (
-        <button
+        <Button
+          variant="primary"
           onClick={() => setIsCreateModalOpen(true)}
-          className="btn-primary focus-ring w-full sm:w-auto mx-auto"
+          className="w-full sm:w-auto mx-auto"
         >
           Add Transaction
-        </button>
+        </Button>
       )}
     </div>
   )
@@ -2901,14 +2903,13 @@ export function TransactionsPage() {
   const loadErrorAlert = (
     <div className="card p-4 space-y-3" role="alert" data-testid="transactions-load-error">
       <p className="text-sm text-danger">Could not load transactions.</p>
-      <button
-        type="button"
-        className="btn-secondary focus-ring"
+      <Button
+        variant="secondary"
         onClick={() => void refreshLists()}
         data-testid="transactions-retry"
       >
         Retry
-      </button>
+      </Button>
     </div>
   )
 
@@ -2917,12 +2918,13 @@ export function TransactionsPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-[length:min(1.875rem,10vw)] leading-9 font-bold text-ink">Transactions</h1>
         {canAddTransactions && (
-          <button
+          <Button
+            variant="primary"
             onClick={() => setIsCreateModalOpen(true)}
-            className="btn-primary focus-ring w-full sm:w-auto justify-center"
+            className="w-full sm:w-auto justify-center"
           >
             Add Transaction
-          </button>
+          </Button>
         )}
       </div>
 
@@ -2974,54 +2976,54 @@ export function TransactionsPage() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
             {!isScheduled && (
             <div className="flex items-center gap-2">
-              <button
-                type="button"
+              <Button
+                variant="secondary"
                 onClick={() => handleMonthChange('prev')}
-                className="inline-flex items-center rounded-full border border-line bg-surface px-2.5 py-1.5 text-sm font-medium text-body transition hover:bg-sunken focus:outline-none"
+                className="px-2.5 py-1.5"
                 aria-label="View previous month"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
-              </button>
+              </Button>
               <span className="text-sm font-semibold text-ink">{currentMonthLabel}</span>
-              <button
-                type="button"
+              <Button
+                variant="secondary"
                 onClick={() => handleMonthChange('next')}
-                className="inline-flex items-center rounded-full border border-line bg-surface px-2.5 py-1.5 text-sm font-medium text-body transition hover:bg-sunken focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                className="px-2.5 py-1.5"
                 aria-label="View next month"
                 disabled={isAtCurrentMonth}
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
-              </button>
+              </Button>
             </div>
             )}
             {!isScheduled && (
-            <button
-              type="button"
+            <Button
+              variant="secondary"
               onClick={() => setIsBreakdownOpen(true)}
               data-onboarding="spending-breakdown"
-              className="inline-flex items-center justify-center gap-2 border border-line bg-surface px-3 py-2 text-sm font-semibold text-body transition hover:bg-sunken focus:outline-none"
+              className="px-3"
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />
               </svg>
               Spending breakdown
-            </button>
+            </Button>
             )}
-            <button
-              type="button"
+            <Button
+              variant="secondary"
               onClick={() => setShowFilters((prev) => !prev)}
-              className="inline-flex items-center justify-center gap-2 border border-line bg-surface px-3 py-2 text-sm font-semibold text-body transition hover:bg-sunken focus:outline-none"
+              className="px-3"
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h18l-7 8v6l-4 2v-8z" />
               </svg>
               {showFilters ? 'Hide filters' : 'Show filters'}
-            </button>
+            </Button>
           </div>
         </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -3038,53 +3040,53 @@ export function TransactionsPage() {
             </p>
           </div>
           {hasActiveFilters && (
-            <button
-              type="button"
+            <Button
+              variant="secondary"
               onClick={resetFilters}
-              className="btn-secondary focus-ring self-start sm:self-auto"
+              className="self-start sm:self-auto"
             >
               Reset filters
-            </button>
+            </Button>
           )}
         </div>
         {(selectedCategoryNames.length > 0 || filterUncategorized || enteredBy === 'me') && (
           <div className="flex flex-wrap gap-2" aria-label="Active filters">
             {!isDrilledUncategorized && selectedCategoryNames.map((name) => (
-              <button
-                type="button"
+              <Button
+                variant="secondary"
                 key={`category:${name}`}
                 onClick={() => toggleCategoryFilter(name)}
-                className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3 py-1 text-sm font-medium text-paper focus-ring"
+                className="min-h-7 gap-1.5 px-3 py-0.5"
                 aria-label={`Remove category filter ${name}`}
               >
                 Category: {name}
                 <span aria-hidden="true">×</span>
-              </button>
+              </Button>
             ))}
             {filterUncategorized && (
-              <button
-                type="button"
+              <Button
+                variant="secondary"
                 onClick={() => {
                   setFilterUncategorized(false)
                   if (isDrilledUncategorized) setSelectedCategoryNames([])
                 }}
-                className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3 py-1 text-sm font-medium text-paper focus-ring"
+                className="min-h-7 gap-1.5 px-3 py-0.5"
                 aria-label="Remove the No category filter"
               >
                 No category
                 <span aria-hidden="true">×</span>
-              </button>
+              </Button>
             )}
             {enteredBy === 'me' && (
-              <button
-                type="button"
+              <Button
+                variant="secondary"
                 onClick={() => setEnteredBy('everyone')}
-                className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3 py-1 text-sm font-medium text-paper focus-ring"
+                className="min-h-7 gap-1.5 px-3 py-0.5"
                 aria-label="Remove the Only mine filter"
               >
                 Only mine
                 <span aria-hidden="true">×</span>
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -3303,14 +3305,13 @@ export function TransactionsPage() {
                 {pageView.from}–{pageView.to} of {totalTransactions}
               </p>
               <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
                   onClick={() => goToPage(pageView.page - 1)}
                   disabled={pageView.page <= 1}
-                  className="btn-secondary focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Previous
-                </button>
+                </Button>
                 {pageItems(pageView.pages, pageView.page).map((item, index) =>
                   item === 0 ? (
                     <span key={`gap-${index}`} className="px-1 text-muted" aria-hidden="true">…</span>
@@ -3326,14 +3327,13 @@ export function TransactionsPage() {
                     </button>
                   )
                 )}
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
                   onClick={() => goToPage(pageView.page + 1)}
                   disabled={pageView.page >= pageView.pages}
-                  className="btn-secondary focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Next
-                </button>
+                </Button>
                 <label className="flex items-center gap-2 text-xs text-muted">
                   Per page
                   <select
@@ -3534,15 +3534,14 @@ export function TransactionsPage() {
               )}
               {isOwnerFull(actionTransaction) && actionTransaction.receipt_url?.startsWith('/api/') && (
                 <div className="space-y-2">
-                  <button
-                    type="button"
+                  <Button
+                    variant="secondary"
                     onClick={() => handleViewReceipt(actionTransaction.id)}
                     disabled={isReceiptLoading}
                     data-testid="view-receipt"
-                    className="px-4 py-2 text-sm font-semibold border border-line text-ink hover:bg-sunken disabled:opacity-50"
                   >
                     {isReceiptLoading ? 'Loading receipt…' : 'View receipt'}
-                  </button>
+                  </Button>
                   {receiptError && <p className="text-sm text-danger">{receiptError}</p>}
                   {receipt && receipt.transactionId === actionTransaction.id && (
                     receipt.type.startsWith('image/') ? (
@@ -3576,15 +3575,14 @@ export function TransactionsPage() {
                       }}
                       className="min-w-0 text-sm text-body"
                     />
-                    <button
-                      type="button"
+                    <Button
+                      variant="secondary"
                       onClick={() => handleUploadReceipt(actionTransaction.id)}
                       disabled={isReceiptUploading || !receiptFile}
                       data-testid="upload-receipt"
-                      className="px-4 py-2 text-sm font-semibold border border-line text-ink hover:bg-sunken disabled:opacity-50"
                     >
                       {isReceiptUploading ? 'Uploading…' : 'Upload receipt'}
-                    </button>
+                    </Button>
                   </div>
                   {receiptUploadError && (
                     <p id="receipt-upload-error" role="alert" data-testid="receipt-upload-error" className="text-sm text-danger">
@@ -3613,53 +3611,57 @@ export function TransactionsPage() {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {actionTransaction.is_posted ? (
                   actionPermissions.can_revert && (
-                  <button
+                  <Button
+                    variant="secondary"
                     onClick={() => handleRevertPostedFromModal(actionTransaction)}
                     disabled={actionLocked}
-                    className="flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold transition-colors duration-200 text-warn hover:bg-sunken disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex min-h-11 py-2.5"
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
                     Mark as not posted
-                  </button>
+                  </Button>
                   )
                 ) : (
                   actionPermissions.can_post && (
-                  <button
+                  <Button
+                    variant="secondary"
                     onClick={() => handleInitPostingForm(actionTransaction)}
                     disabled={actionLocked}
-                    className="flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold transition-colors duration-200 text-ok hover:bg-sunken disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex min-h-11 py-2.5"
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
                     Mark as Posted
-                  </button>
+                  </Button>
                   )
                 )}
                 {actionPermissions.can_edit && (
-                <button
+                <Button
+                  variant="primary"
                   onClick={() => openEditFromModal(actionTransaction)}
                   disabled={actionLocked}
-                  className="flex items-center justify-center gap-2 bg-ink px-4 py-3 text-sm font-semibold text-paper transition-colors duration-200 hover:bg-ink disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex min-h-11 py-2.5"
                 >
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                           </svg>
                   Edit Transaction
-                        </button>
+                        </Button>
                 )}
                 {actionPermissions.can_delete && (
-                        <button
+                        <Button
+                  variant="danger"
                   onClick={() => handleDelete(actionTransaction)}
-                  className="flex items-center justify-center gap-2 bg-sunken px-4 py-3 text-sm font-semibold text-body transition-colors duration-200 hover:bg-sunken"
+                  className="flex min-h-11 py-2.5"
                         >
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                           </svg>
                   Delete Transaction
-                        </button>
+                        </Button>
                 )}
                       </div>
               {actionError && (
@@ -3716,8 +3718,8 @@ export function TransactionsPage() {
                       !postingFormState.needsConversion &&
                       postingFormState.projectedAmount &&
                       postingFormState.projectedAmount > 0 && (
-                        <button
-                          type="button"
+                        <Button
+                          variant="secondary"
                           onClick={() =>
                             setPostingFormState((prev) => ({
                               ...prev,
@@ -3725,10 +3727,10 @@ export function TransactionsPage() {
                               error: null,
                             }))
                           }
-                          className="bg-surface px-3 py-2 text-sm font-semibold text-ink hover:bg-sunken"
+                          className="min-h-9 px-3 py-1.5"
                         >
                           Use projected amount
-                        </button>
+                        </Button>
                       )}
                   </div>
                   {postingFormState.needsReceived && (
@@ -3788,21 +3790,19 @@ export function TransactionsPage() {
                     <p className="text-xs text-danger" role="alert" data-testid="posting-error">{postingFormState.error}</p>
                   )}
                   <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
+                    <Button
+                      variant="primary"
                       onClick={handleSavePostingForm}
                       disabled={actionLocked}
-                      className="btn-primary focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       Save Posted Amount
-                    </button>
-                    <button
-                      type="button"
+                    </Button>
+                    <Button
+                      variant="quiet"
                       onClick={handleCancelPostingForm}
-                      className="btn-secondary focus-ring"
                     >
                       Cancel
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
@@ -4400,28 +4400,29 @@ export function TransactionsPage() {
               )}
               </fieldset>
               <div className="flex flex-wrap gap-3 pt-2">
-                <button type="submit" className="flex-1 btn-primary focus-ring">
+                <Button variant="primary" type="submit" className="flex-1">
                   {editingTransaction ? 'Update Transaction' : 'Create Transaction'}
-                </button>
+                </Button>
                 {!editingTransaction && (
-                  <button
+                  <Button
+                    variant="secondary"
                     type="submit"
-                    className="flex-1 btn-secondary focus-ring"
+                    className="flex-1"
                     data-testid="save-and-add-another"
                   >
                     Save and add another
-                  </button>
+                  </Button>
                 )}
-                <button
-                  type="button"
+                <Button
+                  variant="quiet"
                   onClick={() => {
                     setIsCreateModalOpen(false)
                     resetForm()
                   }}
-                  className="flex-1 btn-secondary focus-ring"
+                  className="flex-1"
                 >
                   Cancel
-                </button>
+                </Button>
               </div>
             </form>
           </div>

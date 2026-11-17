@@ -9,6 +9,7 @@ import {
 import type { ReceivedHouseholdShare, ReceivedShare, ShareRole } from '../store/api'
 import { apiErrorMessage } from '../utils/apiError'
 import { useConfirm } from '../hooks/useConfirm'
+import { Button, buttonClass } from './Button'
 
 const ROLE_LABELS: Record<ShareRole, string> = { viewer: 'Viewer', editor: 'Editor', admin: 'Admin' }
 
@@ -80,14 +81,14 @@ export function SharedWithMe({ onLeft }: { onLeft?: () => void }) {
                 {share.owner_name ? ` · shared by ${share.owner_name}` : ''}
               </p>
             </div>
-            <button
-              type="button"
+            <Button
+              variant="secondary"
               onClick={() => handleLeave(share)}
-              className="btn-secondary focus-ring text-sm"
+              className="text-sm"
               data-testid="shared-with-me-leave"
             >
               Leave
-            </button>
+            </Button>
           </li>
         ))}
         {householdShares.map((share) => (
@@ -106,19 +107,20 @@ export function SharedWithMe({ onLeft }: { onLeft?: () => void }) {
               <Link
                 to="/accounts/household"
                 search={{ sharer: share.sharer_id }}
-                className="btn-secondary focus-ring text-sm"
+                className={buttonClass('secondary', 'text-sm')}
+                data-variant="secondary"
                 data-testid="shared-with-me-household-open"
               >
                 Open
               </Link>
-              <button
-                type="button"
+              <Button
+                variant="secondary"
                 onClick={() => handleLeaveHousehold(share)}
-                className="btn-secondary focus-ring text-sm"
+                className="text-sm"
                 data-testid="shared-with-me-household-leave"
               >
                 Leave
-              </button>
+              </Button>
             </div>
           </li>
         ))}

@@ -2,6 +2,7 @@ import { Spinner } from '../Loading'
 import React, { useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { Link } from '@tanstack/react-router'
+import { Button } from '../Button'
 
 type ValidationError = {
   type: string
@@ -326,10 +327,11 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
               )}
             </div>
 
-            <button
+            <Button
+              variant="primary"
               type="submit"
               disabled={isLoading}
-              className="w-full flex justify-center py-2.5 px-4 border border-transparent text-sm font-semibold text-paper bg-ok hover:bg-ok focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+              className="w-full flex py-2.5"
             >
               {isLoading ? (
                 <div className="flex items-center">
@@ -339,7 +341,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
               ) : (
                 'Create account'
               )}
-            </button>
+            </Button>
           </form>
         </div>
       </div>

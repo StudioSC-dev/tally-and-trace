@@ -17,6 +17,7 @@ initSentry()
 
 // Import your generated route tree
 import { routeTree } from './routeTree.gen'
+import { Button } from './components/Button'
 
 // Create a new router instance
 const router = createRouter({ 
@@ -39,12 +40,12 @@ function CrashFallback() {
       <p className="text-sm text-muted">
         The error has been reported. Reloading usually fixes it.
       </p>
-      <button
+      <Button
+        variant="primary"
         onClick={() => window.location.reload()}
-        className="btn-primary"
       >
         Reload
-      </button>
+      </Button>
     </div>
   )
 }

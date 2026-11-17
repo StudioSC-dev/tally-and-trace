@@ -13,6 +13,7 @@ import { formatCurrency } from '../utils/currency'
 import type { CurrencyCode } from '../utils/currency'
 import { CurrencyControl } from './CurrencyControl'
 import { chartColor, tokenColor } from '../utils/palette'
+import { Button } from './Button'
 
 // Rows the list can't be filtered by, and the "Other" slice, are drawn neutral.
 const NEUTRAL_COLOR = tokenColor('muted')
@@ -137,9 +138,9 @@ export function SpendingBreakdownDialog({
         <p className="text-sm text-body">
           {apiErrorMessage(error) || "Couldn't load the spending breakdown."}
         </p>
-        <button type="button" onClick={() => void refetch()} className="btn-secondary focus-ring mt-4">
+        <Button variant="secondary" onClick={() => void refetch()} className="mt-4">
           Retry
-        </button>
+        </Button>
       </div>
     )
   } else if (breakdown.rows.length === 0 && household.rows.length === 0) {
@@ -292,14 +293,13 @@ export function SpendingBreakdownDialog({
               <h2 id={titleId} className="text-lg font-semibold text-ink">Spending breakdown</h2>
               <p className="text-sm text-muted">{rangeLabel}</p>
             </div>
-            <button
+            <Button
+              variant="secondary"
               ref={closeRef}
-              type="button"
               onClick={onClose}
-              className="btn-secondary focus-ring"
             >
               Close
-            </button>
+            </Button>
           </div>
           <div className="mt-4">
             <CurrencyControl

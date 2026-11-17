@@ -103,6 +103,7 @@ import { CARD_PAY_FORM, DUE_ENTRY_FORM } from '../../store/outboxForms'
 import type { CardPayDraft } from '../../store/outboxForms'
 import { outboxActions } from '../../store/outbox'
 import { Tab, Tabs } from '../Tabs'
+import { Button } from '../Button'
 
 /**
  * "Due and overdue": every recurring occurrence the caller can record and every pending
@@ -319,10 +320,13 @@ interface BatchResultView {
   failures: BatchFailure[]
 }
 
-const buttonClass =
-  'border border-line px-2.5 py-1 text-xs font-semibold text-ink hover:bg-sunken disabled:opacity-50 transition-colors focus-ring'
-const primaryButtonClass =
-  'bg-ok px-2.5 py-1 text-xs font-semibold text-paper hover:bg-ok disabled:opacity-50 transition-colors focus-ring'
+/**
+ * Row actions are secondary buttons (docs/design-system.md, "Button"). Each keeps the height it had until STU-682
+ * sizes buttons: an action that was outlined keeps its padding, and one that was filled had no border, so it takes
+ * 2px less padding and a 24px floor.
+ */
+const ROW_ACTION = 'px-2.5 py-1 text-xs'
+const WAS_FILLED_ROW_ACTION = 'min-h-6 px-2.5 py-0.5 text-xs'
 
 export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransaction, onSeeScheduled, accountCurrencies }: Props) {
   const panelId = useId()
@@ -723,28 +727,28 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
 
   // Change date: the occurrence's date, for a caller who can record it (the server's `can_mark_paid`).
   const changeDateButton = (entryId: number, name: string, occurrenceDate: string, effectiveDate?: string) => (
-    <button
-      type="button"
+    <Button
+      variant="secondary"
       onClick={() => openChangeDate(entryId, name, occurrenceDate, effectiveDate)}
-      className={buttonClass}
+      className={ROW_ACTION}
       data-testid="row-change-date"
     >
       Change date
-    </button>
+    </Button>
   )
 
   const actionButtons = (row: DueEntryRow | DueMissedRow) =>
     row.actions.map((action, index) => (
-      <button
+      <Button
+        variant="secondary"
         key={action}
-        type="button"
         onClick={() => record(row, action)}
         disabled={entryActionsOff(row.entryId)}
-        className={index === 0 ? primaryButtonClass : buttonClass}
+        className={index === 0 ? WAS_FILLED_ROW_ACTION : ROW_ACTION}
         data-testid={ACTION_TEST_IDS[action]}
       >
         {RECURRING_ACTION_LABELS[action]}
-      </button>
+      </Button>
     ))
 
   const pendingRow = (row: DuePendingRow) => {
@@ -770,15 +774,15 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
         <div className="flex-shrink-0 space-y-1 text-right">
           <p className="text-sm font-semibold text-ink">{formatCurrency(shown.amount, shown.currency)}</p>
           {row.action && (
-            <button
-              type="button"
+            <Button
+              variant="secondary"
               onClick={() => onPost(txn)}
               disabled={listsFetching || pendingTransactions.has(txn.id)}
-              className={primaryButtonClass}
+              className={WAS_FILLED_ROW_ACTION}
               data-testid={row.action === 'posted' ? 'due-posted' : 'due-mark-posted'}
             >
               {PENDING_POST_LABELS[row.action]}
-            </button>
+            </Button>
           )}
         </div>
       </li>
@@ -809,9 +813,9 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
         <div className="flex-shrink-0 space-y-1 text-right">
           <p className="text-sm font-semibold text-ink">{formatCurrency(shown.amount, shown.currency)}</p>
           {row.action && (
-            <button type="button" onClick={() => onPost(txn)} disabled={listsFetching || pendingTransactions.has(txn.id)} className={primaryButtonClass} data-testid="due-mark-posted">
+            <Button variant="secondary" onClick={() => onPost(txn)} disabled={listsFetching || pendingTransactions.has(txn.id)} className={WAS_FILLED_ROW_ACTION} data-testid="due-mark-posted">
               {PENDING_POST_LABELS[row.action]}
-            </button>
+            </Button>
           )}
         </div>
       </li>
@@ -856,9 +860,9 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
       </div>
       <div className="flex flex-shrink-0 flex-wrap justify-end gap-2">
         {row.review && (
-          <button type="button" onClick={() => review(row.entryId, row.name)} className={buttonClass} data-testid="due-review">
+          <Button variant="secondary" onClick={() => review(row.entryId, row.name)} className={ROW_ACTION} data-testid="due-review">
             Review
-          </button>
+          </Button>
         )}
         {actionButtons(row)}
         {row.can_mark_paid && changeDateButton(row.entryId, row.name, row.oldest, row.oldestEffectiveKnown ? row.oldestEffective : undefined)}
@@ -903,9 +907,9 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
   const statementRow = (row: DueStatementRow) => {
     const shown = statementRowText(row)
     const postButton = shown.post && (
-      <button type="button" onClick={() => void postDueNow()} disabled={posting || listsFetching} className={buttonClass} data-testid="due-unposted-post">
+      <Button variant="secondary" onClick={() => void postDueNow()} disabled={posting || listsFetching} className={ROW_ACTION} data-testid="due-unposted-post">
         {posting ? 'Posting…' : 'Post due installments now'}
-      </button>
+      </Button>
     )
     return (
       <li
@@ -947,9 +951,9 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
           <div className="flex flex-wrap justify-end gap-2">
             {postButton}
             {shown.pay && (
-              <button type="button" onClick={() => setPayCardId(row.cardId)} disabled={listsFetching || pendingCards.has(row.cardId)} className={primaryButtonClass} data-testid="due-pay">
+              <Button variant="secondary" onClick={() => setPayCardId(row.cardId)} disabled={listsFetching || pendingCards.has(row.cardId)} className={WAS_FILLED_ROW_ACTION} data-testid="due-pay">
                 Pay
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -1026,21 +1030,21 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
           {next !== null && (shown.review || shown.actions.length > 0) && (
             <div className="flex flex-wrap justify-end gap-2">
               {shown.review && (
-                <button type="button" onClick={() => review(plan.entry_id, plan.name)} className={buttonClass} data-testid="due-review">
+                <Button variant="secondary" onClick={() => review(plan.entry_id, plan.name)} className={ROW_ACTION} data-testid="due-review">
                   Review
-                </button>
+                </Button>
               )}
               {shown.actions.map((action, index) => (
-                <button
+                <Button
+                  variant="secondary"
                   key={action}
-                  type="button"
                   onClick={() => openRecord(plan.entry_id, plan.name, next, action)}
                   disabled={entryActionsOff(plan.entry_id)}
-                  className={index === 0 ? primaryButtonClass : buttonClass}
+                  className={index === 0 ? WAS_FILLED_ROW_ACTION : ROW_ACTION}
                   data-testid={ACTION_TEST_IDS[action]}
                 >
                   {RECURRING_ACTION_LABELS[action]}
-                </button>
+                </Button>
               ))}
             </div>
           )}
@@ -1080,9 +1084,9 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
   const windowError = (retry: () => void) => (
     <div className="flex flex-wrap items-center gap-3 px-4 py-3" data-testid="due-window-error">
       <p className="text-sm text-danger" role="alert">Could not load what is coming up.</p>
-      <button type="button" onClick={retry} className={buttonClass} data-testid="due-window-retry">
+      <Button variant="secondary" onClick={retry} className={ROW_ACTION} data-testid="due-window-retry">
         Retry
-      </button>
+      </Button>
     </div>
   )
 
@@ -1125,15 +1129,15 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
                       />
                       Select all
                     </label>
-                    <button
-                      type="button"
+                    <Button
+                      variant="secondary"
                       onClick={reviewSelected}
                       disabled={batchBusy || effective.size === 0}
-                      className={primaryButtonClass}
+                      className={WAS_FILLED_ROW_ACTION}
                       data-testid="due-review-selected"
                     >
                       {reviewSelectedText(effective.size)}
-                    </button>
+                    </Button>
                     {capped && (
                       <p id={limitId} className="text-xs text-muted" data-testid="due-review-notice-limit">{CAP_REASON}</p>
                     )}
@@ -1177,14 +1181,14 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
                             </span>
                           </span>
                         </span>
-                        <button
-                          type="button"
+                        <Button
+                          variant="secondary"
                           onClick={() => review(entry.entryId, entry.name)}
-                          className={buttonClass}
+                          className={ROW_ACTION}
                           data-testid="due-review-notice-review"
                         >
                           Review
-                        </button>
+                        </Button>
                       </li>
                     )
                   })}
@@ -1227,14 +1231,14 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
               >
                 <span className="text-sm text-ink" data-testid="due-today-text">{line.text}</span>
                 {line.canReview && (
-                  <button
-                    type="button"
+                  <Button
+                    variant="secondary"
                     onClick={() => review(line.entryId, line.name)}
-                    className={buttonClass}
+                    className={ROW_ACTION}
                     data-testid="due-today-review"
                   >
                     Review
-                  </button>
+                  </Button>
                 )}
               </li>
             ))}
@@ -1247,15 +1251,15 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
         {(postNow !== null || posted !== null || postError !== null) && (
           <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3">
             {postNow !== null && (
-              <button
-                type="button"
+              <Button
+                variant="secondary"
                 onClick={() => void postDueNow()}
                 disabled={posting || listsFetching}
-                className={primaryButtonClass}
+                className={WAS_FILLED_ROW_ACTION}
                 data-testid="due-post-now"
               >
                 {posting ? 'Posting…' : postNow}
-              </button>
+              </Button>
             )}
             {posted !== null && (
               <p className="text-sm text-ok" role="status" data-testid="due-post-now-result">{postedResultText(posted)}</p>
@@ -1385,9 +1389,9 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
         {plansFailed && (
           <div className="flex flex-wrap items-center gap-3 px-4 py-3" data-testid="due-plans-error">
             <p className="text-sm text-danger" role="alert">Could not load the installment plans.</p>
-            <button type="button" onClick={() => void plansResult.refetch()} className={buttonClass} data-testid="due-plans-retry">
+            <Button variant="secondary" onClick={() => void plansResult.refetch()} className={ROW_ACTION} data-testid="due-plans-retry">
               Retry
-            </button>
+            </Button>
           </div>
         )}
         {!plansPending && !plansFailed && planCount === 0 && (
@@ -1419,16 +1423,16 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     <section className="card" data-testid="due-section" data-limited-rows={LIMITED_ROWS} aria-labelledby={titleId}>
       <h2 id={titleId} className="sr-only">Due and overdue</h2>
       <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-        <button
-          type="button"
+        <Button
+          variant="secondary"
           onClick={() => setOpen((prev) => !prev)}
           aria-expanded={open}
           aria-controls={TABS.map(({ id }) => tabPanelId(id)).join(' ')}
-          className={buttonClass}
+          className={ROW_ACTION}
           data-testid="due-section-toggle"
         >
           {open ? 'Hide' : 'Show'}
-        </button>
+        </Button>
         <Tabs aria-labelledby={titleId} className="flex min-w-[min(16rem,100%)] flex-1 flex-wrap gap-1 bg-sunken p-1">
           {TABS.map(({ id, label, slug, badgeTestId }, index) => {
             const selectedTab = tab === id
@@ -1479,9 +1483,9 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
       ))}
       {open && hasMore && selectedUsesWindow && (
         <div className="border-t border-line px-4 py-3">
-          <button type="button" onClick={loadMore} className={buttonClass} data-testid="due-load-more">
+          <Button variant="secondary" onClick={loadMore} className={ROW_ACTION} data-testid="due-load-more">
             Load more
-          </button>
+          </Button>
         </div>
       )}
       {payCardId !== null && <CardPayDialog

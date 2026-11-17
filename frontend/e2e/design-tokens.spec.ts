@@ -69,12 +69,13 @@ const style = (el: Locator, prop: string): Promise<string> => el.evaluate((e, p)
 
 /**
  * A detached element carrying `className`, appended to #root so the app's cascade applies. Used for the classes no
- * markup on these pages uses yet (`.stat-card`, `.btn-danger`).
+ * markup on these pages uses yet (`.stat-card`, `.button-danger`).
  */
 async function probe(page: Page, className: string): Promise<Locator> {
   await page.evaluate((c) => {
-    const el = document.createElement(c.startsWith('btn-') ? 'button' : 'div')
-    el.className = c
+    // A button variant (STU-678) sits on the shared `.button` footprint, as `Button` renders it.
+    const el = document.createElement(c.startsWith('button-') ? 'button' : 'div')
+    el.className = c.startsWith('button-') ? `button ${c}` : c
     el.dataset.probe = c
     el.textContent = 'Probe'
     document.getElementById('root')?.appendChild(el)
@@ -189,13 +190,13 @@ test.describe('Columnar pad design tokens (STU-675)', () => {
     const card = page.getByTestId('transactions-list-card')
     await expect(card).toBeVisible()
     expect.soft(await style(card, 'background-color'), '.card background is surface').toBe(rgb(LIGHT.surface))
-    const primary = page.locator('.btn-primary:visible').first()
-    const secondary = page.locator('.btn-secondary:visible').first()
+    const primary = page.locator('[data-variant="primary"]:visible').first()
+    const secondary = page.locator('[data-variant="secondary"]:visible').first()
     await expect(primary).toBeVisible()
     await expect(secondary).toBeVisible()
-    expect.soft(await style(primary, 'background-color'), '.btn-primary background is accent').toBe(rgb(LIGHT.accent))
-    expect.soft(await style(primary, 'color'), '.btn-primary text is on-accent').toBe('rgb(242, 245, 240)')
-    expect.soft(await style(secondary, 'border-top-color'), '.btn-secondary border is line-strong').toBe(rgb(LIGHT['line-strong']))
+    expect.soft(await style(primary, 'background-color'), 'a primary button background is accent').toBe(rgb(LIGHT.accent))
+    expect.soft(await style(primary, 'color'), 'a primary button text is on-accent').toBe('rgb(242, 245, 240)')
+    expect.soft(await style(secondary, 'border-top-color'), 'a secondary button border is line-strong').toBe(rgb(LIGHT['line-strong']))
     await shot(page, 'light-transactions')
   })
 
@@ -217,9 +218,9 @@ test.describe('Columnar pad design tokens (STU-675)', () => {
     const card = page.getByTestId('transactions-list-card')
     await expect(card).toBeVisible()
     expect.soft(await style(card, 'background-color'), '.card background').toBe('rgb(23, 33, 27)')
-    const primary = page.locator('.btn-primary:visible').first()
+    const primary = page.locator('[data-variant="primary"]:visible').first()
     await expect(primary).toBeVisible()
-    expect.soft(await style(primary, 'background-color'), '.btn-primary background').toBe('rgb(147, 205, 169)')
+    expect.soft(await style(primary, 'background-color'), 'a primary button background').toBe('rgb(147, 205, 169)')
     await shot(page, 'dark-transactions')
   })
 
@@ -248,12 +249,12 @@ test.describe('Columnar pad design tokens (STU-675)', () => {
     expect.soft(await style(statCard, 'border-radius'), '.stat-card radius').toBe('6px')
     expect.soft(await style(statCard, 'box-shadow'), '.stat-card shadow').toBe('none')
 
-    // Every .btn-* class the stylesheets define, read from the CSSOM, so a new variant is covered too.
+    // Every .button-* variant class the stylesheets define, read from the CSSOM, so a new variant is covered too.
     const variants = await page.evaluate(() => {
       const found = new Set<string>()
       const walk = (rules: CSSRuleList) => {
         for (const rule of Array.from(rules)) {
-          if (rule instanceof CSSStyleRule) for (const m of rule.selectorText.matchAll(/\.(btn-[a-z-]+)/g)) found.add(m[1])
+          if (rule instanceof CSSStyleRule) for (const m of rule.selectorText.matchAll(/\.(button-[a-z-]+)/g)) found.add(m[1])
           if ('cssRules' in rule) walk((rule as CSSGroupingRule).cssRules)
         }
       }
@@ -264,7 +265,7 @@ test.describe('Columnar pad design tokens (STU-675)', () => {
       }
       return [...found].sort()
     })
-    expect.soft(variants, 'the button variants').toEqual(['btn-danger', 'btn-primary', 'btn-secondary'])
+    expect.soft(variants, 'the button variants').toEqual(['button-danger', 'button-primary', 'button-quiet', 'button-secondary'])
     for (const variant of variants) {
       expect.soft(await style(await probe(page, variant), 'border-radius'), `.${variant} radius`).toBe('4px')
     }
@@ -275,10 +276,10 @@ test.describe('Columnar pad design tokens (STU-675)', () => {
     await expect(card).toBeVisible()
     expect.soft(await style(card, 'border-radius'), '.card radius').toBe('6px')
     expect.soft(await style(card, 'box-shadow'), '.card shadow').toBe('none')
-    for (const variant of ['btn-primary', 'btn-secondary']) {
-      const button = page.locator(`.${variant}:visible`).first()
+    for (const variant of ['primary', 'secondary']) {
+      const button = page.locator(`[data-variant="${variant}"]:visible`).first()
       await expect(button).toBeVisible()
-      expect.soft(await style(button, 'border-radius'), `a rendered .${variant} radius`).toBe('4px')
+      expect.soft(await style(button, 'border-radius'), `a rendered ${variant} button radius`).toBe('4px')
     }
     const row = page.locator('[data-testid="due-row"]:visible').first()
     await expect(row).toBeVisible()

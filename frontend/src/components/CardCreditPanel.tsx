@@ -24,6 +24,7 @@ import type { CurrencyCode } from '../utils/currency'
 import { CardPayDialog } from './CardPayDialog'
 import { CreditSummary } from './CreditSummary'
 import { Skeleton } from './Loading'
+import { Button } from './Button'
 
 const STATUS_STYLES: Record<StatementDue['status'], string> = { paid: 'text-ok', overdue: 'text-danger', open: 'text-warn' }
 
@@ -72,9 +73,9 @@ export function CardCreditPanel({ account }: { account: Account }) {
     return (
       <section className="card p-4 sm:p-5 space-y-3" role="alert" data-testid="card-credit-panel-error">
         <p className="text-sm text-danger">{apiErrorMessage(error) || "Could not load this card's credit."}</p>
-        <button type="button" className="btn-secondary focus-ring" onClick={() => void refetch()}>
+        <Button variant="secondary" onClick={() => void refetch()}>
           Retry
-        </button>
+        </Button>
       </section>
     )
   }
@@ -130,15 +131,14 @@ export function CardCreditPanel({ account }: { account: Account }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <h2 className="text-lg font-semibold text-ink">Credit and statements</h2>
         <div className="flex flex-col items-end gap-1">
-          <button
-            type="button"
+          <Button
+            variant="primary"
             onClick={() => setPaying(true)}
             disabled={disabledReason !== null}
-            className="btn-primary focus-ring disabled:opacity-50"
             data-testid="card-pay-open"
           >
             Pay
-          </button>
+          </Button>
           {disabledReason && (
             <p className="text-xs text-muted" data-testid="card-pay-disabled-reason">{disabledReason}</p>
           )}
@@ -161,15 +161,14 @@ export function CardCreditPanel({ account }: { account: Account }) {
         <div className="border border-line p-3 space-y-2 text-sm" data-testid="card-unposted">
           <p className="text-warn" data-testid="card-unposted-text">{unposted.text}</p>
           {unposted.action === 'post' ? (
-            <button
-              type="button"
+            <Button
+              variant="secondary"
               onClick={() => void postNow()}
               disabled={posting}
-              className="btn-secondary focus-ring disabled:opacity-50"
               data-testid="card-unposted-post"
             >
               {posting ? 'Posting…' : 'Post due installments now'}
-            </button>
+            </Button>
           ) : (
             <p className="text-xs text-muted" data-testid="card-unposted-review">
               <Link to="/transactions" className="underline underline-offset-2 text-body hover:text-ink focus-ring">
@@ -333,12 +332,12 @@ function StatementRow({ cardId, statement, currency }: { cardId: number; stateme
             placeholder="0.00"
             data-testid="card-minimum-input"
           />
-          <button type="button" onClick={() => void save()} disabled={busy} className="btn-primary focus-ring disabled:opacity-50" data-testid="card-minimum-save">
+          <Button variant="primary" onClick={() => void save()} disabled={busy} data-testid="card-minimum-save">
             {saving ? 'Saving…' : 'Save'}
-          </button>
-          <button type="button" onClick={() => setEditing(false)} disabled={busy} className="btn-secondary focus-ring">
+          </Button>
+          <Button variant="quiet" onClick={() => setEditing(false)} disabled={busy}>
             Cancel
-          </button>
+          </Button>
         </div>
       )}
 
@@ -428,12 +427,12 @@ function DueDateControls({ cardId, closeDate, dueDate, overridden }: { cardId: n
             className="input-field focus-ring w-44"
             data-testid="card-due-input"
           />
-          <button type="button" onClick={() => void save()} disabled={busy} className="btn-primary focus-ring disabled:opacity-50" data-testid="card-due-save">
+          <Button variant="primary" onClick={() => void save()} disabled={busy} data-testid="card-due-save">
             {saving ? 'Saving…' : 'Save'}
-          </button>
-          <button type="button" onClick={() => setEditing(false)} disabled={busy} className="btn-secondary focus-ring">
+          </Button>
+          <Button variant="quiet" onClick={() => setEditing(false)} disabled={busy}>
             Cancel
-          </button>
+          </Button>
         </div>
       ) : (
         <span className="flex gap-2">

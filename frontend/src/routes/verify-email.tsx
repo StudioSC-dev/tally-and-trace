@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useVerifyEmailMutation } from '../store/authApi'
 import { PageLoader } from '../components/Loading'
 import { apiErrorMessage } from '../utils/apiError'
+import { Button } from '../components/Button'
 
 export const Route = createFileRoute('/verify-email')({
   component: VerifyEmailPage,
@@ -62,12 +63,13 @@ export function VerifyEmailPage() {
           </div>
           <h2 className="text-xl font-semibold text-ink mb-2">Verification Failed</h2>
           <p className="text-body mb-6">{errorMessage}</p>
-          <button
+          <Button
+            variant="primary"
             onClick={() => navigate({ to: '/login', search: { message: undefined } })}
-            className="w-full px-4 py-2 bg-ink text-paper hover:bg-ink transition-colors duration-200"
+            className="w-full min-h-10 py-1.5 text-base"
           >
             Go to Login
-          </button>
+          </Button>
         </div>
       </div>
     )
@@ -92,12 +94,13 @@ export function VerifyEmailPage() {
               style={{ width: `${((5 - countdown) / 5) * 100}%` }}
             ></div>
           </div>
-          <button
+          <Button
+            variant="primary"
             onClick={() => navigate({ to: '/' })}
-            className="w-full px-4 py-2 bg-ink text-paper hover:bg-ink transition-colors duration-200"
+            className="w-full min-h-10 py-1.5 text-base"
           >
             Continue Now
-          </button>
+          </Button>
         </div>
       </div>
     )

@@ -4,6 +4,7 @@ import type { Settlement } from '@tally-trace/shared'
 import { useGetEntryAutoPostPreviewQuery, useGetLoanAutoPostPreviewQuery } from '../store/api'
 import { useAutopayActions } from '../hooks/useAutopayActions'
 import type { AutopaySubject } from '../hooks/useAutopayActions'
+import { Button } from './Button'
 
 /**
  * Autopay or manual for a cash entry or a loan, changed on its own (not with a Save). Turning
@@ -42,15 +43,14 @@ export function SettlementControl({ subject, settlement }: { subject: AutopaySub
           <h3 className="text-sm font-semibold text-ink">Settlement</h3>
           <p className="text-sm text-body" data-testid="settlement-state">{enabled ? 'Autopay' : 'Manual'}</p>
         </div>
-        <button
-          type="button"
+        <Button
+          variant="secondary"
           onClick={() => void change()}
           disabled={busy || blockText !== null}
-          className="btn-secondary focus-ring disabled:opacity-50"
           data-testid="settlement-toggle"
         >
           {enabled ? 'Switch to manual' : 'Turn on autopay'}
-        </button>
+        </Button>
       </div>
       <p className="text-xs text-muted">
         {enabled ? 'Posts by itself on each due date.' : 'Waits for you to record each payment.'}

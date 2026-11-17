@@ -2,6 +2,7 @@ import { fieldErrorProps } from '@tally-trace/shared'
 import type { FieldErrors, ScheduleDraft, ScheduleState, SchedulePreview } from '@tally-trace/shared'
 import { RecurringScheduleFields } from '../RecurringScheduleFields'
 import type { ScheduleControlKey, ScheduleControlProps, ScheduleFieldKey } from '../RecurringScheduleFields'
+import { Button } from '../Button'
 
 // A Repeat control that shows a field's error under it.
 export type RepeatErrorKey = ScheduleFieldKey | ScheduleControlKey
@@ -92,15 +93,15 @@ export function RepeatSection({
           {unavailable && (
             <div className="space-y-2" data-testid="repeat-unavailable">
               <p className="text-sm text-danger" role="alert">{unavailableCopy}</p>
-              <button
-                type="button"
-                className="btn-secondary focus-ring min-h-11"
+              <Button
+                variant="secondary"
+                className="min-h-11"
                 disabled={retryDisabled}
                 onClick={onRetry}
                 data-testid="repeat-retry"
               >
                 Retry
-              </button>
+              </Button>
             </div>
           )}
         </fieldset>

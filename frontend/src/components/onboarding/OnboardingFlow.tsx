@@ -4,6 +4,7 @@ import { useCompleteOnboardingMutation } from '../../store/authApi'
 import { SpotlightOverlay, type SpotlightRect } from './SpotlightOverlay'
 import { resolveOnboardingTarget } from './resolveTarget'
 import { placeBubble, BUBBLE_VIEWPORT_MARGIN } from './placeBubble'
+import { Button } from '../Button'
 
 interface OnboardingStep {
   id: number
@@ -517,19 +518,21 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
 
           {/* Navigation buttons */}
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
-            <button
+            <Button
+              variant="secondary"
               onClick={handlePrevious}
               disabled={currentStep === 0}
-              className="px-3 py-1.5 text-sm text-body bg-sunken hover:bg-sunken disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="min-h-8 px-3 py-1"
             >
               Previous
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="primary"
               onClick={handleNext}
-              className="ml-auto px-4 py-1.5 text-sm bg-ink text-paper hover:bg-ink transition-colors font-medium"
+              className="ml-auto min-h-8 py-1"
             >
               {currentStep === TOTAL_STEPS - 1 ? 'Get Started' : 'Next'}
-            </button>
+            </Button>
           </div>
         </div>
         

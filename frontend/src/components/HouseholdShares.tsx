@@ -9,6 +9,7 @@ import {
 import type { HouseholdShare, UserMatch } from '../store/api'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 import { useConfirm } from '../hooks/useConfirm'
+import { Button } from './Button'
 
 const lookupErrorMessage = (error: unknown): string => {
   if (apiErrorStatus(error) === 429) return 'Too many lookups, try again shortly'
@@ -123,14 +124,14 @@ export function HouseholdShares() {
                   data-testid="household-share-row"
                 >
                   <span className="text-sm text-ink">{share.display_name ?? 'Unknown user'}</span>
-                  <button
-                    type="button"
+                  <Button
+                    variant="secondary"
                     onClick={() => handleRemove(share)}
-                    className="btn-secondary focus-ring text-sm"
+                    className="text-sm"
                     data-testid="household-share-remove"
                   >
                     Remove
-                  </button>
+                  </Button>
                 </li>
               ))}
               {data.shares.length === 0 && (
@@ -158,14 +159,14 @@ export function HouseholdShares() {
                 data-testid="household-share-email"
                 autoComplete="off"
               />
-              <button
+              <Button
+                variant="secondary"
                 type="submit"
                 disabled={isLooking}
-                className="btn-secondary focus-ring"
                 data-testid="household-share-lookup"
               >
                 {isLooking ? 'Looking up...' : 'Look up'}
-              </button>
+              </Button>
             </div>
             {lookupError && (
               <p className="text-sm text-danger" role="alert" data-testid="household-share-lookup-error">
@@ -180,15 +181,14 @@ export function HouseholdShares() {
                     {match.display_name}
                   </span>
                 </p>
-                <button
-                  type="button"
+                <Button
+                  variant="primary"
                   onClick={handleShare}
                   disabled={isCreating}
-                  className="btn-primary focus-ring"
                   data-testid="household-share-submit"
                 >
                   {isCreating ? 'Sharing...' : `Share Household with ${match.display_name}`}
-                </button>
+                </Button>
               </div>
             )}
           </form>

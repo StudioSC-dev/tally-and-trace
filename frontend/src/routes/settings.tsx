@@ -23,6 +23,13 @@ import { localToday } from '@tally-trace/shared'
 import { accountPickerGroups } from '@tally-trace/shared'
 import { PickerOptGroups } from '../components/PickerOptGroups'
 import { DEFAULT_SWATCH_COLOR, displayColor, NO_COLOR, SWATCHES, swatchOf, tokenColor } from '../utils/palette'
+import { Button } from '../components/Button'
+
+/**
+ * The export buttons and a category or tag row's Edit and Delete. They had no border; a Button carries a 1px border,
+ * so they take 2px less padding and a 32px floor to keep their height until STU-682 sizes buttons.
+ */
+const COMPACT_ACTION = 'min-h-8 px-2.5 py-1'
 
 export const Route = createFileRoute('/settings')({
   component: SettingsPage,
@@ -223,12 +230,12 @@ function SettingsPage() {
             <p className="text-sm text-muted">Download everything you own as one JSON file, or as a ZIP of CSV files (one per table). Accounts shared with you and other people's records on your accounts are included with limited details.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button onClick={() => exportData('json')} disabled={downloading !== null} className="text-sm px-2.5 py-1.5 bg-sunken text-body hover:bg-sunken disabled:opacity-50">
+            <Button variant="secondary" onClick={() => exportData('json')} disabled={downloading !== null} className={COMPACT_ACTION}>
               {downloading === 'json' ? '…' : 'JSON'}
-            </button>
-            <button onClick={() => exportData('zip')} disabled={downloading !== null} className="text-sm px-2.5 py-1.5 bg-sunken text-body hover:bg-sunken disabled:opacity-50">
+            </Button>
+            <Button variant="secondary" onClick={() => exportData('zip')} disabled={downloading !== null} className={COMPACT_ACTION}>
               {downloading === 'zip' ? '…' : 'CSV (ZIP)'}
-            </button>
+            </Button>
           </div>
         </div>
         {downloadError && <p className="px-4 sm:px-6 pb-3 text-sm text-danger">{downloadError}</p>}
@@ -241,7 +248,7 @@ function SettingsPage() {
             <h2 className="text-lg font-semibold text-ink">Categories</h2>
             <p className="text-sm text-muted">Colour-coded labels for transactions and budgets.</p>
           </div>
-          <button onClick={openCreateCategory} className="btn-primary focus-ring">Add category</button>
+          <Button variant="primary" onClick={openCreateCategory}>Add category</Button>
         </div>
         {categories === undefined ? (
           categoriesPhase === 'error' ? (
@@ -267,8 +274,8 @@ function SettingsPage() {
                   </span>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <button onClick={() => openEditCategory(c)} className="text-sm px-2.5 py-1.5 text-ink hover:bg-sunken">Edit</button>
-                  <button onClick={() => removeCategory(c)} className="text-sm px-2.5 py-1.5 text-danger hover:bg-sunken">Delete</button>
+                  <Button variant="quiet" onClick={() => openEditCategory(c)} className={COMPACT_ACTION}>Edit</Button>
+                  <Button variant="danger" onClick={() => removeCategory(c)} className={COMPACT_ACTION}>Delete</Button>
                 </div>
               </li>
             ))}
@@ -283,7 +290,7 @@ function SettingsPage() {
             <h2 className="text-lg font-semibold text-ink">Tags</h2>
             <p className="text-sm text-muted">Label accounts, transactions and recurring entries, then filter by tag.</p>
           </div>
-          <button onClick={openCreateTag} className="btn-primary focus-ring">Add tag</button>
+          <Button variant="primary" onClick={openCreateTag}>Add tag</Button>
         </div>
         {tagListError && <p role="alert" className="px-4 sm:px-6 pt-3 text-sm text-danger">{tagListError}</p>}
         {tags === undefined ? (
@@ -307,22 +314,24 @@ function SettingsPage() {
                   {t.is_system && <span className="badge text-muted">System</span>}
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <button
+                  <Button
+                    variant="quiet"
                     onClick={() => openEditTag(t)}
-                    className="text-sm px-2.5 py-1.5 text-ink hover:bg-sunken"
+                    className={COMPACT_ACTION}
                     aria-label={`${t.is_system ? 'Recolour' : 'Edit'} tag ${t.name}`}
                   >
                     {t.is_system ? 'Recolour' : 'Edit'}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="danger"
                     onClick={() => removeTag(t)}
                     disabled={t.is_system}
                     title={t.is_system ? 'The Household tag cannot be deleted' : undefined}
                     aria-label={`Delete tag ${t.name}`}
-                    className="text-sm px-2.5 py-1.5 text-danger hover:bg-sunken disabled:opacity-40 disabled:cursor-not-allowed"
+                    className={COMPACT_ACTION}
                   >
                     Delete
-                  </button>
+                  </Button>
                 </div>
               </li>
             ))}
@@ -364,8 +373,8 @@ function SettingsPage() {
                 </div>
                 {tagError && <p role="alert" className="text-sm text-danger">{tagError}</p>}
                 <div className="flex space-x-3 pt-6 border-t border-line">
-                  <button type="submit" className="flex-1 btn-primary focus-ring py-3">{editingTag ? 'Update' : 'Create'}</button>
-                  <button type="button" onClick={() => setTagModal(false)} className="flex-1 btn-secondary focus-ring py-3">Cancel</button>
+                  <Button variant="primary" type="submit" className="flex-1 py-3">{editingTag ? 'Update' : 'Create'}</Button>
+                  <Button variant="quiet" onClick={() => setTagModal(false)} className="flex-1 py-3">Cancel</Button>
                 </div>
               </form>
             </div>
@@ -405,8 +414,8 @@ function SettingsPage() {
                   <input type="text" value={categoryForm.description} onChange={(e) => setCategoryForm({ ...categoryForm, description: e.target.value })} className="input-field focus-ring" />
                 </div>
                 <div className="flex space-x-3 pt-6 border-t border-line">
-                  <button type="submit" className="flex-1 btn-primary focus-ring py-3">{editingCategory ? 'Update' : 'Create'}</button>
-                  <button type="button" onClick={() => setCategoryModal(false)} className="flex-1 btn-secondary focus-ring py-3">Cancel</button>
+                  <Button variant="primary" type="submit" className="flex-1 py-3">{editingCategory ? 'Update' : 'Create'}</Button>
+                  <Button variant="quiet" onClick={() => setCategoryModal(false)} className="flex-1 py-3">Cancel</Button>
                 </div>
               </form>
             </div>

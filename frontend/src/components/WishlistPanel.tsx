@@ -12,6 +12,7 @@ import {
 } from '../store/api'
 import type { WishlistItem, WishlistItemPriority } from '../store/api'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
+import { Button } from './Button'
 
 const PRIORITIES: WishlistItemPriority[] = ['critical', 'high', 'medium', 'low']
 
@@ -157,7 +158,7 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
             Prioritised things you're saving up for — turn any of them into a budget envelope or savings target.
           </p>
         </div>
-        <button onClick={openCreate} className="btn-primary focus-ring w-full sm:w-auto justify-center">Add item</button>
+        <Button variant="primary" onClick={openCreate} className="w-full sm:w-auto justify-center">Add item</Button>
       </div>
 
       {/* Purchase plan */}
@@ -200,9 +201,9 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
       {wishlistPhase === 'error' ? (
         <div className="card p-6 text-center space-y-3" role="alert" data-testid="wishlist-error">
           <p className="text-sm text-danger">Could not load your wishlist.</p>
-          <button type="button" className="btn-secondary focus-ring" onClick={() => void wishlistQuery.refetch()} data-testid="wishlist-retry">
+          <Button variant="secondary" onClick={() => void wishlistQuery.refetch()} data-testid="wishlist-retry">
             Retry
-          </button>
+          </Button>
         </div>
       ) : wishlistPhase !== 'ready' || !items ? (
         <div className="flex items-center justify-center min-h-48"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-ink" /></div>
@@ -320,8 +321,8 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
                   <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="input-field focus-ring resize-none" rows={2} placeholder="Any details" />
                 </div>
                 <div className="flex space-x-3 pt-6 border-t border-line">
-                  <button type="submit" className="flex-1 btn-primary focus-ring py-3 px-4 text-base">{editing ? 'Update' : 'Add'}</button>
-                  <button type="button" onClick={closeModal} className="flex-1 btn-secondary focus-ring py-3 px-4 text-base">Cancel</button>
+                  <Button variant="primary" type="submit" className="flex-1 py-3 px-4 text-base">{editing ? 'Update' : 'Add'}</Button>
+                  <Button variant="quiet" onClick={closeModal} className="flex-1 py-3 px-4 text-base">Cancel</Button>
                 </div>
               </form>
             </div>

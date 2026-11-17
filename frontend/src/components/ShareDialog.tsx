@@ -10,6 +10,7 @@ import {
 import type { Account, AccountShare, ShareRole, UserMatch } from '../store/api'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 import { useConfirm } from '../hooks/useConfirm'
+import { Button } from './Button'
 
 const ROLE_LABELS: Record<ShareRole, string> = {
   viewer: 'Viewer',
@@ -213,14 +214,14 @@ export function ShareDialog({ account, onClose }: { account: Account; onClose: (
                               </option>
                             ))}
                           </select>
-                          <button
-                            type="button"
+                          <Button
+                            variant="secondary"
                             onClick={() => handleRemove(share)}
-                            className="btn-secondary focus-ring text-sm"
+                            className="text-sm"
                             data-testid="share-remove"
                           >
                             Remove
-                          </button>
+                          </Button>
                         </span>
                       ) : (
                         <span className="text-xs font-semibold text-muted">{ROLE_LABELS[share.role]}</span>
@@ -250,14 +251,14 @@ export function ShareDialog({ account, onClose }: { account: Account; onClose: (
                     data-testid="share-email"
                     autoComplete="off"
                   />
-                  <button
+                  <Button
+                    variant="secondary"
                     type="submit"
                     disabled={isLooking}
-                    className="btn-secondary focus-ring"
                     data-testid="share-lookup"
                   >
                     {isLooking ? 'Looking up...' : 'Look up'}
-                  </button>
+                  </Button>
                 </div>
                 {lookupError && (
                   <p className="text-sm text-danger" role="alert" data-testid="share-lookup-error">
@@ -288,15 +289,14 @@ export function ShareDialog({ account, onClose }: { account: Account; onClose: (
                       </select>
                       <p className="mt-1 text-xs text-muted">{ROLE_HINTS[role]}</p>
                     </div>
-                    <button
-                      type="button"
+                    <Button
+                      variant="primary"
                       onClick={handleShare}
                       disabled={isCreating}
-                      className="btn-primary focus-ring"
                       data-testid="share-submit"
                     >
                       {isCreating ? 'Sharing...' : `Share with ${match.display_name}`}
-                    </button>
+                    </Button>
                   </div>
                 )}
               </form>

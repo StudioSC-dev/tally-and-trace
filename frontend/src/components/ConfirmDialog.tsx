@@ -6,6 +6,7 @@ import { createConfirmFlow } from '@tally-trace/shared'
 import type { ConfirmRequest } from '@tally-trace/shared'
 import { ConfirmContext } from '../hooks/useConfirm'
 import { apiErrorMessage } from '../utils/apiError'
+import { Button } from './Button'
 
 // The one in-app confirm dialog (STU-410), in place of the browser's confirm. Rendered
 // once, in Layout's signed-in branch, outside every page modal's React tree, so its
@@ -160,25 +161,23 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
                 </p>
               )}
               <div className="flex flex-wrap justify-end gap-2">
-                <button
+                <Button
+                  variant="quiet"
                   ref={cancelRef}
-                  type="button"
                   onClick={() => flow.dismiss()}
                   disabled={view.pending}
-                  className="btn-secondary focus-ring disabled:opacity-60"
                   data-testid="confirm-dialog-cancel"
                 >
                   {view.request.cancelLabel ?? 'Cancel'}
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  variant={view.request.tone === 'default' ? 'primary' : 'danger'}
                   onClick={() => flow.accept()}
                   disabled={view.pending}
-                  className={`${view.request.tone === 'default' ? 'btn-primary' : 'btn-danger'} focus-ring disabled:opacity-60`}
                   data-testid="confirm-dialog-confirm"
                 >
                   {view.request.confirmLabel}
-                </button>
+                </Button>
               </div>
             </div>
           </div>

@@ -39,6 +39,7 @@ import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 import { TagPicker } from './TagPicker'
 import { SegmentedControl } from './SegmentedControl'
+import { Button } from './Button'
 
 const toLocalDateTimeInput = (value: Date | string) => {
   const date = typeof value === 'string' ? new Date(value) : value
@@ -901,8 +902,8 @@ export function RecurringEntryFormModal({
           {savedNote !== null && (
             <div className="space-y-3" data-testid="recurring-settlement-note">
               <p className="text-sm text-danger" role="alert">{savedNote}</p>
-              <button
-                type="button"
+              <Button
+                variant="primary"
                 onClick={() => {
                   void (async () => {
                     try {
@@ -912,37 +913,38 @@ export function RecurringEntryFormModal({
                     }
                   })()
                 }}
-                className="bg-ink text-paper py-2 px-4 hover:bg-ink"
+                className="min-h-10 py-1.5 px-4 text-base"
                 data-testid="recurring-settlement-note-close"
               >
                 Close
-              </button>
+              </Button>
             </div>
           )}
 
           {savedNote === null && (
           <div className="flex flex-col sm:flex-row gap-3 pt-2">
-            <button
+            <Button
+              variant="primary"
               type="submit"
-              className="flex-1 bg-ink text-paper py-2 px-4 hover:bg-ink"
+              className="flex-1 min-h-10 py-1.5 px-4 text-base"
             >
               {editingBudgetEntry ? 'Update Recurring Entry' : 'Save Recurring Entry'}
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="quiet"
               onClick={onClose}
-              className="flex-1 bg-sunken text-body py-2 px-4 hover:bg-surface"
+              className="flex-1 min-h-10 py-1.5 px-4 text-base"
             >
               Cancel
-            </button>
+            </Button>
             {editingBudgetEntry && editingBudgetEntry.permissions.can_delete && (
-              <button
-                type="button"
+              <Button
+                variant="danger"
                 onClick={() => handleDelete(editingBudgetEntry)}
-                className="text-danger py-2 px-4 hover:bg-sunken sm:w-auto"
+                className="min-h-10 py-1.5 px-4 text-base sm:w-auto"
               >
                 Delete Recurring Entry
-              </button>
+              </Button>
             )}
           </div>
           )}

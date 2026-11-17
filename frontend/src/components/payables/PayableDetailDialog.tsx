@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { Link } from '@tanstack/react-router'
 import { payableActions, payableTarget } from '@tally-trace/shared'
 import type { Payable } from '@tally-trace/shared'
+import { Button, buttonClass } from '../Button'
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -106,9 +107,9 @@ export function PayableDetailDialog({ payable, display, onClose }: Props) {
               <h2 id={titleId} className="text-lg font-semibold text-ink">{display.name}</h2>
               <p className="text-sm text-muted">{display.statusLabel}</p>
             </div>
-            <button ref={closeRef} type="button" onClick={onClose} className="btn-secondary focus-ring">
+            <Button variant="secondary" ref={closeRef} onClick={onClose}>
               Close
-            </button>
+            </Button>
           </div>
 
           <dl className="space-y-2 text-sm">
@@ -139,7 +140,8 @@ export function PayableDetailDialog({ payable, display, onClose }: Props) {
               <Link
                 to="/accounts/$accountId"
                 params={{ accountId: String(actions.accountId) }}
-                className="btn-primary focus-ring"
+                className={buttonClass('primary')}
+                data-variant="primary"
                 data-testid="payable-account-link"
               >
                 {target.source === 'loan' ? 'View loan account' : 'View card account'}

@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useResendVerificationMutation } from '../../store/authApi'
 import { apiErrorMessage } from '../../utils/apiError'
+import { Button } from '../Button'
 
 type ApiErrorPayload = {
   message?: string
@@ -276,10 +277,11 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
               </div>
             </div>
 
-            <button
+            <Button
+              variant="primary"
               type="submit"
               disabled={isLoading || !!emailError}
-              className="btn-primary min-h-11 w-full disabled:cursor-not-allowed disabled:opacity-50"
+              className="min-h-11 w-full"
             >
               {isLoading ? (
                 <>
@@ -289,7 +291,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
               ) : (
                 'Sign in'
               )}
-            </button>
+            </Button>
           </form>
 
           {/* Demo account quick access */}
@@ -301,22 +303,22 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
               User&apos;s Household.
             </p>
             <div className="space-y-3">
-              <button
-                type="button"
+              <Button
+                variant="secondary"
                 onClick={() => handleDemoLogin('demo@example.com')}
                 disabled={isLoading}
-                className="btn-secondary w-full disabled:cursor-not-allowed disabled:opacity-50"
+                className="w-full"
               >
                 Sign in as Demo User
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="secondary"
                 onClick={() => handleDemoLogin('demo.partner@example.com')}
                 disabled={isLoading}
-                className="btn-secondary w-full disabled:cursor-not-allowed disabled:opacity-50"
+                className="w-full"
               >
                 Sign in as Demo Partner
-              </button>
+              </Button>
             </div>
           </div>
         </div>

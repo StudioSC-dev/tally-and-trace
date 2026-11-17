@@ -21,6 +21,7 @@ import {
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 import { formatCurrency } from '../utils/currency'
 import { RecurringEntryFormModal } from './RecurringEntryFormModal'
+import { Button } from './Button'
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -206,9 +207,9 @@ function ReviewShell({ entryId, name, review, loadError, refetch, onClose, onRev
         >
           <div className="flex items-start justify-between gap-4">
             <h2 id={titleId} className="text-lg font-semibold text-ink" data-testid="installment-review-title">{title}</h2>
-            <button ref={closeRef} type="button" onClick={onClose} className="btn-secondary focus-ring">
+            <Button variant="secondary" ref={closeRef} onClick={onClose}>
               Close
-            </button>
+            </Button>
           </div>
 
           {notFound && (
@@ -322,17 +323,16 @@ function ReviewShell({ entryId, name, review, loadError, refetch, onClose, onRev
 
           <div className="flex flex-wrap gap-2">
             {review && review.block === null && (
-              <button
-                type="button"
+              <Button
+                variant="primary"
                 onClick={() => void handleSubmit()}
                 disabled={!canSubmit}
-                className="btn-primary focus-ring disabled:opacity-50"
                 data-testid="installment-review-submit"
               >
                 {submitting ? 'Recording…' : reviewButtonText(review)}
-              </button>
+              </Button>
             )}
-            <button type="button" onClick={onClose} className="btn-secondary focus-ring">Cancel</button>
+            <Button variant="quiet" onClick={onClose}>Cancel</Button>
           </div>
         </div>
       </div>
@@ -379,7 +379,7 @@ function ReviewEditForm({ entryId, onBack, onDeleted }: { entryId: number; onBac
           ) : (
             <p className="text-sm text-muted" role="status" data-testid="installment-review-edit-loading">Loading…</p>
           )}
-          <button type="button" onClick={onBack} className="btn-secondary focus-ring">Back to the review</button>
+          <Button variant="secondary" onClick={onBack}>Back to the review</Button>
         </div>
       </div>
     </div>,
