@@ -300,6 +300,70 @@ body {
   }
 
   /*
+    The Button component (docs/design-system.md, "Button"). `Button` and
+    `buttonClass` in components/Button.tsx are the only places that set these
+    classes. `.button` is the shared footprint: radius-sm, a 1px border (clear
+    unless the variant colours it, so every variant keeps the same height), the
+    text size and padding. Callers set layout with utilities, which win over
+    this layer. Each variant sets only colour and weight.
+  */
+  .button {
+    @apply focus-ring inline-flex items-center justify-center gap-2 rounded-sm border border-transparent bg-transparent px-4 py-2 text-sm;
+    transition-property: color, background-color, border-color, opacity;
+    transition-duration: var(--dur-fast);
+    transition-timing-function: var(--ease);
+  }
+
+  .button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  /* Primary: the spine fill with leaf text, 600. Hover drops the fill and keeps the outline, so the footprint holds. */
+  .button-primary {
+    border-color: rgb(var(--accent));
+    background-color: rgb(var(--accent));
+    color: rgb(var(--on-accent));
+    font-weight: 600;
+  }
+
+  .button-primary:hover:not(:disabled) {
+    background-color: transparent;
+    color: rgb(var(--accent));
+  }
+
+  /* Secondary: transparent, a line-strong outline, ink text. */
+  .button-secondary {
+    border-color: rgb(var(--line-strong));
+    color: rgb(var(--ink));
+  }
+
+  .button-secondary:hover:not(:disabled) {
+    border-color: rgb(var(--ink));
+    background-color: rgb(var(--sunken));
+  }
+
+  /* Quiet: text only. */
+  .button-quiet {
+    color: rgb(var(--ink));
+  }
+
+  .button-quiet:hover:not(:disabled) {
+    background-color: rgb(var(--sunken));
+  }
+
+  /* Danger: the red-pencil outline and text. */
+  .button-danger {
+    border-color: rgb(var(--danger));
+    color: rgb(var(--danger));
+  }
+
+  .button-danger:hover:not(:disabled) {
+    background-color: rgb(var(--danger));
+    color: rgb(var(--paper));
+  }
+
+  /*
     Buttons take radius-sm and are either spine-filled or outlined. Primary is
     the spine green with leaf text, and inverts on hover — the fill drops out,
     the outline stays put, so the footprint never shifts.
