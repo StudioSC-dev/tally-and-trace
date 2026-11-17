@@ -381,6 +381,37 @@ body {
   .focus-ring {
     @apply focus:outline-2 focus:outline-offset-2 focus:outline-ink;
   }
+
+  /*
+    The selection rule (docs/design-system.md, "Selection rule"): selection is
+    not an action, so a selected tab or segment is never filled like the primary
+    button. Selected is a leaf background, ink 600 and a 2px spine rule
+    underneath, square. Unselected is quiet: transparent, body text, 500. The
+    rule moves under the new choice at dur-fast. Keyed on a class that
+    `SegmentedControl` and `Tabs` (and `selectionClass`) set, never on an ARIA
+    attribute.
+  */
+  .seg {
+    background-color: transparent;
+    color: rgb(var(--body));
+    font-weight: 500;
+    border-radius: 0;
+    transition-property: color, background-color, box-shadow;
+    transition-duration: var(--dur-fast);
+    transition-timing-function: var(--ease);
+  }
+
+  .seg:hover {
+    color: rgb(var(--ink));
+  }
+
+  .seg.is-selected {
+    background-color: rgb(var(--surface));
+    color: rgb(var(--ink));
+    font-weight: 600;
+    box-shadow: inset 0 -2px 0 rgb(var(--accent));
+    border-radius: 0;
+  }
 }
 
 /*
