@@ -1,4 +1,5 @@
 import { pageItems, pageWindow } from '@tally-trace/shared'
+import { withSelection } from '../utils/selection'
 
 interface PagerProps {
   total: number
@@ -45,7 +46,7 @@ export function Pager({ total, page, pageSize, onPage, label, testId, disabled =
               onClick={() => onPage(item)}
               disabled={disabled}
               aria-current={item === view.page ? 'page' : undefined}
-              className={`rounded-full px-3 py-1.5 text-sm font-medium transition focus-ring ${item === view.page ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken'}`}
+              className={withSelection(item === view.page, 'px-3 py-1.5 text-sm focus-ring')}
             >
               {item}
             </button>

@@ -12,6 +12,7 @@ import { ShortfallBanner } from '../components/ShortfallBanner'
 import { useGetForecastTimelineQuery } from '../store/api'
 import { RunningBalanceChart } from '../components/RunningBalanceChart'
 import { TagFilter } from '../components/TagFilter'
+import { SegmentedControl } from '../components/SegmentedControl'
 
 import { overflowPullsFrom, timelineEventAccountLabel, timelineEventAmount, timelineEventName } from '@tally-trace/shared'
 import type { CashflowTimelineEvent, LimitedTimelineEvent } from '@tally-trace/shared'
@@ -116,36 +117,32 @@ function ForecastPage() {
         </div>
         <TagFilter value={selectedTag} onChange={setSelectedTag} />
         {pinnedId !== null && !pinLost ? (
-          <div className="flex space-x-1 bg-sunken p-1 self-start" role="group" aria-label="Accounts" data-testid="timeline-scope">
-            {(['main', 'all'] as const).map((s) => (
-              <button
-                key={s}
-                type="button"
-                aria-pressed={scope === s}
-                onClick={() => setScope(s)}
-                className={`px-4 py-1.5 text-sm font-medium transition-colors duration-200 ${ scope === s ? 'bg-surface text-ink' : 'text-body hover:text-ink' }`}
-              >
-                {s === 'main' ? `Main: ${mainName ?? 'account'}` : 'All cash accounts'}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            className="flex space-x-1 bg-sunken p-1 self-start"
+            aria-label="Accounts"
+            data-testid="timeline-scope"
+            options={[
+              { value: 'main' as const, label: `Main: ${mainName ?? 'account'}` },
+              { value: 'all' as const, label: 'All cash accounts' },
+            ]}
+            value={scope}
+            onChange={setScope}
+            segmentClassName="px-4 py-1.5 text-sm"
+          />
         ) : (
           <Link to="/settings" className="text-sm text-muted hover:text-ink hover:underline self-start sm:self-center">
             Pin a main account in Settings
           </Link>
         )}
         <CurrencyControl currencies={data?.currencies} value={currency} onChange={setCurrency} />
-        <div className="flex space-x-1 bg-sunken p-1">
-          {DAY_OPTIONS.map((d) => (
-            <button
-              key={d}
-              onClick={() => setDays(d)}
-              className={`px-4 py-1.5 text-sm font-medium transition-colors duration-200 ${ days === d ? 'bg-surface text-ink' : 'text-body hover:text-ink' }`}
-            >
-              {d} days
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          className="flex space-x-1 bg-sunken p-1"
+          aria-label="Days ahead"
+          options={DAY_OPTIONS.map((d) => ({ value: d, label: `${d} days` }))}
+          value={days}
+          onChange={setDays}
+          segmentClassName="px-4 py-1.5 text-sm"
+        />
       </div>
 
       {pinLost && (

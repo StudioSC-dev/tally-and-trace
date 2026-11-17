@@ -9,6 +9,7 @@ import { HouseholdDashboardTab } from '../components/household/HouseholdDashboar
 import { HouseholdMonthlyTab } from '../components/household/HouseholdMonthly'
 import { HouseholdTransactionsTab } from '../components/household/HouseholdTransactions'
 import { HouseholdUpcomingTab } from '../components/household/HouseholdUpcoming'
+import { Tab, Tabs } from '../components/Tabs'
 
 export const Route = createFileRoute('/accounts_/household')({
   component: HouseholdPage,
@@ -103,23 +104,19 @@ function HouseholdPage() {
 
       {current && (
         <>
-          <div className="flex space-x-1 bg-sunken p-1" role="tablist">
+          <Tabs className="flex space-x-1 bg-sunken p-1">
             {TABS.map(({ id, label }) => (
-              <button
+              <Tab
                 key={id}
-                type="button"
-                role="tab"
-                aria-selected={tab === id}
+                selected={tab === id}
                 onClick={() => setTab(id)}
-                className={`flex-1 px-3 py-1.5 text-sm font-medium transition-colors duration-200 ${
-                  tab === id ? 'bg-surface text-ink' : 'text-body hover:text-ink'
-                }`}
+                className="flex-1 px-3 py-1.5 text-sm"
                 data-testid={`household-tab-${id}`}
               >
                 {label}
-              </button>
+              </Tab>
             ))}
-          </div>
+          </Tabs>
           {/* Keyed by the sharer, so switching Households never shows the previous one's data. */}
           <div key={current.sharer_id}>
             {tab === 'dashboard' && <HouseholdDashboardTab sharerId={current.sharer_id} />}

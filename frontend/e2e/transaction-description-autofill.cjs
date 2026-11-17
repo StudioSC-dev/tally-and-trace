@@ -97,7 +97,7 @@ async function formState(modal) {
   const typeOf = async () => {
     for (const name of ['Income', 'Expense', 'Transfer']) {
       const button = modal.getByRole('button', { name, exact: true })
-      if ((await button.count()) && (await button.first().evaluate((el) => el.classList.contains('bg-ink')))) return name
+      if ((await button.count()) && ((await button.first().getAttribute('aria-pressed')) === 'true')) return name
     }
     return ''
   }

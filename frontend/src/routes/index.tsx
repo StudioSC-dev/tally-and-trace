@@ -20,6 +20,7 @@ import { PayableDetailDialog } from '../components/payables/PayableDetailDialog'
 import { CardChargesPanel } from '../components/payables/CardChargesPanel'
 import { heldPaymentNotice, payableActions, payableTarget, periodWindow, queryPhase, settlementDetail } from '@tally-trace/shared'
 import { Skeleton, SkeletonRows } from '../components/Loading'
+import { SegmentedControl } from '../components/SegmentedControl'
 import { fullCardChargeKeys, isLimitedEvent, isOtherUpcoming, loggedDays, localToday, statusFromDate, upcomingItemAmount } from '@tally-trace/shared'
 import type { LimitedEvent, Payable, Settlement } from '@tally-trace/shared'
 
@@ -361,18 +362,14 @@ export function Dashboard() {
         <TagFilter value={selectedTag} onChange={setSelectedTag} />
         <CurrencyControl currencies={snapshot?.currencies} value={currency} onChange={setCurrency} />
         <div className="flex flex-col gap-1">
-          <div className="flex max-w-full space-x-1 overflow-x-auto bg-sunken p-1" role="group" aria-label="Period for actual totals">
-            {(['week', 'month', 'year'] as const).map((period) => (
-              <button
-                key={period}
-                aria-pressed={selectedPeriod === period}
-                onClick={() => setSelectedPeriod(period)}
-                className={`px-4 py-1.5 text-sm font-medium transition-colors duration-200 capitalize ${ selectedPeriod === period ? 'bg-surface text-ink' : 'text-body hover:text-ink' }`}
-              >
-                {period}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            className="flex max-w-full space-x-1 overflow-x-auto bg-sunken p-1"
+            aria-label="Period for actual totals"
+            options={(['week', 'month', 'year'] as const).map((period) => ({ value: period, label: period }))}
+            value={selectedPeriod}
+            onChange={setSelectedPeriod}
+            segmentClassName="px-4 py-1.5 text-sm capitalize"
+          />
           <p className="text-xs text-muted" data-testid="period-note">Period applies to actual totals, not the projection.</p>
         </div>
       </div>

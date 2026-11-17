@@ -1,6 +1,7 @@
 import { LoadingLine } from './Loading'
 import { Link } from '@tanstack/react-router'
 import { useGetTagsQuery } from '../store/api'
+import { Segment } from './SegmentedControl'
 
 const FALLBACK_COLOR = '#9ca3af'
 
@@ -38,27 +39,21 @@ export function TagPicker({
         </p>
       ) : (
         <div className="flex flex-wrap gap-2" role="group" aria-label={label}>
-          {tags.map((tag) => {
-            const isSelected = selected.has(tag.id)
-            return (
-              <button
-                key={tag.id}
-                type="button"
-                aria-pressed={isSelected}
-                onClick={() => toggle(tag.id)}
-                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition ${
-                  isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken'
-                }`}
-              >
-                <span
-                  aria-hidden
-                  className="h-2 w-2 shrink-0 rounded-full border border-black/10"
-                  style={{ backgroundColor: tag.color || FALLBACK_COLOR }}
-                />
-                {tag.name}
-              </button>
-            )
-          })}
+          {tags.map((tag) => (
+            <Segment
+              key={tag.id}
+              selected={selected.has(tag.id)}
+              onClick={() => toggle(tag.id)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm"
+            >
+              <span
+                aria-hidden
+                className="h-2 w-2 shrink-0 rounded-full border border-black/10"
+                style={{ backgroundColor: tag.color || FALLBACK_COLOR }}
+              />
+              {tag.name}
+            </Segment>
+          ))}
         </div>
       )}
       {warnHousehold && householdSelected && (

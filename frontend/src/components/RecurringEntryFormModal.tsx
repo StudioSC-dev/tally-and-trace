@@ -38,6 +38,7 @@ import { CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 import { TagPicker } from './TagPicker'
+import { SegmentedControl } from './SegmentedControl'
 
 const toLocalDateTimeInput = (value: Date | string) => {
   const date = typeof value === 'string' ? new Date(value) : value
@@ -537,28 +538,24 @@ export function RecurringEntryFormModal({
                 
               <div>
                 <label className="block text-sm font-medium text-body">Entry Type</label>
-                <div className="mt-1 inline-flex bg-sunken p-1">
-                  {(['expense', 'income'] as Array<'expense' | 'income'>).map((type) => {
-                    const isActive = subscriptionForm.entry_type === type
-                    return (
-                      <button
-                        type="button"
-                        key={type}
-                        onClick={() =>
-                          setSubscriptionForm((prev) => ({
-                            ...prev,
-                            entry_type: type,
-                            // Only an expense can be a recurring transfer; the picker hides for income.
-                            transfer_to_account_id: type === 'expense' ? prev.transfer_to_account_id : undefined,
-                          }))
-                        }
-                        className={`px-3 py-1 text-sm font-semibold transition ${ isActive ? 'bg-ink text-paper' : 'text-body hover:bg-sunken' }`}
-                      >
-                        {type === 'expense' ? 'Expense' : 'Income'}
-                      </button>
-                    )
-                  })}
-                </div>
+                <SegmentedControl
+                  className="mt-1 inline-flex bg-sunken p-1"
+                  aria-label="Entry type"
+                  options={[
+                    { value: 'expense' as const, label: 'Expense' },
+                    { value: 'income' as const, label: 'Income' },
+                  ]}
+                  value={subscriptionForm.entry_type}
+                  onChange={(type) =>
+                    setSubscriptionForm((prev) => ({
+                      ...prev,
+                      entry_type: type,
+                      // Only an expense can be a recurring transfer; the picker hides for income.
+                      transfer_to_account_id: type === 'expense' ? prev.transfer_to_account_id : undefined,
+                    }))
+                  }
+                  segmentClassName="px-3 py-1 text-sm"
+                />
                 </div>
                 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
