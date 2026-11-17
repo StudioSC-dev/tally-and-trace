@@ -249,6 +249,7 @@ const transactions: Transaction[] = [
   tx('2026-03-08', 'Move to emergency fund', 10000, payroll, 29, 'transfer', {
     transfer_from_account_id: payroll.id,
     transfer_to_account_id: savings.id,
+    transfer_fee: 25,
   }),
   tx('2026-03-07', 'Logo design, Kapé Co.', 18500, payroll, 30, 'credit'),
   tx('2026-03-07', 'Dinner, Manam', 2140, card, 23, 'debit', { tags: [tripTag] }),
