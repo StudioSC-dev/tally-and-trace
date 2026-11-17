@@ -134,6 +134,19 @@ and their contrast is given above.
 - Panel padding: 24.
 - Sections are separated by 32 of space, never a line.
 
+### Page
+
+Every route renders into one container, `.page` (`frontend/src/assets/index.css`):
+
+- **Max width:** the `--page-max` token. `--page-max` is 1280px, centred.
+- **Gutter:** 12px on a phone, 24px from `sm` (640px) up.
+- **Rhythm:** 24px above the first block and below the last; 32px between top-level sections.
+- **Header:** the first block is `PageHeader` (`frontend/src/components/`). The title is the page's one
+  `h1`, `text-2xl` 600 in `ink`, on a 44px line. The page's controls (filters, its main action) sit
+  grouped on the right of the same row, 12px apart (8px on a phone). When they do not fit beside the
+  title they wrap under it, one section gap (32) down; the dashboard's filters always take that
+  second row on a phone. A page's lead sentence is its own section under the header, not part of it.
+
 ## Radius
 
 | Token | Value | Utility | Used on |
@@ -239,6 +252,7 @@ The shared components later tickets add. Each is marked planned until its ticket
 |---|---|---|
 | `Button` | planned | the four variants above, one component for every action |
 | `SegmentedControl` / `Tabs` | planned | the selection rule, shared by every tab and segment |
+| `PageHeader` and `.page` | landed (STU-685) | every page's title row and container (see Page, under Spacing) |
 | `ListSheet` and `Row` | landed (STU-681) | one leaf sheet with ruled rows, figures on one right edge (see below) |
 | `StatusText` | planned | status as a dot and a word |
 | `EmptyState` | planned | an empty list's message and its one action |
@@ -268,6 +282,7 @@ Dashboard (desktop)
 |---|---|---|
 | colours | `--paper` … `--danger`, `--accent`, `--on-accent`, `--spine`, `--on-spine`, `--on-spine-muted`, `--scrim` | `bg-paper`, `text-ink`, `bg-accent`, `text-on-accent`, `bg-spine`, `text-on-spine`, `text-on-spine-muted`, `bg-scrim/60` … |
 | radius | `--radius-sm`, `--radius-md`, `--radius-lg` | `rounded-sm`, `rounded-md`, `rounded-lg` |
+| layout | `--page-max` | `.page` (with `PageHeader`) |
 | elevation | `--elev-dialog` | `shadow-dialog` |
 | motion | `--dur-fast`, `--dur-base`, `--ease` | `duration-fast`, `duration-base`, `ease-standard` |
 | type | (Tailwind scale) | `text-xs` … `text-3xl` |

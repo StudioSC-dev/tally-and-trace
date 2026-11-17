@@ -12,6 +12,7 @@ import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } fro
 import { balanceClass, formatBalance } from '../utils/amount'
 import { LoanActions, LoanDueDates, LoanSettlement, LoanSummary } from '../components/LoanPanel'
 import { TagChips } from '../components/TagChips'
+import { PageHeader } from '../components/PageHeader'
 import { TagFilter } from '../components/TagFilter'
 import { TagPicker } from '../components/TagPicker'
 import { AccountRoleBadge } from '../components/AccountRoleBadge'
@@ -784,16 +785,15 @@ export function AccountsPage() {
   )
 
   return (
-    <div className="max-w-7xl mx-auto px-3 py-6 sm:px-4 lg:px-6 space-y-6">
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-        <h1 className="text-2xl font-bold text-ink">Accounts</h1>
+    <div className="page">
+      <PageHeader title="Accounts">
         <button
           onClick={() => setIsCreateModalOpen(true)}
           className="btn-primary focus-ring w-full sm:w-auto justify-center"
         >
           Add Account
         </button>
-      </div>
+      </PageHeader>
 
       <TagFilter value={selectedTag} onChange={setSelectedTag} />
 

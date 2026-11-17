@@ -7,10 +7,13 @@ export function TagFilter({
   value,
   onChange,
   className = '',
+  compact = false,
 }: {
   value: number | undefined
   onChange: (tag: number | undefined) => void
   className?: string
+  /** On a phone the word "Tag" is for screen readers only; the select's "All tags" still names the filter. */
+  compact?: boolean
 }) {
   const { data: tags = [], isSuccess } = useGetTagsQuery()
   // A tag deleted since it was chosen must not leave the list filtered by an id that no
@@ -21,7 +24,7 @@ export function TagFilter({
   }, [isSuccess, known, onChange])
   return (
     <label className={`inline-flex items-center gap-2 text-sm text-body ${className}`}>
-      <span>Tag</span>
+      <span className={compact ? 'sr-only sm:not-sr-only' : undefined}>Tag</span>
       <select
         aria-label="Filter by tag"
         data-testid="tag-filter"
