@@ -1348,9 +1348,8 @@ export function AllocationsPage() {
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
             <p className="text-base font-semibold text-ink">{entry.display_name ?? 'Recurring entry'}</p>
-            <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-wide text-muted">
-              <span>{entry.entry_type === 'income' ? 'Recurring Income' : 'Recurring Expense'}</span>
-              <span className="text-muted">•</span>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+              <span>{entry.entry_type === 'income' ? 'Recurring income' : 'Recurring expense'}</span>
               <span>{formatCadenceLabel(entry.cadence)}</span>
             </div>
           </div>
@@ -1477,18 +1476,11 @@ export function AllocationsPage() {
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-1">
               <p className="text-base font-semibold text-ink">{entry.name}</p>
-              <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-wide text-muted">
-                <span>{entry.entry_type === 'income' ? 'Recurring Income' : 'Recurring Expense'}</span>
-                <span className="text-muted">•</span>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+                <span>{entry.entry_type === 'income' ? 'Recurring income' : 'Recurring expense'}</span>
                 <span>{cadenceLabel}</span>
-                <span className="text-muted">•</span>
                 <span>{settlementLabel(entry.settlement)}</span>
-                {!entry.is_active && (
-                  <>
-                    <span className="text-muted">•</span>
-                    <span>Paused</span>
-                  </>
-                )}
+                {!entry.is_active && <span>Paused</span>}
                   </div>
               {entry.description && <p className="text-sm text-body">{entry.description}</p>}
             </div>

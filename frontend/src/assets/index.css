@@ -215,16 +215,16 @@ body {
   }
 
   /*
-    Mono eyebrow: section labels, metadata, and form field labels — the
-    portfolio uses this same class for all three, which is why the 41 existing
-    `<label className="label">` call sites need no rename.
+    Labels: field labels, section labels and metadata. Sentence case in the
+    text face, 13px medium, muted. No tracking, no capitals.
   */
   .label {
     display: block;
-    font-family: var(--font-mono);
-    font-size: 0.6875rem;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    letter-spacing: normal;
+    text-transform: none;
     color: rgb(var(--muted));
   }
 
@@ -329,13 +329,12 @@ body {
   }
 
   /*
-    Status reads as a dot plus a mono label, never a tinted pill — those
-    bg-*-500/10 badges glowed and pulled focus off the numbers beside them.
-    Pair `.badge` with a dot:
+    A count or status is plain text: tabular figures, no fill, no tracking.
+    Pair `.badge` with a dot for a status:
       <span class="badge"><span class="dot-ok" />Reconciled</span>
   */
   .badge {
-    @apply label inline-flex items-center gap-2 whitespace-nowrap;
+    @apply inline-flex items-center gap-2 whitespace-nowrap text-xs text-muted tabular-nums;
   }
 
   .dot-ok,

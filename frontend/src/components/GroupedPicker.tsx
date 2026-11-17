@@ -383,7 +383,7 @@ export function GroupedPicker(props: GroupedPickerProps) {
           className={depth > 0 ? 'pl-3' : undefined}
         >
           {g.label && (
-            <p id={headingId} data-picker-heading={g.key} className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">
+            <p id={headingId} data-picker-heading={g.key} className="mb-1 text-xs font-semibold text-muted">
               {g.label}
             </p>
           )}
@@ -406,7 +406,7 @@ export function GroupedPicker(props: GroupedPickerProps) {
           className={depth > 0 ? 'pl-3' : undefined}
         >
           {g.label && (
-            <p id={headingId} data-picker-heading={g.key} className="mb-1 px-1 text-xs font-semibold uppercase tracking-wide text-muted">
+            <p id={headingId} data-picker-heading={g.key} className="mb-1 px-1 text-xs font-semibold text-muted">
               {g.label}
             </p>
           )}
@@ -487,7 +487,7 @@ export function GroupedPicker(props: GroupedPickerProps) {
               {leadingRows.length > 0 && <div className="space-y-1">{leadingRows}</div>}
               {!flat && !searching && quickOptions.length > 0 && (
                 <div role="group" aria-labelledby={recentHeadingId} data-picker-group="recent">
-                  <p id={recentHeadingId} data-picker-heading="recent" className="mb-1 px-1 text-xs font-semibold uppercase tracking-wide text-muted">
+                  <p id={recentHeadingId} data-picker-heading="recent" className="mb-1 px-1 text-xs font-semibold text-muted">
                     Recent
                   </p>
                   <div className="space-y-1">{quickOptions.map((o) => row(o, 'recent'))}</div>

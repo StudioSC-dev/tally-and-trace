@@ -189,8 +189,9 @@ test.describe('One face: IBM Plex Sans (STU-676)', () => {
     await open(page, PAGES[1])
     const label = page.locator('.label:visible', { hasText: 'Search transactions' })
     await expect(label).toHaveText('Search transactions')
-    await expect.soft(label).toHaveCSS('font-size', '11px')
-    await expect.soft(label).toHaveCSS('text-transform', 'uppercase')
+    // STU-677: labels are 13px sentence case now (was 11px uppercase).
+    await expect.soft(label).toHaveCSS('font-size', '13px')
+    await expect.soft(label).toHaveCSS('text-transform', 'none')
     await expect.soft(label).toHaveCSS('font-family', /^"IBM Plex Sans"/)
     await shot(page, 'label')
   })
@@ -202,7 +203,8 @@ test.describe('One face: IBM Plex Sans (STU-676)', () => {
       const label = page.locator('.label:visible', { hasText: new RegExp(`^${text}$`) })
       await expect(label).toHaveText(text)
       await expect.soft(label).toHaveCSS('font-size', '11px')
-      await expect.soft(label).toHaveCSS('text-transform', 'uppercase')
+      // STU-677: no tracked capitals (the tab bar keeps its own 11px size).
+      await expect.soft(label).toHaveCSS('text-transform', 'none')
       await expect.soft(label).toHaveCSS('font-family', /^"IBM Plex Sans"/)
       // The tab bar is position: fixed, so a viewport screenshot, saved under shot()'s naming.
       const info = test.info()

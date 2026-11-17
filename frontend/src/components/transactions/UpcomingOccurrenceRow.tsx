@@ -46,7 +46,7 @@ export function UpcomingOccurrenceRow({ occurrence, scheduled, credit, onRecord,
   const amountClass = occurrence.is_transfer ? 'text-ink' : occurrence.entry_type === 'income' ? 'text-ok' : 'text-danger'
   const sign = occurrence.is_transfer ? '' : occurrence.entry_type === 'income' ? '+' : '-'
   const accountLabel = occurrence.is_transfer
-    ? `${occurrence.account_name ?? 'Source'} → ${occurrence.transfer_to_account_name ?? 'Destination'}`
+    ? `${occurrence.account_name ?? 'Source'} to ${occurrence.transfer_to_account_name ?? 'Destination'}`
     : occurrence.account_name
   // The note always starts with "Not recorded", shown on its own; the rest is the auto-post label.
   const detail = view.note.startsWith(NOT_RECORDED) ? view.note.slice(NOT_RECORDED.length) : ` · ${view.note}`
