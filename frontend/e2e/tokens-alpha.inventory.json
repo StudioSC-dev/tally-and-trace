@@ -1,12 +1,13 @@
 {
   "ticket": "STU-210",
   "baseCommit": "75cba71",
-  "note": "Every token opacity-modifier occurrence in frontend/src on 75cba71 (grep of utility/NN with a token name). Occurrences are source sites; one site can render many elements. Property: the computed property that carries the colour. target: for divide-y, the child that gets the divider. hover: measured while hovering the element. state: how the element is reached (see tokens-alpha.cjs reach()).",
+  "note": "Every token opacity-modifier occurrence in frontend/src on 75cba71 (grep of utility/NN with a token name). Occurrences are source sites; one site can render many elements. Property: the computed property that carries the colour. target: for divide-y, the child that gets the divider. hover: measured while hovering the element. state: how the element is reached (see tokens-alpha.cjs reach()). STU-691: lines re-checked against the current tree and the 19 `bg-scrim/60` dialog backdrops added (`scrim` joined the token list). Sites with state `unreached` are not opened by any scripted state; they are covered by the b.inventory-complete scan only.",
   "counts": {
-    "occurrences": 19,
-    "distinctClassNames": 6,
+    "occurrences": 39,
+    "distinctClassNames": 7,
     "byClass": {
       "bg-paper/85": 1,
+      "bg-scrim/60": 20,
       "bg-sunken/50": 3,
       "bg-surface/50": 3,
       "border-line/50": 2,
@@ -18,7 +19,7 @@
     {
       "id": "nav",
       "file": "frontend/src/components/Navigation.tsx",
-      "line": 53,
+      "line": 49,
       "token": "paper",
       "property": "backgroundColor",
       "selector": "nav.bg-paper\\/85",
@@ -137,7 +138,7 @@
     {
       "id": "breakdown-list",
       "file": "frontend/src/components/SpendingBreakdownDialog.tsx",
-      "line": 185,
+      "line": 186,
       "token": "line",
       "property": "borderTopColor",
       "selector": "div > ul.divide-line\\/50",
@@ -149,7 +150,7 @@
     {
       "id": "breakdown-row-hover",
       "file": "frontend/src/components/SpendingBreakdownDialog.tsx",
-      "line": 205,
+      "line": 206,
       "token": "sunken",
       "property": "backgroundColor",
       "selector": "div > ul.divide-line\\/50 .hover\\:bg-sunken\\/50",
@@ -162,7 +163,7 @@
     {
       "id": "breakdown-household-rule",
       "file": "frontend/src/components/SpendingBreakdownDialog.tsx",
-      "line": 225,
+      "line": 226,
       "token": "line",
       "property": "borderTopColor",
       "selector": "section.border-line\\/50",
@@ -173,7 +174,7 @@
     {
       "id": "breakdown-household-list",
       "file": "frontend/src/components/SpendingBreakdownDialog.tsx",
-      "line": 231,
+      "line": 232,
       "token": "line",
       "property": "borderTopColor",
       "selector": "section ul.divide-line\\/50",
@@ -185,7 +186,7 @@
     {
       "id": "breakdown-household-row-hover",
       "file": "frontend/src/components/SpendingBreakdownDialog.tsx",
-      "line": 252,
+      "line": 253,
       "token": "sunken",
       "property": "backgroundColor",
       "selector": "section ul.divide-line\\/50 .hover\\:bg-sunken\\/50",
@@ -198,7 +199,7 @@
     {
       "id": "breakdown-household-total",
       "file": "frontend/src/components/SpendingBreakdownDialog.tsx",
-      "line": 263,
+      "line": 264,
       "token": "line",
       "property": "borderTopColor",
       "selector": "section div.border-line\\/50",
@@ -209,7 +210,7 @@
     {
       "id": "account-modal-balance",
       "file": "frontend/src/routes/accounts.tsx",
-      "line": 901,
+      "line": 903,
       "token": "surface",
       "property": "backgroundColor",
       "selector": ".bg-surface\\/50",
@@ -221,7 +222,7 @@
     {
       "id": "account-modal-status",
       "file": "frontend/src/routes/accounts.tsx",
-      "line": 920,
+      "line": 922,
       "token": "surface",
       "property": "backgroundColor",
       "selector": ".bg-surface\\/50",
@@ -233,13 +234,233 @@
     {
       "id": "account-edit-status",
       "file": "frontend/src/routes/accounts.tsx",
-      "line": 1526,
+      "line": 1528,
       "token": "surface",
       "property": "backgroundColor",
       "selector": ".bg-surface\\/50",
       "state": "account-edit",
       "expectedAlpha": 0.5,
       "class": "bg-surface/50"
+    },
+    {
+      "id": "scrim-accounts-872",
+      "file": "frontend/src/routes/accounts.tsx",
+      "line": 872,
+      "token": "scrim",
+      "property": "backgroundColor",
+      "selector": ".fixed.inset-0.bg-scrim\\/60",
+      "state": "unreached",
+      "expectedAlpha": 0.6,
+      "class": "bg-scrim/60"
+    },
+    {
+      "id": "scrim-accounts-1044",
+      "file": "frontend/src/routes/accounts.tsx",
+      "line": 1044,
+      "token": "scrim",
+      "property": "backgroundColor",
+      "selector": ".fixed.inset-0.bg-scrim\\/60",
+      "state": "unreached",
+      "expectedAlpha": 0.6,
+      "class": "bg-scrim/60"
+    },
+    {
+      "id": "scrim-allocations-1921",
+      "file": "frontend/src/routes/allocations.tsx",
+      "line": 1921,
+      "token": "scrim",
+      "property": "backgroundColor",
+      "selector": ".fixed.inset-0.bg-scrim\\/60",
+      "state": "unreached",
+      "expectedAlpha": 0.6,
+      "class": "bg-scrim/60"
+    },
+    {
+      "id": "scrim-allocations-2090",
+      "file": "frontend/src/routes/allocations.tsx",
+      "line": 2090,
+      "token": "scrim",
+      "property": "backgroundColor",
+      "selector": ".fixed.inset-0.bg-scrim\\/60",
+      "state": "unreached",
+      "expectedAlpha": 0.6,
+      "class": "bg-scrim/60"
+    },
+    {
+      "id": "scrim-settings-336",
+      "file": "frontend/src/routes/settings.tsx",
+      "line": 336,
+      "token": "scrim",
+      "property": "backgroundColor",
+      "selector": ".fixed.inset-0.bg-scrim\\/60",
+      "state": "unreached",
+      "expectedAlpha": 0.6,
+      "class": "bg-scrim/60"
+    },
+    {
+      "id": "scrim-settings-377",
+      "file": "frontend/src/routes/settings.tsx",
+      "line": 377,
+      "token": "scrim",
+      "property": "backgroundColor",
+      "selector": ".fixed.inset-0.bg-scrim\\/60",
+      "state": "unreached",
+      "expectedAlpha": 0.6,
+      "class": "bg-scrim/60"
+    },
+    {
+      "id": "scrim-transactions-3396",
+      "file": "frontend/src/routes/transactions.tsx",
+      "line": 3396,
+      "token": "scrim",
+      "property": "backgroundColor",
+      "selector": ".fixed.inset-0.bg-scrim\\/60",
+      "state": "unreached",
+      "expectedAlpha": 0.6,
+      "class": "bg-scrim/60"
+    },
+    {
+      "id": "scrim-transactions-3841",
+      "file": "frontend/src/routes/transactions.tsx",
+      "line": 3841,
+      "token": "scrim",
+      "property": "backgroundColor",
+      "selector": ".fixed.inset-0.bg-scrim\\/60",
+      "state": "unreached",
+      "expectedAlpha": 0.6,
+      "class": "bg-scrim/60"
+    },
+    {
+      "id": "scrim-cardpaydialog-258",
+      "file": "frontend/src/components/CardPayDialog.tsx",
+      "line": 258,
+      "token": "scrim",
+      "property": "backgroundColor",
+      "selector": ".fixed.inset-0.bg-scrim\\/60",
+      "state": "unreached",
+      "expectedAlpha": 0.6,
+      "class": "bg-scrim/60"
+    },
+    {
+      "id": "scrim-confirmdialog-134",
+      "file": "frontend/src/components/ConfirmDialog.tsx",
+      "line": 134,
+      "token": "scrim",
+      "property": "backgroundColor",
+      "selector": ".fixed.inset-0.bg-scrim\\/60",
+      "state": "unreached",
+      "expectedAlpha": 0.6,
+      "class": "bg-scrim/60"
+    },
+    {
+      "id": "scrim-forcedatedialog-270",
+      "file": "frontend/src/components/ForceDateDialog.tsx",
+      "line": 270,
+      "token": "scrim",
+      "property": "backgroundColor",
+      "selector": ".fixed.inset-0.bg-scrim\\/60",
+      "state": "unreached",
+      "expectedAlpha": 0.6,
+      "class": "bg-scrim/60"
+    },
+    {
+      "id": "scrim-installmentreviewdialog-192",
+      "file": "frontend/src/components/InstallmentReviewDialog.tsx",
+      "line": 192,
+      "token": "scrim",
+      "property": "backgroundColor",
+      "selector": ".fixed.inset-0.bg-scrim\\/60",
+      "state": "unreached",
+      "expectedAlpha": 0.6,
+      "class": "bg-scrim/60"
+    },
+    {
+      "id": "scrim-installmentreviewdialog-372",
+      "file": "frontend/src/components/InstallmentReviewDialog.tsx",
+      "line": 372,
+      "token": "scrim",
+      "property": "backgroundColor",
+      "selector": ".fixed.inset-0.bg-scrim\\/60",
+      "state": "unreached",
+      "expectedAlpha": 0.6,
+      "class": "bg-scrim/60"
+    },
+    {
+      "id": "scrim-markpaiddialog-382",
+      "file": "frontend/src/components/MarkPaidDialog.tsx",
+      "line": 382,
+      "token": "scrim",
+      "property": "backgroundColor",
+      "selector": ".fixed.inset-0.bg-scrim\\/60",
+      "state": "unreached",
+      "expectedAlpha": 0.6,
+      "class": "bg-scrim/60"
+    },
+    {
+      "id": "scrim-recurringentryformmodal-499",
+      "file": "frontend/src/components/RecurringEntryFormModal.tsx",
+      "line": 499,
+      "token": "scrim",
+      "property": "backgroundColor",
+      "selector": ".fixed.inset-0.bg-scrim\\/60",
+      "state": "unreached",
+      "expectedAlpha": 0.6,
+      "class": "bg-scrim/60"
+    },
+    {
+      "id": "scrim-sharedialog-145",
+      "file": "frontend/src/components/ShareDialog.tsx",
+      "line": 145,
+      "token": "scrim",
+      "property": "backgroundColor",
+      "selector": ".fixed.inset-0.bg-scrim\\/60",
+      "state": "unreached",
+      "expectedAlpha": 0.6,
+      "class": "bg-scrim/60"
+    },
+    {
+      "id": "scrim-spendingbreakdowndialog-276",
+      "file": "frontend/src/components/SpendingBreakdownDialog.tsx",
+      "line": 276,
+      "token": "scrim",
+      "property": "backgroundColor",
+      "selector": ".fixed.inset-0.bg-scrim\\/60",
+      "state": "breakdown-dialog",
+      "expectedAlpha": 0.6,
+      "class": "bg-scrim/60"
+    },
+    {
+      "id": "scrim-wishlistpanel-273",
+      "file": "frontend/src/components/WishlistPanel.tsx",
+      "line": 273,
+      "token": "scrim",
+      "property": "backgroundColor",
+      "selector": ".fixed.inset-0.bg-scrim\\/60",
+      "state": "unreached",
+      "expectedAlpha": 0.6,
+      "class": "bg-scrim/60"
+    },
+    {
+      "id": "scrim-payabledetaildialog-89",
+      "file": "frontend/src/components/payables/PayableDetailDialog.tsx",
+      "line": 89,
+      "token": "scrim",
+      "property": "backgroundColor",
+      "selector": ".fixed.inset-0.bg-scrim\\/60",
+      "state": "unreached",
+      "expectedAlpha": 0.6,
+      "class": "bg-scrim/60"
+    },
+    {
+      "id": "scrim-index-573",
+      "file": "frontend/src/assets/index.css",
+      "line": 573,
+      "token": "scrim",
+      "property": "backgroundColor",
+      "selector": ".fixed.inset-0.bg-scrim\\/60",
+      "state": "unreached",
+      "expectedAlpha": 0.6,
+      "class": "bg-scrim/60"
     }
   ]
 }
