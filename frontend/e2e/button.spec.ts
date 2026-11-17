@@ -458,13 +458,11 @@ test.describe('AC1: button variants match the system', () => {
     await expect(cancel).toHaveAttribute('data-variant', 'quiet')
     expect(await style(cancel, 'background-color'), 'quiet background').toBe(TRANSPARENT)
     // No border: the 1px edge every variant shares (it keeps the heights equal) is transparent on quiet.
-    expect(
-      await cancel.evaluate((e) => {
-        const cs = getComputedStyle(e)
-        return [cs.borderTopColor, cs.borderRightColor, cs.borderBottomColor, cs.borderLeftColor]
-      }),
-      'quiet has no visible border',
-    ).toEqual([TRANSPARENT, TRANSPARENT, TRANSPARENT, TRANSPARENT])
+    const borders = await cancel.evaluate((e) => {
+      const cs = getComputedStyle(e)
+      return [cs.borderTopColor, cs.borderRightColor, cs.borderBottomColor, cs.borderLeftColor]
+    })
+    expect(borders, 'quiet has no visible border').toEqual([TRANSPARENT, TRANSPARENT, TRANSPARENT, TRANSPARENT])
     await viewportShot(page, 'variant-quiet')
   })
 
@@ -642,10 +640,9 @@ test.describe('AC6: button migration preserves surrounding behavior and layout',
       expect(migrated.map(({ c }) => `${c.name}: ${c.icons}`), 'migrated controls keep their icons').toEqual(migrated.map(({ b }) => `${b.name}: ${b.icons}`))
       const heights = migrated.map(({ c, b }) => ({ name: c.name, base: b.height, now: c.height }))
       expect(heights.filter((h) => Math.abs(h.now - h.base) > 1), 'migrated controls more than 1px off their base height').toEqual([])
-      expect(
-        controls.filter((c) => c.selection).map((c) => `${c.name}: ${c.look}, ${c.height}px`),
-        'selection controls and tabs are untouched',
-      ).toEqual(base.controls.filter((c) => c.selection).map((c) => `${c.name}: ${c.look}, ${c.height}px`))
+      const selectionNow = controls.filter((c) => c.selection).map((c) => `${c.name}: ${c.look}, ${c.height}px`)
+      const selectionBase = base.controls.filter((c) => c.selection).map((c) => `${c.name}: ${c.look}, ${c.height}px`)
+      expect(selectionNow, 'selection controls and tabs are untouched').toEqual(selectionBase)
       expect(text, 'labels and status text are untouched').toBe(base.text)
     })
 
@@ -723,16 +720,12 @@ test.describe('AC7: source has one button path', () => {
     expect(okFills.filter((hit) => !OK_FILLS.some((o) => hit.startsWith(`${o.file}:`) && hit.includes(o.marker))), 'bg-ok outside the status dots and icon').toEqual([])
     expect(okFills.filter((hit) => /<(button|a|Link)\b|onClick/.test(hit)), 'bg-ok on an action').toEqual([])
     expect(scan(/\bbtn-(primary|secondary|danger)\b/, tsx), 'React elements using btn-primary, btn-secondary or btn-danger').toEqual([])
-    expect(
-      scan(/\b(const|let|var|function)\s+(buttonClass|primaryButtonClass)\b/).map((h) => h.split(':')[0]),
-      'buttonClass helpers outside Button.tsx',
-    ).toEqual([BUTTON_FILE])
+    const helpers = scan(/\b(const|let|var|function)\s+(buttonClass|primaryButtonClass)\b/).map((h) => h.split(':')[0])
+    expect(helpers, 'buttonClass helpers outside Button.tsx').toEqual([BUTTON_FILE])
     // A .btn-* rule kept in index.css would have to name its non-React consumer; there is none, so none is kept.
     expect(scan(/\.btn-[\w-]+/, [CSS_FILE]), '.btn-* rules in index.css').toEqual([])
-    expect(
-      [...new Set(scan(/\bbutton-(primary|secondary|quiet|danger)\b/).map((h) => h.split(':')[0]))].sort(),
-      'the variant classes are set only in Button.tsx and defined only in index.css',
-    ).toEqual([CSS_FILE, BUTTON_FILE].sort())
+    const variantFiles = [...new Set(scan(/\bbutton-(primary|secondary|quiet|danger)\b/).map((h) => h.split(':')[0]))].sort()
+    expect(variantFiles, 'the variant classes are set only in Button.tsx and defined only in index.css').toEqual([CSS_FILE, BUTTON_FILE].sort())
     await openPage(page, '/transactions', 'Transactions')
     await shot(page, 'one-path')
   })
