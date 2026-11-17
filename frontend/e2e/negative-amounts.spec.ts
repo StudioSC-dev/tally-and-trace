@@ -11,6 +11,8 @@ import { shot } from './support/shot'
 const NEGATIVE_PESOS = /^−₱[0-9,]+\.[0-9]{2}$/
 /** A hyphen written next to a currency symbol, either side, with a little context so a failure shows where it is. */
 const HYPHEN_SIGNED = /.{0,24}(?:-₱|₱-|-\$|\$-).{0,8}/g
+/** How long a page may take to first render: the dev server compiles each route on its first visit. */
+const READY_MS = 15_000
 
 /** The fixture's peso totals for the month to date, and its balances today. */
 const MONTH = household.summary.by_currency[0]
@@ -29,8 +31,8 @@ async function toggleDark(page: Page): Promise<void> {
 async function openDashboard(page: Page, data: HouseholdData = household): Promise<void> {
   await mockHousehold(page, data)
   await page.goto('/')
-  await expect(page.getByTestId('period-net-flow')).toBeVisible()
-  await expect(page.getByTestId('quick-balance-tile').first()).toBeVisible()
+  await expect(page.getByTestId('period-net-flow')).toBeVisible({ timeout: READY_MS })
+  await expect(page.getByTestId('quick-balance-tile').first()).toBeVisible({ timeout: READY_MS })
 }
 
 /** The text of one quick-balance line without its caption ("Owed"): the amount alone. */
@@ -79,7 +81,7 @@ for (const surface of SURFACES) {
       test(`no hyphen-signed amounts remain: ${surface.name}, ${variant}, ${theme}`, async ({ page }) => {
         await mockHousehold(page, surface.dollars ? withDollars(data) : data)
         await page.goto(surface.url)
-        await expect(surface.ready(page)).toBeVisible()
+        await expect(surface.ready(page)).toBeVisible({ timeout: READY_MS })
         if (surface.dollars) {
           await page.getByRole('group', { name: 'Currency' }).getByRole('button', { name: 'USD' }).click()
           await expect(page.getByTestId('period-net-flow')).toContainText('86.40')
@@ -110,7 +112,7 @@ test('format change preserves values: accounts negative card', async ({ page }) 
   await mockHousehold(page)
   await page.goto('/accounts')
   const owed = page.locator('main .amount-negative').filter({ hasText: '18,742.30' })
-  await expect(owed).toBeVisible()
+  await expect(owed).toBeVisible({ timeout: READY_MS })
   expect((await owed.innerText()).trim(), 'the card balance on Accounts').toBe('−₱18,742.30')
   await shot(page, 'accounts-card')
 })
