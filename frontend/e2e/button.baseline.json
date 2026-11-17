@@ -124,7 +124,7 @@
             "look": ""
           },
           {
-            "name": "Details →",
+            "name": "Details",
             "height": 20,
             "icons": 0,
             "variant": null,
@@ -180,7 +180,7 @@
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosDashboardYour financial overviewTagAll tagsHouseholdJapan tripweekmonthyearPeriod applies to actual totals, not the projection.Quick balancesEditDebitBPI Payroll₱84,250.40CreditHSBC Red MastercardOwed ₱18,742.30E-walletGCash₱3,415.75Cash-Flow TimelineYour running balance over the next 60 days — before payday, not just month-end.Details →On track in PHP: the lowest projected balance is ₱71,769.85 on Mar 13, 2026.Opening₱84,250.40Trough₱71,769.85Close (60d)₱106,040.10Financial SnapshotActuals cover month to date; the projection runs from today to month end.Month to DateActual Totals (Month to Date)Total income (MTD)₱33,500.00Total expenses (MTD)₱51,821.20Net flow (MTD)₱-18,321.20TodayNet worth₱329,764.35All your accounts, shared and Household accounts, cards and loans included. Not the same as available cash.ProjectedAvailable cash₱343,230.90Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.Budget Envelope StatusCurrent month spending against your envelope limits.5Dining outRemaining ₱2,500.00Limit ₱5,000.00 · Spent ₱2,500.00TransportRemaining ₱900.00Limit ₱4,500.00 · Spent ₱3,600.00GroceriesRemaining ₱2,700.00Limit ₱18,000.00 · Spent ₱15,300.00UtilitiesRemaining ₱0.00Limit ₱6,000.00 · Spent ₱6,000.00ShoppingRemaining ₱0.00Limit ₱5,000.00 · Spent ₱6,000.00Upcoming PayablesCash going out in the next 30 days: bills, card statements and loan payments.6Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI PayrollOverdueHMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll8 days remainingRentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll20 days remainingPLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll25 days remainingHSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll28 days remainingMeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll29 days remainingAlso coming upPayrollMar 15th, 2026 · Money in · Scheduled₱41,250.00PayrollMar 30th, 2026 · Money in · Scheduled₱41,250.00HomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosDashboardYour financial overviewTagAll tagsHouseholdJapan tripweekmonthyearPeriod applies to actual totals, not the projection.Quick balancesEditDebitBPI Payroll₱84,250.40CreditHSBC Red MastercardOwed ₱18,742.30E-walletGCash₱3,415.75Cash-Flow TimelineYour running balance over the next 60 days. It shows the low point before payday, not just month-end.DetailsOn track in PHP: the lowest projected balance is ₱71,769.85 on Mar 13, 2026.Opening₱84,250.40Trough₱71,769.85Close (60d)₱106,040.10Financial SnapshotActuals cover month to date; the projection runs from today to month end.Month to dateActual totals (Month to date)Total income (MTD)₱33,500.00Total expenses (MTD)₱51,821.20Net flow (MTD)₱-18,321.20TodayNet worth₱329,764.35All your accounts, shared and Household accounts, cards and loans included. Not the same as available cash.ProjectedAvailable cash₱343,230.90Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.Budget Envelope StatusCurrent month spending against your envelope limits.5Dining outRemaining ₱2,500.00Limit ₱5,000.00 · Spent ₱2,500.00TransportRemaining ₱900.00Limit ₱4,500.00 · Spent ₱3,600.00GroceriesRemaining ₱2,700.00Limit ₱18,000.00 · Spent ₱15,300.00UtilitiesRemaining ₱0.00Limit ₱6,000.00 · Spent ₱6,000.00ShoppingRemaining ₱0.00Limit ₱5,000.00 · Spent ₱6,000.00Upcoming PayablesCash going out in the next 30 days: bills, card statements and loan payments.6Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI PayrollOverdueHMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll8 days remainingRentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll20 days remainingPLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll25 days remainingHSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll28 days remainingMeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll29 days remainingAlso coming upPayrollMar 15th, 2026 · Money in · Scheduled₱41,250.00PayrollMar 30th, 2026 · Money in · Scheduled₱41,250.00HomeAccountsTransactionsGoals"
       },
       "transactions": {
         "controls": [
@@ -401,7 +401,7 @@
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosTransactionsAdd TransactionDue and overdueHideDue and overdue2Not posted yet0Upcoming16Subscriptions2Installments0Emergency fund top-upMar 8th, 2026 · BPI Payroll · Overdue₱10,000.00Mark paidChange dateHSBC Red Mastercard statementClosed Feb 20th, 2026 · due Mar 13th, 2026₱12,480.55PayTo dateScheduledSearch transactionsMarch 2026Spending breakdownShow filtersDate range: Mar 1st, 2026 → Mar 31st, 2026Automatically showing whole-month activityPuregold weekly groceriesHouseholdHousehold+1TodayMar 12th, 2026HSBC Red MastercardGroceriesPostedExpenseby Mara S.₱3,184.50Lunch, Kanto FreestyleYesterdayMar 11th, 2026Cash on handDining outPostedExpenseby Mara S.₱420.00Grab to MakatiYesterdayMar 11th, 2026GCashTransportPostedExpenseby Mara S.₱286.00Mercury DrugMar 10th, 2026Mar 10th, 2026GCashHealthPostedExpenseby Mara S.₱965.25Meralco February billHouseholdHousehold+1Mar 10th, 2026Mar 10th, 2026BPI PayrollUtilitiesPostedExpenseby Mara S.₱4,812.65Palengke, Marikina marketHouseholdHousehold+1Mar 10th, 2026Mar 10th, 2026BDO Joint householdGroceriesPostedExpenseby Jun R.₱1,385.00Netflix StandardMar 9th, 2026Mar 9th, 2026HSBC Red MastercardSubscriptionsPostedExpenseby Mara S.₱549.00Move to emergency fundMar 8th, 2026Mar 8th, 2026BPI Payroll → Metrobank SavingsSavings transferPostedTransferby Mara S.Fee ₱25.00₱10,000.00Dinner, ManamJapan tripJapan trip+1Mar 7th, 2026Mar 7th, 2026HSBC Red MastercardDining outPostedExpenseby Mara S.₱2,140.00Logo design, Kapé Co.Mar 7th, 2026Mar 7th, 2026BPI PayrollFreelancePostedIncomeby Mara S.+₱18,500.00PLDT FibrHouseholdHousehold+1Mar 6th, 2026Mar 6th, 2026BPI PayrollUtilitiesPostedExpenseby Mara S.₱1,899.00S&R bulk runHouseholdHousehold+1Mar 5th, 2026Mar 5th, 2026HSBC Red MastercardGroceriesPostedExpenseby Mara S.₱6,420.80Shell V-PowerMar 5th, 2026Mar 5th, 2026HSBC Red MastercardTransportPostedExpenseby Mara S.₱2,650.00Spotify DuoMar 4th, 2026Mar 4th, 2026HSBC Red MastercardSubscriptionsPostedExpenseby Mara S.₱239.00Water refill, 4 gallonsHouseholdHousehold+1Mar 4th, 2026Mar 4th, 2026BDO Joint householdUtilitiesPostedExpenseby Jun R.₱160.00Coffee, YardstickMar 3rd, 2026Mar 3rd, 2026GCashDining outPostedExpenseby Mara S.₱210.00Yaya salary, Feb 16–28HouseholdHousehold+1Mar 1st, 2026Mar 1st, 2026BDO Joint householdHousehold helpPostedExpenseby Mara S.₱4,500.00Household fund, MarchHouseholdHousehold+1Mar 1st, 2026Mar 1st, 2026BDO Joint householdSalaryPostedIncomeby Jun R.+₱15,000.00March rentHouseholdHousehold+1Mar 1st, 2026Mar 1st, 2026BPI PayrollRentPostedExpenseby Mara S.₱22,000.001–19 of 19Previous1NextPer page2550100HomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosTransactionsAdd TransactionDue and overdueHideDue and overdue2Not posted yet0Upcoming16Subscriptions2Installments0Emergency fund top-upMar 8th, 2026 · BPI Payroll · Overdue₱10,000.00Mark paidChange dateHSBC Red Mastercard statementClosed Feb 20th, 2026 · due Mar 13th, 2026₱12,480.55PayTo dateScheduledSearch transactionsMarch 2026Spending breakdownShow filtersDate range: Mar 1st, 2026 to Mar 31st, 2026Automatically showing whole-month activityPuregold weekly groceriesHouseholdHousehold+1Mar 12th, 2026HSBC Red MastercardGroceriesPostedExpenseby Mara S.₱3,184.50Lunch, Kanto FreestyleMar 11th, 2026Cash on handDining outPostedExpenseby Mara S.₱420.00Grab to MakatiMar 11th, 2026GCashTransportPostedExpenseby Mara S.₱286.00Mercury DrugMar 10th, 2026GCashHealthPostedExpenseby Mara S.₱965.25Meralco February billHouseholdHousehold+1Mar 10th, 2026BPI PayrollUtilitiesPostedExpenseby Mara S.₱4,812.65Palengke, Marikina marketHouseholdHousehold+1Mar 10th, 2026BDO Joint householdGroceriesPostedExpenseby Jun R.₱1,385.00Netflix StandardMar 9th, 2026HSBC Red MastercardSubscriptionsPostedExpenseby Mara S.₱549.00Move to emergency fundMar 8th, 2026BPI Payroll to Metrobank SavingsSavings transferPostedTransferby Mara S.Fee ₱25.00₱10,000.00Dinner, ManamJapan tripJapan trip+1Mar 7th, 2026HSBC Red MastercardDining outPostedExpenseby Mara S.₱2,140.00Logo design, Kapé Co.Mar 7th, 2026BPI PayrollFreelancePostedIncomeby Mara S.+₱18,500.00PLDT FibrHouseholdHousehold+1Mar 6th, 2026BPI PayrollUtilitiesPostedExpenseby Mara S.₱1,899.00S&R bulk runHouseholdHousehold+1Mar 5th, 2026HSBC Red MastercardGroceriesPostedExpenseby Mara S.₱6,420.80Shell V-PowerMar 5th, 2026HSBC Red MastercardTransportPostedExpenseby Mara S.₱2,650.00Spotify DuoMar 4th, 2026HSBC Red MastercardSubscriptionsPostedExpenseby Mara S.₱239.00Water refill, 4 gallonsHouseholdHousehold+1Mar 4th, 2026BDO Joint householdUtilitiesPostedExpenseby Jun R.₱160.00Coffee, YardstickMar 3rd, 2026GCashDining outPostedExpenseby Mara S.₱210.00Yaya salary, Feb 16–28HouseholdHousehold+1Mar 1st, 2026BDO Joint householdHousehold helpPostedExpenseby Mara S.₱4,500.00Household fund, MarchHouseholdHousehold+1Mar 1st, 2026BDO Joint householdSalaryPostedIncomeby Jun R.+₱15,000.00March rentHouseholdHousehold+1Mar 1st, 2026BPI PayrollRentPostedExpenseby Mara S.₱22,000.001–19 of 19Previous1NextPer page2550100HomeAccountsTransactionsGoals"
       },
       "allocations-recurring": {
         "controls": [
@@ -622,7 +622,7 @@
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAllocationsAdd Recurring EntryRecurringBudgetsSavingsWishlistSwitch tabs to view recurring subscriptions, monthly budgets, savings envelopes, or your wishlist.Search recurring entriesTagAll tagsHouseholdJapan tripSubscriptions3Netflix StandardRecurring ExpenseMonthly · day 9ScheduledNext Apr 9th, 2026In 28 daysAccount: HSBC Red Mastercardby Mara S.IndefiniteChargedPosted₱549.00Spotify DuoRecurring ExpenseMonthly · day 4ScheduledNext Apr 4th, 2026In 23 daysAccount: HSBC Red Mastercardby Mara S.IndefiniteChargedPosted₱239.00Disney+ PremiumRecurring ExpenseMonthly · day 2ScheduledPausedNext Apr 2nd, 2026In 21 daysAccount: HSBC Red Mastercardby Mara S.Indefinite₱369.00Cash expenses10RentHouseholdHousehold+1Recurring ExpenseMonthly · day 1ManualNext Apr 1st, 2026In 20 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱22,000.00MeralcoHouseholdHousehold+1Recurring ExpenseMonthly · day 10ManualNext Apr 10th, 2026In 29 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱4,600.00PLDT FibrRecurring ExpenseMonthly · day 6Auto-payNext Apr 6th, 2026In 25 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,899.00Emergency fund top-upRecurring ExpenseMonthly · day 8ManualNext Apr 8th, 2026In 27 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱10,000.00HMO dependent add-onRecurring ExpenseMonthly · day 20ManualNext Mar 20th, 2026In 8 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,450.00Globe PostpaidRecurring ExpenseMonthly · day 18Auto-payNext Mar 18th, 2026In 6 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,299.00Maynilad waterHouseholdHousehold+1Recurring ExpenseMonthly · day 27ManualNext Mar 27th, 2026In 15 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱720.00Palengke runHouseholdHousehold+1Recurring ExpenseWeekly · SaturdayManualNext Mar 14th, 2026In 2 daysAccount: BDO Joint householdby Mara S.IndefiniteMark paid₱1,300.00Yaya salaryHouseholdHousehold+1Recurring ExpenseTwice a monthManualNext Mar 15th, 2026In 3 daysAccount: BDO Joint householdby Mara S.IndefiniteMark paid₱4,500.00Gym membershipRecurring ExpenseMonthly · day 5ManualPausedNext Apr 5th, 2026In 24 daysAccount: BPI Payrollby Mara S.Indefinite₱2,500.00Income & transfers1PayrollRecurring IncomeTwice a monthScheduledNext Mar 15th, 2026In 3 daysAccount: BPI Payrollby Mara S.IndefiniteMark received+₱41,250.00HomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAllocationsAdd Recurring EntryRecurringBudgetsSavingsWishlistSwitch tabs to view recurring subscriptions, monthly budgets, savings envelopes, or your wishlist.Search recurring entriesTagAll tagsHouseholdJapan tripSubscriptions3Netflix StandardRecurring expenseMonthly · day 9ScheduledNext Apr 9th, 2026In 28 daysAccount: HSBC Red Mastercardby Mara S.IndefiniteChargedPosted₱549.00Spotify DuoRecurring expenseMonthly · day 4ScheduledNext Apr 4th, 2026In 23 daysAccount: HSBC Red Mastercardby Mara S.IndefiniteChargedPosted₱239.00Disney+ PremiumRecurring expenseMonthly · day 2ScheduledPausedNext Apr 2nd, 2026In 21 daysAccount: HSBC Red Mastercardby Mara S.Indefinite₱369.00Cash expenses10RentHouseholdHousehold+1Recurring expenseMonthly · day 1ManualNext Apr 1st, 2026In 20 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱22,000.00MeralcoHouseholdHousehold+1Recurring expenseMonthly · day 10ManualNext Apr 10th, 2026In 29 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱4,600.00PLDT FibrRecurring expenseMonthly · day 6Auto-payNext Apr 6th, 2026In 25 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,899.00Emergency fund top-upRecurring expenseMonthly · day 8ManualNext Apr 8th, 2026In 27 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱10,000.00HMO dependent add-onRecurring expenseMonthly · day 20ManualNext Mar 20th, 2026In 8 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,450.00Globe PostpaidRecurring expenseMonthly · day 18Auto-payNext Mar 18th, 2026In 6 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,299.00Maynilad waterHouseholdHousehold+1Recurring expenseMonthly · day 27ManualNext Mar 27th, 2026In 15 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱720.00Palengke runHouseholdHousehold+1Recurring expenseWeekly · SaturdayManualNext Mar 14th, 2026In 2 daysAccount: BDO Joint householdby Mara S.IndefiniteMark paid₱1,300.00Yaya salaryHouseholdHousehold+1Recurring expenseTwice a monthManualNext Mar 15th, 2026In 3 daysAccount: BDO Joint householdby Mara S.IndefiniteMark paid₱4,500.00Gym membershipRecurring expenseMonthly · day 5ManualPausedNext Apr 5th, 2026In 24 daysAccount: BPI Payrollby Mara S.Indefinite₱2,500.00Income & transfers1PayrollRecurring incomeTwice a monthScheduledNext Mar 15th, 2026In 3 daysAccount: BPI Payrollby Mara S.IndefiniteMark received+₱41,250.00HomeAccountsTransactionsGoals"
       },
       "accounts": {
         "controls": [
@@ -701,7 +701,7 @@
           {
             "name": "View transactions for BPI Payroll",
             "height": 20,
-            "icons": 1,
+            "icons": 0,
             "variant": null,
             "selection": false,
             "look": ""
@@ -709,7 +709,7 @@
           {
             "name": "View transactions for Metrobank Savings",
             "height": 20,
-            "icons": 1,
+            "icons": 0,
             "variant": null,
             "selection": false,
             "look": ""
@@ -717,7 +717,7 @@
           {
             "name": "View transactions for HSBC Red Mastercard",
             "height": 20,
-            "icons": 1,
+            "icons": 0,
             "variant": null,
             "selection": false,
             "look": ""
@@ -725,7 +725,7 @@
           {
             "name": "View transactions for GCash",
             "height": 20,
-            "icons": 1,
+            "icons": 0,
             "variant": null,
             "selection": false,
             "look": ""
@@ -733,7 +733,7 @@
           {
             "name": "View transactions for Cash on hand",
             "height": 20,
-            "icons": 1,
+            "icons": 0,
             "variant": null,
             "selection": false,
             "look": ""
@@ -741,13 +741,13 @@
           {
             "name": "View transactions for BDO Joint household",
             "height": 20,
-            "icons": 1,
+            "icons": 0,
             "variant": null,
             "selection": false,
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAccountsAdd AccountTagAll tagsHouseholdJapan tripAccountBalanceStatusIndividual (5)Debit (2)BPI PayrollcheckingActiveCurrency: PHP₱84,250.40ActiveTransactions →Metrobank SavingssavingsActiveCurrency: PHP₱212,600.00ActiveTransactions →Credit (1)HSBC Red MastercardcreditActiveCurrency: PHPLimit ₱120,000.00+21 days to due−₱18,742.30ActiveTransactions →E-wallet (1)GCashe walletActiveCurrency: PHPNot counted₱3,415.75ActiveTransactions →Cash (1)Cash on handcashActiveCurrency: PHPNot counted₱1,860.00ActiveTransactions →Shared (1)Debit (1)BDO Joint householdcheckingActiveCurrency: PHPEditorShared by Jun R.₱46,380.50ActiveTransactions →Showing 6 of 6 accountsHomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAccountsAdd AccountTagAll tagsHouseholdJapan tripAccountBalanceStatusIndividual (5)Debit (2)BPI PayrollcheckingActiveCurrency: PHP₱84,250.40ActiveTransactionsMetrobank SavingssavingsActiveCurrency: PHP₱212,600.00ActiveTransactionsCredit (1)HSBC Red MastercardcreditActiveCurrency: PHPLimit ₱120,000.00+21 days to due−₱18,742.30ActiveTransactionsE-wallet (1)GCashe walletActiveCurrency: PHPNot counted₱3,415.75ActiveTransactionsCash (1)Cash on handcashActiveCurrency: PHPNot counted₱1,860.00ActiveTransactionsShared (1)Debit (1)BDO Joint householdcheckingActiveCurrency: PHPEditorShared by Jun R.₱46,380.50ActiveTransactionsShowing 6 of 6 accountsHomeAccountsTransactionsGoals"
       },
       "transaction-create": {
         "controls": [
@@ -880,7 +880,7 @@
             "look": ""
           }
         ],
-        "text": "Create TransactionLog income, expenses, and projections to keep budgets on track.DescriptionAccountBPI Payroll(PHP)Metrobank Savings(PHP)GCash(PHP)Cash on hand(PHP)HSBC Red Mastercard(PHP)BDO Joint household(PHP)This is the account where the transaction will be recorded.CategoryUncategorizedChangeShowing expense categories.Transaction TypeIncomeExpenseTransferAmount₱Transaction DatePosting Date (optional)Mark as postedTags (optional)HouseholdJapan tripRepeatStarts a recurring entry with this as its first payment.Recurring entry (optional)Link this to one of your recurring income or expenses.NoneRent • Monthly • ₱22,000.00Meralco • Monthly • ₱4,600.00PLDT Fibr • Monthly • ₱1,899.00Netflix Standard • Monthly • ₱549.00Spotify Duo • Monthly • ₱239.00Emergency fund top-up • Monthly • ₱10,000.00HMO dependent add-on • Monthly • ₱1,450.00Globe Postpaid • Monthly • ₱1,299.00Maynilad water • Monthly • ₱720.00Palengke run • Weekly • ₱1,300.00Yaya salary • Twice a month • ₱4,500.00Create TransactionSave and add anotherCancel"
+        "text": "Create TransactionLog income, expenses, and projections to keep budgets on track.DescriptionAccountBPI Payroll(PHP)Metrobank Savings(PHP)GCash(PHP)Cash on hand(PHP)HSBC Red Mastercard(PHP)BDO Joint household(PHP)This is the account where the transaction will be recorded.CategoryUncategorizedChangeShowing expense categories.Transaction typeIncomeExpenseTransferAmount₱Transaction datePosting date (optional)Mark as postedTags (optional)HouseholdJapan tripRepeatStarts a recurring entry with this as its first payment.Recurring entry (optional)Link this to one of your recurring income or expenses.NoneRent (Monthly, ₱22,000.00)Meralco (Monthly, ₱4,600.00)PLDT Fibr (Monthly, ₱1,899.00)Netflix Standard (Monthly, ₱549.00)Spotify Duo (Monthly, ₱239.00)Emergency fund top-up (Monthly, ₱10,000.00)HMO dependent add-on (Monthly, ₱1,450.00)Globe Postpaid (Monthly, ₱1,299.00)Maynilad water (Monthly, ₱720.00)Palengke run (Weekly, ₱1,300.00)Yaya salary (Twice a month, ₱4,500.00)Create TransactionSave and add anotherCancel"
       },
       "transaction-actions": {
         "controls": [
@@ -1023,7 +1023,7 @@
             "look": ""
           }
         ],
-        "text": "Spending breakdownMar 1st, 2026 → Mar 31st, 2026CloseRent: ₱22,000.00 (click to filter the list)Groceries: ₱10,990.30 (click to filter the list)Utilities: ₱6,871.65 (click to filter the list)Household help: ₱4,500.00 (click to filter the list)Transport: ₱2,936.00 (click to filter the list)Other: ₱4,523.25Total of the categories shown₱51,821.20Rent₱22,000.0042.5%Groceries₱10,990.3021.2%Utilities₱6,871.6513.3%Household help₱4,500.008.7%Transport₱2,936.005.7%Dining out₱2,770.005.3%Health₱965.251.9%Subscriptions₱788.001.5%Uses only the date range and tag on this page; other filters don't apply.Posted spending in PHP only. The filtered list also shows unposted rows, income, transfers and other currencies for that category; set Type to Expense to narrow it.Includes spending from wallets.The filtered list also includes Household rows paid from other accounts."
+        "text": "Spending breakdownMar 1st, 2026 to Mar 31st, 2026CloseRent: ₱22,000.00 (click to filter the list)Groceries: ₱10,990.30 (click to filter the list)Utilities: ₱6,871.65 (click to filter the list)Household help: ₱4,500.00 (click to filter the list)Transport: ₱2,936.00 (click to filter the list)Other: ₱4,523.25Total of the categories shown₱51,821.20Rent₱22,000.0042.5%Groceries₱10,990.3021.2%Utilities₱6,871.6513.3%Household help₱4,500.008.7%Transport₱2,936.005.7%Dining out₱2,770.005.3%Health₱965.251.9%Subscriptions₱788.001.5%Uses only the date range and tag on this page; other filters don't apply.Posted spending in PHP only. The filtered list also shows unposted rows, income, transfers and other currencies for that category; set Type to Expense to narrow it.Includes spending from wallets.The filtered list also includes Household rows paid from other accounts."
       },
       "due-mark-paid": {
         "controls": [
@@ -1195,7 +1195,7 @@
             "look": ""
           }
         ],
-        "text": "Add Recurring EntryProject upcoming income or expenses so they feed into your budgets automatically.NameEntry TypeExpenseIncomeAccountSelect accountBPI PayrollMetrobank SavingsHSBC Red MastercardGCashCash on handBDO Joint householdCategoryUncategorizedDining outGroceriesHealthHousehold helpRentSubscriptionsTransportUtilitiesFreelanceSalarySavings transferOverflow account (optional)NoneBPI PayrollMetrobank SavingsHSBC Red MastercardBDO Joint householdIf the primary account can't cover a payment, the shortfall is drawn from here.Transfer to (optional)None (a payment)BPI PayrollMetrobank SavingsGCashCash on handBDO Joint householdMakes this a recurring transfer from the account above, e.g. moving money to the account a loan is paid from. Not available from or to a credit card. A loan is listed only when the account above is in its currency.CurrencyPHPUSDEURGBPJPYAUDCADCHFCNYSGDAmount (PHP)CadenceWeeklyEvery 2 weeksMonthlyQuarterlySemi-AnnualAnnualNext OccurrenceDaySame as dateDay of month (1–31)Last weekday of monthMonthly · day 12Next: Mar 12th, 2026, Apr 12th, 2026, May 12th, 2026Lead Time (days)Link to Budget (optional)No linked envelopeDining outGroceriesShoppingTransportUtilitiesEndsKeep runningOn dateAfter runsTags (optional)HouseholdJapan tripEntry statusPause recurring entries without deleting them.ActiveNotesSave Recurring EntryCancel"
+        "text": "Add Recurring EntryProject upcoming income or expenses so they feed into your budgets automatically.NameEntry typeExpenseIncomeAccountSelect accountBPI PayrollMetrobank SavingsHSBC Red MastercardGCashCash on handBDO Joint householdCategoryUncategorizedDining outGroceriesHealthHousehold helpRentSubscriptionsTransportUtilitiesFreelanceSalarySavings transferOverflow account (optional)NoneBPI PayrollMetrobank SavingsHSBC Red MastercardBDO Joint householdIf the primary account can't cover a payment, the shortfall is drawn from here.Transfer to (optional)None (a payment)BPI PayrollMetrobank SavingsGCashCash on handBDO Joint householdMakes this a recurring transfer from the account above, e.g. moving money to the account a loan is paid from. Not available from or to a credit card. A loan is listed only when the account above is in its currency.CurrencyPHPUSDEURGBPJPYAUDCADCHFCNYSGDAmount (PHP)CadenceWeeklyEvery 2 weeksMonthlyQuarterlySemi-AnnualAnnualNext occurrenceDaySame as dateDay of month (1–31)Last weekday of monthMonthly · day 12Next: Mar 12th, 2026, Apr 12th, 2026, May 12th, 2026Lead time (days)Link to budget (optional)No linked envelopeDining outGroceriesShoppingTransportUtilitiesEndsKeep runningOn dateAfter runsTags (optional)HouseholdJapan tripEntry statusPause recurring entries without deleting them.ActiveNotesSave Recurring EntryCancel"
       },
       "recurring-charged": {
         "controls": [
@@ -1285,7 +1285,7 @@
             "look": ""
           }
         ],
-        "text": "Create AccountAccount NameAccount Type🏦 Checking💰 Savings💳 Credit Card💵 Cash📱 E-Wallet🏠 LoanSpending walletCash on hand or an e-wallet: its balance is shown but not counted in available cash or projections. Topping it up counts as the expense.Account CurrencyPHP (₱)USD ($)EUR (€)GBP (£)JPY (¥)AUD (A$)CAD (C$)CHF (CHF)CNY (¥)SGD (S$)Initial Balance₱Tags (optional)HouseholdJapan tripDescription (Optional)Account statusInactive accounts stay in history but are hidden from most views.ActiveCreate AccountCancel"
+        "text": "Create AccountAccount nameAccount type🏦 Checking💰 Savings💳 Credit Card💵 Cash📱 E-Wallet🏠 LoanSpending walletCash on hand or an e-wallet: its balance is shown but not counted in available cash or projections. Topping it up counts as the expense.Account currencyPHP (₱)USD ($)EUR (€)GBP (£)JPY (¥)AUD (A$)CAD (C$)CHF (CHF)CNY (¥)SGD (S$)Initial balance₱Tags (optional)HouseholdJapan tripDescription (optional)Account statusInactive accounts stay in history but are hidden from most views.ActiveCreate AccountCancel"
       },
       "account-actions": {
         "controls": [
@@ -1363,7 +1363,7 @@
           "Quick balances",
           "Cash-Flow Timeline",
           "Financial Snapshot",
-          "Actual Totals (Month to Date)",
+          "Actual totals (Month to date)",
           "Projected",
           "Budget Envelope Status",
           "Upcoming Payables",
@@ -1393,7 +1393,7 @@
           "Move GCash later",
           "Remove GCash",
           "+ Add account",
-          "Details →",
+          "Details",
           "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
           "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
           "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
@@ -3802,7 +3802,7 @@
           "Quick balances",
           "Cash-Flow Timeline",
           "Financial Snapshot",
-          "Actual Totals (Month to Date)",
+          "Actual totals (Month to date)",
           "Projected",
           "Budget Envelope Status",
           "Upcoming Payables",
@@ -3824,7 +3824,7 @@
           "DebitBPI Payroll₱84,250.40",
           "CreditHSBC Red MastercardOwed ₱18,742.30",
           "E-walletGCash₱3,415.75",
-          "Details →",
+          "Details",
           "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
           "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
           "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
@@ -3921,7 +3921,7 @@
             "look": ""
           },
           {
-            "name": "Details →",
+            "name": "Details",
             "height": 20,
             "icons": 0,
             "variant": null,
@@ -4009,7 +4009,7 @@
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosDashboardYour financial overviewTagAll tagsHouseholdJapan tripweekmonthyearPeriod applies to actual totals, not the projection.Quick balancesEditDebitBPI Payroll₱84,250.40CreditHSBC Red MastercardOwed ₱18,742.30E-walletGCash₱3,415.75Cash-Flow TimelineYour running balance over the next 60 days — before payday, not just month-end.Details →On track in PHP: the lowest projected balance is ₱71,769.85 on Mar 13, 2026.Opening₱84,250.40Trough₱71,769.85Close (60d)₱106,040.10Financial SnapshotActuals cover month to date; the projection runs from today to month end.Month to DateActual Totals (Month to Date)Total income (MTD)₱33,500.00Total expenses (MTD)₱51,821.20Net flow (MTD)₱-18,321.20TodayNet worth₱329,764.35All your accounts, shared and Household accounts, cards and loans included. Not the same as available cash.ProjectedAvailable cash₱343,230.90Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.Budget Envelope StatusCurrent month spending against your envelope limits.5Dining outRemaining ₱2,500.00Limit ₱5,000.00 · Spent ₱2,500.00TransportRemaining ₱900.00Limit ₱4,500.00 · Spent ₱3,600.00GroceriesRemaining ₱2,700.00Limit ₱18,000.00 · Spent ₱15,300.00UtilitiesRemaining ₱0.00Limit ₱6,000.00 · Spent ₱6,000.00ShoppingRemaining ₱0.00Limit ₱5,000.00 · Spent ₱6,000.00Upcoming PayablesCash going out in the next 30 days: bills, card statements and loan payments.6Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI PayrollOverdueHMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll8 days remainingRentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll20 days remainingPLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll25 days remainingHSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll28 days remainingMeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll29 days remainingAlso coming upPayrollMar 15th, 2026 · Money in · Scheduled₱41,250.00PayrollMar 30th, 2026 · Money in · Scheduled₱41,250.00HomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosDashboardYour financial overviewTagAll tagsHouseholdJapan tripweekmonthyearPeriod applies to actual totals, not the projection.Quick balancesEditDebitBPI Payroll₱84,250.40CreditHSBC Red MastercardOwed ₱18,742.30E-walletGCash₱3,415.75Cash-Flow TimelineYour running balance over the next 60 days. It shows the low point before payday, not just month-end.DetailsOn track in PHP: the lowest projected balance is ₱71,769.85 on Mar 13, 2026.Opening₱84,250.40Trough₱71,769.85Close (60d)₱106,040.10Financial SnapshotActuals cover month to date; the projection runs from today to month end.Month to dateActual totals (Month to date)Total income (MTD)₱33,500.00Total expenses (MTD)₱51,821.20Net flow (MTD)₱-18,321.20TodayNet worth₱329,764.35All your accounts, shared and Household accounts, cards and loans included. Not the same as available cash.ProjectedAvailable cash₱343,230.90Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.Budget Envelope StatusCurrent month spending against your envelope limits.5Dining outRemaining ₱2,500.00Limit ₱5,000.00 · Spent ₱2,500.00TransportRemaining ₱900.00Limit ₱4,500.00 · Spent ₱3,600.00GroceriesRemaining ₱2,700.00Limit ₱18,000.00 · Spent ₱15,300.00UtilitiesRemaining ₱0.00Limit ₱6,000.00 · Spent ₱6,000.00ShoppingRemaining ₱0.00Limit ₱5,000.00 · Spent ₱6,000.00Upcoming PayablesCash going out in the next 30 days: bills, card statements and loan payments.6Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI PayrollOverdueHMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll8 days remainingRentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll20 days remainingPLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll25 days remainingHSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll28 days remainingMeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll29 days remainingAlso coming upPayrollMar 15th, 2026 · Money in · Scheduled₱41,250.00PayrollMar 30th, 2026 · Money in · Scheduled₱41,250.00HomeAccountsTransactionsGoals"
       },
       "transactions": {
         "controls": [
@@ -4222,7 +4222,7 @@
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosTransactionsAdd TransactionDue and overdueHideDue and overdue2Not posted yet0Upcoming16Subscriptions2Installments0Emergency fund top-upMar 8th, 2026 · BPI Payroll · Overdue₱10,000.00Mark paidChange dateHSBC Red Mastercard statementClosed Feb 20th, 2026 · due Mar 13th, 2026₱12,480.55PayTo dateScheduledSearch transactionsMarch 2026Spending breakdownShow filtersDate range: Mar 1st, 2026 → Mar 31st, 2026Automatically showing whole-month activityPuregold weekly groceriesHouseholdHousehold+1TodayMar 12th, 2026HSBC Red MastercardGroceriesPostedExpenseby Mara S.₱3,184.50Lunch, Kanto FreestyleYesterdayMar 11th, 2026Cash on handDining outPostedExpenseby Mara S.₱420.00Grab to MakatiYesterdayMar 11th, 2026GCashTransportPostedExpenseby Mara S.₱286.00Mercury DrugMar 10th, 2026Mar 10th, 2026GCashHealthPostedExpenseby Mara S.₱965.25Meralco February billHouseholdHousehold+1Mar 10th, 2026Mar 10th, 2026BPI PayrollUtilitiesPostedExpenseby Mara S.₱4,812.65Palengke, Marikina marketHouseholdHousehold+1Mar 10th, 2026Mar 10th, 2026BDO Joint householdGroceriesPostedExpenseby Jun R.₱1,385.00Netflix StandardMar 9th, 2026Mar 9th, 2026HSBC Red MastercardSubscriptionsPostedExpenseby Mara S.₱549.00Move to emergency fundMar 8th, 2026Mar 8th, 2026BPI Payroll → Metrobank SavingsSavings transferPostedTransferby Mara S.Fee ₱25.00₱10,000.00Dinner, ManamJapan tripJapan trip+1Mar 7th, 2026Mar 7th, 2026HSBC Red MastercardDining outPostedExpenseby Mara S.₱2,140.00Logo design, Kapé Co.Mar 7th, 2026Mar 7th, 2026BPI PayrollFreelancePostedIncomeby Mara S.+₱18,500.00PLDT FibrHouseholdHousehold+1Mar 6th, 2026Mar 6th, 2026BPI PayrollUtilitiesPostedExpenseby Mara S.₱1,899.00S&R bulk runHouseholdHousehold+1Mar 5th, 2026Mar 5th, 2026HSBC Red MastercardGroceriesPostedExpenseby Mara S.₱6,420.80Shell V-PowerMar 5th, 2026Mar 5th, 2026HSBC Red MastercardTransportPostedExpenseby Mara S.₱2,650.00Spotify DuoMar 4th, 2026Mar 4th, 2026HSBC Red MastercardSubscriptionsPostedExpenseby Mara S.₱239.00Water refill, 4 gallonsHouseholdHousehold+1Mar 4th, 2026Mar 4th, 2026BDO Joint householdUtilitiesPostedExpenseby Jun R.₱160.00Coffee, YardstickMar 3rd, 2026Mar 3rd, 2026GCashDining outPostedExpenseby Mara S.₱210.00Yaya salary, Feb 16–28HouseholdHousehold+1Mar 1st, 2026Mar 1st, 2026BDO Joint householdHousehold helpPostedExpenseby Mara S.₱4,500.00Household fund, MarchHouseholdHousehold+1Mar 1st, 2026Mar 1st, 2026BDO Joint householdSalaryPostedIncomeby Jun R.+₱15,000.00March rentHouseholdHousehold+1Mar 1st, 2026Mar 1st, 2026BPI PayrollRentPostedExpenseby Mara S.₱22,000.001–19 of 19Previous1NextPer page2550100HomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosTransactionsAdd TransactionDue and overdueHideDue and overdue2Not posted yet0Upcoming16Subscriptions2Installments0Emergency fund top-upMar 8th, 2026 · BPI Payroll · Overdue₱10,000.00Mark paidChange dateHSBC Red Mastercard statementClosed Feb 20th, 2026 · due Mar 13th, 2026₱12,480.55PayTo dateScheduledSearch transactionsMarch 2026Spending breakdownShow filtersDate range: Mar 1st, 2026 to Mar 31st, 2026Automatically showing whole-month activityPuregold weekly groceriesHouseholdHousehold+1Mar 12th, 2026HSBC Red MastercardGroceriesPostedExpenseby Mara S.₱3,184.50Lunch, Kanto FreestyleMar 11th, 2026Cash on handDining outPostedExpenseby Mara S.₱420.00Grab to MakatiMar 11th, 2026GCashTransportPostedExpenseby Mara S.₱286.00Mercury DrugMar 10th, 2026GCashHealthPostedExpenseby Mara S.₱965.25Meralco February billHouseholdHousehold+1Mar 10th, 2026BPI PayrollUtilitiesPostedExpenseby Mara S.₱4,812.65Palengke, Marikina marketHouseholdHousehold+1Mar 10th, 2026BDO Joint householdGroceriesPostedExpenseby Jun R.₱1,385.00Netflix StandardMar 9th, 2026HSBC Red MastercardSubscriptionsPostedExpenseby Mara S.₱549.00Move to emergency fundMar 8th, 2026BPI Payroll to Metrobank SavingsSavings transferPostedTransferby Mara S.Fee ₱25.00₱10,000.00Dinner, ManamJapan tripJapan trip+1Mar 7th, 2026HSBC Red MastercardDining outPostedExpenseby Mara S.₱2,140.00Logo design, Kapé Co.Mar 7th, 2026BPI PayrollFreelancePostedIncomeby Mara S.+₱18,500.00PLDT FibrHouseholdHousehold+1Mar 6th, 2026BPI PayrollUtilitiesPostedExpenseby Mara S.₱1,899.00S&R bulk runHouseholdHousehold+1Mar 5th, 2026HSBC Red MastercardGroceriesPostedExpenseby Mara S.₱6,420.80Shell V-PowerMar 5th, 2026HSBC Red MastercardTransportPostedExpenseby Mara S.₱2,650.00Spotify DuoMar 4th, 2026HSBC Red MastercardSubscriptionsPostedExpenseby Mara S.₱239.00Water refill, 4 gallonsHouseholdHousehold+1Mar 4th, 2026BDO Joint householdUtilitiesPostedExpenseby Jun R.₱160.00Coffee, YardstickMar 3rd, 2026GCashDining outPostedExpenseby Mara S.₱210.00Yaya salary, Feb 16–28HouseholdHousehold+1Mar 1st, 2026BDO Joint householdHousehold helpPostedExpenseby Mara S.₱4,500.00Household fund, MarchHouseholdHousehold+1Mar 1st, 2026BDO Joint householdSalaryPostedIncomeby Jun R.+₱15,000.00March rentHouseholdHousehold+1Mar 1st, 2026BPI PayrollRentPostedExpenseby Mara S.₱22,000.001–19 of 19Previous1NextPer page2550100HomeAccountsTransactionsGoals"
       },
       "allocations-recurring": {
         "controls": [
@@ -4467,7 +4467,7 @@
             "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(229, 231, 235) | 0px"
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAllocationsAdd Recurring EntryRecurringBudgetsSavingsWishlistSwitch tabs to view recurring subscriptions, monthly budgets, savings envelopes, or your wishlist.Search recurring entriesTagAll tagsHouseholdJapan tripSubscriptions3Netflix StandardRecurring ExpenseMonthly · day 9ScheduledNext Apr 9th, 2026In 28 daysAccount: HSBC Red Mastercardby Mara S.IndefiniteChargedPosted₱549.00Spotify DuoRecurring ExpenseMonthly · day 4ScheduledNext Apr 4th, 2026In 23 daysAccount: HSBC Red Mastercardby Mara S.IndefiniteChargedPosted₱239.00Disney+ PremiumRecurring ExpenseMonthly · day 2ScheduledPausedNext Apr 2nd, 2026In 21 daysAccount: HSBC Red Mastercardby Mara S.Indefinite₱369.00Cash expenses10RentHouseholdHousehold+1Recurring ExpenseMonthly · day 1ManualNext Apr 1st, 2026In 20 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱22,000.00Meralco+1Household+1Recurring ExpenseMonthly · day 10ManualNext Apr 10th, 2026In 29 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱4,600.00PLDT FibrRecurring ExpenseMonthly · day 6Auto-payNext Apr 6th, 2026In 25 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,899.00Emergency fund top-upRecurring ExpenseMonthly · day 8ManualNext Apr 8th, 2026In 27 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱10,000.00HMO dependent add-onRecurring ExpenseMonthly · day 20ManualNext Mar 20th, 2026In 8 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,450.00Globe PostpaidRecurring ExpenseMonthly · day 18Auto-payNext Mar 18th, 2026In 6 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,299.00Maynilad water+1Household+1Recurring ExpenseMonthly · day 27ManualNext Mar 27th, 2026In 15 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱720.00Palengke run+1Household+1Recurring ExpenseWeekly · SaturdayManualNext Mar 14th, 2026In 2 daysAccount: BDO Joint householdby Mara S.IndefiniteMark paid₱1,300.00Yaya salary+1Household+1Recurring ExpenseTwice a monthManualNext Mar 15th, 2026In 3 daysAccount: BDO Joint householdby Mara S.IndefiniteMark paid₱4,500.00Gym membershipRecurring ExpenseMonthly · day 5ManualPausedNext Apr 5th, 2026In 24 daysAccount: BPI Payrollby Mara S.Indefinite₱2,500.00Income & transfers1PayrollRecurring IncomeTwice a monthScheduledNext Mar 15th, 2026In 3 daysAccount: BPI Payrollby Mara S.IndefiniteMark received+₱41,250.00HomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAllocationsAdd Recurring EntryRecurringBudgetsSavingsWishlistSwitch tabs to view recurring subscriptions, monthly budgets, savings envelopes, or your wishlist.Search recurring entriesTagAll tagsHouseholdJapan tripSubscriptions3Netflix StandardRecurring expenseMonthly · day 9ScheduledNext Apr 9th, 2026In 28 daysAccount: HSBC Red Mastercardby Mara S.IndefiniteChargedPosted₱549.00Spotify DuoRecurring expenseMonthly · day 4ScheduledNext Apr 4th, 2026In 23 daysAccount: HSBC Red Mastercardby Mara S.IndefiniteChargedPosted₱239.00Disney+ PremiumRecurring expenseMonthly · day 2ScheduledPausedNext Apr 2nd, 2026In 21 daysAccount: HSBC Red Mastercardby Mara S.Indefinite₱369.00Cash expenses10RentHouseholdHousehold+1Recurring expenseMonthly · day 1ManualNext Apr 1st, 2026In 20 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱22,000.00Meralco+1Household+1Recurring expenseMonthly · day 10ManualNext Apr 10th, 2026In 29 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱4,600.00PLDT FibrRecurring expenseMonthly · day 6Auto-payNext Apr 6th, 2026In 25 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,899.00Emergency fund top-upRecurring expenseMonthly · day 8ManualNext Apr 8th, 2026In 27 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱10,000.00HMO dependent add-onRecurring expenseMonthly · day 20ManualNext Mar 20th, 2026In 8 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,450.00Globe PostpaidRecurring expenseMonthly · day 18Auto-payNext Mar 18th, 2026In 6 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,299.00Maynilad water+1Household+1Recurring expenseMonthly · day 27ManualNext Mar 27th, 2026In 15 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱720.00Palengke run+1Household+1Recurring expenseWeekly · SaturdayManualNext Mar 14th, 2026In 2 daysAccount: BDO Joint householdby Mara S.IndefiniteMark paid₱1,300.00Yaya salary+1Household+1Recurring expenseTwice a monthManualNext Mar 15th, 2026In 3 daysAccount: BDO Joint householdby Mara S.IndefiniteMark paid₱4,500.00Gym membershipRecurring expenseMonthly · day 5ManualPausedNext Apr 5th, 2026In 24 daysAccount: BPI Payrollby Mara S.Indefinite₱2,500.00Income & transfers1PayrollRecurring incomeTwice a monthScheduledNext Mar 15th, 2026In 3 daysAccount: BPI Payrollby Mara S.IndefiniteMark received+₱41,250.00HomeAccountsTransactionsGoals"
       },
       "accounts": {
         "controls": [
@@ -4506,7 +4506,7 @@
           {
             "name": "View transactions for BPI Payroll",
             "height": 20,
-            "icons": 1,
+            "icons": 0,
             "variant": null,
             "selection": false,
             "look": ""
@@ -4514,7 +4514,7 @@
           {
             "name": "View transactions for Metrobank Savings",
             "height": 20,
-            "icons": 1,
+            "icons": 0,
             "variant": null,
             "selection": false,
             "look": ""
@@ -4522,7 +4522,7 @@
           {
             "name": "View transactions for HSBC Red Mastercard",
             "height": 20,
-            "icons": 1,
+            "icons": 0,
             "variant": null,
             "selection": false,
             "look": ""
@@ -4530,7 +4530,7 @@
           {
             "name": "View transactions for GCash",
             "height": 20,
-            "icons": 1,
+            "icons": 0,
             "variant": null,
             "selection": false,
             "look": ""
@@ -4538,7 +4538,7 @@
           {
             "name": "View transactions for Cash on hand",
             "height": 20,
-            "icons": 1,
+            "icons": 0,
             "variant": null,
             "selection": false,
             "look": ""
@@ -4546,7 +4546,7 @@
           {
             "name": "View transactions for BDO Joint household",
             "height": 20,
-            "icons": 1,
+            "icons": 0,
             "variant": null,
             "selection": false,
             "look": ""
@@ -4584,7 +4584,7 @@
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAccountsAdd AccountTagAll tagsHouseholdJapan tripAccountBalanceStatusIndividual (5)Debit (2)BPI PayrollcheckingActiveCurrency: PHP₱84,250.40ActiveTransactions →Metrobank SavingssavingsActiveCurrency: PHP₱212,600.00ActiveTransactions →Credit (1)HSBC Red MastercardcreditActiveCurrency: PHPLimit ₱120,000.00+21 days to due−₱18,742.30ActiveTransactions →E-wallet (1)GCashe walletActiveCurrency: PHPNot counted₱3,415.75ActiveTransactions →Cash (1)Cash on handcashActiveCurrency: PHPNot counted₱1,860.00ActiveTransactions →Shared (1)Debit (1)BDO Joint householdcheckingActiveCurrency: PHPEditorShared by Jun R.₱46,380.50ActiveTransactions →Showing 6 of 6 accountsHomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAccountsAdd AccountTagAll tagsHouseholdJapan tripAccountBalanceStatusIndividual (5)Debit (2)BPI PayrollcheckingActiveCurrency: PHP₱84,250.40ActiveTransactionsMetrobank SavingssavingsActiveCurrency: PHP₱212,600.00ActiveTransactionsCredit (1)HSBC Red MastercardcreditActiveCurrency: PHPLimit ₱120,000.00+21 days to due−₱18,742.30ActiveTransactionsE-wallet (1)GCashe walletActiveCurrency: PHPNot counted₱3,415.75ActiveTransactionsCash (1)Cash on handcashActiveCurrency: PHPNot counted₱1,860.00ActiveTransactionsShared (1)Debit (1)BDO Joint householdcheckingActiveCurrency: PHPEditorShared by Jun R.₱46,380.50ActiveTransactionsShowing 6 of 6 accountsHomeAccountsTransactionsGoals"
       },
       "transaction-create": {
         "controls": [
@@ -4717,7 +4717,7 @@
             "look": ""
           }
         ],
-        "text": "Create TransactionLog income, expenses, and projections to keep budgets on track.DescriptionAccountBPI Payroll(PHP)Metrobank Savings(PHP)GCash(PHP)Cash on hand(PHP)HSBC Red Mastercard(PHP)BDO Joint household(PHP)This is the account where the transaction will be recorded.CategoryUncategorizedChangeShowing expense categories.Transaction TypeIncomeExpenseTransferAmount₱Transaction DatePosting Date (optional)Mark as postedTags (optional)HouseholdJapan tripRepeatStarts a recurring entry with this as its first payment.Recurring entry (optional)Link this to one of your recurring income or expenses.NoneRent • Monthly • ₱22,000.00Meralco • Monthly • ₱4,600.00PLDT Fibr • Monthly • ₱1,899.00Netflix Standard • Monthly • ₱549.00Spotify Duo • Monthly • ₱239.00Emergency fund top-up • Monthly • ₱10,000.00HMO dependent add-on • Monthly • ₱1,450.00Globe Postpaid • Monthly • ₱1,299.00Maynilad water • Monthly • ₱720.00Palengke run • Weekly • ₱1,300.00Yaya salary • Twice a month • ₱4,500.00Create TransactionSave and add anotherCancel"
+        "text": "Create TransactionLog income, expenses, and projections to keep budgets on track.DescriptionAccountBPI Payroll(PHP)Metrobank Savings(PHP)GCash(PHP)Cash on hand(PHP)HSBC Red Mastercard(PHP)BDO Joint household(PHP)This is the account where the transaction will be recorded.CategoryUncategorizedChangeShowing expense categories.Transaction typeIncomeExpenseTransferAmount₱Transaction datePosting date (optional)Mark as postedTags (optional)HouseholdJapan tripRepeatStarts a recurring entry with this as its first payment.Recurring entry (optional)Link this to one of your recurring income or expenses.NoneRent (Monthly, ₱22,000.00)Meralco (Monthly, ₱4,600.00)PLDT Fibr (Monthly, ₱1,899.00)Netflix Standard (Monthly, ₱549.00)Spotify Duo (Monthly, ₱239.00)Emergency fund top-up (Monthly, ₱10,000.00)HMO dependent add-on (Monthly, ₱1,450.00)Globe Postpaid (Monthly, ₱1,299.00)Maynilad water (Monthly, ₱720.00)Palengke run (Weekly, ₱1,300.00)Yaya salary (Twice a month, ₱4,500.00)Create TransactionSave and add anotherCancel"
       },
       "transaction-actions": {
         "controls": [
@@ -4860,7 +4860,7 @@
             "look": ""
           }
         ],
-        "text": "Spending breakdownMar 1st, 2026 → Mar 31st, 2026CloseRent: ₱22,000.00 (click to filter the list)Groceries: ₱10,990.30 (click to filter the list)Utilities: ₱6,871.65 (click to filter the list)Household help: ₱4,500.00 (click to filter the list)Transport: ₱2,936.00 (click to filter the list)Other: ₱4,523.25Total of the categories shown₱51,821.20Rent₱22,000.0042.5%Groceries₱10,990.3021.2%Utilities₱6,871.6513.3%Household help₱4,500.008.7%Transport₱2,936.005.7%Dining out₱2,770.005.3%Health₱965.251.9%Subscriptions₱788.001.5%Uses only the date range and tag on this page; other filters don't apply.Posted spending in PHP only. The filtered list also shows unposted rows, income, transfers and other currencies for that category; set Type to Expense to narrow it.Includes spending from wallets.The filtered list also includes Household rows paid from other accounts."
+        "text": "Spending breakdownMar 1st, 2026 to Mar 31st, 2026CloseRent: ₱22,000.00 (click to filter the list)Groceries: ₱10,990.30 (click to filter the list)Utilities: ₱6,871.65 (click to filter the list)Household help: ₱4,500.00 (click to filter the list)Transport: ₱2,936.00 (click to filter the list)Other: ₱4,523.25Total of the categories shown₱51,821.20Rent₱22,000.0042.5%Groceries₱10,990.3021.2%Utilities₱6,871.6513.3%Household help₱4,500.008.7%Transport₱2,936.005.7%Dining out₱2,770.005.3%Health₱965.251.9%Subscriptions₱788.001.5%Uses only the date range and tag on this page; other filters don't apply.Posted spending in PHP only. The filtered list also shows unposted rows, income, transfers and other currencies for that category; set Type to Expense to narrow it.Includes spending from wallets.The filtered list also includes Household rows paid from other accounts."
       },
       "due-mark-paid": {
         "controls": [
@@ -5032,7 +5032,7 @@
             "look": ""
           }
         ],
-        "text": "Add Recurring EntryProject upcoming income or expenses so they feed into your budgets automatically.NameEntry TypeExpenseIncomeAccountSelect accountBPI PayrollMetrobank SavingsHSBC Red MastercardGCashCash on handBDO Joint householdCategoryUncategorizedDining outGroceriesHealthHousehold helpRentSubscriptionsTransportUtilitiesFreelanceSalarySavings transferOverflow account (optional)NoneBPI PayrollMetrobank SavingsHSBC Red MastercardBDO Joint householdIf the primary account can't cover a payment, the shortfall is drawn from here.Transfer to (optional)None (a payment)BPI PayrollMetrobank SavingsGCashCash on handBDO Joint householdMakes this a recurring transfer from the account above, e.g. moving money to the account a loan is paid from. Not available from or to a credit card. A loan is listed only when the account above is in its currency.CurrencyPHPUSDEURGBPJPYAUDCADCHFCNYSGDAmount (PHP)CadenceWeeklyEvery 2 weeksMonthlyQuarterlySemi-AnnualAnnualNext OccurrenceDaySame as dateDay of month (1–31)Last weekday of monthMonthly · day 12Next: Mar 12th, 2026, Apr 12th, 2026, May 12th, 2026Lead Time (days)Link to Budget (optional)No linked envelopeDining outGroceriesShoppingTransportUtilitiesEndsKeep runningOn dateAfter runsTags (optional)HouseholdJapan tripEntry statusPause recurring entries without deleting them.ActiveNotesSave Recurring EntryCancel"
+        "text": "Add Recurring EntryProject upcoming income or expenses so they feed into your budgets automatically.NameEntry typeExpenseIncomeAccountSelect accountBPI PayrollMetrobank SavingsHSBC Red MastercardGCashCash on handBDO Joint householdCategoryUncategorizedDining outGroceriesHealthHousehold helpRentSubscriptionsTransportUtilitiesFreelanceSalarySavings transferOverflow account (optional)NoneBPI PayrollMetrobank SavingsHSBC Red MastercardBDO Joint householdIf the primary account can't cover a payment, the shortfall is drawn from here.Transfer to (optional)None (a payment)BPI PayrollMetrobank SavingsGCashCash on handBDO Joint householdMakes this a recurring transfer from the account above, e.g. moving money to the account a loan is paid from. Not available from or to a credit card. A loan is listed only when the account above is in its currency.CurrencyPHPUSDEURGBPJPYAUDCADCHFCNYSGDAmount (PHP)CadenceWeeklyEvery 2 weeksMonthlyQuarterlySemi-AnnualAnnualNext occurrenceDaySame as dateDay of month (1–31)Last weekday of monthMonthly · day 12Next: Mar 12th, 2026, Apr 12th, 2026, May 12th, 2026Lead time (days)Link to budget (optional)No linked envelopeDining outGroceriesShoppingTransportUtilitiesEndsKeep runningOn dateAfter runsTags (optional)HouseholdJapan tripEntry statusPause recurring entries without deleting them.ActiveNotesSave Recurring EntryCancel"
       },
       "recurring-charged": {
         "controls": [
@@ -5122,7 +5122,7 @@
             "look": ""
           }
         ],
-        "text": "Create AccountAccount NameAccount Type🏦 Checking💰 Savings💳 Credit Card💵 Cash📱 E-Wallet🏠 LoanSpending walletCash on hand or an e-wallet: its balance is shown but not counted in available cash or projections. Topping it up counts as the expense.Account CurrencyPHP (₱)USD ($)EUR (€)GBP (£)JPY (¥)AUD (A$)CAD (C$)CHF (CHF)CNY (¥)SGD (S$)Initial Balance₱Tags (optional)HouseholdJapan tripDescription (Optional)Account statusInactive accounts stay in history but are hidden from most views.ActiveCreate AccountCancel"
+        "text": "Create AccountAccount nameAccount type🏦 Checking💰 Savings💳 Credit Card💵 Cash📱 E-Wallet🏠 LoanSpending walletCash on hand or an e-wallet: its balance is shown but not counted in available cash or projections. Topping it up counts as the expense.Account currencyPHP (₱)USD ($)EUR (€)GBP (£)JPY (¥)AUD (A$)CAD (C$)CHF (CHF)CNY (¥)SGD (S$)Initial balance₱Tags (optional)HouseholdJapan tripDescription (optional)Account statusInactive accounts stay in history but are hidden from most views.ActiveCreate AccountCancel"
       },
       "account-actions": {
         "controls": [
@@ -5200,7 +5200,7 @@
           "Quick balances",
           "Cash-Flow Timeline",
           "Financial Snapshot",
-          "Actual Totals (Month to Date)",
+          "Actual totals (Month to date)",
           "Projected",
           "Budget Envelope Status",
           "Upcoming Payables",
@@ -5225,7 +5225,7 @@
           "Move GCash later",
           "Remove GCash",
           "+ Add account",
-          "Details →",
+          "Details",
           "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
           "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
           "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
@@ -7669,7 +7669,7 @@
           "Quick balances",
           "Cash-Flow Timeline",
           "Financial Snapshot",
-          "Actual Totals (Month to Date)",
+          "Actual totals (Month to date)",
           "Projected",
           "Budget Envelope Status",
           "Upcoming Payables",
@@ -7686,7 +7686,7 @@
           "DebitBPI Payroll₱84,250.40",
           "CreditHSBC Red MastercardOwed ₱18,742.30",
           "E-walletGCash₱3,415.75",
-          "Details →",
+          "Details",
           "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
           "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
           "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
