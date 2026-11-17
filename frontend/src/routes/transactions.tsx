@@ -1,0 +1,4433 @@
+import { createFileRoute, useCanGoBack, useNavigate, useRouter } from '@tanstack/react-router'
+import { useLazyGetTransactionsQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetTransactionQuery, useUpdateTransactionMutation, useFetchReceiptMutation, useUploadReceiptMutation, useGetTagsQuery } from '../store/api'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useDispatch, useSelector } from 'react-redux'
+import type {
+  Account,
+  Transaction,
+  FullBudgetEntry,
+  FullTransaction,
+  RecordPermissions,
+  SharedFullTransaction,
+} from '../store/api'
+import { entryDay, DEFAULT_SETTLEMENT, canMakeRepeat, formatCadenceLabel, editFormProjectedAmount, fieldErrorProps, repeatFieldControl, repeatingRefusal, repeatScheduleOf, scheduleRequest, schedulePreview, scheduleState, settlementControlState, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, scheduledRange, postedCycleHint, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError, completionShown, pendingTargets } from '@tally-trace/shared'
+import { AUTOFILL_FIELDS, autofillForm, cleanFormForType } from '@tally-trace/shared'
+import { cappedPaymentDays, centavosToAmount, installmentInput, installmentScheduleDraft } from '@tally-trace/shared'
+import type { AutofillField, DescriptionSuggestion, TypeFits } from '@tally-trace/shared'
+import type { FieldErrors, ListRange, OutboxKind, OutboxRequest, RepeatingTransactionInput, ScheduleContext, ScheduleDraft, TransactionStatus } from '@tally-trace/shared'
+import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
+import { useConfirm } from '../hooks/useConfirm'
+import { useToast } from '../hooks/useToast'
+import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
+import { useManilaDay } from '../hooks/useManilaDay'
+import { useToday } from '../hooks/useToday'
+import { useAuth } from '../contexts/AuthContext'
+import { currentSessionGeneration } from '../store/baseQuery'
+import type { AppDispatch, RootState } from '../store'
+import { newOutboxId, outboxActions } from '../store/outbox'
+import { TRANSACTION_TAGS, transactionDelete } from '../store/outboxForms'
+import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
+import { amountClass, formatAmount } from '../utils/amount'
+import type { AmountKind } from '../utils/amount'
+import { SpendingBreakdownDialog } from '../components/SpendingBreakdownDialog'
+import { TagChips } from '../components/TagChips'
+import { TagFilter } from '../components/TagFilter'
+import { TagPicker } from '../components/TagPicker'
+import type { ScheduleFieldKey } from '../components/RecurringScheduleFields'
+import { RepeatSection } from '../components/transactions/RepeatSection'
+import { DescriptionAutofillInput } from '../components/transactions/DescriptionAutofillInput'
+import type { RepeatErrorKey } from '../components/transactions/RepeatSection'
+import { InstallmentSection, InstallmentFieldError } from '../components/transactions/InstallmentSection'
+import type { InstallmentPreview } from '../components/transactions/InstallmentSection'
+import { installmentErrorProps } from '../components/transactions/installmentField'
+import type { InstallmentField } from '../components/transactions/installmentField'
+import { AccountPicker, CategoryPicker } from '../components/GroupedPicker'
+import { useRecentPicks } from '../hooks/useRecentPicks'
+import { DueAndOverdueSection } from '../components/transactions/DueAndOverdueSection'
+import { ScheduledView } from '../components/transactions/ScheduledView'
+import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
+import { keepsRetainedActual } from '../utils/retainedActual'
+import { SlowReload, Spinner } from '../components/Loading'
+import { Segment, SegmentedControl } from '../components/SegmentedControl'
+import { withSelection } from '../utils/selection'
+
+const TRANSACTION_TYPE_LABELS: Record<Transaction['transaction_type'], string> = {
+  credit: 'Income',
+  debit: 'Expense',
+  transfer: 'Transfer',
+}
+
+type CategoryKind = 'income' | 'expense' | 'transfer'
+
+// Each transaction type has a natural category kind: income for credit,
+// expense for debit, and transfer (savings/investment contributions, card
+// payments) for transfer. The picker only offers categories that match.
+const TYPE_TO_KIND: Record<Transaction['transaction_type'], CategoryKind> = {
+  credit: 'income',
+  debit: 'expense',
+  transfer: 'transfer',
+}
+
+// Tolerate categories created before `kind` existed by falling back to is_expense.
+const categoryKind = (category: { kind?: CategoryKind; is_expense?: boolean }): CategoryKind =>
+  category.kind ?? (category.is_expense === false ? 'income' : 'expense')
+
+// The API takes at most this many category names per request.
+const MAX_CATEGORY_NAMES = 50
+
+// A receipt or invoice given as an external link: an http(s) URL only, so a stored
+// upload (shown as `/api/...`) or any other scheme is never rendered as a link.
+const externalLink = (value: string | null | undefined): string | null => {
+  if (!value) return null
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null
+  } catch {
+    return null
+  }
+}
+
+const getOrdinalSuffix = (day: number) => {
+  if (day % 100 >= 11 && day % 100 <= 13) {
+    return 'th'
+  }
+  switch (day % 10) {
+    case 1:
+      return 'st'
+    case 2:
+      return 'nd'
+    case 3:
+      return 'rd'
+    default:
+      return 'th'
+  }
+}
+
+const formatDateWithOrdinal = (date: Date) => {
+  if (Number.isNaN(date.getTime())) {
+    return 'Invalid date'
+  }
+  const month = new Intl.DateTimeFormat('en-US', { month: 'short' }).format(date)
+  const day = date.getDate()
+  const year = date.getFullYear()
+  return `${month} ${day}${getOrdinalSuffix(day)}, ${year}`
+}
+
+// An unposted row is Pending once its day has come and Planned before; see `transactionStatus`.
+const STATUS_LABELS: Record<TransactionStatus, string> = { posted: 'Posted', pending: 'Pending', planned: 'Planned' }
+const STATUS_BADGE_CLASSES: Record<TransactionStatus, string> = {
+  posted: 'text-ink',
+  pending: 'bg-sunken text-warn',
+  planned: 'bg-sunken text-body',
+}
+const STATUS_TEXT_CLASSES: Record<TransactionStatus, string> = { posted: 'text-ok', pending: 'text-warn', planned: 'text-muted' }
+
+const PAGE_SIZES = [25, 50, 100] as const
+type PageSize = (typeof PAGE_SIZES)[number]
+const PAGE_SIZE_STORAGE_KEY = 'transactions.pageSize'
+const SEARCH_DEBOUNCE_MS = 450
+
+const readStoredPageSize = (): PageSize => {
+  try {
+    const stored = Number(localStorage.getItem(PAGE_SIZE_STORAGE_KEY))
+    return PAGE_SIZES.find((size) => size === stored) ?? PAGE_SIZES[0]
+  } catch {
+    return PAGE_SIZES[0]
+  }
+}
+
+type TransactionQuery = {
+  account_ids?: number[]
+  category_names?: string[]
+  uncategorized?: boolean
+  entered_by?: 'me'
+  transaction_types?: string[]
+  start_date?: string
+  end_date?: string
+  search?: string
+  tag?: number
+  limit?: number
+  offset?: number
+}
+
+/** A list range as the API's date filters; an open end sends nothing. */
+const rangeParams = (range: ListRange): TransactionQuery => ({
+  ...(range.start !== undefined ? { start_date: range.start } : {}),
+  ...(range.end !== undefined ? { end_date: range.end } : {}),
+})
+
+/** Page numbers to show, with 0 standing for a gap: 1 … 4 5 6 … 12. */
+const pageItems = (pages: number, page: number): number[] => {
+  const wanted = new Set([1, pages, page - 1, page, page + 1])
+  const shown = [...wanted].filter((value) => value >= 1 && value <= pages).sort((a, b) => a - b)
+  const items: number[] = []
+  shown.forEach((value, index) => {
+    const previous = shown[index - 1]
+    if (previous !== undefined && value - previous > 1) {
+      items.push(0)
+    }
+    items.push(value)
+  })
+  return items
+}
+
+const getMonthStart = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1)
+
+const getMonthEnd = (date: Date) => new Date(date.getFullYear(), date.getMonth() + 1, 0)
+
+const isSameMonth = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth()
+
+// A loan payment stores its principal as the amount and its interest as the fee;
+// the form and the posting flow work with the whole payment, in whole cents.
+const toPrincipal = (total: number, interest?: number | null) =>
+  Math.round((total - (interest ?? 0)) * 100) / 100
+
+// A transaction the caller sees in full or shared-full (never Limited): the only
+// shapes that carry the fields an edit form, a posting or a loan check reads.
+type DetailedTransaction = FullTransaction | SharedFullTransaction
+
+// Whether the stored row is already a transfer into the account (an edit of it
+// is never split by the server, see routers/transactions.py).
+const paysLoan = (transaction: DetailedTransaction | null, accountId: number | undefined) =>
+  transaction !== null &&
+  accountId !== undefined &&
+  transaction.transaction_type === 'transfer' &&
+  transaction.transfer_to_account_id === accountId
+
+// Whether a row is a loan payment: `loan` / `not_loan`, `pending` while its
+// destination is being looked up, `unavailable` when that lookup found nothing.
+type LoanPaymentStatus = 'loan' | 'not_loan' | 'pending' | 'unavailable'
+
+const NO_PERMISSIONS: RecordPermissions = {
+  can_edit: false,
+  can_delete: false,
+  can_post: false,
+  can_revert: false,
+  can_tag: false,
+}
+
+const DESTINATION_UNAVAILABLE =
+  "This transfer's destination account can't be found, so it is read-only here."
+
+// The transaction form's inline field errors (STU-410). The dates keep their own
+// `dateErrors` (STU-404); every other checked field is keyed here.
+const TRANSACTION_FIELDS = [
+  'description',
+  'account_id',
+  'transfer_to_account_id',
+  'projected_amount',
+  'received_amount',
+  'transfer_fee',
+  'amount',
+] as const
+type TransactionField = (typeof TRANSACTION_FIELDS)[number]
+const isTransactionField = (key: string | undefined): key is TransactionField =>
+  (TRANSACTION_FIELDS as readonly string[]).includes(key ?? '')
+const fieldErrorId = (key: TransactionField) => `transaction-${key}-error`
+const withoutErrors = (errors: FieldErrors<TransactionField>, keys: TransactionField[]) =>
+  keys.reduce((rest, key) => withoutError(rest, key), errors)
+
+function FieldErrorText({ field, message }: { field: TransactionField; message: string | undefined }) {
+  if (!message) return null
+  return (
+    <p id={fieldErrorId(field)} className="mt-1 text-xs text-danger" role="alert" data-testid={`field-error-${field}`}>
+      {message}
+    </p>
+  )
+}
+
+// Repeat in Add Transaction (STU-584): the schedule the new recurring entry takes. Its first
+// occurrence is the transaction's own date, so the draft holds no date.
+type RepeatDraft = Omit<ScheduleDraft, 'next_occurrence'>
+const createRepeatDraft = (): RepeatDraft => ({
+  cadence: 'monthly',
+  day: { kind: 'same_as_date' },
+  end_mode: 'indefinite',
+  end_date: undefined,
+  max_occurrences: undefined,
+  kind_choice: 'automatic',
+  bank_kind: 'other',
+  settlement: DEFAULT_SETTLEMENT,
+})
+const REPEAT_FIELD_KEYS: readonly string[] = ['day', 'day_of_month', 'end_date', 'max_occurrences'] satisfies ScheduleFieldKey[]
+const isRepeatField = (key: string | undefined): key is ScheduleFieldKey => REPEAT_FIELD_KEYS.includes(key ?? '')
+// Focuses a field: an open compact picker's search box; else a chip group's selected chip,
+// else its first (an open picker's toggle comes first in the DOM, so it is passed over while
+// there is a chip); a button group's first.
+const focusField = (field: HTMLElement | null) => {
+  const target =
+    field?.getAttribute('role') === 'group'
+      ? field.querySelector<HTMLElement>('[data-picker-panel] input[data-picker-search]') ??
+        field.querySelector<HTMLElement>('button[data-selected="true"]') ??
+        field.querySelector<HTMLElement>('button:not([data-picker-toggle])') ??
+        field.querySelector<HTMLElement>('button')
+      : field
+  target?.focus()
+}
+
+const REPEAT_CARD_TRANSFER = "A recurring transfer can't be paid into or funded from a credit card"
+// An API from before POST /transactions/repeating answers 405 during a deploy (its
+// /transactions/{id} routes take no POST), or a bare 404 "Not Found" with no such route. A
+// 404 with any other detail ("Account not found") is a refusal, shown on the form's line.
+const REPEAT_UNAVAILABLE = "Repeat isn't available right now; the app may be updating. Try again, or turn Repeat off to save it once."
+// The same for Edit's "Make this repeat" (POST /transactions/{id}/repeat, STU-585).
+const REPEAT_EDIT_UNAVAILABLE = "Repeat isn't available right now; the app may be updating. Try again, or turn Make this repeat off to save your changes."
+
+const formatMonthYear = (date: Date) =>
+  date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+
+const formatDateInput = (date: Date) => {
+  const year = date.getFullYear()
+  const month = `${date.getMonth() + 1}`.padStart(2, '0')
+  const day = `${date.getDate()}`.padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const parseDateInput = (value: string) => {
+  const [year, month, day] = value.split('-').map(Number)
+  return new Date(year, (month || 1) - 1, day || 1)
+}
+
+export const Route = createFileRoute('/transactions')({
+  component: TransactionsPage,
+  // `?edit=<id>` opens that transaction; `from=dashboard` goes back there when it closes.
+  // `?view=scheduled` lists what is coming after today instead of the month, so a reload or a link keeps it.
+  validateSearch: (search: Record<string, unknown>): { edit?: number; from?: 'dashboard'; view?: 'scheduled' } => {
+    const edit = Number(search.edit)
+    return {
+      edit: Number.isInteger(edit) && edit > 0 ? edit : undefined,
+      from: search.from === 'dashboard' ? 'dashboard' : undefined,
+      view: search.view === 'scheduled' ? 'scheduled' : undefined,
+    }
+  },
+})
+
+type TransactionFormState = {
+  account_id: number
+  category_id?: number
+  allocation_id?: number
+  budget_entry_id?: number
+  amount?: number
+  currency: CurrencyCode
+  projected_amount?: number
+  projected_currency?: CurrencyCode
+  original_amount?: number
+  original_currency?: CurrencyCode
+  exchange_rate?: number
+  // A transfer between currencies: what the destination received, in its own currency.
+  received_amount?: number
+  // Undefined while the field is blank: a payment into a loan then leaves the
+  // principal/interest split to the server.
+  transfer_fee?: number
+  description: string
+  transaction_type: Transaction['transaction_type']
+  transaction_date: string
+  posting_date?: string
+  is_posted: boolean
+  transfer_from_account_id?: number
+  transfer_to_account_id?: number
+  // The tags picked in the form; an edit sends them only when they changed.
+  tag_ids: number[]
+}
+
+type PostingFormState = {
+  visible: boolean
+  amount: string
+  error: string | null
+  projectedAmount: number | null
+  projectedCurrency: CurrencyCode
+  accountCurrency: CurrencyCode
+  needsConversion: boolean
+  // A transfer into another currency also needs what the destination received.
+  needsReceived: boolean
+  destinationCurrency: CurrencyCode
+  received: string
+  // The caller may post but not edit (the owner resolving a creator's record): the only
+  // figure sent is the one the row needs, beside `is_posted`.
+  statusOnly: boolean
+  // The day it posted (YYYY-MM-DD), asked for unless the caller may only post.
+  postedOn: string
+  dateError: string | null
+}
+
+/** A transaction save as the outbox keeps it for Edit (STU-605): the form as the user left it. */
+type TransactionDraft = {
+  formData: TransactionFormState
+  repeatOn: boolean
+  repeatDraft: RepeatDraft
+  /** Installment from a total (STU-631): on, with the total and months as typed. */
+  installment?: InstallmentDraft
+  editing: DetailedTransaction | null
+  postedTouched: boolean
+}
+
+/** The Installment option as typed: the total and months are kept as text, as entered. */
+type InstallmentDraft = { on: boolean; total: string; months: string }
+const createInstallmentDraft = (): InstallmentDraft => ({ on: false, total: '', months: '' })
+const INSTALLMENT_UNAVAILABLE = "Installments aren't available right now; the app may be updating. Try again in a moment."
+
+/** A display-only "Saving…" row in the main list: built from what was typed, it feeds no total. */
+type PendingListRow = {
+  key: string
+  date: string
+  description: string
+  amount: string
+  account: string
+  /** `failed`: refused or not confirmed; a refusal's row reopens its form on click. */
+  state: 'saving' | 'failed'
+  editClientId: string | null
+}
+
+/**
+ * Places the "Saving…" rows among a date-descending page of rows: before the first row dated
+ * earlier. A row dated before the whole page goes at its end only on the last page, and one
+ * dated after it only on page 1, so it shows on the page it will land on.
+ */
+function withPendingRows(rows: Transaction[], pending: PendingListRow[], page: number, lastPage: boolean) {
+  type Item = { kind: 'row'; row: Transaction } | { kind: 'pending'; row: PendingListRow }
+  const items: Item[] = rows.map((row) => ({ kind: 'row', row }))
+  const firstDay = rows.length > 0 ? transactionDate(rows[0]) : null
+  for (const p of pending) {
+    if (firstDay !== null && p.date > firstDay && page !== 1) continue
+    const at = items.findIndex((item) => item.kind === 'row' && transactionDate(item.row) < p.date)
+    if (at === -1) {
+      if (lastPage || rows.length === 0) items.push({ kind: 'pending', row: p })
+      continue
+    }
+    items.splice(at, 0, { kind: 'pending', row: p })
+  }
+  return items
+}
+
+const emptyPostingForm = (currency: CurrencyCode): PostingFormState => ({
+  visible: false,
+  amount: '',
+  error: null,
+  projectedAmount: null,
+  projectedCurrency: currency,
+  accountCurrency: currency,
+  needsConversion: false,
+  needsReceived: false,
+  destinationCurrency: currency,
+  received: '',
+  statusOnly: false,
+  postedOn: '',
+  dateError: null,
+})
+
+export function TransactionsPage() {
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth()
+  const navigate = useNavigate()
+  const fallbackCurrency = (user?.default_currency as CurrencyCode) || 'PHP'
+
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      navigate({ to: '/login', search: { message: undefined } })
+    }
+  }, [isAuthenticated, authLoading, navigate])
+
+  const createInitialFormState = (overrides: Partial<TransactionFormState> = {}): TransactionFormState => ({
+    account_id: 0,
+    category_id: undefined,
+    allocation_id: undefined,
+    budget_entry_id: undefined,
+    amount: undefined,
+    currency: fallbackCurrency,
+    projected_amount: undefined,
+    projected_currency: fallbackCurrency,
+    original_amount: undefined,
+    original_currency: undefined,
+    exchange_rate: undefined,
+    received_amount: undefined,
+    transfer_fee: undefined,
+    description: '',
+    transaction_type: 'debit',
+    transaction_date: localToday(),
+    posting_date: undefined,
+    is_posted: true,
+    transfer_from_account_id: undefined,
+    transfer_to_account_id: undefined,
+    tag_ids: [],
+    ...overrides,
+  })
+
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+  const [editingTransaction, setEditingTransaction] = useState<DetailedTransaction | null>(null)
+  const [isActionModalOpen, setIsActionModalOpen] = useState(false)
+  const [actionTransaction, setActionTransaction] = useState<Transaction | null>(null)
+  const [fetchReceipt, { isLoading: isReceiptLoading }] = useFetchReceiptMutation()
+  const [receipt, setReceipt] = useState<{ url: string; type: string; transactionId: number } | null>(null)
+  const [receiptError, setReceiptError] = useState<string | null>(null)
+  // Uploading a receipt from the action modal: the chosen file, a refusal, and the
+  // input's key (bumped to clear it after an upload).
+  const [uploadReceipt, { isLoading: isReceiptUploading }] = useUploadReceiptMutation()
+  const [receiptFile, setReceiptFile] = useState<File | null>(null)
+  const [receiptUploadError, setReceiptUploadError] = useState<string | null>(null)
+  const [receiptUploaded, setReceiptUploaded] = useState(false)
+  const [receiptInputKey, setReceiptInputKey] = useState(0)
+  // True once the user changes the date or the posted box in this dialog session. The
+  // future-date note waits for it, so Edit never shows it for a row as loaded.
+  const [postedTouched, setPostedTouched] = useState(false)
+  const [dateErrors, setDateErrors] = useState<{ transaction_date?: string | undefined; posting_date?: string | undefined }>({})
+  const transactionDateInput = useRef<HTMLInputElement>(null)
+  const postingDateInput = useRef<HTMLInputElement>(null)
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors<TransactionField>>({})
+  // A failed action from the action modal (mark not posted, a status-only post) shows here.
+  const [actionError, setActionError] = useState<string | null>(null)
+  const askConfirm = useConfirm()
+  const showToast = useToast()
+  const [formError, setFormError] = useState<string | null>(null)
+  // Repeat (Add, and Edit's "Make this repeat"): the toggle, its schedule, its fields' errors, a refusal the section
+  // shows on its own line, and an API that does not have the endpoint yet (Retry).
+  const [repeatOn, setRepeatOn] = useState(false)
+  const [repeatDraft, setRepeatDraft] = useState<RepeatDraft>(createRepeatDraft)
+  const [repeatErrors, setRepeatErrors] = useState<FieldErrors<RepeatErrorKey>>({})
+  const [repeatError, setRepeatError] = useState<string | null>(null)
+  const [repeatUnavailable, setRepeatUnavailable] = useState(false)
+  // Installment from a total (Add only, an expense on a credit card, STU-631): the toggle, the
+  // total and months as typed, their errors and a refusal shown on the section's own line.
+  const [installment, setInstallment] = useState<InstallmentDraft>(createInstallmentDraft)
+  const [installmentErrors, setInstallmentErrors] = useState<Partial<Record<InstallmentField, string>>>({})
+  const [installmentError, setInstallmentError] = useState<string | null>(null)
+  // A save is queued in the save outbox (STU-605) and runs in the background: the dialog closes
+  // at once, or clears for the next entry. The ref guards a second submit in the same tick.
+  const saveInFlight = useRef(false)
+  const dispatch = useDispatch<AppDispatch>()
+  // The line confirming the last "Save and add another".
+  const [savedNotice, setSavedNotice] = useState<string | null>(null)
+  // `selector`: a refused save's field, focused once its form has reopened (the toast's Edit).
+  const [focusRequest, setFocusRequest] = useState<{ n: number; to: 'description' | 'submitter' | { selector: string } } | null>(null)
+  const focusSeq = useRef(0)
+  const focusHandled = useRef(0)
+  // The submit button the current attempt was made with.
+  const submitterRef = useRef<HTMLElement | null>(null)
+  // A refused save reopened by the toast's Edit: its error is shown once the form has rendered.
+  const [pendingRefusal, setPendingRefusal] = useState<{ error: unknown; repeat: boolean; superseded: boolean } | null>(null)
+  const transactionForm = useRef<HTMLFormElement>(null)
+  // The controls the browser flagged in one submit attempt, in tree order.
+  const invalidControls = useRef<Array<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>>([])
+  const receiptFor = useRef<number | null>(null)
+  // The object URL is owned here, not by `receipt` state, so one accepted
+  // before its state commits is still revoked.
+  const receiptUrl = useRef<string | null>(null)
+  const releaseReceiptUrl = useCallback(() => {
+    if (receiptUrl.current) URL.revokeObjectURL(receiptUrl.current)
+    receiptUrl.current = null
+  }, [])
+  // A result that lands after the page unmounts must find no pending request.
+  useEffect(() => () => {
+    receiptFor.current = null
+    releaseReceiptUrl()
+  }, [releaseReceiptUrl])
+  const [postingFormState, setPostingFormState] = useState<PostingFormState>(emptyPostingForm(fallbackCurrency))
+  const [searchTerm, setSearchTerm] = useState('')
+  const [showFilters, setShowFilters] = useState(false)
+  const [isBreakdownOpen, setIsBreakdownOpen] = useState(false)
+  const [selectedAccountIds, setSelectedAccountIds] = useState<number[]>([])
+  const [selectedCategoryNames, setSelectedCategoryNames] = useState<string[]>([])
+  const [filterUncategorized, setFilterUncategorized] = useState(false)
+  const [enteredBy, setEnteredBy] = useState<'everyone' | 'me'>('everyone')
+  const [selectedTypes, setSelectedTypes] = useState<Transaction['transaction_type'][]>([])
+  const [selectedTag, setSelectedTag] = useState<number | undefined>(undefined)
+  // The Scheduled view's own range: empty means the default (tomorrow, through a year ahead).
+  const { view } = Route.useSearch()
+  // The day every list membership is decided on: Manila's, the server's day. The main list
+  // ends on it, the Due card keeps it and earlier and its Upcoming tab starts after it, so an
+  // item is in one section whatever the viewer's time zone. A new Manila day refetches.
+  const partitionDay = useManilaDay()
+  const isScheduled = view === 'scheduled'
+  const [scheduledFrom, setScheduledFrom] = useState('')
+  const [scheduledThrough, setScheduledThrough] = useState('')
+  const resetPostingFormState = useCallback(() => {
+    setPostingFormState(emptyPostingForm(fallbackCurrency))
+  }, [fallbackCurrency])
+  const defaultMonthStartRef = useRef(getMonthStart(new Date()))
+  const defaultMonthEndRef = useRef(getMonthEnd(defaultMonthStartRef.current))
+  const [currentMonth, setCurrentMonth] = useState<Date>(defaultMonthStartRef.current)
+  const [startDate, setStartDate] = useState<string>(() => formatDateInput(defaultMonthStartRef.current))
+  const [endDate, setEndDate] = useState<string>(() => formatDateInput(defaultMonthEndRef.current))
+  const [isCustomRange, setIsCustomRange] = useState(false)
+  const [formData, setFormData] = useState<TransactionFormState>(() => createInitialFormState())
+  // Description autofill (STU-626): the fields the user changed in this form, which autofill
+  // never overwrites, and a key the Description field drops its suggestions on. Both reset with
+  // the form, and on "Save and add another".
+  const changedFields = useRef<Set<AutofillField>>(new Set())
+  const markChanged = (...fields: AutofillField[]) => {
+    for (const field of fields) changedFields.current.add(field)
+  }
+  const [autofillResetKey, setAutofillResetKey] = useState(0)
+  const pendingSuggestion = useRef<DescriptionSuggestion | null>(null)
+  const resetAutofill = () => {
+    pendingSuggestion.current = null
+    changedFields.current = new Set()
+    setAutofillResetKey((n) => n + 1)
+  }
+  const currencyOptions = useMemo(() => Object.keys(CURRENCY_CONFIGS) as CurrencyCode[], [])
+  const transactionTypeOptions = useMemo(
+    () => [
+      { value: 'credit' as Transaction['transaction_type'], label: 'Income' },
+      { value: 'debit' as Transaction['transaction_type'], label: 'Expense' },
+      { value: 'transfer' as Transaction['transaction_type'], label: 'Transfer' },
+    ],
+    []
+  )
+  const resetFilters = useCallback(() => {
+    const freshStart = getMonthStart(new Date())
+    const freshEnd = getMonthEnd(freshStart)
+    defaultMonthStartRef.current = freshStart
+    defaultMonthEndRef.current = freshEnd
+    setSearchTerm('')
+    setSelectedAccountIds((prev) => (prev.length ? [] : prev))
+    setSelectedCategoryNames((prev) => (prev.length ? [] : prev))
+    setFilterUncategorized(false)
+    setEnteredBy('everyone')
+    setSelectedTypes((prev) => (prev.length ? [] : prev))
+    setSelectedTag(undefined)
+    setScheduledFrom('')
+    setScheduledThrough('')
+    setCurrentMonth(freshStart)
+    setStartDate(formatDateInput(freshStart))
+    setEndDate(formatDateInput(freshEnd))
+    setIsCustomRange(false)
+  }, [])
+
+  const defaultMonthStartString = formatDateInput(defaultMonthStartRef.current)
+  const defaultMonthEndString = formatDateInput(defaultMonthEndRef.current)
+
+  // The spending breakdown's Uncategorized row sets both, which read as one "No category" chip.
+  const isDrilledUncategorized =
+    filterUncategorized && selectedCategoryNames.length === 1 && selectedCategoryNames[0] === 'Uncategorized'
+
+  const hasActiveFilters = useMemo(
+    () =>
+      Boolean(
+        searchTerm.trim() ||
+          selectedAccountIds.length ||
+          selectedCategoryNames.length ||
+          filterUncategorized ||
+          enteredBy !== 'everyone' ||
+          selectedTypes.length ||
+          selectedTag !== undefined ||
+          (isScheduled
+            ? scheduledFrom !== '' || scheduledThrough !== ''
+            : isCustomRange || startDate !== defaultMonthStartString || endDate !== defaultMonthEndString)
+      ),
+    [
+      searchTerm,
+      selectedAccountIds,
+      selectedCategoryNames,
+      filterUncategorized,
+      enteredBy,
+      selectedTypes,
+      selectedTag,
+      isCustomRange,
+      isScheduled,
+      scheduledFrom,
+      scheduledThrough,
+      startDate,
+      endDate,
+      defaultMonthStartString,
+      defaultMonthEndString,
+    ]
+  )
+
+  const dateRangeSummary = useMemo(() => {
+    if (isScheduled) {
+      const scheduled = scheduledRange(partitionDay, scheduledFrom, scheduledThrough)
+      return `${formatDateWithOrdinal(parseDateInput(scheduled.start))} → ${formatDateWithOrdinal(parseDateInput(scheduled.end))}`
+    }
+    if (!startDate && !endDate) {
+      return 'All dates'
+    }
+    const startLabel = startDate ? formatDateWithOrdinal(parseDateInput(startDate)) : 'Beginning'
+    const endLabel = endDate ? formatDateWithOrdinal(parseDateInput(endDate)) : 'Present'
+    return `${startLabel} → ${endLabel}`
+  }, [isScheduled, partitionDay, scheduledFrom, scheduledThrough, startDate, endDate])
+
+  // The dialog reads the same dates; an open side is "Any date".
+  const breakdownRangeLabel = useMemo(() => {
+    const startLabel = startDate ? formatDateWithOrdinal(parseDateInput(startDate)) : 'Any date'
+    const endLabel = endDate ? formatDateWithOrdinal(parseDateInput(endDate)) : 'Any date'
+    return `${startLabel} → ${endLabel}`
+  }, [startDate, endDate])
+
+  const todayMonthStart = useMemo(() => getMonthStart(new Date()), [])
+  const currentMonthLabel = useMemo(() => formatMonthYear(currentMonth), [currentMonth])
+  const isAtCurrentMonth = useMemo(
+    () => isSameMonth(currentMonth, todayMonthStart),
+    [currentMonth, todayMonthStart]
+  )
+
+  const handleMonthChange = useCallback(
+    (direction: 'prev' | 'next') => {
+      setIsCustomRange(false)
+      setCurrentMonth((prev) => {
+        if (direction === 'next' && isSameMonth(prev, todayMonthStart)) {
+          return prev
+        }
+        const next = new Date(prev)
+        next.setMonth(prev.getMonth() + (direction === 'next' ? 1 : -1))
+        return getMonthStart(next)
+      })
+    },
+    [todayMonthStart]
+  )
+
+  const toggleCategoryFilter = useCallback((name: string) => {
+    setSelectedCategoryNames((prev) => {
+      if (prev.includes(name)) return prev.filter((value) => value !== name)
+      return prev.length >= MAX_CATEGORY_NAMES ? prev : [...prev, name]
+    })
+  }, [])
+
+  const toggleTypeFilter = useCallback((value: Transaction['transaction_type']) => {
+    setSelectedTypes((prev) =>
+      prev.includes(value) ? prev.filter((item) => item !== value) : [...prev, value]
+    )
+  }, [])
+
+  const handleCustomStartDateChange = useCallback((value: string) => {
+    setIsCustomRange(true)
+    setStartDate(value)
+    if (value) {
+      setCurrentMonth(getMonthStart(parseDateInput(value)))
+    }
+  }, [])
+
+  const handleCustomEndDateChange = useCallback((value: string) => {
+    setIsCustomRange(true)
+    setEndDate(value)
+  }, [])
+
+  useEffect(() => {
+    if (isCustomRange) {
+      return
+    }
+    const nextStart = formatDateInput(currentMonth)
+    const nextEnd = formatDateInput(getMonthEnd(currentMonth))
+    setStartDate((prev) => (prev === nextStart ? prev : nextStart))
+    setEndDate((prev) => (prev === nextEnd ? prev : nextEnd))
+  }, [currentMonth, isCustomRange])
+
+  const [triggerTransactions] = useLazyGetTransactionsQuery()
+  const beginTransactionsRequest = useRequestGeneration()
+  const { data: accountsData, isLoading: isAccountsLoading } = useGetAccountsQuery(
+    // Read to pick accounts, not to show balances: a save does not refetch it (see `getAccounts`).
+    { is_active: true, limit: 100, forSelector: true },
+    { skip: !isAuthenticated }
+  )
+  const {
+    data: categoriesData,
+    isLoading: isCategoriesLoading,
+  } = useGetCategoriesQuery({ is_active: true }, { skip: !isAuthenticated })
+  const {
+    data: budgetEntriesData,
+    isLoading: budgetEntriesLoading,
+  } = useGetBudgetEntriesQuery({ is_active: true, limit: 200 }, { skip: !isAuthenticated })
+  
+  const [updateTransaction] = useUpdateTransactionMutation()
+
+  const accounts = useMemo(() => accountsData?.items ?? [], [accountsData])
+  const accountCurrencies = useMemo(
+    () => new Map(accounts.map((account) => [account.id, account.currency as CurrencyCode])),
+    [accounts],
+  )
+  // The form's account pickers offer only accounts the caller may add transactions to
+  // (a viewer's shared account can be read and filtered by, never written to).
+  const writableAccounts = useMemo(
+    () => accounts.filter((account) => account.permissions.can_add_transactions),
+    [accounts]
+  )
+  // The form pickers' recent choices on this device, written only after a save succeeds.
+  const recentAccounts = useRecentPicks('account')
+  const recentCategories = useRecentPicks('category')
+  // Destinations looked up by id because they are not in `accounts` (inactive,
+  // or past its first 100); null when the lookup found no such account.
+  const [triggerAccount] = useLazyGetAccountQuery()
+  const [resolvedDestinations, setResolvedDestinations] = useState<Record<number, Account | null>>({})
+  const destinationLookups = useRef(new Set<number>())
+  const categories = useMemo(() => categoriesData ?? [], [categoriesData])
+  // The category picker's recents (ids) as the names the filter works in.
+  const recentCategoryNames = useMemo(() => {
+    const names = new Map(categories.map((category) => [category.id, category.name]))
+    return recentCategories.recentIds.flatMap((id) => {
+      const name = typeof id === 'number' ? names.get(id) : undefined
+      return name === undefined ? [] : [name]
+    })
+  }, [categories, recentCategories.recentIds])
+  // Only the caller's own entries can be linked to a transaction: a shared or limited
+  // entry belongs to someone else, whose category and allocation the caller can't use.
+  const budgetEntries = useMemo(() => (budgetEntriesData?.items ?? []).filter(isOwnerFull), [budgetEntriesData])
+  // The viewer's local day, for display only: a row's status, "Today" / "Tomorrow" and the form's defaults.
+  const today = useToday()
+  const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [totalTransactions, setTotalTransactions] = useState(0)
+  // The full-page spinner is for the first load only; later loads keep the rows on screen.
+  const [mainSettled, setMainSettled] = useState(false)
+  // Whether the list reflects its latest request, and whether that request failed. A
+  // failure keeps the rows already on screen and never turns them into an empty list.
+  const [mainCurrent, setMainCurrent] = useState(false)
+  const [mainError, setMainError] = useState(false)
+  const listError = mainError
+  const listsCurrent = mainCurrent
+  const [isMainLoading, setIsMainLoading] = useState(false)
+  // The filter, page and outbox drain the rows on screen were loaded under. Rows from another
+  // filter or page are stale: dimmed, and their actions wait for the fresh ones.
+  const [loadedKey, setLoadedKey] = useState('')
+  const outbox = useSelector((state: RootState) => state.outbox)
+  // The picks each queued save will record as recent once it succeeds, by client id. A refused
+  // or discarded save records nothing.
+  const recentsOnSave = useRef(
+    new Map<string, { accounts: Array<number | null | undefined>; categories: Array<number | null | undefined> | null }>(),
+  )
+  const pushRecentAccounts = recentAccounts.push
+  const pushRecentCategories = recentCategories.push
+  useEffect(() => {
+    const waiting = recentsOnSave.current
+    if (waiting.size === 0) return
+    for (const completion of outbox.completions) {
+      const picks = waiting.get(completion.clientId)
+      if (!picks) continue
+      waiting.delete(completion.clientId)
+      pushRecentAccounts(picks.accounts)
+      if (picks.categories) pushRecentCategories(picks.categories)
+    }
+    // A save discarded from its toast settles without a completion.
+    const queued = new Set(outbox.entries.map((entry) => entry.clientId))
+    for (const clientId of waiting.keys()) {
+      if (!queued.has(clientId)) waiting.delete(clientId)
+    }
+  }, [outbox.completions, outbox.entries, pushRecentAccounts, pushRecentCategories])
+  const drainSeqRef = useLatestRef(outbox.drainSeq)
+  const [listDrainSeq, setListDrainSeq] = useState(outbox.drainSeq)
+  const isInitialLoading = !mainSettled
+  const isRefreshing = isMainLoading
+
+  const [pageSize, setPageSizeState] = useState<PageSize>(readStoredPageSize)
+  // The search term enters the filter key 450ms after the last keystroke.
+  const [debouncedSearch, setDebouncedSearch] = useState(searchTerm)
+  useEffect(() => {
+    // `effectiveSearch` makes a reset a single fetch; clearing here at once stops a stale term coming back.
+    if (searchTerm.trim() === '') {
+      setDebouncedSearch('')
+      return
+    }
+    const timer = setTimeout(() => setDebouncedSearch(searchTerm), SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [searchTerm])
+
+  // Everything that changes which rows are listed. The page is stored with the key it
+  // was chosen under, so any change of filter, page size or day falls back to page 1
+  // in the same render, with no second fetch.
+  // A cleared search applies in the render that clears it, so a filter reset sends one fetch.
+  const effectiveSearch = searchTerm.trim() === '' ? '' : debouncedSearch.trim()
+  const filterKey = useMemo(
+    () => JSON.stringify([startDate, endDate, selectedAccountIds, selectedCategoryNames, filterUncategorized, enteredBy, selectedTypes, effectiveSearch, selectedTag ?? null, pageSize, partitionDay]),
+    [startDate, endDate, selectedAccountIds, selectedCategoryNames, filterUncategorized, enteredBy, selectedTypes, effectiveSearch, selectedTag, pageSize, partitionDay]
+  )
+  const [pageState, setPageState] = useState<{ key: string; page: number }>({ key: '', page: 1 })
+  const page = pageState.key === filterKey ? pageState.page : 1
+  // Re-key the stored page when the filters change, so a round trip (page 2, another
+  // filter, back) lands on page 1. `page` is already 1 for a mismatched key, so this
+  // changes nothing the fetches depend on.
+  useEffect(() => {
+    setPageState((prev) => (prev.key === filterKey ? prev : { key: filterKey, page: 1 }))
+  }, [filterKey])
+  const goToPage = useCallback((next: number) => setPageState({ key: filterKey, page: next }), [filterKey])
+  const setPageSize = useCallback((next: PageSize) => {
+    try {
+      localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(next))
+    } catch {
+      // Storage can be blocked; the choice then lasts for this visit only.
+    }
+    setPageSizeState(next)
+  }, [])
+
+  // The main list's range: the filter, on or before the Manila day. Upcoming is the Due card's tab.
+  const bounds = useMemo(
+    () => listBounds(startDate, endDate, partitionDay),
+    [startDate, endDate, partitionDay]
+  )
+  const filterParams = useMemo(() => {
+    const params: TransactionQuery = {}
+    if (selectedAccountIds.length > 0) {
+      params.account_ids = selectedAccountIds
+    }
+    if (selectedTypes.length > 0) {
+      params.transaction_types = selectedTypes
+    }
+    if (selectedCategoryNames.length > 0) {
+      params.category_names = selectedCategoryNames
+    }
+    if (filterUncategorized) {
+      params.uncategorized = true
+    }
+    if (enteredBy === 'me') {
+      params.entered_by = 'me'
+    }
+    if (selectedTag !== undefined) {
+      params.tag = selectedTag
+    }
+    if (effectiveSearch) {
+      params.search = effectiveSearch
+    }
+    return params
+  }, [selectedAccountIds, selectedTypes, selectedCategoryNames, filterUncategorized, enteredBy, selectedTag, effectiveSearch])
+
+  // The Scheduled view: its range, and the switch between it and the month list (`?view=`).
+  const scheduled = useMemo(
+    () => scheduledRange(partitionDay, scheduledFrom, scheduledThrough),
+    [partitionDay, scheduledFrom, scheduledThrough]
+  )
+  const listCardRef = useRef<HTMLDivElement>(null)
+  const showView = useCallback(
+    (next: 'to_date' | 'scheduled') => {
+      void navigate({
+        to: '/transactions',
+        search: (prev) => ({ ...prev, view: next === 'scheduled' ? 'scheduled' : undefined }),
+      })
+    },
+    [navigate]
+  )
+  // "See everything scheduled" on the Due card: switch the list and bring it into view.
+  const seeScheduled = useCallback(() => {
+    showView('scheduled')
+    requestAnimationFrame(() => listCardRef.current?.scrollIntoView({ block: 'start' }))
+  }, [showView])
+
+  const loadTransactions = useCallback(
+    async () => {
+      if (!isAuthenticated) {
+        return
+      }
+      const isCurrent = beginTransactionsRequest(true)
+      const requestKey = `${filterKey}|${page}`
+      const drainAtStart = drainSeqRef.current
+      let refetching = false
+      try {
+        setIsMainLoading(true)
+        setMainCurrent(false)
+        if (bounds.main === null) {
+          setTransactions([])
+          setTotalTransactions(0)
+          setMainError(false)
+          setMainCurrent(true)
+          setLoadedKey(requestKey)
+          setListDrainSeq(drainAtStart)
+          return
+        }
+        const offset = (page - 1) * pageSize
+        const result = await triggerTransactions({ ...filterParams, ...rangeParams(bounds.main), limit: pageSize, offset }).unwrap()
+        if (!isCurrent()) return
+        // The page ran past the end (rows were deleted or moved): go straight to the last one.
+        if (result.total > 0 && offset >= result.total) {
+          refetching = true
+          goToPage(pageWindow(result.total, page, pageSize).pages)
+          return
+        }
+        setTransactions(result.items)
+        setTotalTransactions(result.total)
+        setMainError(false)
+        setMainCurrent(true)
+        setLoadedKey(requestKey)
+        setListDrainSeq(drainAtStart)
+      } catch (error) {
+        if (!isCurrent()) return
+        console.error('Error loading transactions:', error)
+        setMainError(true)
+      } finally {
+        if (isCurrent() && !refetching) {
+          setIsMainLoading(false)
+          setMainSettled(true)
+        }
+      }
+    },
+    [beginTransactionsRequest, bounds.main, drainSeqRef, filterKey, filterParams, goToPage, isAuthenticated, page, pageSize, triggerTransactions]
+  )
+
+  // After a change the main list is fetched again under the filters and page now on screen; the
+  // Due card's queries refetch on their own (the `Transaction` tag).
+  const refreshLists = useCallback(async () => {
+    await loadTransactions()
+  }, [loadTransactions])
+  const refreshListsRef = useLatestRef(refreshLists)
+
+  // Background saves (STU-605): once the outbox drains, the main list is fetched once again.
+  const seenDrain = useRef(outbox.drainSeq)
+  useEffect(() => {
+    if (outbox.drainSeq === seenDrain.current) return
+    seenDrain.current = outbox.drainSeq
+    void refreshListsRef.current()
+  }, [outbox.drainSeq, refreshListsRef])
+
+  // The success toast's View: once the list is current, its row is scrolled to and marked.
+  const [highlightedId, setHighlightedId] = useState<number | null>(null)
+  useEffect(() => {
+    const highlight = outbox.highlight
+    if (!highlight || highlight.form !== 'transaction' || !mainCurrent || isScheduled) return
+    dispatch(outboxActions.highlightHandled(highlight.seq))
+    const row = document.querySelector(`[data-transaction-id="${highlight.id}"]`)
+    if (!row) return
+    row.scrollIntoView({ block: 'center' })
+    setHighlightedId(highlight.id)
+  }, [outbox.highlight, mainCurrent, isScheduled, transactions, dispatch])
+  useEffect(() => {
+    if (highlightedId === null) return
+    const timer = setTimeout(() => setHighlightedId(null), 2500)
+    return () => clearTimeout(timer)
+  }, [highlightedId])
+
+  useEffect(() => {
+    if (authLoading || !isAuthenticated) {
+      return
+    }
+    void loadTransactions()
+  }, [authLoading, isAuthenticated, loadTransactions])
+
+  useEffect(() => {
+    if (!isActionModalOpen) {
+      resetPostingFormState()
+    }
+  }, [isActionModalOpen, resetPostingFormState])
+
+  const transferDestinationOptions = useMemo(
+    () =>
+      writableAccounts.filter(
+        (account) =>
+          account.id !== (formData.transfer_from_account_id ?? formData.account_id) && account.id !== 0
+      ),
+    [writableAccounts, formData.account_id, formData.transfer_from_account_id]
+  )
+
+  const matchingBudgetEntries = useMemo(() => {
+    if (formData.transaction_type === 'transfer') {
+      return []
+    }
+    const targetType = formData.transaction_type === 'credit' ? 'income' : 'expense'
+    return budgetEntries.filter((entry) => entry.is_active && entry.entry_type === targetType)
+  }, [budgetEntries, formData.transaction_type])
+
+  const selectedBudgetEntry = formData.budget_entry_id
+    ? budgetEntries.find((entry) => entry.id === formData.budget_entry_id)
+    : undefined
+
+  // Only offer categories whose kind matches the current type; a transfer now
+  // gets its own (savings/investment/contribution) categories.
+  const categoryKindForType = TYPE_TO_KIND[formData.transaction_type]
+  const visibleCategories = useMemo(
+    () => categories.filter((category) => categoryKind(category) === categoryKindForType),
+    [categories, categoryKindForType]
+  )
+
+  const selectedFormAccount = useMemo(
+    () => accounts.find((account) => account.id === formData.account_id),
+    [accounts, formData.account_id]
+  )
+  // A posted day that puts a card row on another statement than its own day says so; saving is never blocked.
+  const editFormHint =
+    selectedFormAccount?.account_type === 'credit' && formData.is_posted && formData.transaction_date && formData.posting_date
+      ? postedCycleHint(selectedFormAccount, formData.transaction_date, formData.posting_date)
+      : null
+  const postingFormRow = actionTransaction && !isLimited(actionTransaction) ? actionTransaction : null
+  const postingFormCard = accounts.find((account) => account.id === postingFormRow?.account_id)
+  const postingFormHint =
+    postingFormRow && postingFormCard?.account_type === 'credit' && postingFormState.postedOn
+      ? postedCycleHint(postingFormCard, postingFormRow.transaction_date, postingFormState.postedOn)
+      : null
+  const destinationFormAccount = useMemo(
+    () => accounts.find((account) => account.id === formData.transfer_to_account_id),
+    [accounts, formData.transfer_to_account_id]
+  )
+
+  // Repeat: the entry this transaction would start, read through the recurring form's rules
+  // with the transaction's date fixed as its first occurrence (scheduleDraft.ts).
+  const repeatTransferTo = formData.transaction_type === 'transfer' ? formData.transfer_to_account_id : undefined
+  const repeatBlockedReason =
+    formData.transaction_type === 'transfer' &&
+    (selectedFormAccount?.account_type === 'credit' || destinationFormAccount?.account_type === 'credit')
+      ? REPEAT_CARD_TRANSFER
+      : null
+  // A blocked pair turns Repeat off for good: picking a pair Repeat can use again leaves it off.
+  if (repeatOn && repeatBlockedReason !== null) setRepeatOn(false)
+  // Edit offers it only on the owner's own unlinked, non-transfer row (STU-585): the stored row
+  // decides, so picking "None" in the link select of a linked row does not reveal it.
+  const offerRepeat = !editingTransaction || canMakeRepeat(editingTransaction, formData.transaction_type)
+  const repeatActive = repeatOn && offerRepeat && repeatBlockedReason === null
+  const repeatSchedule: ScheduleDraft = { ...repeatDraft, next_occurrence: `${formData.transaction_date}T00:00` }
+  const repeatContext: ScheduleContext = {
+    stored: null,
+    entryType: formData.transaction_type === 'credit' ? 'income' : 'expense',
+    transferToAccountId: repeatTransferTo,
+    account: selectedFormAccount,
+    accountId: formData.account_id,
+    dateFixed: true,
+  }
+  const repeatState = scheduleState(repeatSchedule, repeatContext)
+  const repeatPreview = repeatActive ? schedulePreview(repeatSchedule, repeatContext) : null
+  // The entry's currency is the transaction's face: a posted row's account currency unless a
+  // foreign projected figure was typed, else the projected currency (as the save sends it).
+  const repeatAccountCurrency = selectedFormAccount?.currency ?? fallbackCurrency
+  const repeatFaceCurrency =
+    formData.is_posted && !((formData.projected_amount ?? 0) > 0)
+      ? repeatAccountCurrency
+      : formData.projected_currency ?? repeatAccountCurrency
+  const repeatSettlement = settlementControlState({
+    entryType: repeatContext.entryType,
+    transferToAccountId: repeatTransferTo,
+    account: selectedFormAccount,
+    currency: repeatFaceCurrency,
+    isActive: true,
+  })
+  const changeRepeat = (update: (prev: ScheduleDraft) => ScheduleDraft) => {
+    setRepeatErrors({})
+    setRepeatError(null)
+    setRepeatDraft((prev) => {
+      // The date stays the transaction's: only the schedule is kept.
+      const next: RepeatDraft & Partial<Pick<ScheduleDraft, 'next_occurrence'>> = update({
+        ...prev,
+        next_occurrence: `${formData.transaction_date}T00:00`,
+      })
+      delete next.next_occurrence
+      return next
+    })
+  }
+  // Installment from a total: an expense on a credit card, in Add only. It is the same card
+  // installment Repeat starts, with the first payment as this transaction (STU-658: the last
+  // payment absorbs the rounding difference).
+  const offerInstallment =
+    !editingTransaction && formData.transaction_type === 'debit' && selectedFormAccount?.account_type === 'credit'
+  const installmentActive = installment.on && offerInstallment
+  // The currency the save sends the payments in: the account's when posted (the amount
+  // field is hidden, so no projected figure is sent), else the Currency select's.
+  const installmentCurrency = formData.is_posted ? repeatAccountCurrency : formData.projected_currency ?? repeatAccountCurrency
+  const installmentInputState = installmentActive ? installmentInput(installment.total, installment.months) : null
+  const installmentPreview: InstallmentPreview | null = (() => {
+    if (!installmentInputState?.ok) return null
+    const { split } = installmentInputState
+    const draft = installmentScheduleDraft(`${formData.transaction_date}T00:00`, split.months)
+    const days = cappedPaymentDays(draft, repeatContext)
+    if (!days || days.length !== split.months) return null
+    return {
+      first: formatCurrency(centavosToAmount(split.first), installmentCurrency),
+      monthly: formatCurrency(centavosToAmount(split.monthly), installmentCurrency),
+      last: split.months > 1 && split.last !== split.monthly ? formatCurrency(centavosToAmount(split.last), installmentCurrency) : null,
+      months: split.months,
+      days,
+      onClose: scheduleState(draft, repeatContext).chargedOnClose,
+    }
+  })()
+  const changeInstallment = (update: Partial<InstallmentDraft>) => {
+    setInstallmentErrors({})
+    setInstallmentError(null)
+    setInstallment((prev) => ({ ...prev, ...update }))
+  }
+  // The Amount box holds the purchase total while Installment is on: an amount typed before
+  // becomes the total, and the total is kept as the amount when it is turned off (STU-656).
+  const toggleInstallment = (on: boolean) => {
+    const amountKey = formData.is_posted ? 'amount' : 'projected_amount'
+    if (on) {
+      const typed = formData[amountKey]
+      changeInstallment({ on, total: typed === undefined ? installment.total : String(typed) })
+    } else {
+      const total = Number(installment.total.trim().replace(/,/g, ''))
+      changeInstallment({ on })
+      setFormData((prev) => ({ ...prev, [amountKey]: installment.total.trim() !== '' && Number.isFinite(total) ? total : undefined }))
+    }
+    if (on) {
+      // One new entry at a time, and a transaction that starts its own entry links to no other.
+      setRepeatOn(false)
+      setFormData((prev) => ({ ...prev, budget_entry_id: undefined }))
+    }
+  }
+  const resetInstallment = () => {
+    setInstallment(createInstallmentDraft())
+    setInstallmentErrors({})
+    setInstallmentError(null)
+  }
+  const toggleRepeat = (on: boolean) => {
+    if (on) changeInstallment({ on: false })
+    setRepeatOn(on)
+    setRepeatErrors({})
+    setRepeatError(null)
+    setRepeatUnavailable(false)
+    // A transaction that starts its own entry links to no other.
+    if (on) setFormData((prev) => ({ ...prev, budget_entry_id: undefined }))
+  }
+  const resetRepeat = () => {
+    setRepeatOn(false)
+    setRepeatDraft(createRepeatDraft())
+    setRepeatErrors({})
+    setRepeatError(null)
+    setRepeatUnavailable(false)
+  }
+  // A stored row is a loan payment when the server marked it one; an unmarked
+  // (legacy) transfer is one when its destination is a loan, looked up by id
+  // when it is not in `accounts`.
+  const loanPaymentStatus = useCallback(
+    (transaction: Transaction): LoanPaymentStatus => {
+      // A Limited row can't be edited, posted or reverted, so it is never classified.
+      if (isLimited(transaction)) {
+        return 'not_loan'
+      }
+      if (transaction.loan_payment_kind) {
+        return 'loan'
+      }
+      const destinationId = transaction.transfer_to_account_id
+      if (transaction.transaction_type !== 'transfer' || destinationId == null) {
+        return 'not_loan'
+      }
+      const destination =
+        accounts.find((account) => account.id === destinationId) ?? resolvedDestinations[destinationId]
+      if (destination === null) {
+        return 'unavailable'
+      }
+      if (destination === undefined) {
+        return 'pending'
+      }
+      return destination.account_type === 'loan' ? 'loan' : 'not_loan'
+    },
+    [accounts, resolvedDestinations]
+  )
+  const isLoanPayment = (transaction: Transaction) => loanPaymentStatus(transaction) === 'loan'
+  // Editing, posting or reverting a row waits until it is classified; a row
+  // whose destination can't be found is read-only.
+  const actionLoanStatus: LoanPaymentStatus = actionTransaction
+    ? loanPaymentStatus(actionTransaction)
+    : 'not_loan'
+  const actionLocked = actionLoanStatus === 'pending' || actionLoanStatus === 'unavailable'
+  // Every control follows the row's server-computed flags, never its view kind.
+  const actionPermissions = actionTransaction?.permissions ?? NO_PERMISSIONS
+
+  useEffect(() => {
+    if (!accountsData) {
+      return
+    }
+    for (const transaction of [actionTransaction, editingTransaction]) {
+      const destinationId = transaction && !isLimited(transaction) ? transaction.transfer_to_account_id : undefined
+      if (!transaction || destinationId == null || loanPaymentStatus(transaction) !== 'pending') {
+        continue
+      }
+      if (destinationLookups.current.has(destinationId)) {
+        continue
+      }
+      destinationLookups.current.add(destinationId)
+      triggerAccount(destinationId, true)
+        .unwrap()
+        .then((account) => {
+          setResolvedDestinations((prev) => ({ ...prev, [destinationId]: account }))
+        })
+        .catch((error: unknown) => {
+          if ((error as { status?: unknown } | undefined)?.status === 404) {
+            setResolvedDestinations((prev) => ({ ...prev, [destinationId]: null }))
+          }
+        })
+        .finally(() => {
+          destinationLookups.current.delete(destinationId)
+        })
+    }
+  }, [accountsData, actionTransaction, editingTransaction, loanPaymentStatus, triggerAccount])
+
+  // The fee once `account` is picked as the destination of the form's transfer.
+  const destinationTransferFee = (account: Account, fee: number | undefined) => {
+    // Back to the row's stored destination: its stored fee again.
+    if (paysLoan(editingTransaction, account.id)) {
+      return editingTransaction?.transfer_fee ?? 0
+    }
+    // Newly paying a loan: the fee becomes the interest, left blank so the
+    // server splits the amount at the loan's rate.
+    if (account.account_type === 'loan') {
+      return undefined
+    }
+    // A legacy (unmarked) loan payment moved to a non-loan account: the amount
+    // stays the whole payment and nothing else leaves the source.
+    if (
+      editingTransaction !== null &&
+      !editingTransaction.loan_payment_kind &&
+      isLoanPayment(editingTransaction)
+    ) {
+      return 0
+    }
+    return fee
+  }
+
+  // A transfer into a loan is a loan payment: its fee is the interest. The
+  // stored destination of the row being edited is classified like the row.
+  const transferIntoLoan =
+    formData.transaction_type === 'transfer' &&
+    (destinationFormAccount?.account_type === 'loan' ||
+      (editingTransaction !== null &&
+        formData.transfer_to_account_id === editingTransaction.transfer_to_account_id &&
+        isLoanPayment(editingTransaction)))
+
+  // Account-type-aware nudge toward the correct dual-perspective framing.
+  const contextHint = useMemo<{ text: string; suggestTransfer: boolean } | null>(() => {
+    const type = formData.transaction_type
+    if (type !== 'transfer') {
+      if (selectedFormAccount?.account_type === 'savings' && type === 'debit') {
+        return {
+          text: 'Taking money out of savings is usually a transfer to another account, not an expense — record it as a Transfer so your net worth stays accurate.',
+          suggestTransfer: true,
+        }
+      }
+      if (selectedFormAccount?.account_type === 'savings' && type === 'credit') {
+        return {
+          text: 'Interest earned? Income is correct. But if you are moving your own money into savings, use a Transfer so it does not count as income.',
+          suggestTransfer: true,
+        }
+      }
+      if (selectedFormAccount?.account_type === 'credit' && type === 'debit') {
+        return {
+          text: 'This records a new charge on the card and increases what you owe. Paying the card off later is a Transfer from your funding account.',
+          suggestTransfer: false,
+        }
+      }
+      return null
+    }
+    if (destinationFormAccount?.account_type === 'credit') {
+      return { text: 'Card payment: this reduces the balance you owe on the destination card.', suggestTransfer: false }
+    }
+    if (destinationFormAccount?.account_type === 'savings') {
+      return { text: 'Savings contribution: the amount leaves the source account and lands in savings. Net worth is unchanged.', suggestTransfer: false }
+    }
+    return null
+  }, [formData.transaction_type, selectedFormAccount, destinationFormAccount])
+
+  const isLoading = isInitialLoading || isAccountsLoading || isCategoriesLoading || budgetEntriesLoading
+
+  // A transfer between currencies sends one figure and receives another.
+  const crossCurrencyTransfer =
+    formData.transaction_type === 'transfer' &&
+    selectedFormAccount !== undefined &&
+    destinationFormAccount !== undefined &&
+    selectedFormAccount.currency !== destinationFormAccount.currency
+  const destinationCurrency = (destinationFormAccount?.currency as CurrencyCode | undefined) ?? formData.currency
+  const formCurrencySymbol = getCurrencySymbol(formData.currency)
+  const resolvedProjectedCurrency = formData.projected_currency ?? formData.currency
+  const projectedCurrencySymbol = getCurrencySymbol(resolvedProjectedCurrency)
+
+  const handleAccountSelect = (value: number) => {
+    const accountId = Number.isNaN(value) ? 0 : value
+    setFieldErrors((prev) => withoutError(prev, 'account_id'))
+    const nextAccount = accounts.find((account) => account.id === accountId)
+    setFormData((prev) => ({
+      ...prev,
+      account_id: accountId,
+      currency: nextAccount ? (nextAccount.currency as CurrencyCode) : fallbackCurrency,
+      projected_currency:
+        prev.projected_currency ?? (nextAccount ? (nextAccount.currency as CurrencyCode) : fallbackCurrency),
+      transfer_from_account_id:
+        prev.transaction_type === 'transfer' ? accountId || prev.transfer_from_account_id : prev.transfer_from_account_id,
+      transfer_to_account_id:
+        prev.transaction_type === 'transfer' && prev.transfer_to_account_id === accountId
+          ? undefined
+          : prev.transfer_to_account_id,
+    }))
+  }
+
+  // Description autofill (STU-626): the latest transaction with this description fills the
+  // fields the user has not changed, with what they can still use. Add only; never the amount.
+  // Read only while the form is open, as the tag picker in it does (the same cached read): opening the page sends none (STU-636).
+  const tagsQuery = useGetTagsQuery(undefined, { skip: !isAuthenticated || !isCreateModalOpen })
+  const tagOptions = tagsQuery.data ?? []
+  // A suggestion picked before the tags have answered waits for them, so none of its tags is dropped as unknown.
+  const tagsSettled = tagsQuery.isSuccess || tagsQuery.isError
+  const applyAutofill = (suggestion: DescriptionSuggestion) => {
+    if (editingTransaction) return
+    if (!tagsSettled) {
+      pendingSuggestion.current = suggestion
+      return
+    }
+    fillFromSuggestion(suggestion)
+  }
+  const fillFromSuggestion = (suggestion: DescriptionSuggestion) => {
+    const changed = new Set(changedFields.current)
+    setFormData((prev) => {
+      // A type change runs the type-button clean-up first (cleanFormForType), then fills.
+      const next = autofillForm(prev, suggestion, changed, {
+        account: (id) => writableAccounts.some((account) => account.id === id),
+        category: (id, type) =>
+          categories.some((category) => category.id === id && categoryKind(category) === TYPE_TO_KIND[type]),
+        tag: (id) => tagOptions.some((tag) => tag.id === id),
+      }, typeFits)
+      if (next.account_id !== prev.account_id) {
+        // The account's currency is the form's recording currency, as a manual pick sets it.
+        const account = accounts.find((a) => a.id === next.account_id)
+        if (account) next.currency = account.currency as CurrencyCode
+      }
+      return next
+    })
+    setFieldErrors((prev) => withoutErrors(prev, ['account_id', 'transfer_to_account_id']))
+  }
+
+  // What still fits a transaction of a type: the one clean-up for a type click and for autofill.
+  const typeFits: TypeFits = {
+    budgetEntry: (id, type) => {
+      const entry = budgetEntries.find((e) => e.id === id)
+      return !!entry && entry.entry_type === (type === 'credit' ? 'income' : 'expense')
+    },
+    category: (id, type) => {
+      const category = categories.find((c) => c.id === id)
+      return !!category && categoryKind(category) === TYPE_TO_KIND[type]
+    },
+  }
+
+  useEffect(() => {
+    if (!tagsSettled || !pendingSuggestion.current) return
+    const suggestion = pendingSuggestion.current
+    pendingSuggestion.current = null
+    fillFromSuggestion(suggestion)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once the tags have answered
+  }, [tagsSettled])
+
+  const handleTypeChange = (nextType: Transaction['transaction_type']) => {
+    // The destination, fee and received figure come and go with the type.
+    setFieldErrors((prev) => withoutErrors(prev, ['transfer_to_account_id', 'transfer_fee', 'received_amount']))
+    setFormData((prev) => cleanFormForType(prev, nextType, typeFits))
+  }
+
+  const openActionModal = (transaction: Transaction) => {
+    resetPostingFormState()
+    releaseReceiptUrl()
+    setReceipt(null)
+    setReceiptError(null)
+    resetReceiptUpload()
+    receiptFor.current = transaction.id
+    setActionError(null)
+    setActionTransaction(transaction)
+    setIsActionModalOpen(true)
+  }
+
+  const closeActionModal = () => {
+    setIsActionModalOpen(false)
+    setActionTransaction(null)
+    releaseReceiptUrl()
+    setReceipt(null)
+    setReceiptError(null)
+    resetReceiptUpload()
+    receiptFor.current = null
+    setActionError(null)
+    resetPostingFormState()
+  }
+
+  const resetReceiptUpload = () => {
+    setReceiptFile(null)
+    setReceiptUploadError(null)
+    setReceiptUploaded(false)
+    setReceiptInputKey((key) => key + 1)
+  }
+
+  // Uploads the chosen file as the transaction's receipt. A refused upload shows the
+  // server's reason and leaves the stored receipt as it was; an accepted one replaces it,
+  // so a shown preview of the old one is dropped.
+  const handleUploadReceipt = async (transactionId: number) => {
+    if (!receiptFile) {
+      setReceiptUploadError('Choose a file to upload.')
+      return
+    }
+    setReceiptUploadError(null)
+    setReceiptUploaded(false)
+    const generation = currentSessionGeneration()
+    try {
+      const result = await uploadReceipt({ transaction_id: transactionId, file: receiptFile }).unwrap()
+      if (receiptFor.current !== transactionId || generation !== currentSessionGeneration()) return
+      releaseReceiptUrl()
+      setReceipt(null)
+      setReceiptError(null)
+      setActionTransaction((prev) =>
+        prev && prev.id === transactionId && isOwnerFull(prev) ? { ...prev, receipt_url: result.file_url } : prev,
+      )
+      setReceiptFile(null)
+      setReceiptInputKey((key) => key + 1)
+      setReceiptUploaded(true)
+    } catch (error) {
+      if (receiptFor.current === transactionId) {
+        setReceiptUploadError(apiErrorMessage(error) || 'Could not upload the receipt.')
+      }
+    }
+  }
+
+  // The receipt is fetched with the auth header and shown from an object URL,
+  // revoked when it is replaced, the modal closes or the page unmounts.
+  const handleViewReceipt = async (transactionId: number) => {
+    setReceiptError(null)
+    const generation = currentSessionGeneration()
+    try {
+      const result = await fetchReceipt(transactionId).unwrap()
+      if (receiptFor.current !== transactionId || generation !== currentSessionGeneration()) {
+        URL.revokeObjectURL(result.url)
+        return
+      }
+      releaseReceiptUrl()
+      receiptUrl.current = result.url
+      setReceipt({ ...result, transactionId })
+    } catch (error) {
+      if (receiptFor.current === transactionId) {
+        setReceiptError(apiErrorMessage(error) || 'Could not load the receipt.')
+      }
+    }
+  }
+
+  // The "Mark as posted" box and a future Transaction Date share this: the amount fields
+  // swap with the posted state.
+  const setPostedState = (checked: boolean) => {
+    const today = localToday()
+    setFieldErrors((prev) => withoutErrors(prev, ['amount', 'projected_amount', 'received_amount']))
+    setFormData((prev) => ({
+      ...prev,
+      is_posted: checked,
+      posting_date: checked ? prev.posting_date ?? today : undefined,
+      amount: checked ? prev.amount ?? prev.projected_amount : prev.amount,
+    }))
+  }
+
+  const resetForm = () => {
+    setFormData(createInitialFormState())
+    resetAutofill()
+    setEditingTransaction(null)
+    setPostedTouched(false)
+    setDateErrors({})
+    setFieldErrors({})
+    setFormError(null)
+    setSavedNotice(null)
+    resetRepeat()
+    resetInstallment()
+    saveInFlight.current = false
+    setFocusRequest(null)
+  }
+
+  // Each request is applied once; a submitter's focus is dropped if the user has put focus
+  // somewhere meanwhile.
+  useEffect(() => {
+    if (!focusRequest || focusRequest.n === focusHandled.current) return
+    if (focusRequest.to === 'description') {
+      focusHandled.current = focusRequest.n
+      transactionForm.current?.querySelector<HTMLElement>('[data-field="description"]')?.focus()
+      return
+    }
+    if (typeof focusRequest.to === 'object') {
+      focusHandled.current = focusRequest.n
+      focusField(transactionForm.current?.querySelector<HTMLElement>(focusRequest.to.selector) ?? null)
+      return
+    }
+    focusHandled.current = focusRequest.n
+    const active = document.activeElement
+    if (active === null || active === document.body) submitterRef.current?.focus()
+  }, [focusRequest])
+
+  // One inline error per attempt, on the first invalid field, which takes focus. A chip
+  // group focuses its selected chip, else its first (an open picker's toggle comes first
+  // in the DOM, so it is passed over while there is a chip).
+  const fail = (key: TransactionField, message: string) => {
+    setDateErrors({})
+    setRepeatErrors({})
+    setInstallmentErrors({})
+    setFieldErrors({ [key]: message })
+    focusField(transactionForm.current?.querySelector<HTMLElement>(`[data-field="${key}"]`) ?? null)
+  }
+
+  // The Repeat control a field's error is shown on, while it is on screen.
+  const repeatControl = (key: RepeatErrorKey) =>
+    transactionForm.current?.querySelector<HTMLElement>(`[data-testid="repeat-fields"] [data-field="${key}"]`) ?? null
+
+  // A Repeat control's error, shown under it, with focus (a group's first button).
+  const failRepeat = (key: RepeatErrorKey, message: string) => {
+    setDateErrors({})
+    setFieldErrors({})
+    setInstallmentErrors({})
+    setRepeatErrors({ [key]: message })
+    focusField(repeatControl(key))
+  }
+
+  // An Installment field's error, shown under it, with focus.
+  const failInstallment = (key: InstallmentField, message: string) => {
+    setDateErrors({})
+    setFieldErrors({})
+    setRepeatErrors({})
+    setInstallmentErrors({ [key]: message })
+    // The total is the Amount box's.
+    const selector = key === 'installment_total' ? '[data-installment-total]' : `[data-field="${key}"]`
+    focusField(transactionForm.current?.querySelector<HTMLElement>(selector) ?? null)
+  }
+
+  // A refused save's field takes focus once its form has reopened.
+  const focusAfterSave = (selector: string) => setFocusRequest({ n: ++focusSeq.current, to: { selector } })
+
+  // The app's own words for an empty required field, where it has them.
+  const valueMissingCopy = (key: string | undefined): string | undefined => {
+    switch (key) {
+      case 'projected_amount':
+        return 'Please enter an amount greater than zero.'
+      case 'amount':
+        return 'Please enter the actual amount posted to the account.'
+      case 'received_amount':
+        return `Please enter the amount received in ${destinationCurrency}.`
+      default:
+        return undefined
+    }
+  }
+
+  // The browser keeps every required, min, max and step check; only its bubble is
+  // replaced. The invalid events fire in tree order during the submit's check, so the
+  // first one is shown inline once they have all fired. A task, not a microtask: on a
+  // real click the microtask queue drains between one invalid event and the next.
+  // Any invalid control has its bubble suppressed. One that is not wired to a field
+  // error (no known `data-field`) falls back to the form's own error line, with focus.
+  const handleInvalidCapture = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const control = event.target
+    if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement)) return
+    invalidControls.current.push(control)
+    if (invalidControls.current.length > 1) return
+    window.setTimeout(() => {
+      const first = invalidControls.current[0]
+      invalidControls.current = []
+      if (!first) return
+      const key = first.dataset.field
+      const message = (first.validity.valueMissing ? valueMissingCopy(key) : undefined) || first.validationMessage
+      setFormError(null)
+      setSavedNotice(null)
+      if (key === 'transaction_date' || key === 'posting_date') {
+        setFieldErrors({})
+        setDateErrors({ [key]: message })
+        first.focus()
+      } else if (isTransactionField(key)) {
+        fail(key, message)
+      } else if (isRepeatField(key) && first.closest('[data-testid="repeat-fields"]')) {
+        failRepeat(key, message)
+      } else {
+        setFieldErrors({})
+        setDateErrors({})
+        setFormError(message)
+        first.focus()
+      }
+    }, 0)
+  }
+
+  // A refused repeating save: an API without the endpoint (405, or a bare 404 "Not Found")
+  // gets the Repeat section's Retry; a field the API names (`body.transaction.<field>`,
+  // `body.repeat.<field>`) shows its error inline on that field, a Repeat field with no control
+  // on screen on the Repeat section's line. Anything else, such as a 404 "Account not found",
+  // is left to the form's own error line (false).
+  const showRepeatRefusal = (error: unknown): boolean => {
+    const status = apiErrorStatus(error)
+    const detail = (error as { data?: { detail?: unknown } } | undefined)?.data?.detail
+    if (status === 405 || (status === 404 && detail === 'Not Found')) {
+      if (installment.on) setInstallmentError(INSTALLMENT_UNAVAILABLE)
+      else setRepeatUnavailable(true)
+      return true
+    }
+    const refusal = repeatingRefusal(detail)
+    if (!refusal || refusal.part === null || !refusal.message) return false
+    // Installment from a total: the schedule and the split amounts are the section's, so a
+    // refusal of them, or of the first payment's amount, is shown there.
+    if (installment.on && (refusal.part === 'repeat' || refusal.field === 'amount' || refusal.field === 'projected_amount')) {
+      setInstallmentError(refusal.message)
+      return true
+    }
+    if (refusal.part === 'repeat') {
+      const control = repeatFieldControl(refusal.field)
+      if (control && repeatControl(control)) {
+        failRepeat(control, refusal.message)
+        focusAfterSave(`[data-testid="repeat-fields"] [data-field="${control}"]`)
+      } else {
+        setRepeatError(refusal.message)
+      }
+      return true
+    }
+    const field = refusal.field
+    if (field === 'transaction_date' || field === 'posting_date') {
+      setDateErrors({ [field]: refusal.message })
+      focusAfterSave(`[data-field="${field}"]`)
+      return true
+    }
+    // The face amount is the one input the form shows: the posted amount, or the planned one.
+    const shown = field === 'amount' || field === 'projected_amount' ? (formData.is_posted ? 'amount' : 'projected_amount') : field
+    if (shown !== null && isTransactionField(shown)) {
+      fail(shown, refusal.message)
+      focusAfterSave(`[data-field="${shown}"]`)
+      return true
+    }
+    return false
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    // A second submit in the same tick (the first already queued this save).
+    if (saveInFlight.current) return
+    setFormError(null)
+    setFieldErrors({})
+    setSavedNotice(null)
+    setRepeatErrors({})
+    setRepeatError(null)
+    setRepeatUnavailable(false)
+    setInstallmentErrors({})
+    setInstallmentError(null)
+    // The button pressed picks the path, so the browser's own checks run the same for both.
+    const submitter = (e.nativeEvent as SubmitEvent).submitter
+    submitterRef.current = submitter
+    const addAnother = !editingTransaction && submitter?.dataset.testid === 'save-and-add-another'
+    if (editingTransaction && loanPaymentStatus(editingTransaction) === 'pending') {
+      setFormError('Still checking this transfer\'s destination account. Try again in a moment.')
+      return
+    }
+    if (editingTransaction && loanPaymentStatus(editingTransaction) === 'unavailable') {
+      setFormError(DESTINATION_UNAVAILABLE)
+      return
+    }
+    try {
+      const transactionDateError = recordDateError(formData.transaction_date)
+      const postingDateError = formData.is_posted && formData.posting_date ? recordDateError(formData.posting_date) : null
+      if (transactionDateError || postingDateError) {
+        setDateErrors({
+          ...(transactionDateError ? { transaction_date: transactionDateError } : {}),
+          ...(postingDateError ? { posting_date: postingDateError } : {}),
+        })
+        ;(transactionDateError ? transactionDateInput : postingDateInput).current?.focus()
+        return
+      }
+      setDateErrors({})
+      if ((repeatActive || installmentActive) && !formData.description.trim()) {
+        fail('description', 'Please enter a description: it names the recurring entry.')
+        return
+      }
+      if (!formData.account_id) {
+        fail('account_id', 'Please select an account for this transaction.')
+        return
+      }
+      if (formData.transaction_type === 'transfer' && !formData.transfer_to_account_id) {
+        fail('transfer_to_account_id', 'Please select a destination account for this transfer.')
+        return
+      }
+
+      // Installment from a total: the total and months are checked, and this transaction is the
+      // first payment, in place of the amount field it hides (the whole total over one month).
+      const installmentSplit = installmentActive ? installmentInput(installment.total, installment.months) : null
+      if (installmentSplit && !installmentSplit.ok) {
+        failInstallment(installmentSplit.field, installmentSplit.message)
+        return
+      }
+      const firstPayment = installmentSplit?.ok ? centavosToAmount(installmentSplit.split.first) : undefined
+      const formAmount = firstPayment !== undefined && formData.is_posted ? firstPayment : formData.amount
+      const formProjected =
+        firstPayment === undefined ? formData.projected_amount : formData.is_posted ? undefined : firstPayment
+
+      const selectedAccount = accounts.find((account) => account.id === formData.account_id)
+      const accountCurrency = (selectedAccount?.currency as CurrencyCode) || fallbackCurrency
+      // A new posted row keeps a foreign currency only when a positive projected amount was
+      // typed for it; the hidden select's earlier value must not ride into a bare actual.
+      const enteredProjected = formProjected ?? 0
+      const projectedCurrency =
+        formData.is_posted && !editingTransaction && !(enteredProjected > 0)
+          ? accountCurrency
+          : (formData.projected_currency ?? accountCurrency)
+      const destinationAccount = accounts.find((account) => account.id === formData.transfer_to_account_id)
+      const crossing =
+        formData.transaction_type === 'transfer' &&
+        destinationAccount !== undefined &&
+        destinationAccount.currency !== accountCurrency
+      if (crossing && formData.is_posted && !(formData.received_amount !== undefined && formData.received_amount > 0)) {
+        fail('received_amount', `Please enter the amount received in ${destinationAccount.currency}.`)
+        return
+      }
+
+      let projectedAmount = formProjected
+      if (!formData.is_posted) {
+        if (!projectedAmount || projectedAmount <= 0) {
+          fail('projected_amount', 'Please enter an amount greater than zero.')
+          return
+        }
+      }
+
+      let actualAmount = formAmount
+      if (formData.is_posted) {
+        if (actualAmount === undefined || actualAmount <= 0) {
+          fail('amount', 'Please enter the actual amount posted to the account.')
+          return
+        }
+        if (!projectedAmount || projectedAmount <= 0) {
+          projectedAmount = actualAmount
+        }
+      } else {
+        actualAmount = projectedAmount
+      }
+
+      // For a transfer into a loan the amount entered is the whole payment; the
+      // stored amount is its principal, so interest is taken out of it. Blank
+      // interest on a row newly paying the loan is left out so the server splits
+      // the amount; on a row already paying it the server never splits, so blank
+      // is sent as 0 and the payment stays the amount entered.
+      let principal = actualAmount
+      let transferFee: number | undefined =
+        formData.transaction_type === 'transfer' ? formData.transfer_fee ?? 0 : 0
+      if (transferIntoLoan) {
+        if (formData.transfer_fee === undefined) {
+          transferFee = paysLoan(editingTransaction, formData.transfer_to_account_id)
+            ? 0
+            : undefined
+        } else {
+          if (actualAmount !== undefined) {
+            if (formData.transfer_fee > actualAmount) {
+              fail('transfer_fee', 'The interest cannot be more than the payment amount.')
+              return
+            }
+            principal = toPrincipal(actualAmount, formData.transfer_fee)
+          }
+        }
+      }
+
+      const payload: Record<string, unknown> = {
+        account_id: formData.account_id,
+        amount: principal,
+        currency: accountCurrency,
+        description: formData.description,
+        transaction_type: formData.transaction_type,
+        transaction_date: new Date(formData.transaction_date).toISOString(),
+        posting_date:
+          formData.is_posted && formData.posting_date
+            ? new Date(formData.posting_date).toISOString()
+            : formData.is_posted
+            ? new Date().toISOString()
+            : undefined,
+        is_posted: formData.is_posted,
+        transfer_fee: transferFee,
+        // Any other type sends both as null, so an edit away from a transfer clears them.
+        ...transferAccountFields(
+          formData.transaction_type,
+          formData.transfer_from_account_id ?? formData.account_id,
+          formData.transfer_to_account_id,
+        ),
+        category_id: formData.category_id,
+        allocation_id: formData.transaction_type === 'transfer' ? undefined : formData.allocation_id,
+        budget_entry_id: formData.transaction_type === 'transfer' ? undefined : formData.budget_entry_id,
+        // An edit sends the tags only when they changed; omitting them keeps them.
+        ...(editingTransaction
+          ? tagIdsIfChanged(formData.tag_ids, tagIdsOf(editingTransaction.tags))
+          : { tag_ids: formData.tag_ids }),
+        projected_amount: projectedAmount ?? undefined,
+        projected_currency: projectedCurrency,
+        // Only a transfer between currencies carries what the destination received.
+        ...(crossing ? { received_amount: formData.received_amount ?? null } : {}),
+      }
+
+      // Someone else's transaction on a shared account keeps its creator's category,
+      // allocation and schedule link: the server refuses an edit that sends them.
+      if (editingTransaction && isSharedFull(editingTransaction)) {
+        delete payload.category_id
+        delete payload.allocation_id
+        delete payload.budget_entry_id
+      }
+
+      if (formData.is_posted) {
+        if (projectedAmount && projectedAmount > 0) {
+          payload.exchange_rate =
+            projectedCurrency !== accountCurrency || actualAmount !== projectedAmount
+              ? (actualAmount as number) / projectedAmount
+              : 1
+        } else {
+          payload.exchange_rate = undefined
+        }
+      } else {
+        payload.exchange_rate = undefined
+        payload.posting_date = undefined
+      }
+
+      // A foreign pending row keeps its retained actual figure: only the projected figure
+      // is edited here, so no amount, currency or rate is sent.
+      if (
+        editingTransaction &&
+        keepsRetainedActual({
+          editing: true,
+          sameAccount: editingTransaction.account_id === formData.account_id,
+          isPosted: formData.is_posted,
+          transactionType: formData.transaction_type,
+          accountCurrency,
+          faceCurrency: projectedCurrency,
+        })
+      ) {
+        delete payload.amount
+        delete payload.currency
+        delete payload.exchange_rate
+      }
+
+      // Repeat: the same transaction, sent with the schedule of the entry it starts, in one
+      // request that commits both or neither. It links to no other entry. In Edit the row
+      // itself becomes the first occurrence: POST /transactions/{id}/repeat replaces the PUT.
+      let repeatBody: RepeatingTransactionInput | null = null
+      if (installmentSplit?.ok && installmentSplit.split.months > 1) {
+        // The card installment Repeat starts, for all the months: the server links this
+        // transaction as the first payment, the entry's amount is each later payment and its
+        // final_amount the last (STU-658). One month is the transaction alone, with no entry.
+        const { split } = installmentSplit
+        const schedule = scheduleRequest(installmentScheduleDraft(`${formData.transaction_date}T00:00`, split.months), repeatContext)
+        if (!schedule.ok) {
+          if (schedule.field === 'next_occurrence') {
+            setDateErrors({ transaction_date: schedule.message })
+            transactionDateInput.current?.focus()
+          } else {
+            setInstallmentError(schedule.message)
+          }
+          return
+        }
+        const transaction = { ...payload }
+        delete transaction.budget_entry_id
+        repeatBody = {
+          transaction,
+          repeat: {
+            ...repeatScheduleOf(schedule.fields, 'manual'),
+            amount: centavosToAmount(split.monthly),
+            final_amount: centavosToAmount(split.last),
+          },
+        }
+      } else if (installmentSplit?.ok) {
+        // One month: the purchase is this one transaction, linked to no entry.
+        delete payload.budget_entry_id
+      } else if (repeatActive) {
+        const schedule = scheduleRequest(repeatSchedule, repeatContext)
+        if (!schedule.ok) {
+          if (schedule.field === 'next_occurrence') {
+            setDateErrors({ transaction_date: schedule.message })
+            transactionDateInput.current?.focus()
+          } else {
+            failRepeat(schedule.field, schedule.message)
+          }
+          return
+        }
+        const transaction = { ...payload }
+        delete transaction.budget_entry_id
+        const settlement =
+          repeatSettlement.shown && repeatSettlement.disabledReason === null ? repeatDraft.settlement : 'manual'
+        repeatBody = { transaction, repeat: repeatScheduleOf(schedule.fields, settlement) }
+      }
+
+      // The save leaves the dialog now and runs in the background (STU-605): it is queued in the
+      // outbox, the dialog closes (or clears for the next entry), and a toast and a "Saving…" row
+      // follow it. A refusal comes back as a failed toast whose Edit reopens this form.
+      saveInFlight.current = true
+      // The entered figure, not the server's principal (a loan payment's differs).
+      const figure = formData.is_posted
+        ? formatCurrency(formAmount ?? 0, accountCurrency)
+        : formatCurrency(projectedAmount ?? 0, projectedCurrency)
+      const accountName = selectedAccount?.name ?? 'the account'
+      const description = formData.description.trim() || `${TRANSACTION_TYPE_LABELS[formData.transaction_type]} ${figure}`
+      const editingRow = editingTransaction
+      const kind: OutboxKind = repeatBody ? 'repeat' : editingRow ? 'update' : 'create'
+      const request: OutboxRequest = editingRow
+        ? repeatBody
+          ? { method: 'POST', url: `transactions/${editingRow.id}/repeat`, body: repeatBody }
+          : { method: 'PUT', url: `transactions/${editingRow.id}`, body: payload }
+        : repeatBody
+          ? { method: 'POST', url: 'transactions/repeating', body: repeatBody }
+          : { method: 'POST', url: 'transactions/', body: payload }
+      const clientId = newOutboxId()
+      const draft: TransactionDraft = {
+        formData,
+        repeatOn: repeatActive,
+        repeatDraft,
+        installment: { ...installment, on: installmentActive },
+        editing: editingRow,
+        postedTouched,
+      }
+      dispatch(
+        outboxActions.enqueued({
+          clientId,
+          kind,
+          form: 'transaction',
+          draft,
+          ...(editingRow ? { targetId: editingRow.id } : {}),
+          label: `Saving ${figure} to ${accountName}…`,
+          description,
+          request,
+          // Every POST here is an idempotent create (PERF-9); the PUT is idempotent by body.
+          ...(request.method === 'POST' ? { idempotencyKey: clientId } : {}),
+          tags: repeatBody ? [...TRANSACTION_TAGS, 'BudgetEntry'] : TRANSACTION_TAGS,
+          ...(editingRow
+            ? {}
+            : {
+                display: {
+                  date: formData.transaction_date,
+                  description,
+                  amount: figure,
+                  account: accountName,
+                  transactionType: formData.transaction_type,
+                },
+              }),
+          viewable: true,
+          undoable: kind === 'create',
+        }),
+      )
+      // Recorded as recent picks once the save succeeds (the effect on completions below).
+      // The source account ends up newest, then the destination.
+      recentsOnSave.current.set(clientId, {
+        accounts: [
+          formData.account_id || undefined,
+          formData.transaction_type === 'transfer' ? formData.transfer_to_account_id : undefined,
+        ],
+        categories: 'category_id' in payload ? [formData.category_id] : null,
+      })
+      if (addAnother) {
+        const fresh = createInitialFormState()
+        // Per-entry fields clear to the fresh dialog's values; the account, type,
+        // category, date, posted mode and transfer accounts are kept.
+        setFormData((prev) => ({
+          ...prev,
+          description: fresh.description,
+          amount: fresh.amount,
+          projected_amount: fresh.projected_amount,
+          received_amount: fresh.received_amount,
+          transfer_fee: fresh.transfer_fee,
+          tag_ids: fresh.tag_ids,
+          budget_entry_id: fresh.budget_entry_id,
+          allocation_id: fresh.allocation_id,
+          posting_date: fresh.posting_date,
+          exchange_rate: fresh.exchange_rate,
+          original_amount: fresh.original_amount,
+          original_currency: fresh.original_currency,
+          // Its select is hidden once posted: a foreign currency must not ride along
+          // unseen into the next posted entry. A pending run keeps its visible choice.
+          projected_currency: prev.is_posted ? accountCurrency : prev.projected_currency,
+        }))
+        // Repeat and its schedule reset with the form; so does what the user changed (STU-626):
+        // the kept account, type and category are the next entry's to autofill.
+        resetRepeat()
+        resetInstallment()
+        resetAutofill()
+        setSavedNotice(`Saving "${formData.description} ${figure}"…`)
+        setDateErrors({})
+        setFieldErrors({})
+        setFormError(null)
+        setFocusRequest({ n: ++focusSeq.current, to: 'description' })
+        // The cleared form renders before the next event, so the guard can go now.
+        saveInFlight.current = false
+        return
+      }
+      resetForm()
+      setIsCreateModalOpen(false)
+    } catch (error) {
+      console.error('Error saving transaction:', error)
+      setFormError(apiErrorMessage(error) || 'Could not save the transaction. Please try again.')
+    }
+  }
+
+  // The toast's Edit on a refused transaction save: the form reopens with what the user typed,
+  // and the refusal is shown on its field as the dialog showed it before saves went background.
+  const editRequest = useSelector((state: RootState) => state.outbox.editRequest)
+  const editEntry = useSelector((state: RootState) =>
+    state.outbox.editRequest === null ? undefined : state.outbox.entries.find((e) => e.clientId === state.outbox.editRequest),
+  )
+  useEffect(() => {
+    if (editRequest === null || !editEntry || editEntry.form !== 'transaction' || editEntry.draft === null) return
+    if (isAccountsLoading || isCategoriesLoading) return
+    const draft = editEntry.draft as TransactionDraft
+    dispatch(outboxActions.editHandled(editEntry.clientId))
+    resetForm()
+    closeActionModal()
+    setEditingTransaction(draft.editing)
+    setFormData(draft.formData)
+    // What the user had in the form is theirs: autofill leaves it alone.
+    markChanged(...AUTOFILL_FIELDS)
+    setPostedTouched(draft.postedTouched)
+    if (draft.repeatOn) {
+      setRepeatOn(true)
+      setRepeatDraft(draft.repeatDraft)
+    }
+    if (draft.installment?.on) setInstallment(draft.installment)
+    setIsCreateModalOpen(true)
+    setPendingRefusal({ error: editEntry.error?.raw, repeat: editEntry.kind === 'repeat', superseded: editEntry.error?.superseded === true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per request; the form setters are stable
+  }, [editRequest, editEntry, isAccountsLoading, isCategoriesLoading, dispatch])
+  useEffect(() => {
+    if (!pendingRefusal || !isCreateModalOpen) return
+    setPendingRefusal(null)
+    if (pendingRefusal.superseded) {
+      // Not a refusal: a newer change to this row was made after it. Saving now applies these values.
+      setFormError('This transaction was changed again after this edit. Saving applies these values over that change.')
+      setFocusRequest({ n: ++focusSeq.current, to: 'submitter' })
+      return
+    }
+    if (pendingRefusal.repeat && showRepeatRefusal(pendingRefusal.error)) return
+    setFormError(apiErrorMessage(pendingRefusal.error) || 'Could not save the transaction. Please try again.')
+    setFocusRequest({ n: ++focusSeq.current, to: 'submitter' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- applied once, after the reopened form renders
+  }, [pendingRefusal, isCreateModalOpen])
+
+  const handleEdit = (transaction: Transaction) => {
+    // A Limited row has no fields to edit.
+    if (isLimited(transaction)) {
+      return
+    }
+    setEditingTransaction(transaction)
+    setPostedTouched(false)
+    setDateErrors({})
+    setFieldErrors({})
+    setFormError(null)
+    // "Make this repeat" starts off, with a fresh schedule, for every row opened.
+    resetRepeat()
+    // A loan payment's form amount is the whole payment (principal + interest).
+    const intoLoan = isLoanPayment(transaction)
+    const total = intoLoan
+      ? toTotal(transaction.amount, transaction.transfer_fee)
+      : transaction.amount
+    setFormData(
+      createInitialFormState({
+      account_id: transaction.account_id,
+        // A shared-full row has no category, allocation or schedule link to edit.
+        category_id: isOwnerFull(transaction) ? transaction.category_id ?? undefined : undefined,
+        allocation_id: isOwnerFull(transaction) ? transaction.allocation_id ?? undefined : undefined,
+        budget_entry_id: isOwnerFull(transaction) ? transaction.budget_entry_id ?? undefined : undefined,
+      amount: total,
+        currency: (transaction.currency as CurrencyCode) || fallbackCurrency,
+        projected_amount: editFormProjectedAmount(transaction, intoLoan),
+        projected_currency:
+          (transaction.projected_currency as CurrencyCode) ||
+          (transaction.currency as CurrencyCode) ||
+          fallbackCurrency,
+        original_amount: transaction.original_amount ?? undefined,
+        original_currency: (transaction.original_currency as CurrencyCode) ?? undefined,
+        exchange_rate: transaction.exchange_rate ?? undefined,
+        received_amount: transaction.received_amount ?? undefined,
+        transfer_fee: transaction.transfer_fee ?? 0,
+      description: transaction.description || '',
+      transaction_type: transaction.transaction_type,
+      transaction_date: entryDay(transaction.transaction_date),
+        posting_date: transaction.posting_date
+          ? postingDay(transaction.posting_date) ?? undefined
+          : undefined,
+        is_posted: transaction.is_posted,
+        transfer_from_account_id: transaction.transaction_type === 'transfer'
+          ? transaction.transfer_from_account_id ?? transaction.account_id
+          : undefined,
+        transfer_to_account_id: transaction.transaction_type === 'transfer'
+          ? transaction.transfer_to_account_id ?? undefined
+          : undefined,
+        tag_ids: tagIdsOf(transaction.tags),
+      })
+    )
+    setIsCreateModalOpen(true)
+  }
+
+  // The delete runs from the in-app dialog, so a refusal stays there with the server's reason.
+  const handleDelete = async (transaction: Transaction) => {
+    const description = transactionDescription(transaction)
+    const deleted = await askConfirm({
+      title: 'Delete transaction?',
+      message: description ? `Delete the transaction "${description}"?` : 'Delete this transaction?',
+      confirmLabel: 'Delete transaction',
+    })
+    if (!deleted) return
+    if (actionTransaction?.id === transaction.id) {
+      closeActionModal()
+    }
+    // In the background (STU-605): the row is dimmed until the delete settles.
+    dispatch(outboxActions.enqueued(transactionDelete(transaction.id, description?.trim() || 'Untitled transaction')))
+  }
+
+  // Posting a row (the action modal's form, and the Due card's Post, which opens it) goes
+  // through the save outbox: the modal closes and the row reads "Saving…" until it settles.
+  const queuePost = (transaction: Transaction, data: Record<string, unknown>) => {
+    const description = transactionDescription(transaction)?.trim() || 'Untitled transaction'
+    dispatch(
+      outboxActions.enqueued({
+        clientId: newOutboxId(),
+        kind: 'due-action',
+        targetId: transaction.id,
+        form: 'transaction',
+        draft: null,
+        label: `Posting "${description}"…`,
+        description,
+        request: { method: 'PUT', url: `transactions/${transaction.id}`, body: data },
+        tags: TRANSACTION_TAGS,
+        viewable: true,
+      }),
+    )
+    closeActionModal()
+  }
+
+  const handleMarkPostedFromModal = async (
+    transaction: Transaction,
+    actualAmount: number,
+    postedOn: string,
+    exchangeRate?: number,
+    receivedAmount?: number,
+  ) => {
+    if (isLimited(transaction)) {
+      return
+    }
+    const account = accounts.find((item) => item.id === transaction.account_id)
+    const accountCurrency = (account?.currency as CurrencyCode) || fallbackCurrency
+    // A loan payment's posted amount is the whole payment; its interest is kept.
+    const amount = isLoanPayment(transaction)
+      ? toPrincipal(actualAmount, transaction.transfer_fee)
+      : actualAmount
+    const payload: Record<string, unknown> = {
+      is_posted: true,
+      // UTC midnight of the chosen day, as the edit form sends a posting date.
+      posting_date: new Date(postedOn).toISOString(),
+      amount,
+      currency: accountCurrency,
+      exchange_rate: exchangeRate,
+      // A transfer between currencies posts with what the destination received.
+      ...(receivedAmount !== undefined ? { received_amount: receivedAmount } : {}),
+    }
+    queuePost(transaction, payload)
+  }
+
+  // Posting or reverting a record the caller may not edit (the account owner resolving
+  // a record whose creator lost access) sends the status alone: the API refuses any
+  // other field from them.
+  // The one figure the row needs besides the status goes with it: `amount` for a foreign
+  // pending debit or credit, `received_amount` for a transfer between currencies.
+  const handlePostStatusOnly = async (
+    transaction: Transaction,
+    figure: { amount: number } | { received_amount: number } | null = null,
+  ): Promise<string | null> => {
+    queuePost(transaction, { is_posted: true, ...(figure ?? {}) })
+    return null
+  }
+
+  const handleRevertPostedFromModal = async (transaction: Transaction) => {
+    if (isLimited(transaction)) {
+      return
+    }
+    const account = accounts.find((item) => item.id === transaction.account_id)
+    const accountCurrency = (account?.currency as CurrencyCode) || fallbackCurrency
+    // A foreign debit or credit keeps its actual figure on revert: the API re-estimates the
+    // plan from `projected_amount`, so no amount, currency or rate is sent.
+    const face = (transaction.projected_currency as CurrencyCode | undefined) ?? (transaction.currency as CurrencyCode)
+    const isForeignFlow = transaction.transaction_type !== 'transfer' && face !== accountCurrency
+    const payload: Record<string, unknown> = !transaction.permissions.can_edit || isForeignFlow
+      ? { is_posted: false }
+      : {
+          is_posted: false,
+          posting_date: undefined,
+          // A loan payment's projected amount is the whole payment; its interest is kept.
+          amount:
+            transaction.projected_amount != null && isLoanPayment(transaction)
+              ? toPrincipal(transaction.projected_amount, transaction.transfer_fee)
+              : transaction.projected_amount ?? transaction.amount,
+          currency: accountCurrency,
+          exchange_rate: undefined,
+        }
+    setActionError(null)
+    let updatedTransaction: Transaction
+    try {
+      updatedTransaction = await updateTransaction({ id: transaction.id, data: payload }).unwrap()
+    } catch (error) {
+      console.error('Error reverting transaction:', error)
+      setActionError(apiErrorMessage(error) || 'Could not mark the transaction as not posted. Please try again.')
+      return
+    }
+    setActionTransaction(updatedTransaction)
+    resetPostingFormState()
+    void refreshListsRef.current()
+  }
+
+  const handleInitPostingForm = (transaction: Transaction) => {
+    if (isLimited(transaction)) {
+      return
+    }
+    const account = accounts.find((item) => item.id === transaction.account_id)
+    const accountCurrency = (account?.currency as CurrencyCode) || fallbackCurrency
+    const destinationId = transaction.transaction_type === 'transfer' ? transaction.transfer_to_account_id : null
+    const destinationCurrency =
+      destinationId != null
+        ? ((accounts.find((item) => item.id === destinationId) ?? resolvedDestinations[destinationId])?.currency as CurrencyCode | undefined)
+        : undefined
+    const needsReceived = destinationCurrency !== undefined && destinationCurrency !== accountCurrency
+    // Only the status may change: the row's one missing figure is asked for, if it has one.
+    if (!transaction.permissions.can_edit) {
+      const face = (transaction.projected_currency as CurrencyCode | undefined) ?? (transaction.currency as CurrencyCode)
+      const needsAmount = transaction.transaction_type !== 'transfer' && face !== accountCurrency
+      const needsStoredReceived = needsReceived && !(transaction.received_amount != null && transaction.received_amount > 0)
+      if (!needsAmount && !needsStoredReceived) {
+        setActionError(null)
+        void handlePostStatusOnly(transaction).then((message) => {
+          if (message) setActionError(message)
+        })
+        return
+      }
+      setPostingFormState({
+        ...emptyPostingForm(accountCurrency),
+        visible: true,
+        projectedAmount: transaction.projected_amount ?? null,
+        projectedCurrency: face,
+        needsConversion: needsAmount,
+        needsReceived: needsStoredReceived,
+        destinationCurrency: destinationCurrency ?? accountCurrency,
+        statusOnly: true,
+      })
+      return
+    }
+    // A loan payment is posted for its whole amount (principal + interest).
+    const projectedAmount =
+      transaction.projected_amount ??
+      (isLoanPayment(transaction)
+        ? toTotal(transaction.amount, transaction.transfer_fee)
+        : transaction.amount) ??
+      null
+    const projectedCurrency =
+      (transaction.projected_currency as CurrencyCode) ??
+      (transaction.currency as CurrencyCode) ??
+      accountCurrency
+    const needsConversion = projectedCurrency !== accountCurrency
+    setPostingFormState({
+      ...emptyPostingForm(accountCurrency),
+      visible: true,
+      amount:
+        !needsConversion && projectedAmount && projectedAmount > 0
+          ? String(projectedAmount)
+          : '',
+      error: null,
+      projectedAmount,
+      projectedCurrency,
+      accountCurrency,
+      needsConversion,
+      needsReceived,
+      destinationCurrency: destinationCurrency ?? accountCurrency,
+      received: needsReceived && transaction.received_amount != null ? String(transaction.received_amount) : '',
+      statusOnly: false,
+      // Read now, not from the page's cached day, which can lag Manila midnight by a poll.
+      postedOn: manilaToday(),
+    })
+  }
+
+  const handleSavePostingForm = async () => {
+    if (!actionTransaction) {
+      return
+    }
+    // A status-only post asks for just the one figure the row needs.
+    const askAmount = !postingFormState.statusOnly || postingFormState.needsConversion
+    const parsed = parseFloat(postingFormState.amount)
+    if (askAmount && (Number.isNaN(parsed) || parsed <= 0)) {
+      setPostingFormState((prev) => ({
+        ...prev,
+        error: prev.needsConversion
+          ? `Enter the amount in ${prev.accountCurrency} to post this foreign purchase`
+          : 'Please enter a valid amount greater than zero.',
+      }))
+      return
+    }
+    const received = parseFloat(postingFormState.received)
+    if (postingFormState.needsReceived && (Number.isNaN(received) || received <= 0)) {
+      setPostingFormState((prev) => ({
+        ...prev,
+        error: `Enter the amount received in ${prev.destinationCurrency}.`,
+      }))
+      return
+    }
+    if (!postingFormState.statusOnly) {
+      const dateError =
+        postingFormState.postedOn === '' ? 'Choose the date it posted.' : recordDateError(postingFormState.postedOn)
+      if (dateError) {
+        setPostingFormState((prev) => ({ ...prev, dateError }))
+        return
+      }
+    }
+    try {
+      if (postingFormState.statusOnly) {
+        const message = await handlePostStatusOnly(
+          actionTransaction,
+          postingFormState.needsConversion ? { amount: parsed } : { received_amount: received },
+        )
+        if (message) setPostingFormState((prev) => ({ ...prev, error: message }))
+        return
+      }
+      const projectedAmount = postingFormState.projectedAmount
+      const exchangeRate =
+        projectedAmount && projectedAmount > 0 ? parsed / projectedAmount : undefined
+      await handleMarkPostedFromModal(
+        actionTransaction,
+        parsed,
+        postingFormState.postedOn,
+        exchangeRate,
+        postingFormState.needsReceived ? received : undefined,
+      )
+      resetPostingFormState()
+    } catch (error) {
+      // The API's reason ("Enter the amount received", ...) stays in the form.
+      setPostingFormState((prev) => ({
+        ...prev,
+        error: apiErrorMessage(error) || 'Could not mark the transaction as posted. Please try again.',
+      }))
+    }
+  }
+
+  const handleCancelPostingForm = () => {
+    resetPostingFormState()
+  }
+
+  const openEditFromModal = (transaction: Transaction) => {
+    closeActionModal()
+    handleEdit(transaction)
+  }
+
+  // A link from the dashboard (`?edit=<id>&from=dashboard`) opens that transaction: its
+  // form when the caller may edit it and it is classified, else its action modal, which
+  // locks a pending or unavailable loan destination and shows only the permitted
+  // actions. The search is then cleared, so a reload doesn't reopen it, and once the
+  // modal it opened closes, the page goes back to the dashboard.
+  const { edit: linkedId, from: linkedFrom } = Route.useSearch()
+  const router = useRouter()
+  const canGoBack = useCanGoBack()
+  const { currentData: linkedTransaction, error: linkedError } = useGetTransactionQuery(linkedId ?? 0, {
+    skip: linkedId === undefined || !isAuthenticated,
+  })
+  const handleEditRef = useLatestRef(handleEdit)
+  const openActionModalRef = useLatestRef(openActionModal)
+  // The id already opened, so a re-run (StrictMode, a new `loanPaymentStatus`) doesn't reopen it.
+  const handledEditId = useRef<number | null>(null)
+  const returnToDashboard = useRef(false)
+  // The linked modal has been seen open, so its closing is what sends the page back.
+  const linkedSeenOpen = useRef(false)
+  const goBackToDashboard = useCallback(() => {
+    if (canGoBack) {
+      router.history.back()
+    } else {
+      navigate({ to: '/' })
+    }
+  }, [canGoBack, navigate, router])
+
+  useEffect(() => {
+    if (linkedId === undefined) {
+      handledEditId.current = null
+      return
+    }
+    if (handledEditId.current === linkedId) {
+      return
+    }
+    if (linkedError) {
+      handledEditId.current = linkedId
+      // No dialog is open to hold it, and the page moves on, so the toast carries it.
+      showToast(
+        'status' in linkedError && linkedError.status === 404
+          ? 'This transaction is no longer available.'
+          : apiErrorMessage(linkedError) || 'This transaction is no longer available.'
+      )
+      if (linkedFrom === 'dashboard') {
+        goBackToDashboard()
+      } else {
+        navigate({ to: '/transactions', search: (prev) => ({ view: prev.view }), replace: true })
+      }
+      return
+    }
+    if (!accountsData || !linkedTransaction || linkedTransaction.id !== linkedId) {
+      return
+    }
+    handledEditId.current = linkedId
+    returnToDashboard.current = linkedFrom === 'dashboard'
+    linkedSeenOpen.current = false
+    const status = loanPaymentStatus(linkedTransaction)
+    // `handleEdit` itself refuses only a Limited row, so the edit right is checked here.
+    if (
+      !isLimited(linkedTransaction) &&
+      linkedTransaction.permissions.can_edit &&
+      (status === 'loan' || status === 'not_loan')
+    ) {
+      handleEditRef.current(linkedTransaction)
+    } else {
+      openActionModalRef.current(linkedTransaction)
+    }
+    navigate({ to: '/transactions', search: (prev) => ({ view: prev.view }), replace: true })
+  }, [
+    accountsData,
+    goBackToDashboard,
+    handleEditRef,
+    linkedError,
+    linkedFrom,
+    linkedId,
+    linkedTransaction,
+    loanPaymentStatus,
+    navigate,
+    openActionModalRef,
+    showToast,
+  ])
+
+  useEffect(() => {
+    if (!returnToDashboard.current) {
+      return
+    }
+    // `openEditFromModal` swaps the action modal for the form in one batch, so this
+    // never reads false in between.
+    if (isCreateModalOpen || isActionModalOpen) {
+      linkedSeenOpen.current = true
+      return
+    }
+    if (!linkedSeenOpen.current) {
+      return
+    }
+    returnToDashboard.current = false
+    linkedSeenOpen.current = false
+    handledEditId.current = null
+    goBackToDashboard()
+  }, [goBackToDashboard, isActionModalOpen, isCreateModalOpen])
+
+  const getTransactionMeta = useCallback(
+    (transaction: Transaction) => {
+      const currencyCode = (transaction.currency as CurrencyCode) || fallbackCurrency
+      const amountKind: AmountKind = transaction.transaction_type === 'credit' ? 'in' : 'out'
+      const amountLabel = formatAmount(amountKind, transaction.amount, currencyCode)
+      const transferFeeLabel =
+        transaction.transfer_fee && transaction.transfer_fee > 0
+          ? formatCurrency(transaction.transfer_fee, currencyCode)
+          : null
+      const typeBadgeStyles = amountClass(amountKind)
+      const amountClassName = amountClass(amountKind)
+
+      // A Limited row names its accounts through references (a hidden one is a neutral
+      // name with no id); every other row looks them up in the caller's account list.
+      if (isLimited(transaction)) {
+        return {
+          accountLabel: transaction.account?.name || 'Account',
+          sourceLabel: transaction.account?.name || 'Source',
+          destinationLabel: transaction.counterpart?.name || 'Destination',
+          categoryName: transaction.category_name,
+          amountLabel,
+          projectedLabel: null,
+          transferFeeLabel,
+          typeBadgeStyles,
+          amountClass: amountClassName,
+          budgetEntry: undefined,
+          scheduleLabel: null,
+        }
+      }
+
+      const primaryAccount = accounts.find((a) => a.id === transaction.account_id)
+      // An unposted foreign debit or credit is listed by its face, in the face's own currency;
+      // a row whose account is not in the list keeps its stored figure.
+      const shown = primaryAccount
+        ? rowAmount(transaction, primaryAccount.currency as CurrencyCode)
+        : { amount: transaction.amount, currency: transaction.currency as CurrencyCode }
+      const fromAccount = transaction.transfer_from_account_id
+        ? accounts.find((a) => a.id === transaction.transfer_from_account_id)
+        : undefined
+      const toAccount = transaction.transfer_to_account_id
+        ? accounts.find((a) => a.id === transaction.transfer_to_account_id)
+        : undefined
+      const projectedLabel =
+        !transaction.is_posted && transaction.projected_amount && transaction.projected_currency
+          ? formatCurrency(transaction.projected_amount, transaction.projected_currency as CurrencyCode)
+          : null
+      const categoryName = isSharedFull(transaction)
+        ? transaction.category_name
+        : transaction.category_id
+        ? categories.find((cat) => cat.id === transaction.category_id)?.name ?? null
+        : null
+      const budgetEntry = isOwnerFull(transaction) && transaction.budget_entry_id
+        ? budgetEntries.find((entry) => entry.id === transaction.budget_entry_id)
+        : undefined
+      const scheduleLabel = budgetEntry
+        ? `${budgetEntry.name} • ${formatCadenceLabel(budgetEntry.cadence)}`
+        : null
+
+      return {
+        accountLabel: primaryAccount?.name || 'Account',
+        sourceLabel: fromAccount?.name || primaryAccount?.name || 'Source',
+        destinationLabel: toAccount?.name || 'Destination',
+        categoryName,
+        amountLabel: formatAmount(amountKind, shown.amount, shown.currency),
+        projectedLabel,
+        transferFeeLabel,
+        typeBadgeStyles,
+        amountClass: amountClassName,
+        budgetEntry,
+        scheduleLabel,
+      }
+    },
+    [accounts, categories, fallbackCurrency, budgetEntries]
+  )
+
+  const actionModalMeta = useMemo(() => {
+    if (!actionTransaction) {
+      return null
+    }
+    const date = transactionDate(actionTransaction)
+    // A Limited row has no posting date; its status alone says whether it is posted.
+    const postingDate = isLimited(actionTransaction) ? undefined : actionTransaction.posting_date
+    // A posting date reads as its Manila day, whatever the browser's zone.
+    const postedDay = postingDate ? postingDay(postingDate) : null
+    return {
+      transactionDate: formatEntryDate(date),
+      transactionRelative: relativeEntryDay(date, today),
+      postingDate: postingDate
+        ? postedDay
+          ? formatEntryDate(postedDay)
+          : 'Invalid date'
+        : isLimited(actionTransaction) && actionTransaction.is_posted
+        ? 'Posted'
+        : 'Not posted',
+      postingRelative: postedDay ? relativeEntryDay(postedDay, today) : null,
+      typeLabel: TRANSACTION_TYPE_LABELS[actionTransaction.transaction_type],
+    }
+  }, [actionTransaction, today])
+
+  const actionMeta = useMemo(() => (actionTransaction ? getTransactionMeta(actionTransaction) : null), [actionTransaction, getTransactionMeta])
+
+  const actionTransferMeta = useMemo(() => {
+    if (!actionTransaction || actionTransaction.transaction_type !== 'transfer') {
+      return null
+    }
+    return getTransactionMeta(actionTransaction)
+  }, [actionTransaction, getTransactionMeta])
+
+  const actionSchedule = actionMeta?.budgetEntry ?? null
+
+  const handleBudgetEntrySelect = useCallback((entry: FullBudgetEntry | undefined) => {
+    if (!entry) {
+      setFormData((prev) => ({
+        ...prev,
+        budget_entry_id: undefined,
+      }))
+      return
+    }
+
+    // A link to an existing entry and Repeat or Installment (a new entry) exclude each other.
+    setRepeatOn(false)
+    setInstallment((prev) => ({ ...prev, on: false }))
+    setFormData((prev) => {
+      const nextAccountId = entry.account_id ?? prev.account_id
+      const nextAccount = nextAccountId ? accounts.find((acc) => acc.id === nextAccountId) : undefined
+      const nextCurrency = (entry.currency as CurrencyCode) || (nextAccount?.currency as CurrencyCode) || prev.currency
+      const updated: TransactionFormState = {
+        ...prev,
+        budget_entry_id: entry.id,
+        account_id: nextAccountId,
+        currency: nextCurrency,
+        projected_currency: prev.projected_currency ?? nextCurrency,
+      }
+
+      if (entry.category_id) {
+        updated.category_id = entry.category_id
+      }
+      if (entry.allocation_id) {
+        updated.allocation_id = entry.allocation_id
+      }
+      if (!prev.description && entry.description) {
+        updated.description = entry.description
+      }
+      // The next occurrence's own amount (the last of an installment bills its final_amount), from the API.
+      const occurrenceAmount = entry.next_occurrence_amount ?? entry.amount
+      if (occurrenceAmount) {
+        if (prev.is_posted) {
+          updated.amount = prev.amount && prev.amount > 0 ? prev.amount : occurrenceAmount
+        } else {
+          updated.projected_amount = prev.projected_amount && prev.projected_amount > 0 ? prev.projected_amount : occurrenceAmount
+        }
+      }
+      return updated
+    })
+  }, [accounts])
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-ink"></div>
+      </div>
+    )
+  }
+
+  if (!isAuthenticated) {
+    return null // Will redirect
+  }
+
+  // Background saves (STU-605): rows with a save of their own pending, and display-only
+  // "Saving…" rows for creates, kept until the list has refetched with the server row.
+  const rowTargets = pendingTargets(outbox, 'transaction')
+  const rowsStale = mainSettled && loadedKey !== `${filterKey}|${page}`
+  const listedIds = new Set(transactions.map((transaction) => transaction.id))
+  const inRange = (day: string) =>
+    bounds.main !== null && (bounds.main.start === undefined || day >= bounds.main.start) && (bounds.main.end === undefined || day <= bounds.main.end)
+  const pendingRows: PendingListRow[] = []
+  for (const entry of outbox.entries) {
+    if (entry.form !== 'transaction' || !entry.display || entry.targetId !== undefined) continue
+    if (!inRange(entry.display.date)) continue
+    const failed = entry.status === 'failed'
+    pendingRows.push({
+      key: `pending-${entry.clientId}`,
+      ...entry.display,
+      state: failed ? 'failed' : 'saving',
+      editClientId: failed && entry.error && !entry.error.retryable ? entry.clientId : null,
+    })
+  }
+  for (const completion of outbox.completions) {
+    if (completion.form !== 'transaction' || !completion.display || completion.targetId !== undefined) continue
+    if (completion.kind === 'delete' || !inRange(completion.display.date)) continue
+    if (!completionShown(completion, listDrainSeq)) continue
+    if (completion.serverId !== undefined && listedIds.has(completion.serverId)) continue
+    pendingRows.push({ key: `pending-${completion.clientId}`, ...completion.display, state: 'saving', editClientId: null })
+  }
+  const lastPage = page >= pageWindow(totalTransactions, page, pageSize).pages
+  const listItems = withPendingRows(transactions, pendingRows, page, lastPage)
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-96">
+        <div className="text-center">
+          <div className="loading-spinner mx-auto mb-4"></div>
+          <p className="text-body font-medium">Loading transactions...</p>
+        </div>
+      </div>
+    )
+  }
+
+  const renderTransactionRow = (transaction: Transaction) => {
+    const {
+      accountLabel,
+      sourceLabel,
+      destinationLabel,
+      categoryName,
+      amountLabel,
+      projectedLabel,
+      transferFeeLabel,
+      typeBadgeStyles,
+      amountClass,
+      scheduleLabel,
+    } = getTransactionMeta(transaction)
+    const rowDate = transactionDate(transaction)
+    const relativeDate = relativeEntryDay(rowDate, today)
+    const exactDate = formatEntryDate(rowDate)
+    const status = transactionStatus(transaction, today)
+    const postedDay =
+      !isLimited(transaction) && transaction.posting_date ? postingDay(transaction.posting_date) : null
+    const postedDate =
+      !isLimited(transaction) && transaction.posting_date
+        ? postedDay
+          ? formatEntryDate(postedDay)
+          : 'Invalid date'
+        : null
+    const typeLabel = TRANSACTION_TYPE_LABELS[transaction.transaction_type]
+    const cardStateClasses = transaction.is_posted ? '' : 'bg-sunken border border-line'
+    const description = transactionDescription(transaction)?.trim() || 'Untitled transaction'
+    // A row with a save of its own in the outbox is read-only until it settles (STU-605); rows
+    // from another filter or page wait for the fresh ones.
+    const pendingKind = rowTargets.get(transaction.id)
+    const actionable = pendingKind === undefined && !rowsStale
+    const open = () => {
+      if (actionable) openActionModal(transaction)
+    }
+
+    return (
+      <article
+        key={transaction.id}
+        data-transaction-id={transaction.id}
+        data-pending={pendingKind}
+        data-highlighted={highlightedId === transaction.id ? 'true' : undefined}
+        className={`card p-4 sm:p-5 transition-colors duration-200 ${actionable ? 'hover:bg-sunken cursor-pointer' : 'cursor-default'} ${pendingKind === 'delete' ? 'opacity-50' : ''} ${highlightedId === transaction.id ? 'ring-2 ring-ink' : ''} ${cardStateClasses}`}
+        onClick={open}
+        role="button"
+        tabIndex={0}
+        aria-disabled={actionable ? undefined : 'true'}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            open()
+          }
+        }}
+      >
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted">
+                <span>{relativeDate}</span>
+                <span className="hidden md:inline text-muted">•</span>
+                <span className="text-muted">{exactDate}</span>
+              </div>
+              <p className="text-base font-semibold text-ink">{description}</p>
+              <div className="flex flex-wrap gap-2 text-xs text-body">
+                <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                  </svg>
+                  {transaction.transaction_type === 'transfer'
+                    ? `${sourceLabel} → ${destinationLabel}`
+                    : accountLabel}
+              </span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
+                  </svg>
+                  {transaction.transaction_type === 'transfer'
+                    ? categoryName || 'Transfer'
+                    : categoryName || 'Uncategorized'}
+              </span>
+                {transaction.created_by && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1" data-testid="created-by">
+                    by {transaction.created_by}
+                  </span>
+                )}
+                <TagChips tags={transaction.tags} />
+                {scheduleLabel && (
+                  <span className="inline-flex items-center gap-1 px-2 py-1 text-ink">
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    {scheduleLabel}
+                  </span>
+                )}
+                {transferFeeLabel && (
+                  <span className="inline-flex items-center gap-1 px-2 py-1 text-warn">
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
+                    </svg>
+                    Fee {transferFeeLabel}
+                  </span>
+                )}
+                {projectedLabel && !transaction.is_posted && (
+                  <span className="inline-flex items-center gap-1 px-2 py-1 text-ink">
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3" />
+                    </svg>
+                    Projected {projectedLabel}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="space-y-2 text-right">
+              <p className={`text-lg font-bold ${amountClass}`}>{amountLabel}</p>
+              {!isLimited(transaction) && transaction.original_amount != null && transaction.original_currency && (
+                <p className="text-xs text-muted">
+                  Original {formatCurrency(transaction.original_amount, transaction.original_currency as CurrencyCode)}
+                </p>
+              )}
+              {postedDate && <p className="text-xs text-muted">Posted {postedDate}</p>}
+              <div className="flex flex-wrap justify-end gap-2">
+                {pendingKind !== undefined && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1 text-xs font-semibold text-muted" data-testid="row-saving">
+                    <Spinner size="xs" />
+                    {pendingKind === 'delete' ? 'Deleting…' : 'Saving…'}
+                  </span>
+                )}
+                <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${typeBadgeStyles}`}>
+                  {typeLabel}
+                </span>
+                <span
+                  className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${STATUS_BADGE_CLASSES[status]}`}
+                >
+                  {STATUS_LABELS[status]}
+                </span>
+                {!isLimited(transaction) && transaction.is_reconciled && (
+                  <span className="inline-flex rounded-full px-2 py-1 text-xs font-semibold text-ok">
+                    Reconciled
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+    )
+  }
+
+  const renderPendingRow = (row: PendingListRow) => {
+    const editable = row.editClientId !== null
+    const edit = () => {
+      if (row.editClientId !== null) dispatch(outboxActions.editRequested(row.editClientId))
+    }
+    return (
+      <article
+        key={row.key}
+        data-testid="pending-row"
+        data-state={row.state}
+        className={`card border border-dashed border-line p-4 sm:p-5 ${editable ? 'cursor-pointer hover:bg-sunken' : 'opacity-70'}`}
+        {...(editable
+          ? {
+              role: 'button',
+              tabIndex: 0,
+              onClick: edit,
+              onKeyDown: (event: React.KeyboardEvent) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  edit()
+                }
+              },
+            }
+          : {})}
+      >
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div className="space-y-2">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted">{formatEntryDate(row.date)}</div>
+            <p className="text-base font-semibold text-ink">{row.description}</p>
+            <p className="text-xs text-body">{row.account}</p>
+          </div>
+          <div className="space-y-2 text-right">
+            <p className="text-lg font-bold text-muted">{row.amount}</p>
+            <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1 text-xs font-semibold text-muted">
+              {row.state === 'saving' ? (
+                <>
+                  <Spinner size="xs" />
+                  Saving…
+                </>
+              ) : editable ? (
+                'Not saved — tap to edit'
+              ) : (
+                'Not saved'
+              )}
+            </span>
+          </div>
+        </div>
+      </article>
+    )
+  }
+
+  const pageView = pageWindow(totalTransactions, page, pageSize)
+
+  // Nothing to add a transaction to when every account is read-only for the caller.
+  const canAddTransactions = writableAccounts.length > 0
+
+  const emptyState = (
+    <div className="card p-6 text-center space-y-4">
+      <div className="w-16 h-16 mx-auto rounded-full bg-sunken flex items-center justify-center">
+        <svg className="w-8 h-8 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+        </svg>
+      </div>
+      <div>
+        <p className="text-lg font-semibold text-ink">No transactions found</p>
+        <p className="text-sm text-muted mt-1">
+          {hasActiveFilters
+            ? 'No transactions match the current filters. Try adjusting them or reset to see more.'
+            : 'No activity recorded for this month yet. Add your first transaction to get started.'}
+        </p>
+      </div>
+      {canAddTransactions && (
+        <button
+          onClick={() => setIsCreateModalOpen(true)}
+          className="btn-primary focus-ring w-full sm:w-auto mx-auto"
+        >
+          Add Transaction
+        </button>
+      )}
+    </div>
+  )
+
+  const loadErrorAlert = (
+    <div className="card p-4 space-y-3" role="alert" data-testid="transactions-load-error">
+      <p className="text-sm text-danger">Could not load transactions.</p>
+      <button
+        type="button"
+        className="btn-secondary focus-ring"
+        onClick={() => void refreshLists()}
+        data-testid="transactions-retry"
+      >
+        Retry
+      </button>
+    </div>
+  )
+
+  return (
+    <div className="max-w-7xl mx-auto px-3 py-6 sm:px-4 lg:px-6 space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-[length:min(1.875rem,10vw)] leading-9 font-bold text-ink">Transactions</h1>
+        {canAddTransactions && (
+          <button
+            onClick={() => setIsCreateModalOpen(true)}
+            className="btn-primary focus-ring w-full sm:w-auto justify-center"
+          >
+            Add Transaction
+          </button>
+        )}
+      </div>
+
+      <DueAndOverdueSection
+        today={partitionDay}
+        onPost={(transaction) => {
+          openActionModal(transaction)
+          handleInitPostingForm(transaction)
+        }}
+        onChanged={() => void refreshListsRef.current()}
+        onOpenTransaction={openActionModal}
+        onSeeScheduled={seeScheduled}
+        accountCurrencies={accountCurrencies}
+      />
+
+      {/* Search and Filters */}
+      <div ref={listCardRef} className="card p-4 sm:p-6 space-y-4" data-testid="transactions-list-card">
+        <SegmentedControl
+          className="flex flex-wrap items-center gap-2"
+          aria-label="List view"
+          options={[
+            { value: 'to_date', label: 'To date', testId: 'view-to-date' },
+            { value: 'scheduled', label: 'Scheduled', testId: 'view-scheduled' },
+          ]}
+          value={isScheduled ? 'scheduled' : 'to_date'}
+          onChange={showView}
+          segmentClassName="min-h-11 px-4 py-2 text-sm focus-ring"
+        />
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="w-full lg:max-w-md">
+            <label className="label">Search transactions</label>
+            <div className="relative" data-busy-passthrough-box>
+              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                <svg className="h-5 w-5 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+              <input
+                type="text"
+                data-busy-passthrough
+                data-testid="transactions-search"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="input-field pl-10 focus-ring"
+                placeholder="Search by description..."
+              />
+            </div>
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+            {!isScheduled && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleMonthChange('prev')}
+                className="inline-flex items-center rounded-full border border-line bg-surface px-2.5 py-1.5 text-sm font-medium text-body transition hover:bg-sunken focus:outline-none"
+                aria-label="View previous month"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+              <span className="text-sm font-semibold text-ink">{currentMonthLabel}</span>
+              <button
+                type="button"
+                onClick={() => handleMonthChange('next')}
+                className="inline-flex items-center rounded-full border border-line bg-surface px-2.5 py-1.5 text-sm font-medium text-body transition hover:bg-sunken focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                aria-label="View next month"
+                disabled={isAtCurrentMonth}
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            </div>
+            )}
+            {!isScheduled && (
+            <button
+              type="button"
+              onClick={() => setIsBreakdownOpen(true)}
+              data-onboarding="spending-breakdown"
+              className="inline-flex items-center justify-center gap-2 border border-line bg-surface px-3 py-2 text-sm font-semibold text-body transition hover:bg-sunken focus:outline-none"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />
+              </svg>
+              Spending breakdown
+            </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowFilters((prev) => !prev)}
+              className="inline-flex items-center justify-center gap-2 border border-line bg-surface px-3 py-2 text-sm font-semibold text-body transition hover:bg-sunken focus:outline-none"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h18l-7 8v6l-4 2v-8z" />
+              </svg>
+              {showFilters ? 'Hide filters' : 'Show filters'}
+            </button>
+          </div>
+        </div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-medium text-body">Date range: {dateRangeSummary}</p>
+            <p className="text-xs text-muted">
+              {isScheduled
+                ? scheduledFrom !== '' || scheduledThrough !== ''
+                  ? 'Custom range selected'
+                  : 'From tomorrow, through a year ahead'
+                : isCustomRange
+                  ? 'Custom range selected'
+                  : 'Automatically showing whole-month activity'}
+            </p>
+          </div>
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="btn-secondary focus-ring self-start sm:self-auto"
+            >
+              Reset filters
+            </button>
+          )}
+        </div>
+        {(selectedCategoryNames.length > 0 || filterUncategorized || enteredBy === 'me') && (
+          <div className="flex flex-wrap gap-2" aria-label="Active filters">
+            {!isDrilledUncategorized && selectedCategoryNames.map((name) => (
+              <button
+                type="button"
+                key={`category:${name}`}
+                onClick={() => toggleCategoryFilter(name)}
+                className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3 py-1 text-sm font-medium text-paper focus-ring"
+                aria-label={`Remove category filter ${name}`}
+              >
+                Category: {name}
+                <span aria-hidden="true">×</span>
+              </button>
+            ))}
+            {filterUncategorized && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterUncategorized(false)
+                  if (isDrilledUncategorized) setSelectedCategoryNames([])
+                }}
+                className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3 py-1 text-sm font-medium text-paper focus-ring"
+                aria-label="Remove the No category filter"
+              >
+                No category
+                <span aria-hidden="true">×</span>
+              </button>
+            )}
+            {enteredBy === 'me' && (
+              <button
+                type="button"
+                onClick={() => setEnteredBy('everyone')}
+                className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3 py-1 text-sm font-medium text-paper focus-ring"
+                aria-label="Remove the Only mine filter"
+              >
+                Only mine
+                <span aria-hidden="true">×</span>
+              </button>
+            )}
+          </div>
+        )}
+        {showFilters && (
+          <div className="space-y-6">
+            <div>
+              <h3 id="filter-accounts-heading" className="text-sm font-semibold text-body">Accounts</h3>
+              <div className="mt-2">
+                <AccountPicker
+                  mode="multi"
+                  accounts={accounts}
+                  value={selectedAccountIds}
+                  onChange={(ids) => setSelectedAccountIds(ids.filter((id): id is number => typeof id === 'number'))}
+                  recentIds={recentAccounts.recentIds}
+                  pinnedId={user?.main_account_id ?? undefined}
+                  dataField="filter_accounts"
+                  labelledBy="filter-accounts-heading"
+                  leading={[
+                    {
+                      key: 'all',
+                      label: 'All accounts',
+                      selected: selectedAccountIds.length === 0,
+                      onClick: () => setSelectedAccountIds([]),
+                      disabled: selectedAccountIds.length === 0,
+                    },
+                  ]}
+                />
+              </div>
+            </div>
+          <div>
+              <h3 className="text-sm font-semibold text-body">Transaction types</h3>
+              <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Transaction types">
+                <Segment
+                  selected={selectedTypes.length === 0}
+                  onClick={() => setSelectedTypes([])}
+                  className="px-3 py-1.5 text-sm"
+                  disabled={selectedTypes.length === 0}
+                >
+                  All types
+                </Segment>
+                {transactionTypeOptions.map((option) => (
+                  <Segment
+                    key={option.value}
+                    selected={selectedTypes.includes(option.value)}
+                    onClick={() => toggleTypeFilter(option.value)}
+                    className="px-3 py-1.5 text-sm capitalize"
+                  >
+                    {option.label}
+                  </Segment>
+                ))}
+          </div>
+        </div>
+            <div>
+              <h3 id="filter-categories-heading" className="text-sm font-semibold text-body">Categories</h3>
+              <div className="mt-2">
+                <CategoryPicker
+                  mode="multi"
+                  byName
+                  categories={categories}
+                  value={selectedCategoryNames}
+                  onChange={(ids) => setSelectedCategoryNames(ids.filter((id): id is string => typeof id === 'string'))}
+                  maxSelected={MAX_CATEGORY_NAMES}
+                  recentIds={recentCategoryNames}
+                  dataField="filter_categories"
+                  labelledBy="filter-categories-heading"
+                  leading={[
+                    {
+                      key: 'all',
+                      label: 'All categories',
+                      selected: selectedCategoryNames.length === 0 && !filterUncategorized,
+                      onClick: () => {
+                        setSelectedCategoryNames([])
+                        setFilterUncategorized(false)
+                      },
+                      disabled: selectedCategoryNames.length === 0 && !filterUncategorized,
+                    },
+                    {
+                      key: 'none',
+                      label: 'No category',
+                      selected: filterUncategorized,
+                      onClick: () => setFilterUncategorized((prev) => !prev),
+                      italic: true,
+                    },
+                  ]}
+                />
+              </div>
+              {selectedCategoryNames.length >= MAX_CATEGORY_NAMES && (
+                <p className="mt-2 text-xs text-muted">
+                  You can filter by up to {MAX_CATEGORY_NAMES} categories at once.
+                </p>
+              )}
+      </div>
+            <div>
+              <h3 className="text-sm font-semibold text-body">Entered by</h3>
+              <SegmentedControl
+                className="mt-2 flex flex-wrap gap-2"
+                aria-label="Entered by"
+                options={[
+                  { value: 'everyone', label: 'Everyone' },
+                  { value: 'me', label: 'Only mine' },
+                ]}
+                value={enteredBy}
+                onChange={setEnteredBy}
+                segmentClassName="px-3 py-1.5 text-sm"
+              />
+              <p className="mt-2 text-xs text-muted">
+                Only mine keeps the rows you own, including ones someone else recorded for you from your recurring entries.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-body">Tag</h3>
+              <div className="mt-2">
+                <TagFilter value={selectedTag} onChange={setSelectedTag} />
+              </div>
+            </div>
+            {isScheduled ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label className="label" htmlFor="scheduled-from">From</label>
+                <input
+                  id="scheduled-from"
+                  type="date"
+                  data-testid="scheduled-from"
+                  value={scheduled.start}
+                  onChange={(e) => setScheduledFrom(e.target.value)}
+                  className="input-field focus-ring"
+                  min={scheduled.min}
+                  max={scheduled.end}
+                />
+              </div>
+              <div>
+                <label className="label" htmlFor="scheduled-through">Through</label>
+                <input
+                  id="scheduled-through"
+                  type="date"
+                  data-testid="scheduled-through"
+                  value={scheduled.end}
+                  onChange={(e) => setScheduledThrough(e.target.value)}
+                  className="input-field focus-ring"
+                  min={scheduled.start}
+                  max={scheduled.max}
+                />
+              </div>
+            </div>
+            ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label className="label">Custom start date</label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => handleCustomStartDateChange(e.target.value)}
+                  className="input-field focus-ring"
+                  max={endDate || undefined}
+                />
+              </div>
+              <div>
+                <label className="label">Custom end date</label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => handleCustomEndDateChange(e.target.value)}
+                  className="input-field focus-ring"
+                  min={startDate || undefined}
+                />
+              </div>
+            </div>
+            )}
+            {!isScheduled && isCustomRange && (
+              <p className="text-xs text-muted">
+                Month navigation will snap back to calendar months. Use reset to return to the current month view.
+              </p>
+            )}
+                    </div>
+        )}
+      </div>
+
+      {isScheduled ? (
+        <ScheduledView
+          filters={filterParams}
+          range={scheduled}
+          pageSize={pageSize}
+          pageSizes={PAGE_SIZES}
+          onPageSize={(size) => setPageSize(size as PageSize)}
+          today={partitionDay}
+          localDay={today}
+          onOpenTransaction={openActionModal}
+          onChanged={() => void refreshListsRef.current()}
+          accountCurrencies={accountCurrencies}
+          filtered={hasActiveFilters}
+        />
+      ) : (
+      <>
+      {/* Always mounted at a fixed height so showing it never moves the list. */}
+      <p className="flex h-4 items-center gap-2 text-xs text-muted" role="status">
+        {isRefreshing && (
+          <>
+            <span className="loading-spinner !h-3 !w-3" aria-hidden="true"></span>
+            Updating...
+          </>
+        )}
+        <SlowReload active={isRefreshing} />
+      </p>
+      {listItems.length === 0 ? (
+        // Not before the first load settles; after that the previous state stays up while refreshing.
+        isInitialLoading ? null : listError ? loadErrorAlert : emptyState
+      ) : (
+        <div className={`space-y-6 transition-opacity ${isRefreshing || rowsStale ? 'opacity-60' : ''}`} aria-busy={isRefreshing}>
+          {listError && !listsCurrent && loadErrorAlert}
+          <div className="grid grid-cols-1 gap-3">
+            {listItems.map((item) => (item.kind === 'row' ? renderTransactionRow(item.row) : renderPendingRow(item.row)))}
+          </div>
+          {totalTransactions > 0 && (
+            <nav className="flex flex-col gap-3 px-1 sm:flex-row sm:items-center sm:justify-between" aria-label="Transactions pages" data-testid="transactions-pager">
+              <p className="text-xs text-muted">
+                {pageView.from}–{pageView.to} of {totalTransactions}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => goToPage(pageView.page - 1)}
+                  disabled={pageView.page <= 1}
+                  className="btn-secondary focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+                {pageItems(pageView.pages, pageView.page).map((item, index) =>
+                  item === 0 ? (
+                    <span key={`gap-${index}`} className="px-1 text-muted" aria-hidden="true">…</span>
+                  ) : (
+                    <button
+                      type="button"
+                      key={item}
+                      onClick={() => goToPage(item)}
+                      aria-current={item === pageView.page ? 'page' : undefined}
+                      className={withSelection(item === pageView.page, 'px-3 py-1.5 text-sm')}
+                    >
+                      {item}
+                    </button>
+                  )
+                )}
+                <button
+                  type="button"
+                  onClick={() => goToPage(pageView.page + 1)}
+                  disabled={pageView.page >= pageView.pages}
+                  className="btn-secondary focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+                <label className="flex items-center gap-2 text-xs text-muted">
+                  Per page
+                  <select
+                    value={pageSize}
+                    onChange={(event) => setPageSize(Number(event.target.value) as PageSize)}
+                    className="input-field focus-ring !w-auto !py-1"
+                  >
+                    {PAGE_SIZES.map((size) => (
+                      <option key={size} value={size}>{size}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </nav>
+          )}
+        </div>
+      )}
+      </>
+      )}
+
+      {isBreakdownOpen && (
+        <SpendingBreakdownDialog
+          startDate={startDate}
+          endDate={endDate}
+          tag={selectedTag}
+          rangeLabel={breakdownRangeLabel}
+          defaultCurrency={fallbackCurrency}
+          onSelectCategory={(target) => {
+            // Replaces any category selection and the uncategorized flag. Page 1 is set
+            // explicitly so picking again from page 2 still resets, when the key would not change.
+            setSelectedCategoryNames(target.names)
+            setFilterUncategorized(target.uncategorized)
+            goToPage(1)
+            setIsBreakdownOpen(false)
+          }}
+          onClose={() => setIsBreakdownOpen(false)}
+        />
+      )}
+
+      {isActionModalOpen && actionTransaction && (
+        <div
+          className="modal-backdrop fixed inset-0 z-50 overflow-y-auto bg-scrim/60"
+          onClick={closeActionModal}
+        >
+          <div className="min-h-full flex items-center justify-center">
+          <div
+            className="w-full max-w-2xl bg-surface p-6"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-semibold text-ink">Transaction Actions</h2>
+                <p className="text-sm text-muted">
+                  {transactionDescription(actionTransaction) || 'No description'}
+                </p>
+              </div>
+                        <button
+                onClick={closeActionModal}
+                className="text-muted hover:text-body transition-colors duration-200"
+                aria-label="Close actions modal"
+              >
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="border border-line p-4">
+                <h3 className="text-sm font-semibold text-body">Dates</h3>
+                <dl className="mt-3 space-y-2 text-sm text-body">
+                  <div className="flex justify-between gap-3">
+                    <dt>Transaction</dt>
+                    <dd className="text-right">
+                      {actionModalMeta?.transactionDate}
+                      {actionModalMeta?.transactionRelative && (
+                        <span className="ml-2 text-muted">({actionModalMeta.transactionRelative})</span>
+                      )}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt>Posting</dt>
+                    <dd className="text-right">
+                      {actionModalMeta?.postingDate}
+                      {actionModalMeta?.postingRelative && (
+                        <span className="ml-2 text-muted">({actionModalMeta.postingRelative})</span>
+                      )}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+
+              <div className="border border-line p-4">
+                <h3 className="text-sm font-semibold text-body">Details</h3>
+                <dl className="mt-3 space-y-2 text-sm text-body">
+                  <div className="flex justify-between">
+                    <dt>Amount</dt>
+                    <dd className={`${actionMeta?.amountClass ?? ''} font-medium`}>
+                      {actionMeta?.amountLabel}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt>Type</dt>
+                    <dd>{actionModalMeta?.typeLabel}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt>Status</dt>
+                    <dd className={STATUS_TEXT_CLASSES[transactionStatus(actionTransaction, today)]}>
+                      {STATUS_LABELS[transactionStatus(actionTransaction, today)]}
+                    </dd>
+                  </div>
+                  {actionTransaction.created_by && (
+                    <div className="flex justify-between gap-3">
+                      <dt>Created by</dt>
+                      <dd className="text-right">{actionTransaction.created_by}</dd>
+                    </div>
+                  )}
+                  {actionTransaction.transaction_type === 'transfer' && (
+                    <>
+                      <div className="flex justify-between gap-3">
+                        <dt>From</dt>
+                        <dd className="text-right">
+                          {actionTransferMeta?.sourceLabel || 'Source account'}
+                        </dd>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <dt>To</dt>
+                        <dd className="text-right">
+                          {actionTransferMeta?.destinationLabel || 'Destination account'}
+                        </dd>
+                      </div>
+                      {actionTransferMeta?.transferFeeLabel && (
+                        <div className="flex justify-between gap-3">
+                          <dt>Transfer Fee</dt>
+                          <dd className={`text-right ${amountClass('out')}`}>{actionTransferMeta.transferFeeLabel}</dd>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  {actionSchedule && (
+                    <>
+                      <div className="flex justify-between gap-3">
+                        <dt>Recurring entry</dt>
+                        <dd className="text-right text-ink font-medium">{actionSchedule.name}</dd>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <dt>Cadence</dt>
+                        <dd>{formatCadenceLabel(actionSchedule.cadence)}</dd>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <dt>Scheduled Amount</dt>
+                        <dd>{formatCurrency(actionSchedule.amount, actionSchedule.currency)}</dd>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <dt>Next Occurrence</dt>
+                        <dd>{formatEntryDate(actionSchedule.next_occurrence)}</dd>
+                      </div>
+                      {actionSchedule.lead_time_days ? (
+                        <div className="flex justify-between gap-3 text-xs text-muted">
+                          <dt>Reminder</dt>
+                          <dd>{actionSchedule.lead_time_days} day{actionSchedule.lead_time_days === 1 ? '' : 's'} before</dd>
+                        </div>
+                      ) : null}
+                      {actionSchedule.settlement === 'autopay' && (
+                        <div className="flex justify-between gap-3 text-xs text-ink">
+                          <dt>Autopay</dt>
+                          <dd>Enabled</dd>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </dl>
+              </div>
+            </div>
+
+            <div className="mt-6 space-y-4">
+              {isOwnerFull(actionTransaction) && externalLink(actionTransaction.receipt_url) && (
+                <a
+                  href={externalLink(actionTransaction.receipt_url) ?? undefined}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="receipt-link"
+                  className="block text-sm text-ink underline break-all"
+                >
+                  Open receipt link
+                </a>
+              )}
+              {isOwnerFull(actionTransaction) && externalLink(actionTransaction.invoice_url) && (
+                <a
+                  href={externalLink(actionTransaction.invoice_url) ?? undefined}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="invoice-link"
+                  className="block text-sm text-ink underline break-all"
+                >
+                  Open invoice link
+                </a>
+              )}
+              {isOwnerFull(actionTransaction) && actionTransaction.receipt_url?.startsWith('/api/') && (
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => handleViewReceipt(actionTransaction.id)}
+                    disabled={isReceiptLoading}
+                    data-testid="view-receipt"
+                    className="px-4 py-2 text-sm font-semibold border border-line text-ink hover:bg-sunken disabled:opacity-50"
+                  >
+                    {isReceiptLoading ? 'Loading receipt…' : 'View receipt'}
+                  </button>
+                  {receiptError && <p className="text-sm text-danger">{receiptError}</p>}
+                  {receipt && receipt.transactionId === actionTransaction.id && (
+                    receipt.type.startsWith('image/') ? (
+                      <img src={receipt.url} alt="Receipt" data-testid="receipt-preview" className="max-h-80 border border-line" />
+                    ) : (
+                      <a href={receipt.url} download={`receipt-${actionTransaction.id}`} data-testid="receipt-download" className="text-sm text-ink underline">
+                        Download receipt
+                      </a>
+                    )
+                  )}
+                </div>
+              )}
+              {isOwnerFull(actionTransaction) && actionPermissions.can_edit && (
+                <div className="space-y-2">
+                  <label htmlFor="receipt-file" className="block text-sm font-semibold text-body">
+                    {actionTransaction.receipt_url ? 'Replace receipt' : 'Add a receipt'}
+                  </label>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <input
+                      key={receiptInputKey}
+                      id="receipt-file"
+                      type="file"
+                      accept=".jpg,.jpeg,.png,.pdf,.doc,.docx"
+                      data-testid="receipt-file"
+                      aria-invalid={receiptUploadError ? true : undefined}
+                      aria-describedby={receiptUploadError ? 'receipt-upload-error' : undefined}
+                      onChange={(event) => {
+                        setReceiptFile(event.target.files?.[0] ?? null)
+                        setReceiptUploadError(null)
+                        setReceiptUploaded(false)
+                      }}
+                      className="min-w-0 text-sm text-body"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleUploadReceipt(actionTransaction.id)}
+                      disabled={isReceiptUploading || !receiptFile}
+                      data-testid="upload-receipt"
+                      className="px-4 py-2 text-sm font-semibold border border-line text-ink hover:bg-sunken disabled:opacity-50"
+                    >
+                      {isReceiptUploading ? 'Uploading…' : 'Upload receipt'}
+                    </button>
+                  </div>
+                  {receiptUploadError && (
+                    <p id="receipt-upload-error" role="alert" data-testid="receipt-upload-error" className="text-sm text-danger">
+                      {receiptUploadError}
+                    </p>
+                  )}
+                  {receiptUploaded && (
+                    <p role="status" data-testid="receipt-upload-done" className="text-sm text-ok">Receipt uploaded.</p>
+                  )}
+                </div>
+              )}
+              {actionLoanStatus === 'pending' && (
+                <p className="text-sm text-muted">Checking this transfer&apos;s destination account…</p>
+              )}
+              {actionLoanStatus === 'unavailable' && (
+                <p className="text-sm text-warn">{DESTINATION_UNAVAILABLE}</p>
+              )}
+              {!actionPermissions.can_post &&
+                !actionPermissions.can_revert &&
+                !actionPermissions.can_edit &&
+                !actionPermissions.can_delete && (
+                  <p className="text-sm text-muted" data-testid="read-only-note">
+                    You can view this transaction but not change it.
+                  </p>
+                )}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {actionTransaction.is_posted ? (
+                  actionPermissions.can_revert && (
+                  <button
+                    onClick={() => handleRevertPostedFromModal(actionTransaction)}
+                    disabled={actionLocked}
+                    className="flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold transition-colors duration-200 text-warn hover:bg-sunken disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    Mark as not posted
+                  </button>
+                  )
+                ) : (
+                  actionPermissions.can_post && (
+                  <button
+                    onClick={() => handleInitPostingForm(actionTransaction)}
+                    disabled={actionLocked}
+                    className="flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold transition-colors duration-200 text-ok hover:bg-sunken disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    Mark as Posted
+                  </button>
+                  )
+                )}
+                {actionPermissions.can_edit && (
+                <button
+                  onClick={() => openEditFromModal(actionTransaction)}
+                  disabled={actionLocked}
+                  className="flex items-center justify-center gap-2 bg-ink px-4 py-3 text-sm font-semibold text-paper transition-colors duration-200 hover:bg-ink disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                  Edit Transaction
+                        </button>
+                )}
+                {actionPermissions.can_delete && (
+                        <button
+                  onClick={() => handleDelete(actionTransaction)}
+                  className="flex items-center justify-center gap-2 bg-sunken px-4 py-3 text-sm font-semibold text-body transition-colors duration-200 hover:bg-sunken"
+                        >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                  Delete Transaction
+                        </button>
+                )}
+                      </div>
+              {actionError && (
+                <p className="text-sm text-danger" role="alert" data-testid="transaction-action-error">
+                  {actionError}
+                </p>
+              )}
+              {!actionTransaction.is_posted && actionPermissions.can_post && postingFormState.visible && (
+                <div className="border border-ink p-4 space-y-3">
+                  <p className="text-sm font-medium text-ink">
+                    {postingFormState.projectedAmount
+                      ? `Projected amount: ${formatCurrency(
+                          postingFormState.projectedAmount,
+                          postingFormState.projectedCurrency
+                        )}`
+                      : 'No projected amount recorded.'}
+                  </p>
+                  <p className="text-xs text-ink">
+                    {postingFormState.needsConversion
+                      ? `Enter the amount actually posted in ${postingFormState.accountCurrency}. The projection only estimates it.`
+                      : postingFormState.statusOnly
+                      ? 'Enter the figure this transfer needs before it can be posted.'
+                      : 'Verify the received amount. Update it only if the actual amount differs.'}
+                  </p>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                    {(!postingFormState.statusOnly || postingFormState.needsConversion) && (
+                    <div className="flex-1">
+                      <label className="label text-ink">
+                        {postingFormState.needsReceived ? `Amount sent (${postingFormState.accountCurrency})` : `Amount in ${postingFormState.accountCurrency}`}
+                      </label>
+                      <div className="relative">
+                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-ink text-sm">
+                          {getCurrencySymbol(postingFormState.accountCurrency)}
+                        </span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={postingFormState.amount}
+                          onChange={(e) =>
+                            setPostingFormState((prev) => ({
+                              ...prev,
+                              amount: e.target.value,
+                              error: null,
+                            }))
+                          }
+                          className="input-field pl-7 focus-ring"
+                          placeholder="0.00"
+                        />
+                      </div>
+                    </div>
+                    )}
+                    {!postingFormState.statusOnly &&
+                      !postingFormState.needsConversion &&
+                      postingFormState.projectedAmount &&
+                      postingFormState.projectedAmount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPostingFormState((prev) => ({
+                              ...prev,
+                              amount: String(prev.projectedAmount ?? ''),
+                              error: null,
+                            }))
+                          }
+                          className="bg-surface px-3 py-2 text-sm font-semibold text-ink hover:bg-sunken"
+                        >
+                          Use projected amount
+                        </button>
+                      )}
+                  </div>
+                  {postingFormState.needsReceived && (
+                    <div>
+                      <label className="label text-ink" htmlFor="posting-received">
+                        Amount received ({postingFormState.destinationCurrency})
+                      </label>
+                      <div className="relative">
+                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-ink text-sm">
+                          {getCurrencySymbol(postingFormState.destinationCurrency)}
+                        </span>
+                        <input
+                          id="posting-received"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={postingFormState.received}
+                          onChange={(e) =>
+                            setPostingFormState((prev) => ({ ...prev, received: e.target.value, error: null }))
+                          }
+                          className="input-field pl-7 focus-ring"
+                          placeholder="0.00"
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {!postingFormState.statusOnly && (
+                    <div>
+                      <label className="label text-ink" htmlFor="posting-form-date">
+                        Posted on
+                      </label>
+                      <input
+                        id="posting-form-date"
+                        type="date"
+                        value={postingFormState.postedOn}
+                        onChange={(e) =>
+                          setPostingFormState((prev) => ({ ...prev, postedOn: e.target.value, dateError: null, error: null }))
+                        }
+                        min={RECORD_DATE_MIN}
+                        max={recordDateMax()}
+                        className="input-field focus-ring"
+                        aria-invalid={postingFormState.dateError ? true : undefined}
+                        aria-describedby={postingFormState.dateError ? 'posting-form-date-error' : undefined}
+                        data-testid="posting-form-date"
+                      />
+                      {postingFormState.dateError && (
+                        <p id="posting-form-date-error" className="mt-1 text-xs text-danger" role="alert" data-testid="posting-form-date-error">
+                          {postingFormState.dateError}
+                        </p>
+                      )}
+                      {postingFormHint && (
+                        <p className="mt-1 text-xs text-muted" data-testid="posting-form-hint">{postingFormHint}</p>
+                      )}
+                    </div>
+                  )}
+                  {postingFormState.error && (
+                    <p className="text-xs text-danger" role="alert" data-testid="posting-error">{postingFormState.error}</p>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSavePostingForm}
+                      disabled={actionLocked}
+                      className="btn-primary focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Save Posted Amount
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancelPostingForm}
+                      className="btn-secondary focus-ring"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+        </div>
+          </div>
+      </div>
+      )}
+
+      {/* Create/Edit Modal */}
+      {isCreateModalOpen && (
+        <div className="modal-backdrop fixed inset-0 z-50 overflow-y-auto bg-scrim/60">
+          <div className="min-h-full flex items-center justify-center">
+          <div className="bg-surface p-6 w-full max-w-xl">
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h2 className="text-xl font-semibold text-ink">
+              {editingTransaction ? 'Edit Transaction' : 'Create Transaction'}
+            </h2>
+                <p className="text-sm text-muted mt-1">
+                  {formData.transaction_type === 'transfer'
+                    ? 'Move funds between your accounts and optionally include fees.'
+                    : 'Log income, expenses, and projections to keep budgets on track.'}
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setIsCreateModalOpen(false)
+                  resetForm()
+                }}
+                className="text-muted hover:text-body transition-colors duration-200"
+                aria-label="Close transaction modal"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <form ref={transactionForm} onSubmit={handleSubmit} onInvalidCapture={handleInvalidCapture} className="space-y-5">
+              <fieldset className="space-y-5 min-w-0">
+              <div>
+                <label className="label">Description</label>
+                <DescriptionAutofillInput
+                  value={formData.description}
+                  onValueChange={(description) => {
+                    setFormData((prev) => ({ ...prev, description }))
+                    setFieldErrors((prev) => withoutError(prev, 'description'))
+                  }}
+                  enabled={!editingTransaction}
+                  onAutofill={applyAutofill}
+                  resetKey={autofillResetKey}
+                  className="input-field focus-ring"
+                  placeholder="Add notes about this transaction"
+                  data-field="description"
+                  {...fieldErrorProps(fieldErrors, 'description', fieldErrorId('description'))}
+                  required
+                />
+                <FieldErrorText field="description" message={fieldErrors.description} />
+              </div>
+              <div>
+                <label className="label" id="transaction-account-label">
+                  {formData.transaction_type === 'transfer' ? 'From Account' : 'Account'}
+                </label>
+                <AccountPicker
+                  mode="single"
+                  accounts={writableAccounts}
+                  value={formData.account_id || undefined}
+                  onChange={(id) => {
+                    if (typeof id !== 'number') return
+                    markChanged('account_id', ...(formData.transaction_type === 'transfer' ? ['transfer_from_account_id' as const] : []))
+                    handleAccountSelect(id)
+                  }}
+                  recentIds={recentAccounts.recentIds}
+                  pinnedId={user?.main_account_id ?? undefined}
+                  dataField="account_id"
+                  compact
+                  labelledBy="transaction-account-label"
+                  describedBy={fieldErrorProps(fieldErrors, 'account_id', fieldErrorId('account_id'))['aria-describedby']}
+                />
+                <FieldErrorText field="account_id" message={fieldErrors.account_id} />
+                <p className="mt-2 text-xs text-muted">
+                  {formData.transaction_type === 'transfer'
+                    ? 'Funds will move out of this account.'
+                    : 'This is the account where the transaction will be recorded.'}
+                </p>
+                {formData.account_id !== 0 && (
+                  <p className="mt-1 text-xs text-muted">
+                    Recording in {formData.currency} ({formCurrencySymbol})
+                  </p>
+                )}
+              </div>
+              
+              {formData.transaction_type === 'transfer' && (
+              <div>
+                  <label className="label" id="transaction-destination-label">Destination Account</label>
+                  <AccountPicker
+                    mode="single"
+                    deselectable
+                    accounts={transferDestinationOptions}
+                    value={formData.transfer_to_account_id}
+                    onChange={(id) => {
+                      const account = transferDestinationOptions.find((a) => a.id === id)
+                      markChanged('transfer_to_account_id')
+                      setFieldErrors((prev) => withoutError(prev, 'transfer_to_account_id'))
+                      setFormData((prev) => ({
+                        ...prev,
+                        transfer_to_account_id: account ? account.id : undefined,
+                        transfer_fee: account
+                          ? destinationTransferFee(account, prev.transfer_fee)
+                          : prev.transfer_fee,
+                      }))
+                    }}
+                    recentIds={recentAccounts.recentIds}
+                    pinnedId={user?.main_account_id ?? undefined}
+                    dataField="transfer_to_account_id"
+                    compact
+                    labelledBy="transaction-destination-label"
+                    describedBy={fieldErrorProps(fieldErrors, 'transfer_to_account_id', fieldErrorId('transfer_to_account_id'))['aria-describedby']}
+                    emptyText="Select a different source account to see destinations."
+                  />
+                  <FieldErrorText field="transfer_to_account_id" message={fieldErrors.transfer_to_account_id} />
+                </div>
+              )}
+              
+              {editingTransaction && isSharedFull(editingTransaction) ? (
+                <div>
+                  <label className="label">Category</label>
+                  <p className="text-sm text-body" data-testid="shared-category">
+                    {editingTransaction.category_name || 'Uncategorized'}
+                  </p>
+                  <p className="mt-1 text-xs text-muted">
+                    The category belongs to {editingTransaction.created_by ?? 'the person who recorded this'} and
+                    can&apos;t be changed here.
+                  </p>
+                </div>
+              ) : (
+              <div>
+                <label className="label" id="transaction-category-label">
+                  {formData.transaction_type === 'transfer' ? 'Contribution category' : 'Category'}
+                </label>
+                <CategoryPicker
+                  mode="single"
+                  categories={visibleCategories}
+                  value={formData.category_id}
+                  onChange={(id) => {
+                    if (typeof id !== 'number') return
+                    markChanged('category_id')
+                    setFormData((prev) => ({ ...prev, category_id: id }))
+                  }}
+                  leading={[
+                    {
+                      key: 'none',
+                      label: formData.transaction_type === 'transfer' ? 'None' : 'Uncategorized',
+                      selected: formData.category_id === undefined,
+                      onClick: () => {
+                        markChanged('category_id')
+                        setFormData((prev) => ({ ...prev, category_id: undefined }))
+                      },
+                    },
+                  ]}
+                  recentIds={recentCategories.recentIds}
+                  dataField="category_id"
+                  compact
+                  labelledBy="transaction-category-label"
+                />
+                <p className="mt-2 text-xs text-muted">
+                  {formData.transaction_type === 'transfer'
+                    ? 'Tag this move (e.g. Savings, Investments) to track contributions. It stays out of income and expense totals.'
+                    : `Showing ${TRANSACTION_TYPE_LABELS[formData.transaction_type].toLowerCase()} categories.`}
+                </p>
+              </div>
+              )}
+
+              <div>
+                <label className="label">Transaction Type</label>
+                <SegmentedControl
+                  className="flex flex-wrap gap-2"
+                  aria-label="Transaction type"
+                  options={transactionTypeOptions}
+                  value={formData.transaction_type}
+                  onChange={(value) => {
+                    markChanged('transaction_type')
+                    handleTypeChange(value)
+                  }}
+                  segmentClassName="px-3 py-1.5 text-sm capitalize"
+                />
+                {contextHint && (
+                  <div className="mt-3 flex items-start gap-2 border border-line px-3 py-2 text-xs text-ink">
+                    <svg className="mt-0.5 h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div className="space-y-1">
+                      <p>{contextHint.text}</p>
+                      {contextHint.suggestTransfer && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            markChanged('transaction_type')
+                            handleTypeChange('transfer')
+                          }}
+                          className="font-semibold text-ink underline-offset-2 hover:underline"
+                        >
+                          Switch to Transfer
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {!formData.is_posted && (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="label" htmlFor="transaction-projected-amount">{installmentActive ? 'Purchase total' : crossCurrencyTransfer ? `Amount sent (${formData.currency})` : 'Amount'}</label>
+                    <div className="relative">
+                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-muted text-sm">
+                        {projectedCurrencySymbol}
+                      </span>
+                      {installmentActive ? (
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          autoComplete="off"
+                          value={installment.total}
+                          onChange={(e) => changeInstallment({ total: e.target.value })}
+                          className="input-field pl-7 focus-ring"
+                          placeholder="0.00"
+                          id="transaction-projected-amount"
+                          data-field="projected_amount"
+                          data-installment-total
+                          {...installmentErrorProps('installment_total', installmentErrors.installment_total)}
+                        />
+                      ) : (
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={formData.projected_amount ?? ''}
+                        onChange={(e) => {
+                          const value = parseFloat(e.target.value)
+                          setFormData((prev) => ({
+                            ...prev,
+                            projected_amount: Number.isNaN(value) ? undefined : value,
+                          }))
+                          setFieldErrors((prev) => withoutError(prev, 'projected_amount'))
+                        }}
+                        className="input-field pl-7 focus-ring"
+                        placeholder="0.00"
+                        id="transaction-projected-amount"
+                        data-field="projected_amount"
+                        {...fieldErrorProps(fieldErrors, 'projected_amount', fieldErrorId('projected_amount'))}
+                  required
+                      />
+                      )}
+                    </div>
+                    {installmentActive
+                      ? <InstallmentFieldError field="installment_total" message={installmentErrors.installment_total} />
+                      : <FieldErrorText field="projected_amount" message={fieldErrors.projected_amount} />}
+                  </div>
+                  <div>
+                    <label className="label">Currency</label>
+                    <select
+                      value={formData.projected_currency ?? formData.currency}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          projected_currency: e.target.value as CurrencyCode,
+                        }))
+                      }
+                      className="select-field focus-ring"
+                    >
+                      {currencyOptions.map((currency) => (
+                        <option key={currency} value={currency}>
+                          {currency}
+                        </option>
+                      ))}
+                </select>
+              </div>
+                </div>
+              )}
+              
+              {crossCurrencyTransfer && (
+              <div>
+                  <label className="label" htmlFor="transfer-received">Amount received ({destinationCurrency})</label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-muted text-sm">
+                      {getCurrencySymbol(destinationCurrency)}
+                    </span>
+                    <input
+                      id="transfer-received"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={formData.received_amount ?? ''}
+                      onChange={(e) => {
+                        const value = parseFloat(e.target.value)
+                        setFormData((prev) => ({
+                          ...prev,
+                          received_amount: Number.isNaN(value) ? undefined : value,
+                        }))
+                        setFieldErrors((prev) => withoutError(prev, 'received_amount'))
+                      }}
+                      className="input-field pl-7 focus-ring"
+                      placeholder="0.00"
+                      data-field="received_amount"
+                      {...fieldErrorProps(fieldErrors, 'received_amount', fieldErrorId('received_amount'))}
+                      required={formData.is_posted}
+                    />
+                  </div>
+                  <FieldErrorText field="received_amount" message={fieldErrors.received_amount} />
+                  <p className="mt-1 text-xs text-muted">
+                    What lands in the destination, in {destinationCurrency}. {formData.is_posted ? 'Required to post a transfer between currencies.' : 'Needed before this transfer can be posted; until then the projection estimates it.'}
+                  </p>
+                </div>
+              )}
+
+              {formData.transaction_type === 'transfer' && (
+              <div>
+                  <label className="label">{transferIntoLoan ? 'Interest' : 'Transfer Fee'}</label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-muted text-sm">
+                      {formCurrencySymbol}
+                    </span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                      value={formData.transfer_fee ?? ''}
+                      onChange={(e) => {
+                        const value = parseFloat(e.target.value)
+                        setFormData((prev) => ({
+                          ...prev,
+                          transfer_fee: Number.isNaN(value) ? undefined : value,
+                        }))
+                        setFieldErrors((prev) => withoutError(prev, 'transfer_fee'))
+                      }}
+                      className="input-field pl-7 focus-ring"
+                      placeholder="0.00"
+                      data-field="transfer_fee"
+                      {...fieldErrorProps(fieldErrors, 'transfer_fee', fieldErrorId('transfer_fee'))}
+                />
+              </div>
+                  <FieldErrorText field="transfer_fee" message={fieldErrors.transfer_fee} />
+                  <p className="mt-1 text-xs text-muted">
+                    {transferIntoLoan
+                      ? "The interest part of this payment. Leave blank to split the amount at the loan's rate."
+                      : 'Automatically deducted from the source account. Default is 0.'}
+                  </p>
+                </div>
+              )}
+              
+              {formData.is_posted && (
+              <div>
+                  <label className="label" htmlFor="transaction-amount">{installmentActive ? 'Purchase total' : crossCurrencyTransfer ? `Amount sent (${formData.currency})` : 'Amount'}</label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-muted text-sm">
+                      {formCurrencySymbol}
+                    </span>
+                {installmentActive ? (
+                <input
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      value={installment.total}
+                      onChange={(e) => changeInstallment({ total: e.target.value })}
+                      className="input-field pl-7 focus-ring"
+                      placeholder="0.00"
+                      id="transaction-amount"
+                      data-field="amount"
+                      data-installment-total
+                      {...installmentErrorProps('installment_total', installmentErrors.installment_total)}
+                />
+                ) : (
+                <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={formData.amount ?? ''}
+                      onChange={(e) => {
+                        const value = parseFloat(e.target.value)
+                        setFormData((prev) => ({
+                          ...prev,
+                          amount: Number.isNaN(value) ? undefined : value,
+                        }))
+                        setFieldErrors((prev) => withoutError(prev, 'amount'))
+                      }}
+                      className="input-field pl-7 focus-ring"
+                      placeholder="0.00"
+                      id="transaction-amount"
+                      data-field="amount"
+                      {...fieldErrorProps(fieldErrors, 'amount', fieldErrorId('amount'))}
+                  required
+                />
+                )}
+              </div>
+                  {installmentActive
+                    ? <InstallmentFieldError field="installment_total" message={installmentErrors.installment_total} />
+                    : <FieldErrorText field="amount" message={fieldErrors.amount} />}
+                </div>
+              )}
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                  <label className="label">Transaction Date</label>
+                <input
+                  ref={transactionDateInput}
+                  type="date"
+                  value={formData.transaction_date}
+                    onChange={(e) => {
+                      const day = e.target.value
+                      setPostedTouched(true)
+                      // A future date starts the row as not posted. Moving the date back never ticks the box.
+                      if (formData.is_posted && day > localToday()) setPostedState(false)
+                      setFormData((prev) => ({
+                        ...prev,
+                        transaction_date: day,
+                      }))
+                      setDateErrors((prev) => ({ ...prev, transaction_date: undefined }))
+                    }}
+                    min={RECORD_DATE_MIN}
+                    max={recordDateMax()}
+                    className="input-field focus-ring"
+                    aria-invalid={dateErrors.transaction_date ? true : undefined}
+                    aria-describedby={dateErrors.transaction_date ? 'transaction-date-error' : undefined}
+                    data-testid="transaction-date"
+                    data-field="transaction_date"
+                  required
+                />
+                {dateErrors.transaction_date && (
+                  <p id="transaction-date-error" className="mt-1 text-xs text-danger" role="alert" data-testid="record-date-error">
+                    {dateErrors.transaction_date}
+                  </p>
+                )}
+              </div>
+              <div>
+                  <label className="label">Posting Date (optional)</label>
+                <input
+                  ref={postingDateInput}
+                  type="date"
+                  value={formData.posting_date || ''}
+                    onChange={(e) => {
+                      setFormData((prev) => ({
+                        ...prev,
+                        posting_date: e.target.value || undefined,
+                      }))
+                      setDateErrors((prev) => ({ ...prev, posting_date: undefined }))
+                    }}
+                    min={RECORD_DATE_MIN}
+                    max={recordDateMax()}
+                    className="input-field focus-ring disabled:cursor-not-allowed disabled:bg-sunken disabled:text-muted"
+                    disabled={!formData.is_posted}
+                    aria-invalid={dateErrors.posting_date ? true : undefined}
+                    aria-describedby={dateErrors.posting_date ? 'posting-date-error' : undefined}
+                    data-testid="posting-date"
+                    data-field="posting_date"
+                  />
+                  {dateErrors.posting_date && (
+                    <p id="posting-date-error" className="mt-1 text-xs text-danger" role="alert" data-testid="record-date-error">
+                      {dateErrors.posting_date}
+                    </p>
+                  )}
+                  {editFormHint && (
+                    <p className="mt-1 text-xs text-muted" data-testid="posting-date-hint">{editFormHint}</p>
+                  )}
+                </div>
+              </div>
+              
+              <div className="flex flex-wrap gap-4">
+                <label className="inline-flex items-center gap-2 text-sm text-body cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="border-line text-ink"
+                    checked={formData.is_posted}
+                    onChange={(e) => {
+                      setPostedTouched(true)
+                      setPostedState(e.target.checked)
+                    }}
+                  />
+                  <span>Mark as posted</span>
+                </label>
+              </div>
+              {postedTouched && formData.is_posted && formData.transaction_date > localToday() && (
+                <p className="-mt-2 text-xs text-muted" data-testid="future-posted-note">
+                  This date is in the future. It will be saved as already posted.
+                </p>
+              )}
+
+              {(!editingTransaction || editingTransaction.permissions.can_tag) && (
+                <TagPicker
+                  value={formData.tag_ids}
+                  onChange={(tag_ids) => {
+                    markChanged('tag_ids')
+                    setFormData((prev) => ({ ...prev, tag_ids }))
+                  }}
+                />
+              )}
+
+              {offerInstallment && (
+                <InstallmentSection
+                  active={installmentActive}
+                  onToggle={toggleInstallment}
+                  total={installment.total}
+                  months={installment.months}
+                  onMonthsChange={(months) => changeInstallment({ months })}
+                  errors={installmentErrors}
+                  error={installmentError}
+                  preview={installmentPreview}
+                />
+              )}
+
+              {offerRepeat && !installmentActive && (
+                <RepeatSection
+                  label={editingTransaction ? 'Make this repeat' : 'Repeat'}
+                  help={
+                    repeatBlockedReason ??
+                    (repeatActive && repeatState.cardInstallmentCreate
+                      ? 'This is the first of the payments. The amount is each payment, not the total.'
+                      : 'Starts a recurring entry with this as its first payment.')
+                  }
+                  unavailableCopy={editingTransaction ? REPEAT_EDIT_UNAVAILABLE : REPEAT_UNAVAILABLE}
+                  active={repeatActive}
+                  blocked={repeatBlockedReason !== null}
+                  onToggle={toggleRepeat}
+                  schedule={repeatSchedule}
+                  state={repeatState}
+                  preview={repeatPreview}
+                  settlementControl={repeatSettlement}
+                  onChange={changeRepeat}
+                  errors={repeatErrors}
+                  error={repeatError}
+                  unavailable={repeatUnavailable}
+                  retryDisabled={false}
+                  onRetry={() => {
+                    // Retry the button that was refused: Create (or Update), or Save and add another.
+                    const form = transactionForm.current
+                    const used = submitterRef.current
+                    const primary = form?.querySelector<HTMLElement>('button[type="submit"]:not([data-testid])')
+                    form?.requestSubmit((used && form.contains(used) ? used : primary) ?? undefined)
+                  }}
+                />
+              )}
+
+              {formData.transaction_type !== 'transfer' && !repeatActive && !installmentActive && !(editingTransaction && isSharedFull(editingTransaction)) && (
+                <div className="space-y-3">
+                  <label className="label">Recurring entry (optional)</label>
+                  <p className="text-xs text-muted">Link this to one of your recurring income or expenses.</p>
+                  {matchingBudgetEntries.length === 0 ? (
+                    <p className="text-sm text-muted">No recurring entries of this type yet.</p>
+                  ) : (
+                    <select
+                      className="input-field focus-ring"
+                      value={formData.budget_entry_id ?? ''}
+                      onChange={(event) => {
+                        const value = event.target.value
+                        if (!value) {
+                          handleBudgetEntrySelect(undefined)
+                          return
+                        }
+                        const entryId = Number(value)
+                        const entry = matchingBudgetEntries.find((candidate) => candidate.id === entryId)
+                        handleBudgetEntrySelect(entry ?? undefined)
+                      }}
+                    >
+                      <option value="">None</option>
+                      {matchingBudgetEntries.map((entry) => (
+                        <option key={entry.id} value={entry.id}>
+                          {entry.name} • {formatCadenceLabel(entry.cadence)} • {formatCurrency(entry.amount, entry.currency)}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {selectedBudgetEntry && (
+                    <div className="bg-sunken p-3 text-xs text-body space-y-1">
+                      <p className="font-semibold text-ink">{selectedBudgetEntry.name}</p>
+                      <p>Cadence: {formatCadenceLabel(selectedBudgetEntry.cadence)}</p>
+                      <p>Next due: {formatEntryDate(selectedBudgetEntry.next_occurrence)}</p>
+                      <p>Amount: {formatCurrency(selectedBudgetEntry.amount, selectedBudgetEntry.currency)}</p>
+                      {selectedBudgetEntry.settlement === 'autopay' && <p>Autopay enabled</p>}
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {/* Always mounted in create mode, so a screen reader knows the live region before it fills. */}
+              {!editingTransaction && (
+                <p role="status" data-testid="transaction-saved-notice" className="text-sm text-ok break-words">
+                  {savedNotice}
+                </p>
+              )}
+              {formError && (
+                <p className="text-sm text-danger" role="alert" data-testid="transaction-form-error">
+                  {formError}
+                </p>
+              )}
+              </fieldset>
+              <div className="flex flex-wrap gap-3 pt-2">
+                <button type="submit" className="flex-1 btn-primary focus-ring">
+                  {editingTransaction ? 'Update Transaction' : 'Create Transaction'}
+                </button>
+                {!editingTransaction && (
+                  <button
+                    type="submit"
+                    className="flex-1 btn-secondary focus-ring"
+                    data-testid="save-and-add-another"
+                  >
+                    Save and add another
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCreateModalOpen(false)
+                    resetForm()
+                  }}
+                  className="flex-1 btn-secondary focus-ring"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
