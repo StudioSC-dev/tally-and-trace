@@ -1172,7 +1172,7 @@ export const withAccountHistory = (data: HouseholdData): HouseholdData => {
 }
 
 /** `GET /accounts/{id}` for every account in `data`, as the account page asks it. */
-export const accountDetailRoutes = (data: HouseholdData): ApiRoute[] => data.accounts.map((a) => apiRoute<Account>('GET', `/accounts/${a.id}`, a))
+export const allAccountDetailRoutes = (data: HouseholdData): ApiRoute[] => data.accounts.map((a) => apiRoute<Account>('GET', `/accounts/${a.id}`, a))
 
 const plan = (entryId: number, name: string, nextCharge: string, paymentsLeft: number, paymentsTotal: number): InstallmentPlan => ({
   view: 'full',

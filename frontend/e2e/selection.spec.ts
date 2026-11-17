@@ -13,7 +13,7 @@ import { mockApi } from './support/mockApi'
 import type { ApiMock } from './support/mockApi'
 import { shot } from './support/shot'
 import {
-  accountDetailRoutes,
+  allAccountDetailRoutes,
   createAccountRoute,
   createdAccount,
   household,
@@ -909,7 +909,7 @@ const INVENTORY: Group[] = [
     kind: 'current',
     open: async (page) => {
       const data = withAccountHistory(household)
-      const api = await openPage(page, '/accounts/13', 'GCash', data, accountDetailRoutes(data))
+      const api = await openPage(page, '/accounts/13', 'GCash', data, allAccountDetailRoutes(data))
       await expect(page.getByTestId('account-transactions-pager').getByRole('button', { name: '2', exact: true })).toBeVisible()
       return api
     },
