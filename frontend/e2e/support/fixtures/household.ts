@@ -16,8 +16,9 @@
  * on load; `mockHousehold(page, data)` signs in, freezes the clock on `HOUSEHOLD_TODAY` and
  * installs those routes.
  *
- * `with*` helpers derive a variant for one state (a main account, one account's balance, dollars,
- * a long account history, long Due card lists); the create factories (`createdAccount`, `createAccountRoute`,
+ * `with*` helpers derive a variant for one state (a main account, one account's balance, zero-amount rows,
+ * a zero forecast event, dollars, a long account history, long Due card lists); `cardStatements` answers the card's
+ * statements; the create factories (`createdAccount`, `createAccountRoute`,
  * `householdCreateRoutes`) answer the dialogs' saves.
  */
 import type { Page } from '@playwright/test'
@@ -31,6 +32,7 @@ import type {
   CardCredit,
   CardCreditDetail,
   CardStatementDue,
+  CardStatements,
   CashflowTimeline,
   CashflowTimelineEvent,
   Category,
@@ -1097,6 +1099,95 @@ export const ZERO_FIGURE_CASES: readonly { name: string; accountId: number; line
   { name: 'under half a centavo', accountId: card.id, line: 'owed', balance: -0.004, input: '0.004' },
   { name: 'under half a centavo below zero', accountId: card.id, line: 'owed', balance: 0.004, input: '-0.004' },
 ]
+
+/**
+ * Two Household-tagged rows on the joint account whose amount is zero (a voided expense and a voided refund), for the
+ * zero-sign specs. Defined after every other module-level row, so no other row's id moves.
+ */
+const zeroRows: FullTransaction[] = [
+  tx('2026-03-11', 'Voided palengke run', 0, joint, 22, 'debit', { tags: [householdTag] }),
+  tx('2026-03-11', 'Voided refund', 0, joint, 30, 'credit', { tags: [householdTag] }),
+]
+/** The zero rows `withZeroRows` adds: what each is called, its type and its account. */
+export const ZERO_ROWS: readonly { description: string; type: FullTransaction['transaction_type']; accountId: number }[] = zeroRows.map((t) => ({
+  description: t.description ?? '',
+  type: t.transaction_type,
+  accountId: t.account_id,
+}))
+/** A variant with the zero rows on the joint account (Transactions, the account page and the Household view list them). */
+export const withZeroRows = (data: HouseholdData): HouseholdData => ({ ...data, transactions: [...zeroRows, ...data.transactions] })
+
+/** The card's returned purchase and dollar refund on its closed statement (`cardStatements`): credits, so negative. */
+export const STATEMENT_REFUNDS = { pesos: -1250, dollars: -40, dollarsInPesos: -2320 } as const
+/**
+ * `GET /accounts/{card}/statements` for the owner: the closed 20 February statement, whose two charges, returned
+ * purchase and converted dollar refund add up to its amount due.
+ */
+export const cardStatements: CardStatements = {
+  view: 'full',
+  account_id: card.id,
+  name: card.name,
+  currency: 'PHP',
+  statements: [
+    {
+      close_date: cardStatement.close_date,
+      due_date: cardStatement.due_date,
+      amount_due: CLOSED_STATEMENT,
+      currency: 'PHP',
+      status: 'open',
+      statement_balance: CLOSED_STATEMENT,
+      lines: [
+        { date: '2026-02-03T00:00:00', display_description: "Rustan's Makati", amount: 9560.55, transaction_id: 901 },
+        { date: '2026-02-07T00:00:00', display_description: 'Uniqlo Glorietta', amount: 6490, transaction_id: 902 },
+        { date: '2026-02-09T00:00:00', display_description: 'Uniqlo Glorietta return', amount: STATEMENT_REFUNDS.pesos, transaction_id: 903 },
+        {
+          date: '2026-02-14T00:00:00',
+          display_description: 'Klook refund',
+          amount: STATEMENT_REFUNDS.dollarsInPesos,
+          transaction_id: 904,
+          estimated: true,
+          original_amount: STATEMENT_REFUNDS.dollars,
+          original_currency: 'USD',
+          rate: 58,
+          rate_as_of: '2026-02-14',
+          rate_stale: false,
+        },
+      ],
+      unconverted_lines: [],
+    },
+  ],
+}
+
+/** The name of the zero-amount forecast event `withZeroTimelineEvent` adds. */
+export const ZERO_EVENT_NAME = 'Maynilad bill adjustment'
+/**
+ * A variant whose forecast has one more payroll event on 27 March whose amount is zero (a bill adjusted to nothing):
+ * the running balance carries over from the event before it.
+ */
+export const withZeroTimelineEvent = (data: HouseholdData): HouseholdData => {
+  const add = (events: CashflowTimeline['events']): CashflowTimeline['events'] => {
+    const at = events.findIndex((e) => e.date > '2026-03-27')
+    const before = at > 0 ? events[at - 1].running_balance : data.timeline.opening_balance
+    const zero: CashflowTimelineEvent = {
+      date: '2026-03-27',
+      name: ZERO_EVENT_NAME,
+      amount: 0,
+      type: 'expense',
+      source: 'budget_entry',
+      source_id: mayniladEntry.id,
+      event_id: `be-${mayniladEntry.id}-adjusted`,
+      currency: 'PHP',
+      accounts: [{ account_id: payroll.id, account_name: payroll.name, amount: 0, currency: 'PHP' }],
+      running_balance: before,
+    }
+    return at < 0 ? [...events, zero] : [...events.slice(0, at), zero, ...events.slice(at)]
+  }
+  const { timeline } = data
+  return {
+    ...data,
+    timeline: { ...timeline, events: add(timeline.events), by_currency: timeline.by_currency.map((row) => ({ ...row, events: add(row.events) })) },
+  }
+}
 
 /**
  * A variant whose cash-flow timeline also holds dollars: a USD row with an opening balance and no events, so the
