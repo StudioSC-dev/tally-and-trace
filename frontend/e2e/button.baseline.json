@@ -9,7 +9,7 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(228, 234, 226) | 400 | none | rgb(229, 231, 235) | 0px"
           },
           {
             "name": "Dashboard",
@@ -17,7 +17,7 @@
             "icons": 1,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(22, 36, 28) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(228, 234, 226) | 400 | none | rgb(228, 234, 226) | 0px"
           },
           {
             "name": "Forecast",
@@ -180,7 +180,7 @@
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosDashboardYour financial overviewTagAll tagsHouseholdJapan tripweekmonthyearPeriod applies to actual totals, not the projection.Quick balancesEditDebitBPI Payroll₱84,250.40CreditHSBC Red MastercardOwed ₱18,742.30E-walletGCash₱3,415.75Cash-Flow TimelineYour running balance over the next 60 days. It shows the low point before payday, not just month-end.DetailsOn track in PHP: the lowest projected balance is ₱71,769.85 on Mar 13, 2026.Opening₱84,250.40Trough₱71,769.85Close (60d)₱106,040.10Financial SnapshotActuals cover month to date; the projection runs from today to month end.Month to dateActual totals (Month to date)Total income (MTD)₱33,500.00Total expenses (MTD)₱51,821.20Net flow (MTD)₱-18,321.20TodayNet worth₱329,764.35All your accounts, shared and Household accounts, cards and loans included. Not the same as available cash.ProjectedAvailable cash₱343,230.90Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.Budget Envelope StatusCurrent month spending against your envelope limits.5Dining outRemaining ₱2,500.00Limit ₱5,000.00 · Spent ₱2,500.00TransportRemaining ₱900.00Limit ₱4,500.00 · Spent ₱3,600.00GroceriesRemaining ₱2,700.00Limit ₱18,000.00 · Spent ₱15,300.00UtilitiesRemaining ₱0.00Limit ₱6,000.00 · Spent ₱6,000.00ShoppingRemaining ₱0.00Limit ₱5,000.00 · Spent ₱6,000.00Upcoming PayablesCash going out in the next 30 days: bills, card statements and loan payments.6Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI PayrollOverdueHMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll8 days remainingRentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll20 days remainingPLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll25 days remainingHSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll28 days remainingMeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll29 days remainingAlso coming upPayrollMar 15th, 2026 · Money in · Scheduled₱41,250.00PayrollMar 30th, 2026 · Money in · Scheduled₱41,250.00HomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosDashboardYour financial overviewTagAll tagsHouseholdJapan tripweekmonthyearPeriod applies to actual totals, not the projection.Quick balancesEditDebitBPI Payroll₱84,250.40CreditHSBC Red MastercardOwed ₱18,742.30E-walletGCash₱3,415.75Cash-Flow TimelineYour running balance over the next 60 days. It shows the low point before payday, not just month-end.DetailsOn track in PHP: the lowest projected balance is ₱71,769.85 on Mar 13, 2026.Opening₱84,250.40Trough₱71,769.85Close (60d)₱106,040.10Financial SnapshotActuals cover month to date; the projection runs from today to month end.Month to dateActual totals (Month to date)Total income (MTD)₱33,500.00Total expenses (MTD)₱51,821.20Net flow (MTD)−₱18,321.20TodayNet worth₱329,764.35All your accounts, shared and Household accounts, cards and loans included. Not the same as available cash.ProjectedAvailable cash₱343,230.90Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.Budget Envelope StatusCurrent month spending against your envelope limits.5Dining outRemaining ₱2,500.00Limit ₱5,000.00 · Spent ₱2,500.00TransportRemaining ₱900.00Limit ₱4,500.00 · Spent ₱3,600.00GroceriesRemaining ₱2,700.00Limit ₱18,000.00 · Spent ₱15,300.00UtilitiesRemaining ₱0.00Limit ₱6,000.00 · Spent ₱6,000.00ShoppingRemaining ₱0.00Limit ₱5,000.00 · Spent ₱6,000.00Upcoming PayablesCash going out in the next 30 days: bills, card statements and loan payments.6Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI PayrollOverdueHMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll8 days remainingRentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll20 days remainingPLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll25 days remainingHSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll28 days remainingMeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll29 days remainingAlso coming upPayrollMar 15th, 2026 · Money in · Scheduled₱41,250.00PayrollMar 30th, 2026 · Money in · Scheduled₱41,250.00DashboardAccountsTransactionsAllocations"
       },
       "transactions": {
         "controls": [
@@ -222,7 +222,7 @@
             "icons": 1,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(22, 36, 28) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(228, 234, 226) | 400 | none | rgb(228, 234, 226) | 0px"
           },
           {
             "name": "Allocations",
@@ -401,7 +401,7 @@
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosTransactionsAdd TransactionDue and overdueHideDue and overdue2Not posted yet0Upcoming16Subscriptions2Installments0Emergency fund top-upMar 8th, 2026 · BPI Payroll · Overdue₱10,000.00Mark paidChange dateHSBC Red Mastercard statementClosed Feb 20th, 2026 · due Mar 13th, 2026₱12,480.55PayTo dateScheduledSearch transactionsMarch 2026Spending breakdownShow filtersDate range: Mar 1st, 2026 to Mar 31st, 2026Automatically showing whole-month activityPuregold weekly groceriesHouseholdHousehold+1Mar 12th, 2026HSBC Red MastercardGroceriesPostedExpenseby Mara S.₱3,184.50Lunch, Kanto FreestyleMar 11th, 2026Cash on handDining outPostedExpenseby Mara S.₱420.00Grab to MakatiMar 11th, 2026GCashTransportPostedExpenseby Mara S.₱286.00Mercury DrugMar 10th, 2026GCashHealthPostedExpenseby Mara S.₱965.25Meralco February billHouseholdHousehold+1Mar 10th, 2026BPI PayrollUtilitiesPostedExpenseby Mara S.₱4,812.65Palengke, Marikina marketHouseholdHousehold+1Mar 10th, 2026BDO Joint householdGroceriesPostedExpenseby Jun R.₱1,385.00Netflix StandardMar 9th, 2026HSBC Red MastercardSubscriptionsPostedExpenseby Mara S.₱549.00Move to emergency fundMar 8th, 2026BPI Payroll to Metrobank SavingsSavings transferPostedTransferby Mara S.Fee ₱25.00₱10,000.00Dinner, ManamJapan tripJapan trip+1Mar 7th, 2026HSBC Red MastercardDining outPostedExpenseby Mara S.₱2,140.00Logo design, Kapé Co.Mar 7th, 2026BPI PayrollFreelancePostedIncomeby Mara S.+₱18,500.00PLDT FibrHouseholdHousehold+1Mar 6th, 2026BPI PayrollUtilitiesPostedExpenseby Mara S.₱1,899.00S&R bulk runHouseholdHousehold+1Mar 5th, 2026HSBC Red MastercardGroceriesPostedExpenseby Mara S.₱6,420.80Shell V-PowerMar 5th, 2026HSBC Red MastercardTransportPostedExpenseby Mara S.₱2,650.00Spotify DuoMar 4th, 2026HSBC Red MastercardSubscriptionsPostedExpenseby Mara S.₱239.00Water refill, 4 gallonsHouseholdHousehold+1Mar 4th, 2026BDO Joint householdUtilitiesPostedExpenseby Jun R.₱160.00Coffee, YardstickMar 3rd, 2026GCashDining outPostedExpenseby Mara S.₱210.00Yaya salary, Feb 16–28HouseholdHousehold+1Mar 1st, 2026BDO Joint householdHousehold helpPostedExpenseby Mara S.₱4,500.00Household fund, MarchHouseholdHousehold+1Mar 1st, 2026BDO Joint householdSalaryPostedIncomeby Jun R.+₱15,000.00March rentHouseholdHousehold+1Mar 1st, 2026BPI PayrollRentPostedExpenseby Mara S.₱22,000.001–19 of 19Previous1NextPer page2550100HomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosTransactionsAdd TransactionDue and overdueHideDue and overdue2Not posted yet0Upcoming16Subscriptions2Installments0Emergency fund top-upMar 8th, 2026 · BPI Payroll · Overdue₱10,000.00Mark paidChange dateHSBC Red Mastercard statementClosed Feb 20th, 2026 · due Mar 13th, 2026₱12,480.55PayTo dateScheduledSearch transactionsMarch 2026Spending breakdownShow filtersDate range: Mar 1st, 2026 to Mar 31st, 2026Automatically showing whole-month activityPuregold weekly groceriesHouseholdHousehold+1Mar 12th, 2026HSBC Red MastercardGroceriesPostedExpenseby Mara S.₱3,184.50Lunch, Kanto FreestyleMar 11th, 2026Cash on handDining outPostedExpenseby Mara S.₱420.00Grab to MakatiMar 11th, 2026GCashTransportPostedExpenseby Mara S.₱286.00Mercury DrugMar 10th, 2026GCashHealthPostedExpenseby Mara S.₱965.25Meralco February billHouseholdHousehold+1Mar 10th, 2026BPI PayrollUtilitiesPostedExpenseby Mara S.₱4,812.65Palengke, Marikina marketHouseholdHousehold+1Mar 10th, 2026BDO Joint householdGroceriesPostedExpenseby Jun R.₱1,385.00Netflix StandardMar 9th, 2026HSBC Red MastercardSubscriptionsPostedExpenseby Mara S.₱549.00Move to emergency fundMar 8th, 2026BPI Payroll to Metrobank SavingsSavings transferPostedTransferby Mara S.Fee ₱25.00₱10,000.00Dinner, ManamJapan tripJapan trip+1Mar 7th, 2026HSBC Red MastercardDining outPostedExpenseby Mara S.₱2,140.00Logo design, Kapé Co.Mar 7th, 2026BPI PayrollFreelancePostedIncomeby Mara S.+₱18,500.00PLDT FibrHouseholdHousehold+1Mar 6th, 2026BPI PayrollUtilitiesPostedExpenseby Mara S.₱1,899.00S&R bulk runHouseholdHousehold+1Mar 5th, 2026HSBC Red MastercardGroceriesPostedExpenseby Mara S.₱6,420.80Shell V-PowerMar 5th, 2026HSBC Red MastercardTransportPostedExpenseby Mara S.₱2,650.00Spotify DuoMar 4th, 2026HSBC Red MastercardSubscriptionsPostedExpenseby Mara S.₱239.00Water refill, 4 gallonsHouseholdHousehold+1Mar 4th, 2026BDO Joint householdUtilitiesPostedExpenseby Jun R.₱160.00Coffee, YardstickMar 3rd, 2026GCashDining outPostedExpenseby Mara S.₱210.00Yaya salary, Feb 16–28HouseholdHousehold+1Mar 1st, 2026BDO Joint householdHousehold helpPostedExpenseby Mara S.₱4,500.00Household fund, MarchHouseholdHousehold+1Mar 1st, 2026BDO Joint householdSalaryPostedIncomeby Jun R.+₱15,000.00March rentHouseholdHousehold+1Mar 1st, 2026BPI PayrollRentPostedExpenseby Mara S.₱22,000.001–19 of 19Previous1NextPer page2550100DashboardAccountsTransactionsAllocations"
       },
       "allocations-recurring": {
         "controls": [
@@ -451,7 +451,7 @@
             "icons": 1,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(22, 36, 28) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(228, 234, 226) | 400 | none | rgb(228, 234, 226) | 0px"
           },
           {
             "name": "Toggle theme",
@@ -622,7 +622,7 @@
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAllocationsAdd Recurring EntryRecurringBudgetsSavingsWishlistSwitch tabs to view recurring subscriptions, monthly budgets, savings envelopes, or your wishlist.Search recurring entriesTagAll tagsHouseholdJapan tripSubscriptions3Netflix StandardRecurring expenseMonthly · day 9ScheduledNext Apr 9th, 2026In 28 daysAccount: HSBC Red Mastercardby Mara S.IndefiniteChargedPosted₱549.00Spotify DuoRecurring expenseMonthly · day 4ScheduledNext Apr 4th, 2026In 23 daysAccount: HSBC Red Mastercardby Mara S.IndefiniteChargedPosted₱239.00Disney+ PremiumRecurring expenseMonthly · day 2ScheduledPausedNext Apr 2nd, 2026In 21 daysAccount: HSBC Red Mastercardby Mara S.Indefinite₱369.00Cash expenses10RentHouseholdHousehold+1Recurring expenseMonthly · day 1ManualNext Apr 1st, 2026In 20 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱22,000.00MeralcoHouseholdHousehold+1Recurring expenseMonthly · day 10ManualNext Apr 10th, 2026In 29 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱4,600.00PLDT FibrRecurring expenseMonthly · day 6Auto-payNext Apr 6th, 2026In 25 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,899.00Emergency fund top-upRecurring expenseMonthly · day 8ManualNext Apr 8th, 2026In 27 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱10,000.00HMO dependent add-onRecurring expenseMonthly · day 20ManualNext Mar 20th, 2026In 8 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,450.00Globe PostpaidRecurring expenseMonthly · day 18Auto-payNext Mar 18th, 2026In 6 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,299.00Maynilad waterHouseholdHousehold+1Recurring expenseMonthly · day 27ManualNext Mar 27th, 2026In 15 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱720.00Palengke runHouseholdHousehold+1Recurring expenseWeekly · SaturdayManualNext Mar 14th, 2026In 2 daysAccount: BDO Joint householdby Mara S.IndefiniteMark paid₱1,300.00Yaya salaryHouseholdHousehold+1Recurring expenseTwice a monthManualNext Mar 15th, 2026In 3 daysAccount: BDO Joint householdby Mara S.IndefiniteMark paid₱4,500.00Gym membershipRecurring expenseMonthly · day 5ManualPausedNext Apr 5th, 2026In 24 daysAccount: BPI Payrollby Mara S.Indefinite₱2,500.00Income & transfers1PayrollRecurring incomeTwice a monthScheduledNext Mar 15th, 2026In 3 daysAccount: BPI Payrollby Mara S.IndefiniteMark received+₱41,250.00HomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAllocationsAdd Recurring EntryRecurringBudgetsSavingsWishlistSwitch tabs to view recurring subscriptions, monthly budgets, savings envelopes, or your wishlist.Search recurring entriesTagAll tagsHouseholdJapan tripSubscriptions3Netflix StandardRecurring expenseMonthly · day 9ScheduledNext Apr 9th, 2026In 28 daysAccount: HSBC Red Mastercardby Mara S.IndefiniteChargedPosted₱549.00Spotify DuoRecurring expenseMonthly · day 4ScheduledNext Apr 4th, 2026In 23 daysAccount: HSBC Red Mastercardby Mara S.IndefiniteChargedPosted₱239.00Disney+ PremiumRecurring expenseMonthly · day 2ScheduledPausedNext Apr 2nd, 2026In 21 daysAccount: HSBC Red Mastercardby Mara S.Indefinite₱369.00Cash expenses10RentHouseholdHousehold+1Recurring expenseMonthly · day 1ManualNext Apr 1st, 2026In 20 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱22,000.00MeralcoHouseholdHousehold+1Recurring expenseMonthly · day 10ManualNext Apr 10th, 2026In 29 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱4,600.00PLDT FibrRecurring expenseMonthly · day 6Auto-payNext Apr 6th, 2026In 25 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,899.00Emergency fund top-upRecurring expenseMonthly · day 8ManualNext Apr 8th, 2026In 27 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱10,000.00HMO dependent add-onRecurring expenseMonthly · day 20ManualNext Mar 20th, 2026In 8 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,450.00Globe PostpaidRecurring expenseMonthly · day 18Auto-payNext Mar 18th, 2026In 6 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,299.00Maynilad waterHouseholdHousehold+1Recurring expenseMonthly · day 27ManualNext Mar 27th, 2026In 15 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱720.00Palengke runHouseholdHousehold+1Recurring expenseWeekly · SaturdayManualNext Mar 14th, 2026In 2 daysAccount: BDO Joint householdby Mara S.IndefiniteMark paid₱1,300.00Yaya salaryHouseholdHousehold+1Recurring expenseTwice a monthManualNext Mar 15th, 2026In 3 daysAccount: BDO Joint householdby Mara S.IndefiniteMark paid₱4,500.00Gym membershipRecurring expenseMonthly · day 5ManualPausedNext Apr 5th, 2026In 24 daysAccount: BPI Payrollby Mara S.Indefinite₱2,500.00Income & transfers1PayrollRecurring incomeTwice a monthScheduledNext Mar 15th, 2026In 3 daysAccount: BPI Payrollby Mara S.IndefiniteMark received+₱41,250.00DashboardAccountsTransactionsAllocations"
       },
       "accounts": {
         "controls": [
@@ -656,7 +656,7 @@
             "icons": 1,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(22, 36, 28) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(228, 234, 226) | 400 | none | rgb(228, 234, 226) | 0px"
           },
           {
             "name": "Transactions",
@@ -747,7 +747,7 @@
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAccountsAdd AccountTagAll tagsHouseholdJapan tripAccountBalanceStatusIndividual (5)Debit (2)BPI PayrollcheckingActiveCurrency: PHP₱84,250.40ActiveTransactionsMetrobank SavingssavingsActiveCurrency: PHP₱212,600.00ActiveTransactionsCredit (1)HSBC Red MastercardcreditActiveCurrency: PHPLimit ₱120,000.00+21 days to due−₱18,742.30ActiveTransactionsE-wallet (1)GCashe walletActiveCurrency: PHPNot counted₱3,415.75ActiveTransactionsCash (1)Cash on handcashActiveCurrency: PHPNot counted₱1,860.00ActiveTransactionsShared (1)Debit (1)BDO Joint householdcheckingActiveCurrency: PHPEditorShared by Jun R.₱46,380.50ActiveTransactionsShowing 6 of 6 accountsHomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAccountsAdd AccountTagAll tagsHouseholdJapan tripAccountBalanceStatusIndividual (5)Debit (2)BPI PayrollcheckingActiveCurrency: PHP₱84,250.40ActiveTransactionsMetrobank SavingssavingsActiveCurrency: PHP₱212,600.00ActiveTransactionsCredit (1)HSBC Red MastercardcreditActiveCurrency: PHPLimit ₱120,000.00+21 days to due−₱18,742.30ActiveTransactionsE-wallet (1)GCashe walletActiveCurrency: PHPNot counted₱3,415.75ActiveTransactionsCash (1)Cash on handcashActiveCurrency: PHPNot counted₱1,860.00ActiveTransactionsShared (1)Debit (1)BDO Joint householdcheckingActiveCurrency: PHPEditorShared by Jun R.₱46,380.50ActiveTransactionsShowing 6 of 6 accountsDashboardAccountsTransactionsAllocations"
       },
       "settings": {
         "controls": [
@@ -1064,7 +1064,7 @@
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosSettingsChoose your cash-flow timeline's main account, manage categories and tags, and export your data.Cash-flow timelineThe timeline opens on your main account's own running balance. You can still switch to all cash accounts there.Main accountNone (all cash accounts)BPI Payroll (PHP)Metrobank Savings (PHP)BDO Joint household (PHP)Export your dataDownload everything you own as one JSON file, or as a ZIP of CSV files (one per table). Accounts shared with you and other people's records on your accounts are included with limited details.JSONCSV (ZIP)CategoriesColour-coded labels for transactions and budgets.Add categorySalaryIncomeEditDeleteGroceriesExpenseEditDeleteDining outExpenseEditDeleteUtilitiesExpenseEditDeleteTransportExpenseEditDeleteRentExpenseEditDeleteSubscriptionsExpenseEditDeleteHealthExpenseEditDeleteSavings transferTransferEditDeleteFreelanceIncomeEditDeleteHousehold helpExpenseEditDeleteTagsLabel accounts, transactions and recurring entries, then filter by tag.Add tagHouseholdSystemRecolourDeleteJapan tripEditDeleteHousehold sharingShare your Household tag with someone, by their email. They can see your Household-tagged accounts, their balances and your Household-tagged transactions and recurring entries, read-only: they can't change anything, and they see nothing that isn't tagged Household.People who can see your HouseholdNot shared with anyone yet.Add a personLook upHomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosSettingsChoose your cash-flow timeline's main account, manage categories and tags, and export your data.Cash-flow timelineThe timeline opens on your main account's own running balance. You can still switch to all cash accounts there.Main accountNone (all cash accounts)BPI Payroll (PHP)Metrobank Savings (PHP)BDO Joint household (PHP)Export your dataDownload everything you own as one JSON file, or as a ZIP of CSV files (one per table). Accounts shared with you and other people's records on your accounts are included with limited details.JSONCSV (ZIP)CategoriesColour-coded labels for transactions and budgets.Add categorySalaryIncomeEditDeleteGroceriesExpenseEditDeleteDining outExpenseEditDeleteUtilitiesExpenseEditDeleteTransportExpenseEditDeleteRentExpenseEditDeleteSubscriptionsExpenseEditDeleteHealthExpenseEditDeleteSavings transferTransferEditDeleteFreelanceIncomeEditDeleteHousehold helpExpenseEditDeleteTagsLabel accounts, transactions and recurring entries, then filter by tag.Add tagHouseholdSystemRecolourDeleteJapan tripEditDeleteHousehold sharingShare your Household tag with someone, by their email. They can see your Household-tagged accounts, their balances and your Household-tagged transactions and recurring entries, read-only: they can't change anything, and they see nothing that isn't tagged Household.People who can see your HouseholdNot shared with anyone yet.Add a personLook upDashboardAccountsTransactionsAllocations"
       },
       "allocations-wishlist": {
         "controls": [
@@ -1114,7 +1114,7 @@
             "icons": 1,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(22, 36, 28) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(228, 234, 226) | 400 | none | rgb(228, 234, 226) | 0px"
           },
           {
             "name": "Toggle theme",
@@ -1253,7 +1253,7 @@
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAllocationsRecurringBudgetsSavingsWishlistSwitch tabs to view recurring subscriptions, monthly budgets, savings envelopes, or your wishlist.WishlistPrioritised things you're saving up for. Turn any of them into a budget envelope or savings target.Add itemShow purchasedhighWork laptopFor freelance workTarget Jun 30, 2026Savings targetBudget envelope₱65,000.00mediumRice cookerSavings targetBudget envelope₱3,500.00HomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAllocationsRecurringBudgetsSavingsWishlistSwitch tabs to view recurring subscriptions, monthly budgets, savings envelopes, or your wishlist.WishlistPrioritised things you're saving up for. Turn any of them into a budget envelope or savings target.Add itemShow purchasedhighWork laptopFor freelance workTarget Jun 30, 2026Savings targetBudget envelope₱65,000.00mediumRice cookerSavings targetBudget envelope₱3,500.00DashboardAccountsTransactionsAllocations"
       },
       "quick-balances-editor": {
         "controls": [
@@ -1263,7 +1263,7 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(228, 234, 226) | 400 | none | rgb(229, 231, 235) | 0px"
           },
           {
             "name": "Dashboard",
@@ -1271,7 +1271,7 @@
             "icons": 1,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(22, 36, 28) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(228, 234, 226) | 400 | none | rgb(228, 234, 226) | 0px"
           },
           {
             "name": "Forecast",
@@ -1498,7 +1498,7 @@
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosDashboardYour financial overviewTagAll tagsHouseholdJapan tripweekmonthyearPeriod applies to actual totals, not the projection.Quick balancesChoose up to 6 accounts and put them in order.CancelSaveDebitBPI Payroll‹›✕CreditHSBC Red Mastercard‹›✕E-walletGCash‹›✕+ Add account3 of 6Cash-Flow TimelineYour running balance over the next 60 days. It shows the low point before payday, not just month-end.DetailsOn track in PHP: the lowest projected balance is ₱71,769.85 on Mar 13, 2026.Opening₱84,250.40Trough₱71,769.85Close (60d)₱106,040.10Financial SnapshotActuals cover month to date; the projection runs from today to month end.Month to dateActual totals (Month to date)Total income (MTD)₱33,500.00Total expenses (MTD)₱51,821.20Net flow (MTD)₱-18,321.20TodayNet worth₱329,764.35All your accounts, shared and Household accounts, cards and loans included. Not the same as available cash.ProjectedAvailable cash₱343,230.90Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.Budget Envelope StatusCurrent month spending against your envelope limits.5Dining outRemaining ₱2,500.00Limit ₱5,000.00 · Spent ₱2,500.00TransportRemaining ₱900.00Limit ₱4,500.00 · Spent ₱3,600.00GroceriesRemaining ₱2,700.00Limit ₱18,000.00 · Spent ₱15,300.00UtilitiesRemaining ₱0.00Limit ₱6,000.00 · Spent ₱6,000.00ShoppingRemaining ₱0.00Limit ₱5,000.00 · Spent ₱6,000.00Upcoming PayablesCash going out in the next 30 days: bills, card statements and loan payments.6Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI PayrollOverdueHMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll8 days remainingRentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll20 days remainingPLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll25 days remainingHSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll28 days remainingMeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll29 days remainingAlso coming upPayrollMar 15th, 2026 · Money in · Scheduled₱41,250.00PayrollMar 30th, 2026 · Money in · Scheduled₱41,250.00HomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosDashboardYour financial overviewTagAll tagsHouseholdJapan tripweekmonthyearPeriod applies to actual totals, not the projection.Quick balancesChoose up to 6 accounts and put them in order.CancelSaveDebitBPI Payroll‹›✕CreditHSBC Red Mastercard‹›✕E-walletGCash‹›✕+ Add account3 of 6Cash-Flow TimelineYour running balance over the next 60 days. It shows the low point before payday, not just month-end.DetailsOn track in PHP: the lowest projected balance is ₱71,769.85 on Mar 13, 2026.Opening₱84,250.40Trough₱71,769.85Close (60d)₱106,040.10Financial SnapshotActuals cover month to date; the projection runs from today to month end.Month to dateActual totals (Month to date)Total income (MTD)₱33,500.00Total expenses (MTD)₱51,821.20Net flow (MTD)−₱18,321.20TodayNet worth₱329,764.35All your accounts, shared and Household accounts, cards and loans included. Not the same as available cash.ProjectedAvailable cash₱343,230.90Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.Budget Envelope StatusCurrent month spending against your envelope limits.5Dining outRemaining ₱2,500.00Limit ₱5,000.00 · Spent ₱2,500.00TransportRemaining ₱900.00Limit ₱4,500.00 · Spent ₱3,600.00GroceriesRemaining ₱2,700.00Limit ₱18,000.00 · Spent ₱15,300.00UtilitiesRemaining ₱0.00Limit ₱6,000.00 · Spent ₱6,000.00ShoppingRemaining ₱0.00Limit ₱5,000.00 · Spent ₱6,000.00Upcoming PayablesCash going out in the next 30 days: bills, card statements and loan payments.6Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI PayrollOverdueHMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll8 days remainingRentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll20 days remainingPLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll25 days remainingHSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll28 days remainingMeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll29 days remainingAlso coming upPayrollMar 15th, 2026 · Money in · Scheduled₱41,250.00PayrollMar 30th, 2026 · Money in · Scheduled₱41,250.00DashboardAccountsTransactionsAllocations"
       },
       "quick-balances-editor-pinned": {
         "controls": [
@@ -1508,7 +1508,7 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(228, 234, 226) | 400 | none | rgb(229, 231, 235) | 0px"
           },
           {
             "name": "Dashboard",
@@ -1516,7 +1516,7 @@
             "icons": 1,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(22, 36, 28) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(228, 234, 226) | 400 | none | rgb(228, 234, 226) | 0px"
           },
           {
             "name": "Forecast",
@@ -1751,7 +1751,7 @@
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosDashboardYour financial overviewTagAll tagsHouseholdJapan tripweekmonthyearPeriod applies to actual totals, not the projection.Quick balancesChoose up to 6 accounts and put them in order.Reset to defaultsCancelSaveE-walletGCash‹›✕CreditHSBC Red Mastercard‹›✕DebitBPI Payroll‹›✕+ Add account3 of 6Cash-Flow TimelineYour running balance over the next 60 days. It shows the low point before payday, not just month-end.DetailsOn track in PHP: the lowest projected balance is ₱71,769.85 on Mar 13, 2026.Opening₱84,250.40Trough₱71,769.85Close (60d)₱106,040.10Financial SnapshotActuals cover month to date; the projection runs from today to month end.Month to dateActual totals (Month to date)Total income (MTD)₱33,500.00Total expenses (MTD)₱51,821.20Net flow (MTD)₱-18,321.20TodayNet worth₱329,764.35All your accounts, shared and Household accounts, cards and loans included. Not the same as available cash.ProjectedAvailable cash₱343,230.90Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.Budget Envelope StatusCurrent month spending against your envelope limits.5Dining outRemaining ₱2,500.00Limit ₱5,000.00 · Spent ₱2,500.00TransportRemaining ₱900.00Limit ₱4,500.00 · Spent ₱3,600.00GroceriesRemaining ₱2,700.00Limit ₱18,000.00 · Spent ₱15,300.00UtilitiesRemaining ₱0.00Limit ₱6,000.00 · Spent ₱6,000.00ShoppingRemaining ₱0.00Limit ₱5,000.00 · Spent ₱6,000.00Upcoming PayablesCash going out in the next 30 days: bills, card statements and loan payments.6Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI PayrollOverdueHMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll8 days remainingRentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll20 days remainingPLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll25 days remainingHSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll28 days remainingMeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll29 days remainingAlso coming upPayrollMar 15th, 2026 · Money in · Scheduled₱41,250.00PayrollMar 30th, 2026 · Money in · Scheduled₱41,250.00HomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosDashboardYour financial overviewTagAll tagsHouseholdJapan tripweekmonthyearPeriod applies to actual totals, not the projection.Quick balancesChoose up to 6 accounts and put them in order.Reset to defaultsCancelSaveE-walletGCash‹›✕CreditHSBC Red Mastercard‹›✕DebitBPI Payroll‹›✕+ Add account3 of 6Cash-Flow TimelineYour running balance over the next 60 days. It shows the low point before payday, not just month-end.DetailsOn track in PHP: the lowest projected balance is ₱71,769.85 on Mar 13, 2026.Opening₱84,250.40Trough₱71,769.85Close (60d)₱106,040.10Financial SnapshotActuals cover month to date; the projection runs from today to month end.Month to dateActual totals (Month to date)Total income (MTD)₱33,500.00Total expenses (MTD)₱51,821.20Net flow (MTD)−₱18,321.20TodayNet worth₱329,764.35All your accounts, shared and Household accounts, cards and loans included. Not the same as available cash.ProjectedAvailable cash₱343,230.90Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.Budget Envelope StatusCurrent month spending against your envelope limits.5Dining outRemaining ₱2,500.00Limit ₱5,000.00 · Spent ₱2,500.00TransportRemaining ₱900.00Limit ₱4,500.00 · Spent ₱3,600.00GroceriesRemaining ₱2,700.00Limit ₱18,000.00 · Spent ₱15,300.00UtilitiesRemaining ₱0.00Limit ₱6,000.00 · Spent ₱6,000.00ShoppingRemaining ₱0.00Limit ₱5,000.00 · Spent ₱6,000.00Upcoming PayablesCash going out in the next 30 days: bills, card statements and loan payments.6Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI PayrollOverdueHMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll8 days remainingRentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll20 days remainingPLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll25 days remainingHSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll28 days remainingMeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll29 days remainingAlso coming upPayrollMar 15th, 2026 · Money in · Scheduled₱41,250.00PayrollMar 30th, 2026 · Money in · Scheduled₱41,250.00DashboardAccountsTransactionsAllocations"
       },
       "transaction-create": {
         "controls": [
@@ -10686,7 +10686,7 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(228, 234, 226) | 400 | none | rgb(229, 231, 235) | 0px"
           },
           {
             "name": "Toggle theme",
@@ -10817,7 +10817,7 @@
             "look": ""
           },
           {
-            "name": "Home",
+            "name": "Dashboard",
             "height": 64,
             "icons": 2,
             "variant": null,
@@ -10841,7 +10841,7 @@
             "look": ""
           },
           {
-            "name": "Goals",
+            "name": "Allocations",
             "height": 64,
             "icons": 2,
             "variant": null,
@@ -10849,7 +10849,7 @@
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosDashboardYour financial overviewTagAll tagsHouseholdJapan tripweekmonthyearPeriod applies to actual totals, not the projection.Quick balancesEditDebitBPI Payroll₱84,250.40CreditHSBC Red MastercardOwed ₱18,742.30E-walletGCash₱3,415.75Cash-Flow TimelineYour running balance over the next 60 days. It shows the low point before payday, not just month-end.DetailsOn track in PHP: the lowest projected balance is ₱71,769.85 on Mar 13, 2026.Opening₱84,250.40Trough₱71,769.85Close (60d)₱106,040.10Financial SnapshotActuals cover month to date; the projection runs from today to month end.Month to dateActual totals (Month to date)Total income (MTD)₱33,500.00Total expenses (MTD)₱51,821.20Net flow (MTD)₱-18,321.20TodayNet worth₱329,764.35All your accounts, shared and Household accounts, cards and loans included. Not the same as available cash.ProjectedAvailable cash₱343,230.90Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.Budget Envelope StatusCurrent month spending against your envelope limits.5Dining outRemaining ₱2,500.00Limit ₱5,000.00 · Spent ₱2,500.00TransportRemaining ₱900.00Limit ₱4,500.00 · Spent ₱3,600.00GroceriesRemaining ₱2,700.00Limit ₱18,000.00 · Spent ₱15,300.00UtilitiesRemaining ₱0.00Limit ₱6,000.00 · Spent ₱6,000.00ShoppingRemaining ₱0.00Limit ₱5,000.00 · Spent ₱6,000.00Upcoming PayablesCash going out in the next 30 days: bills, card statements and loan payments.6Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI PayrollOverdueHMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll8 days remainingRentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll20 days remainingPLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll25 days remainingHSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll28 days remainingMeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll29 days remainingAlso coming upPayrollMar 15th, 2026 · Money in · Scheduled₱41,250.00PayrollMar 30th, 2026 · Money in · Scheduled₱41,250.00HomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosDashboardYour financial overviewTagAll tagsHouseholdJapan tripweekmonthyearPeriod applies to actual totals, not the projection.Quick balancesEditDebitBPI Payroll₱84,250.40CreditHSBC Red MastercardOwed ₱18,742.30E-walletGCash₱3,415.75Cash-Flow TimelineYour running balance over the next 60 days. It shows the low point before payday, not just month-end.DetailsOn track in PHP: the lowest projected balance is ₱71,769.85 on Mar 13, 2026.Opening₱84,250.40Trough₱71,769.85Close (60d)₱106,040.10Financial SnapshotActuals cover month to date; the projection runs from today to month end.Month to dateActual totals (Month to date)Total income (MTD)₱33,500.00Total expenses (MTD)₱51,821.20Net flow (MTD)−₱18,321.20TodayNet worth₱329,764.35All your accounts, shared and Household accounts, cards and loans included. Not the same as available cash.ProjectedAvailable cash₱343,230.90Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.Budget Envelope StatusCurrent month spending against your envelope limits.5Dining outRemaining ₱2,500.00Limit ₱5,000.00 · Spent ₱2,500.00TransportRemaining ₱900.00Limit ₱4,500.00 · Spent ₱3,600.00GroceriesRemaining ₱2,700.00Limit ₱18,000.00 · Spent ₱15,300.00UtilitiesRemaining ₱0.00Limit ₱6,000.00 · Spent ₱6,000.00ShoppingRemaining ₱0.00Limit ₱5,000.00 · Spent ₱6,000.00Upcoming PayablesCash going out in the next 30 days: bills, card statements and loan payments.6Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI PayrollOverdueHMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll8 days remainingRentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll20 days remainingPLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll25 days remainingHSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll28 days remainingMeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll29 days remainingAlso coming upPayrollMar 15th, 2026 · Money in · Scheduled₱41,250.00PayrollMar 30th, 2026 · Money in · Scheduled₱41,250.00DashboardAccountsTransactionsAllocations"
       },
       "transactions": {
         "controls": [
@@ -11030,7 +11030,7 @@
             "look": ""
           },
           {
-            "name": "Home",
+            "name": "Dashboard",
             "height": 64,
             "icons": 2,
             "variant": null,
@@ -11054,7 +11054,7 @@
             "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(229, 231, 235) | 0px"
           },
           {
-            "name": "Goals",
+            "name": "Allocations",
             "height": 64,
             "icons": 2,
             "variant": null,
@@ -11062,7 +11062,7 @@
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosTransactionsAdd TransactionDue and overdueHideDue and overdue2Not posted yet0Upcoming16Subscriptions2Installments0Emergency fund top-upMar 8th, 2026 · BPI Payroll · Overdue₱10,000.00Mark paidChange dateHSBC Red Mastercard statementClosed Feb 20th, 2026 · due Mar 13th, 2026₱12,480.55PayTo dateScheduledSearch transactionsMarch 2026Spending breakdownShow filtersDate range: Mar 1st, 2026 to Mar 31st, 2026Automatically showing whole-month activityPuregold weekly groceriesHouseholdHousehold+1Mar 12th, 2026HSBC Red MastercardGroceriesPostedExpenseby Mara S.₱3,184.50Lunch, Kanto FreestyleMar 11th, 2026Cash on handDining outPostedExpenseby Mara S.₱420.00Grab to MakatiMar 11th, 2026GCashTransportPostedExpenseby Mara S.₱286.00Mercury DrugMar 10th, 2026GCashHealthPostedExpenseby Mara S.₱965.25Meralco February billHouseholdHousehold+1Mar 10th, 2026BPI PayrollUtilitiesPostedExpenseby Mara S.₱4,812.65Palengke, Marikina marketHouseholdHousehold+1Mar 10th, 2026BDO Joint householdGroceriesPostedExpenseby Jun R.₱1,385.00Netflix StandardMar 9th, 2026HSBC Red MastercardSubscriptionsPostedExpenseby Mara S.₱549.00Move to emergency fundMar 8th, 2026BPI Payroll to Metrobank SavingsSavings transferPostedTransferby Mara S.Fee ₱25.00₱10,000.00Dinner, ManamJapan tripJapan trip+1Mar 7th, 2026HSBC Red MastercardDining outPostedExpenseby Mara S.₱2,140.00Logo design, Kapé Co.Mar 7th, 2026BPI PayrollFreelancePostedIncomeby Mara S.+₱18,500.00PLDT FibrHouseholdHousehold+1Mar 6th, 2026BPI PayrollUtilitiesPostedExpenseby Mara S.₱1,899.00S&R bulk runHouseholdHousehold+1Mar 5th, 2026HSBC Red MastercardGroceriesPostedExpenseby Mara S.₱6,420.80Shell V-PowerMar 5th, 2026HSBC Red MastercardTransportPostedExpenseby Mara S.₱2,650.00Spotify DuoMar 4th, 2026HSBC Red MastercardSubscriptionsPostedExpenseby Mara S.₱239.00Water refill, 4 gallonsHouseholdHousehold+1Mar 4th, 2026BDO Joint householdUtilitiesPostedExpenseby Jun R.₱160.00Coffee, YardstickMar 3rd, 2026GCashDining outPostedExpenseby Mara S.₱210.00Yaya salary, Feb 16–28HouseholdHousehold+1Mar 1st, 2026BDO Joint householdHousehold helpPostedExpenseby Mara S.₱4,500.00Household fund, MarchHouseholdHousehold+1Mar 1st, 2026BDO Joint householdSalaryPostedIncomeby Jun R.+₱15,000.00March rentHouseholdHousehold+1Mar 1st, 2026BPI PayrollRentPostedExpenseby Mara S.₱22,000.001–19 of 19Previous1NextPer page2550100HomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosTransactionsAdd TransactionDue and overdueHideDue and overdue2Not posted yet0Upcoming16Subscriptions2Installments0Emergency fund top-upMar 8th, 2026 · BPI Payroll · Overdue₱10,000.00Mark paidChange dateHSBC Red Mastercard statementClosed Feb 20th, 2026 · due Mar 13th, 2026₱12,480.55PayTo dateScheduledSearch transactionsMarch 2026Spending breakdownShow filtersDate range: Mar 1st, 2026 to Mar 31st, 2026Automatically showing whole-month activityPuregold weekly groceriesHouseholdHousehold+1Mar 12th, 2026HSBC Red MastercardGroceriesPostedExpenseby Mara S.₱3,184.50Lunch, Kanto FreestyleMar 11th, 2026Cash on handDining outPostedExpenseby Mara S.₱420.00Grab to MakatiMar 11th, 2026GCashTransportPostedExpenseby Mara S.₱286.00Mercury DrugMar 10th, 2026GCashHealthPostedExpenseby Mara S.₱965.25Meralco February billHouseholdHousehold+1Mar 10th, 2026BPI PayrollUtilitiesPostedExpenseby Mara S.₱4,812.65Palengke, Marikina marketHouseholdHousehold+1Mar 10th, 2026BDO Joint householdGroceriesPostedExpenseby Jun R.₱1,385.00Netflix StandardMar 9th, 2026HSBC Red MastercardSubscriptionsPostedExpenseby Mara S.₱549.00Move to emergency fundMar 8th, 2026BPI Payroll to Metrobank SavingsSavings transferPostedTransferby Mara S.Fee ₱25.00₱10,000.00Dinner, ManamJapan tripJapan trip+1Mar 7th, 2026HSBC Red MastercardDining outPostedExpenseby Mara S.₱2,140.00Logo design, Kapé Co.Mar 7th, 2026BPI PayrollFreelancePostedIncomeby Mara S.+₱18,500.00PLDT FibrHouseholdHousehold+1Mar 6th, 2026BPI PayrollUtilitiesPostedExpenseby Mara S.₱1,899.00S&R bulk runHouseholdHousehold+1Mar 5th, 2026HSBC Red MastercardGroceriesPostedExpenseby Mara S.₱6,420.80Shell V-PowerMar 5th, 2026HSBC Red MastercardTransportPostedExpenseby Mara S.₱2,650.00Spotify DuoMar 4th, 2026HSBC Red MastercardSubscriptionsPostedExpenseby Mara S.₱239.00Water refill, 4 gallonsHouseholdHousehold+1Mar 4th, 2026BDO Joint householdUtilitiesPostedExpenseby Jun R.₱160.00Coffee, YardstickMar 3rd, 2026GCashDining outPostedExpenseby Mara S.₱210.00Yaya salary, Feb 16–28HouseholdHousehold+1Mar 1st, 2026BDO Joint householdHousehold helpPostedExpenseby Mara S.₱4,500.00Household fund, MarchHouseholdHousehold+1Mar 1st, 2026BDO Joint householdSalaryPostedIncomeby Jun R.+₱15,000.00March rentHouseholdHousehold+1Mar 1st, 2026BPI PayrollRentPostedExpenseby Mara S.₱22,000.001–19 of 19Previous1NextPer page2550100DashboardAccountsTransactionsAllocations"
       },
       "allocations-recurring": {
         "controls": [
@@ -11275,7 +11275,7 @@
             "look": ""
           },
           {
-            "name": "Home",
+            "name": "Dashboard",
             "height": 64,
             "icons": 2,
             "variant": null,
@@ -11299,7 +11299,7 @@
             "look": ""
           },
           {
-            "name": "Goals",
+            "name": "Allocations",
             "height": 64,
             "icons": 2,
             "variant": null,
@@ -11307,7 +11307,7 @@
             "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(229, 231, 235) | 0px"
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAllocationsAdd Recurring EntryRecurringBudgetsSavingsWishlistSwitch tabs to view recurring subscriptions, monthly budgets, savings envelopes, or your wishlist.Search recurring entriesTagAll tagsHouseholdJapan tripSubscriptions3Netflix StandardRecurring expenseMonthly · day 9ScheduledNext Apr 9th, 2026In 28 daysAccount: HSBC Red Mastercardby Mara S.IndefiniteChargedPosted₱549.00Spotify DuoRecurring expenseMonthly · day 4ScheduledNext Apr 4th, 2026In 23 daysAccount: HSBC Red Mastercardby Mara S.IndefiniteChargedPosted₱239.00Disney+ PremiumRecurring expenseMonthly · day 2ScheduledPausedNext Apr 2nd, 2026In 21 daysAccount: HSBC Red Mastercardby Mara S.Indefinite₱369.00Cash expenses10RentHouseholdHousehold+1Recurring expenseMonthly · day 1ManualNext Apr 1st, 2026In 20 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱22,000.00Meralco+1Household+1Recurring expenseMonthly · day 10ManualNext Apr 10th, 2026In 29 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱4,600.00PLDT FibrRecurring expenseMonthly · day 6Auto-payNext Apr 6th, 2026In 25 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,899.00Emergency fund top-upRecurring expenseMonthly · day 8ManualNext Apr 8th, 2026In 27 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱10,000.00HMO dependent add-onRecurring expenseMonthly · day 20ManualNext Mar 20th, 2026In 8 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,450.00Globe PostpaidRecurring expenseMonthly · day 18Auto-payNext Mar 18th, 2026In 6 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,299.00Maynilad water+1Household+1Recurring expenseMonthly · day 27ManualNext Mar 27th, 2026In 15 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱720.00Palengke run+1Household+1Recurring expenseWeekly · SaturdayManualNext Mar 14th, 2026In 2 daysAccount: BDO Joint householdby Mara S.IndefiniteMark paid₱1,300.00Yaya salary+1Household+1Recurring expenseTwice a monthManualNext Mar 15th, 2026In 3 daysAccount: BDO Joint householdby Mara S.IndefiniteMark paid₱4,500.00Gym membershipRecurring expenseMonthly · day 5ManualPausedNext Apr 5th, 2026In 24 daysAccount: BPI Payrollby Mara S.Indefinite₱2,500.00Income & transfers1PayrollRecurring incomeTwice a monthScheduledNext Mar 15th, 2026In 3 daysAccount: BPI Payrollby Mara S.IndefiniteMark received+₱41,250.00HomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAllocationsAdd Recurring EntryRecurringBudgetsSavingsWishlistSwitch tabs to view recurring subscriptions, monthly budgets, savings envelopes, or your wishlist.Search recurring entriesTagAll tagsHouseholdJapan tripSubscriptions3Netflix StandardRecurring expenseMonthly · day 9ScheduledNext Apr 9th, 2026In 28 daysAccount: HSBC Red Mastercardby Mara S.IndefiniteChargedPosted₱549.00Spotify DuoRecurring expenseMonthly · day 4ScheduledNext Apr 4th, 2026In 23 daysAccount: HSBC Red Mastercardby Mara S.IndefiniteChargedPosted₱239.00Disney+ PremiumRecurring expenseMonthly · day 2ScheduledPausedNext Apr 2nd, 2026In 21 daysAccount: HSBC Red Mastercardby Mara S.Indefinite₱369.00Cash expenses10RentHouseholdHousehold+1Recurring expenseMonthly · day 1ManualNext Apr 1st, 2026In 20 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱22,000.00Meralco+1Household+1Recurring expenseMonthly · day 10ManualNext Apr 10th, 2026In 29 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱4,600.00PLDT FibrRecurring expenseMonthly · day 6Auto-payNext Apr 6th, 2026In 25 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,899.00Emergency fund top-upRecurring expenseMonthly · day 8ManualNext Apr 8th, 2026In 27 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱10,000.00HMO dependent add-onRecurring expenseMonthly · day 20ManualNext Mar 20th, 2026In 8 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,450.00Globe PostpaidRecurring expenseMonthly · day 18Auto-payNext Mar 18th, 2026In 6 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱1,299.00Maynilad water+1Household+1Recurring expenseMonthly · day 27ManualNext Mar 27th, 2026In 15 daysAccount: BPI Payrollby Mara S.IndefiniteMark paid₱720.00Palengke run+1Household+1Recurring expenseWeekly · SaturdayManualNext Mar 14th, 2026In 2 daysAccount: BDO Joint householdby Mara S.IndefiniteMark paid₱1,300.00Yaya salary+1Household+1Recurring expenseTwice a monthManualNext Mar 15th, 2026In 3 daysAccount: BDO Joint householdby Mara S.IndefiniteMark paid₱4,500.00Gym membershipRecurring expenseMonthly · day 5ManualPausedNext Apr 5th, 2026In 24 daysAccount: BPI Payrollby Mara S.Indefinite₱2,500.00Income & transfers1PayrollRecurring incomeTwice a monthScheduledNext Mar 15th, 2026In 3 daysAccount: BPI Payrollby Mara S.IndefiniteMark received+₱41,250.00DashboardAccountsTransactionsAllocations"
       },
       "accounts": {
         "controls": [
@@ -11392,7 +11392,7 @@
             "look": ""
           },
           {
-            "name": "Home",
+            "name": "Dashboard",
             "height": 64,
             "icons": 2,
             "variant": null,
@@ -11416,7 +11416,7 @@
             "look": ""
           },
           {
-            "name": "Goals",
+            "name": "Allocations",
             "height": 64,
             "icons": 2,
             "variant": null,
@@ -11424,7 +11424,7 @@
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAccountsAdd AccountTagAll tagsHouseholdJapan tripAccountBalanceStatusIndividual (5)Debit (2)BPI PayrollcheckingActiveCurrency: PHP₱84,250.40ActiveTransactionsMetrobank SavingssavingsActiveCurrency: PHP₱212,600.00ActiveTransactionsCredit (1)HSBC Red MastercardcreditActiveCurrency: PHPLimit ₱120,000.00+21 days to due−₱18,742.30ActiveTransactionsE-wallet (1)GCashe walletActiveCurrency: PHPNot counted₱3,415.75ActiveTransactionsCash (1)Cash on handcashActiveCurrency: PHPNot counted₱1,860.00ActiveTransactionsShared (1)Debit (1)BDO Joint householdcheckingActiveCurrency: PHPEditorShared by Jun R.₱46,380.50ActiveTransactionsShowing 6 of 6 accountsHomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAccountsAdd AccountTagAll tagsHouseholdJapan tripAccountBalanceStatusIndividual (5)Debit (2)BPI PayrollcheckingActiveCurrency: PHP₱84,250.40ActiveTransactionsMetrobank SavingssavingsActiveCurrency: PHP₱212,600.00ActiveTransactionsCredit (1)HSBC Red MastercardcreditActiveCurrency: PHPLimit ₱120,000.00+21 days to due−₱18,742.30ActiveTransactionsE-wallet (1)GCashe walletActiveCurrency: PHPNot counted₱3,415.75ActiveTransactionsCash (1)Cash on handcashActiveCurrency: PHPNot counted₱1,860.00ActiveTransactionsShared (1)Debit (1)BDO Joint householdcheckingActiveCurrency: PHPEditorShared by Jun R.₱46,380.50ActiveTransactionsShowing 6 of 6 accountsDashboardAccountsTransactionsAllocations"
       },
       "settings": {
         "controls": [
@@ -11701,7 +11701,7 @@
             "look": ""
           },
           {
-            "name": "Home",
+            "name": "Dashboard",
             "height": 64,
             "icons": 2,
             "variant": null,
@@ -11725,7 +11725,7 @@
             "look": ""
           },
           {
-            "name": "Goals",
+            "name": "Allocations",
             "height": 64,
             "icons": 2,
             "variant": null,
@@ -11733,7 +11733,7 @@
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosSettingsChoose your cash-flow timeline's main account, manage categories and tags, and export your data.Cash-flow timelineThe timeline opens on your main account's own running balance. You can still switch to all cash accounts there.Main accountNone (all cash accounts)BPI Payroll (PHP)Metrobank Savings (PHP)BDO Joint household (PHP)Export your dataDownload everything you own as one JSON file, or as a ZIP of CSV files (one per table). Accounts shared with you and other people's records on your accounts are included with limited details.JSONCSV (ZIP)CategoriesColour-coded labels for transactions and budgets.Add categorySalaryIncomeEditDeleteGroceriesExpenseEditDeleteDining outExpenseEditDeleteUtilitiesExpenseEditDeleteTransportExpenseEditDeleteRentExpenseEditDeleteSubscriptionsExpenseEditDeleteHealthExpenseEditDeleteSavings transferTransferEditDeleteFreelanceIncomeEditDeleteHousehold helpExpenseEditDeleteTagsLabel accounts, transactions and recurring entries, then filter by tag.Add tagHouseholdSystemRecolourDeleteJapan tripEditDeleteHousehold sharingShare your Household tag with someone, by their email. They can see your Household-tagged accounts, their balances and your Household-tagged transactions and recurring entries, read-only: they can't change anything, and they see nothing that isn't tagged Household.People who can see your HouseholdNot shared with anyone yet.Add a personLook upHomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosSettingsChoose your cash-flow timeline's main account, manage categories and tags, and export your data.Cash-flow timelineThe timeline opens on your main account's own running balance. You can still switch to all cash accounts there.Main accountNone (all cash accounts)BPI Payroll (PHP)Metrobank Savings (PHP)BDO Joint household (PHP)Export your dataDownload everything you own as one JSON file, or as a ZIP of CSV files (one per table). Accounts shared with you and other people's records on your accounts are included with limited details.JSONCSV (ZIP)CategoriesColour-coded labels for transactions and budgets.Add categorySalaryIncomeEditDeleteGroceriesExpenseEditDeleteDining outExpenseEditDeleteUtilitiesExpenseEditDeleteTransportExpenseEditDeleteRentExpenseEditDeleteSubscriptionsExpenseEditDeleteHealthExpenseEditDeleteSavings transferTransferEditDeleteFreelanceIncomeEditDeleteHousehold helpExpenseEditDeleteTagsLabel accounts, transactions and recurring entries, then filter by tag.Add tagHouseholdSystemRecolourDeleteJapan tripEditDeleteHousehold sharingShare your Household tag with someone, by their email. They can see your Household-tagged accounts, their balances and your Household-tagged transactions and recurring entries, read-only: they can't change anything, and they see nothing that isn't tagged Household.People who can see your HouseholdNot shared with anyone yet.Add a personLook upDashboardAccountsTransactionsAllocations"
       },
       "allocations-wishlist": {
         "controls": [
@@ -11882,7 +11882,7 @@
             "look": ""
           },
           {
-            "name": "Home",
+            "name": "Dashboard",
             "height": 64,
             "icons": 2,
             "variant": null,
@@ -11906,7 +11906,7 @@
             "look": ""
           },
           {
-            "name": "Goals",
+            "name": "Allocations",
             "height": 64,
             "icons": 2,
             "variant": null,
@@ -11914,7 +11914,7 @@
             "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(229, 231, 235) | 0px"
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAllocationsRecurringBudgetsSavingsWishlistSwitch tabs to view recurring subscriptions, monthly budgets, savings envelopes, or your wishlist.WishlistPrioritised things you're saving up for. Turn any of them into a budget envelope or savings target.Add itemShow purchasedhighWork laptopFor freelance workTarget Jun 30, 2026Savings targetBudget envelope₱65,000.00mediumRice cookerSavings targetBudget envelope₱3,500.00HomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAllocationsRecurringBudgetsSavingsWishlistSwitch tabs to view recurring subscriptions, monthly budgets, savings envelopes, or your wishlist.WishlistPrioritised things you're saving up for. Turn any of them into a budget envelope or savings target.Add itemShow purchasedhighWork laptopFor freelance workTarget Jun 30, 2026Savings targetBudget envelope₱65,000.00mediumRice cookerSavings targetBudget envelope₱3,500.00DashboardAccountsTransactionsAllocations"
       },
       "quick-balances-editor": {
         "controls": [
@@ -11924,7 +11924,7 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(228, 234, 226) | 400 | none | rgb(229, 231, 235) | 0px"
           },
           {
             "name": "Toggle theme",
@@ -12119,7 +12119,7 @@
             "look": ""
           },
           {
-            "name": "Home",
+            "name": "Dashboard",
             "height": 64,
             "icons": 2,
             "variant": null,
@@ -12143,7 +12143,7 @@
             "look": ""
           },
           {
-            "name": "Goals",
+            "name": "Allocations",
             "height": 64,
             "icons": 2,
             "variant": null,
@@ -12151,7 +12151,7 @@
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosDashboardYour financial overviewTagAll tagsHouseholdJapan tripweekmonthyearPeriod applies to actual totals, not the projection.Quick balancesChoose up to 6 accounts and put them in order.CancelSaveDebitBPI Payroll‹›✕CreditHSBC Red Mastercard‹›✕E-walletGCash‹›✕+ Add account3 of 6Cash-Flow TimelineYour running balance over the next 60 days. It shows the low point before payday, not just month-end.DetailsOn track in PHP: the lowest projected balance is ₱71,769.85 on Mar 13, 2026.Opening₱84,250.40Trough₱71,769.85Close (60d)₱106,040.10Financial SnapshotActuals cover month to date; the projection runs from today to month end.Month to dateActual totals (Month to date)Total income (MTD)₱33,500.00Total expenses (MTD)₱51,821.20Net flow (MTD)₱-18,321.20TodayNet worth₱329,764.35All your accounts, shared and Household accounts, cards and loans included. Not the same as available cash.ProjectedAvailable cash₱343,230.90Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.Budget Envelope StatusCurrent month spending against your envelope limits.5Dining outRemaining ₱2,500.00Limit ₱5,000.00 · Spent ₱2,500.00TransportRemaining ₱900.00Limit ₱4,500.00 · Spent ₱3,600.00GroceriesRemaining ₱2,700.00Limit ₱18,000.00 · Spent ₱15,300.00UtilitiesRemaining ₱0.00Limit ₱6,000.00 · Spent ₱6,000.00ShoppingRemaining ₱0.00Limit ₱5,000.00 · Spent ₱6,000.00Upcoming PayablesCash going out in the next 30 days: bills, card statements and loan payments.6Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI PayrollOverdueHMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll8 days remainingRentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll20 days remainingPLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll25 days remainingHSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll28 days remainingMeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll29 days remainingAlso coming upPayrollMar 15th, 2026 · Money in · Scheduled₱41,250.00PayrollMar 30th, 2026 · Money in · Scheduled₱41,250.00HomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosDashboardYour financial overviewTagAll tagsHouseholdJapan tripweekmonthyearPeriod applies to actual totals, not the projection.Quick balancesChoose up to 6 accounts and put them in order.CancelSaveDebitBPI Payroll‹›✕CreditHSBC Red Mastercard‹›✕E-walletGCash‹›✕+ Add account3 of 6Cash-Flow TimelineYour running balance over the next 60 days. It shows the low point before payday, not just month-end.DetailsOn track in PHP: the lowest projected balance is ₱71,769.85 on Mar 13, 2026.Opening₱84,250.40Trough₱71,769.85Close (60d)₱106,040.10Financial SnapshotActuals cover month to date; the projection runs from today to month end.Month to dateActual totals (Month to date)Total income (MTD)₱33,500.00Total expenses (MTD)₱51,821.20Net flow (MTD)−₱18,321.20TodayNet worth₱329,764.35All your accounts, shared and Household accounts, cards and loans included. Not the same as available cash.ProjectedAvailable cash₱343,230.90Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.Budget Envelope StatusCurrent month spending against your envelope limits.5Dining outRemaining ₱2,500.00Limit ₱5,000.00 · Spent ₱2,500.00TransportRemaining ₱900.00Limit ₱4,500.00 · Spent ₱3,600.00GroceriesRemaining ₱2,700.00Limit ₱18,000.00 · Spent ₱15,300.00UtilitiesRemaining ₱0.00Limit ₱6,000.00 · Spent ₱6,000.00ShoppingRemaining ₱0.00Limit ₱5,000.00 · Spent ₱6,000.00Upcoming PayablesCash going out in the next 30 days: bills, card statements and loan payments.6Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI PayrollOverdueHMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll8 days remainingRentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll20 days remainingPLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll25 days remainingHSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll28 days remainingMeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll29 days remainingAlso coming upPayrollMar 15th, 2026 · Money in · Scheduled₱41,250.00PayrollMar 30th, 2026 · Money in · Scheduled₱41,250.00DashboardAccountsTransactionsAllocations"
       },
       "quick-balances-editor-pinned": {
         "controls": [
@@ -12161,7 +12161,7 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(228, 234, 226) | 400 | none | rgb(229, 231, 235) | 0px"
           },
           {
             "name": "Toggle theme",
@@ -12364,7 +12364,7 @@
             "look": ""
           },
           {
-            "name": "Home",
+            "name": "Dashboard",
             "height": 64,
             "icons": 2,
             "variant": null,
@@ -12388,7 +12388,7 @@
             "look": ""
           },
           {
-            "name": "Goals",
+            "name": "Allocations",
             "height": 64,
             "icons": 2,
             "variant": null,
@@ -12396,7 +12396,7 @@
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosDashboardYour financial overviewTagAll tagsHouseholdJapan tripweekmonthyearPeriod applies to actual totals, not the projection.Quick balancesChoose up to 6 accounts and put them in order.Reset to defaultsCancelSaveE-walletGCash‹›✕CreditHSBC Red Mastercard‹›✕DebitBPI Payroll‹›✕+ Add account3 of 6Cash-Flow TimelineYour running balance over the next 60 days. It shows the low point before payday, not just month-end.DetailsOn track in PHP: the lowest projected balance is ₱71,769.85 on Mar 13, 2026.Opening₱84,250.40Trough₱71,769.85Close (60d)₱106,040.10Financial SnapshotActuals cover month to date; the projection runs from today to month end.Month to dateActual totals (Month to date)Total income (MTD)₱33,500.00Total expenses (MTD)₱51,821.20Net flow (MTD)₱-18,321.20TodayNet worth₱329,764.35All your accounts, shared and Household accounts, cards and loans included. Not the same as available cash.ProjectedAvailable cash₱343,230.90Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.Budget Envelope StatusCurrent month spending against your envelope limits.5Dining outRemaining ₱2,500.00Limit ₱5,000.00 · Spent ₱2,500.00TransportRemaining ₱900.00Limit ₱4,500.00 · Spent ₱3,600.00GroceriesRemaining ₱2,700.00Limit ₱18,000.00 · Spent ₱15,300.00UtilitiesRemaining ₱0.00Limit ₱6,000.00 · Spent ₱6,000.00ShoppingRemaining ₱0.00Limit ₱5,000.00 · Spent ₱6,000.00Upcoming PayablesCash going out in the next 30 days: bills, card statements and loan payments.6Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI PayrollOverdueHMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll8 days remainingRentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll20 days remainingPLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll25 days remainingHSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll28 days remainingMeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll29 days remainingAlso coming upPayrollMar 15th, 2026 · Money in · Scheduled₱41,250.00PayrollMar 30th, 2026 · Money in · Scheduled₱41,250.00HomeAccountsTransactionsGoals"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosDashboardYour financial overviewTagAll tagsHouseholdJapan tripweekmonthyearPeriod applies to actual totals, not the projection.Quick balancesChoose up to 6 accounts and put them in order.Reset to defaultsCancelSaveE-walletGCash‹›✕CreditHSBC Red Mastercard‹›✕DebitBPI Payroll‹›✕+ Add account3 of 6Cash-Flow TimelineYour running balance over the next 60 days. It shows the low point before payday, not just month-end.DetailsOn track in PHP: the lowest projected balance is ₱71,769.85 on Mar 13, 2026.Opening₱84,250.40Trough₱71,769.85Close (60d)₱106,040.10Financial SnapshotActuals cover month to date; the projection runs from today to month end.Month to dateActual totals (Month to date)Total income (MTD)₱33,500.00Total expenses (MTD)₱51,821.20Net flow (MTD)−₱18,321.20TodayNet worth₱329,764.35All your accounts, shared and Household accounts, cards and loans included. Not the same as available cash.ProjectedAvailable cash₱343,230.90Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.Budget Envelope StatusCurrent month spending against your envelope limits.5Dining outRemaining ₱2,500.00Limit ₱5,000.00 · Spent ₱2,500.00TransportRemaining ₱900.00Limit ₱4,500.00 · Spent ₱3,600.00GroceriesRemaining ₱2,700.00Limit ₱18,000.00 · Spent ₱15,300.00UtilitiesRemaining ₱0.00Limit ₱6,000.00 · Spent ₱6,000.00ShoppingRemaining ₱0.00Limit ₱5,000.00 · Spent ₱6,000.00Upcoming PayablesCash going out in the next 30 days: bills, card statements and loan payments.6Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI PayrollOverdueHMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll8 days remainingRentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll20 days remainingPLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll25 days remainingHSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll28 days remainingMeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll29 days remainingAlso coming upPayrollMar 15th, 2026 · Money in · Scheduled₱41,250.00PayrollMar 30th, 2026 · Money in · Scheduled₱41,250.00DashboardAccountsTransactionsAllocations"
       },
       "transaction-create": {
         "controls": [
@@ -13773,10 +13773,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -13838,10 +13838,10 @@
           "Create Transaction",
           "Save and add another",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /tags/"
@@ -13876,10 +13876,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -13919,10 +13919,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Close",
           "Mark paid",
           "Cancel"
@@ -13968,10 +13968,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Close",
           "Save"
         ],
@@ -14010,10 +14010,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Close",
           "Pay",
           "Cancel"
@@ -14056,10 +14056,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /transactions/?start_date=2026-02-01T00%3A00%3A00Z&end_date=2026-02-28T23%3A59%3A59.999999Z&limit=25&offset=0"
@@ -14098,10 +14098,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Close",
           "Rent₱22,000.0042.5%",
           "Groceries₱10,990.3021.2%",
@@ -14175,10 +14175,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /tags/"
@@ -14248,10 +14248,10 @@
           "Active",
           "Save Recurring Entry",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -14297,10 +14297,10 @@
           "Show 1 more tag: Household",
           "Mark paid",
           "Mark received",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Close",
           "Charged",
           "Posted",
@@ -14353,10 +14353,10 @@
           "Show 1 more tag: Household",
           "Mark paid",
           "Mark received",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Close",
           "Posted",
           "Charged",
@@ -14409,10 +14409,10 @@
           "Show 1 more tag: Household",
           "Mark paid",
           "Mark received",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Close",
           "Charged",
           "Posted",
@@ -14465,10 +14465,10 @@
           "Show 1 more tag: Household",
           "Mark paid",
           "Mark received",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Close",
           "Posted",
           "Charged",
@@ -14521,10 +14521,10 @@
           "Show 1 more tag: Household",
           "Mark paid",
           "Mark received",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Close",
           "Mark paid",
           "Cancel"
@@ -14576,10 +14576,10 @@
           "Show 1 more tag: Household",
           "Mark paid",
           "Mark received",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Close",
           "Mark paid",
           "Cancel"
@@ -14631,10 +14631,10 @@
           "Show 1 more tag: Household",
           "Mark paid",
           "Mark received",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Close",
           "Mark paid",
           "Cancel"
@@ -14686,10 +14686,10 @@
           "Show 1 more tag: Household",
           "Mark paid",
           "Mark received",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Close",
           "Mark paid",
           "Cancel"
@@ -14741,10 +14741,10 @@
           "Show 1 more tag: Household",
           "Mark paid",
           "Mark received",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Close",
           "Mark paid",
           "Cancel"
@@ -14796,10 +14796,10 @@
           "Show 1 more tag: Household",
           "Mark paid",
           "Mark received",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Close",
           "Mark paid",
           "Cancel"
@@ -14851,10 +14851,10 @@
           "Show 1 more tag: Household",
           "Mark paid",
           "Mark received",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Close",
           "Mark paid",
           "Cancel"
@@ -14906,10 +14906,10 @@
           "Show 1 more tag: Household",
           "Mark paid",
           "Mark received",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Close",
           "Mark paid",
           "Cancel"
@@ -14961,10 +14961,10 @@
           "Show 1 more tag: Household",
           "Mark paid",
           "Mark received",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Close",
           "Mark paid",
           "Cancel"
@@ -15017,10 +15017,10 @@
           "Show 1 more tag: Household",
           "Mark paid",
           "Mark received",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Close",
           "Mark received",
           "Cancel"
@@ -15070,10 +15070,10 @@
           "Active",
           "Create Account",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -15127,10 +15127,10 @@
           "Edit tag Japan trip",
           "Delete tag Japan trip",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /data/export.json"
@@ -15186,10 +15186,10 @@
           "Edit tag Japan trip",
           "Delete tag Japan trip",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /data/export.csv"
@@ -15261,10 +15261,10 @@
           "Colour #dc2626",
           "Create",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -15334,10 +15334,10 @@
           "Colour #dc2626",
           "Update",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -15392,10 +15392,10 @@
           "Edit tag Japan trip",
           "Delete tag Japan trip",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Cancel",
           "Delete category"
         ],
@@ -15467,10 +15467,10 @@
           "Colour #dc2626",
           "Update",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -15525,10 +15525,10 @@
           "Edit tag Japan trip",
           "Delete tag Japan trip",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Cancel",
           "Delete category"
         ],
@@ -15600,10 +15600,10 @@
           "Colour #dc2626",
           "Update",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -15658,10 +15658,10 @@
           "Edit tag Japan trip",
           "Delete tag Japan trip",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Cancel",
           "Delete category"
         ],
@@ -15733,10 +15733,10 @@
           "Colour #dc2626",
           "Update",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -15791,10 +15791,10 @@
           "Edit tag Japan trip",
           "Delete tag Japan trip",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Cancel",
           "Delete category"
         ],
@@ -15866,10 +15866,10 @@
           "Colour #dc2626",
           "Update",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -15924,10 +15924,10 @@
           "Edit tag Japan trip",
           "Delete tag Japan trip",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Cancel",
           "Delete category"
         ],
@@ -15999,10 +15999,10 @@
           "Colour #dc2626",
           "Update",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -16057,10 +16057,10 @@
           "Edit tag Japan trip",
           "Delete tag Japan trip",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Cancel",
           "Delete category"
         ],
@@ -16132,10 +16132,10 @@
           "Colour #dc2626",
           "Update",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -16190,10 +16190,10 @@
           "Edit tag Japan trip",
           "Delete tag Japan trip",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Cancel",
           "Delete category"
         ],
@@ -16265,10 +16265,10 @@
           "Colour #dc2626",
           "Update",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -16323,10 +16323,10 @@
           "Edit tag Japan trip",
           "Delete tag Japan trip",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Cancel",
           "Delete category"
         ],
@@ -16398,10 +16398,10 @@
           "Colour #dc2626",
           "Update",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -16456,10 +16456,10 @@
           "Edit tag Japan trip",
           "Delete tag Japan trip",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Cancel",
           "Delete category"
         ],
@@ -16531,10 +16531,10 @@
           "Colour #dc2626",
           "Update",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -16589,10 +16589,10 @@
           "Edit tag Japan trip",
           "Delete tag Japan trip",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Cancel",
           "Delete category"
         ],
@@ -16664,10 +16664,10 @@
           "Colour #dc2626",
           "Update",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -16722,10 +16722,10 @@
           "Edit tag Japan trip",
           "Delete tag Japan trip",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Cancel",
           "Delete category"
         ],
@@ -16795,10 +16795,10 @@
           "Colour #dc2626",
           "Create",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -16866,10 +16866,10 @@
           "Colour #dc2626",
           "Update",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -16937,10 +16937,10 @@
           "Colour #dc2626",
           "Update",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -16995,10 +16995,10 @@
           "Edit tag Japan trip",
           "Delete tag Japan trip",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Cancel",
           "Delete tag"
         ],
@@ -17055,10 +17055,10 @@
           "Delete tag Japan trip",
           "Look up",
           "Share Household with Lia M.",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /users/lookup?email=lia%40example.com"
@@ -17104,10 +17104,10 @@
           "",
           "Add",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -17155,10 +17155,10 @@
           "Active",
           "Create Savings Tracker",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -17213,10 +17213,10 @@
           "Active",
           "Create Budget Envelope",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -17248,10 +17248,10 @@
           "Mark as purchased",
           "Edit",
           "Delete",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /wishlist/?is_purchased=false",
@@ -17299,10 +17299,10 @@
           "",
           "Update",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -17335,10 +17335,10 @@
           "Mark as purchased",
           "Edit",
           "Delete",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Cancel",
           "Delete item"
         ],
@@ -17388,10 +17388,10 @@
           "Active",
           "Create Savings Tracker",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -17446,10 +17446,10 @@
           "Active",
           "Create Budget Envelope",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -17481,10 +17481,10 @@
           "Mark as purchased",
           "Edit",
           "Delete",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /wishlist/?is_purchased=false",
@@ -17532,10 +17532,10 @@
           "",
           "Update",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -17568,10 +17568,10 @@
           "Mark as purchased",
           "Edit",
           "Delete",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Cancel",
           "Delete item"
         ],
@@ -17611,10 +17611,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -17652,10 +17652,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "PUT /dashboard/quick-balances {\"account_ids\":[11,15,13]}"
@@ -17703,10 +17703,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -17749,10 +17749,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -17798,10 +17798,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -17847,10 +17847,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -17893,10 +17893,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -17942,10 +17942,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -17988,10 +17988,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -18040,10 +18040,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -18085,10 +18085,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "PUT /dashboard/quick-balances {\"account_ids\":[]}"
@@ -18128,10 +18128,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -18169,10 +18169,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "PUT /dashboard/quick-balances {\"account_ids\":[13,15,11]}"
@@ -18221,10 +18221,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -18268,10 +18268,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -18318,10 +18318,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -18368,10 +18368,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -18415,10 +18415,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -18465,10 +18465,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -18512,10 +18512,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -18565,10 +18565,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -18606,10 +18606,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Dismiss",
           "View",
           "Undo"
@@ -18676,10 +18676,10 @@
           "Create Transaction",
           "Save and add another",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Dismiss",
           "View",
           "Undo"
@@ -18724,10 +18724,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -18790,10 +18790,10 @@
           "Create Transaction",
           "Save and add another",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -18831,10 +18831,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Dismiss",
           "View"
         ],
@@ -18902,10 +18902,10 @@
           "Create Transaction",
           "Save and add another",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Dismiss",
           "View"
         ],
@@ -18950,10 +18950,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -18999,10 +18999,10 @@
           "Mark as not posted",
           "Edit Transaction",
           "Delete Transaction",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /budget-entries/installment-plans",
@@ -19063,10 +19063,10 @@
           "Japan trip",
           "Update Transaction",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /tags/"
@@ -19113,10 +19113,10 @@
           "Mark as not posted",
           "Edit Transaction",
           "Delete Transaction",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Cancel",
           "Delete transaction"
         ],
@@ -19164,10 +19164,10 @@
           "Mark as not posted",
           "Edit Transaction",
           "Delete Transaction",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -19203,10 +19203,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Dismiss"
         ],
         "requests": [
@@ -19249,10 +19249,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -19288,10 +19288,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -19327,10 +19327,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Dismiss"
         ],
         "requests": [
@@ -19375,10 +19375,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -19414,10 +19414,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -19453,10 +19453,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -19492,10 +19492,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -19531,10 +19531,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /accounts/?is_active=true&limit=100",
@@ -19587,10 +19587,10 @@
           "Mark paid",
           "Mark paid",
           "Mark received",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /allocations/?limit=10&offset=0",
@@ -19638,10 +19638,10 @@
           "Show 1 more tag: Household",
           "Mark paid",
           "Mark received",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -19683,10 +19683,10 @@
           "Show 1 more tag: Household",
           "Mark paid",
           "Mark received",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -19728,10 +19728,10 @@
           "Show 1 more tag: Household",
           "Mark paid",
           "Mark received",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /accounts/?is_active=true&limit=100",
@@ -19782,10 +19782,10 @@
           "Show 1 more tag: Household",
           "Mark paid",
           "Mark received",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /accounts/?is_active=true&limit=100",
@@ -19836,10 +19836,10 @@
           "Show 1 more tag: Household",
           "Mark paid",
           "Mark received",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -19872,10 +19872,10 @@
           "View transactions for GCash",
           "View transactions for Cash on hand",
           "View transactions for BDO Joint household",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /accounts/?limit=1000",
@@ -19909,10 +19909,10 @@
           "View transactions for GCash",
           "View transactions for Cash on hand",
           "View transactions for BDO Joint household",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -19933,10 +19933,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /accounts/11",
@@ -19979,10 +19979,10 @@
           "Edit account",
           "Share account",
           "Delete account",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /accounts/?limit=1000",
@@ -20030,10 +20030,10 @@
           "Active",
           "Update Account",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -20078,10 +20078,10 @@
           "Edit account",
           "Share account",
           "Delete account",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /accounts/11/shares"
@@ -20123,10 +20123,10 @@
           "Edit account",
           "Share account",
           "Delete account",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Cancel",
           "Delete account"
         ],
@@ -20165,10 +20165,10 @@
           "Close share dialog",
           "Remove",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Cancel",
           "Stop sharing"
         ],
@@ -20211,10 +20211,10 @@
           "Remove",
           "Look up",
           "Share with Lia M.",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /users/lookup?email=lia%40example.com"
@@ -20254,10 +20254,10 @@
           "Remove",
           "Look up",
           "Share with Lia M.",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Cancel",
           "Stop sharing"
         ],
@@ -20300,10 +20300,10 @@
           "Remove",
           "Look up",
           "Share with Lia M.",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /users/lookup?email=lia%40example.com"
@@ -20348,10 +20348,10 @@
           "Remove",
           "Remove",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /accounts/11/shares",
@@ -20391,10 +20391,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -20429,10 +20429,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /accounts/?is_active=true&limit=100",
@@ -20476,10 +20476,10 @@
           "Previous",
           "1",
           "Next",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -20537,10 +20537,10 @@
           "Edit tag Japan trip",
           "Delete tag Japan trip",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /categories/",
@@ -20597,10 +20597,10 @@
           "Edit tag Japan trip",
           "Delete tag Japan trip",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -20656,10 +20656,10 @@
           "Edit tag Japan trip",
           "Delete tag Japan trip",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /categories/",
@@ -20716,10 +20716,10 @@
           "Edit tag Japan trip",
           "Delete tag Japan trip",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -20777,10 +20777,10 @@
           "Edit tag Pet care",
           "Delete tag Pet care",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /tags/",
@@ -20837,10 +20837,10 @@
           "Edit tag Japan trip",
           "Delete tag Japan trip",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -20896,10 +20896,10 @@
           "Edit tag Pet care",
           "Delete tag Pet care",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /accounts/?is_active=true&limit=1000",
@@ -20957,10 +20957,10 @@
           "Edit tag Japan trip",
           "Delete tag Japan trip",
           "Look up",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -20999,10 +20999,10 @@
           "Mark as purchased",
           "Edit",
           "Delete",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /wishlist/?is_purchased=false",
@@ -21038,10 +21038,10 @@
           "Mark as purchased",
           "Edit",
           "Delete",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -21065,10 +21065,10 @@
           "Budgets",
           "Savings",
           "Wishlist",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /allocations/?limit=10&offset=0",
@@ -21093,10 +21093,10 @@
           "Budgets",
           "Savings",
           "Wishlist",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -21125,10 +21125,10 @@
           "Resume allocation",
           "Edit allocation",
           "Delete allocation",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": [
           "GET /allocations/?limit=10&offset=0",
@@ -21176,10 +21176,10 @@
           "Active",
           "Update Allocation",
           "Cancel",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       },
@@ -21209,10 +21209,10 @@
           "Pause allocation",
           "Edit allocation",
           "Delete allocation",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals",
+          "Allocations",
           "Cancel",
           "Delete allocation"
         ],
@@ -21252,10 +21252,10 @@
           "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
           "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
           "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
-          "Home",
+          "Dashboard",
           "Accounts",
           "Transactions",
-          "Goals"
+          "Allocations"
         ],
         "requests": []
       }
