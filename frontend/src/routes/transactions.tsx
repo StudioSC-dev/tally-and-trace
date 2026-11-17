@@ -2777,7 +2777,7 @@ export function TransactionsPage() {
     return (
       <Row
         key={row.key}
-        data-testid="pending-row"
+        kind="pending-row"
         data-state={row.state}
         className={editable ? 'cursor-pointer hover:bg-sunken' : 'opacity-70'}
         {...(editable

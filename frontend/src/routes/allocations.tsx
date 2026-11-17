@@ -1354,7 +1354,7 @@ export function AllocationsPage() {
     return (
       <Row
         key={entry.id}
-        data-testid="limited-entry"
+        kind="limited-entry"
         title={entry.display_name ?? 'Recurring entry'}
         meta={
           <>

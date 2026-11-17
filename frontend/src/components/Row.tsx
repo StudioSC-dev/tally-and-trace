@@ -9,6 +9,8 @@ interface RowProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
   amount?: ReactNode
   /** Anything more (tags, notes, the row's own controls), on lines below; pass nothing when there is none. */
   children?: ReactNode
+  /** What the row lists, as `data-row-kind` (for example `limited-entry` or `pending-row`); the `row` hook stays fixed. */
+  kind?: string
 }
 
 /**
@@ -17,12 +19,13 @@ interface RowProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
  * right. A row with one meta line and nothing below is 56px between rules on desktop and 64px
  * on a phone. Click, keyboard and ARIA attributes pass through to the `<article>`.
  */
-export function Row({ title, meta, amount, children, className = '', ...rest }: RowProps) {
+export function Row({ title, meta, amount, children, kind, className = '', ...rest }: RowProps) {
   return (
     <article
-      data-testid="row"
       className={`block rounded-none border-b border-line px-4 py-3 last:border-b-0 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ink sm:py-2 ${className}`}
       {...rest}
+      data-testid="row"
+      data-row-kind={kind}
     >
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1">

@@ -357,7 +357,7 @@ test.describe('amount classes', () => {
 
   test('amount colour is a class, not a selector shim: recurring entries', async ({ page }) => {
     const main = await openRecurring(page)
-    const full = main.locator('article:not([data-testid="limited-entry"])')
+    const full = main.locator('article:not([data-row-kind="limited-entry"])')
     for (const [kind, cls] of [['Income', 'amount-in'], ['Expense', 'amount-out']] as const) {
       const amounts = amountOf(full.filter({ hasText: new RegExp(`Recurring ${kind}`) }))
       const count = await amounts.count()
@@ -372,7 +372,7 @@ test.describe('amount classes', () => {
     const withLimited = { ...household, entries: [...household.entries, ...limitedRecurring] }
     await addRoutes(page, [queryRoute<PaginatedResponse<BudgetEntry>>('GET', '/budget-entries/', (q) => budgetEntriesFor(withLimited, q))])
     await page.goto('/allocations?tab=recurring')
-    const limited = page.getByTestId('limited-entry')
+    const limited = page.locator('[data-row-kind="limited-entry"]')
     await expect(limited.first()).toBeVisible()
     expect(await limited.count(), 'the limited renderer lists both entries').toBe(2)
     for (const [kind, cls] of [['Income', 'amount-in'], ['Expense', 'amount-out']] as const) {
