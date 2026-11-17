@@ -9,7 +9,7 @@ import type { Locator, Page } from '@playwright/test'
 import loadConfig from 'tailwindcss/loadConfig.js'
 import resolveConfig from 'tailwindcss/resolveConfig.js'
 import { shot } from './support/shot'
-import { calmHousehold, emptyHousehold, household, mockHousehold, SHARED_ACCOUNT_IDS } from './support/fixtures/household'
+import { calmHousehold, emptyHousehold, household, mockHousehold, SHARED_ACCOUNT_IDS, transactionsFor } from './support/fixtures/household'
 import type { HouseholdData } from './support/fixtures/household'
 import type { BudgetEntry, CashflowTimelineEvent, PaginatedResponse, Transaction } from '@tally-trace/shared'
 
@@ -494,6 +494,26 @@ test.describe('Columnar pad design tokens (STU-675)', () => {
           expect.soft(month?.items.length, 'one page of them').toBe(Math.min(25, inMonth.length))
           await expect.soft(page.getByText('Payroll, February 1–15'), 'no February row on the March view').toHaveCount(0)
           if (inMonth.length) await expect.soft(page.getByText('Puregold weekly groceries').first(), 'a March row is shown').toBeVisible()
+        }
+        if (p.name === 'transactions') {
+          // The API's order is date then id, newest first or oldest first (`order=asc`). Checked on every answer the
+          // page got, and on the whole variant in both directions (the page's ascending call is a future window).
+          const keyOf = (t: Transaction): string => `${t.view === 'limited' ? t.date : t.transaction_date}#${String(t.id).padStart(6, '0')}`
+          const inOrder = (items: Transaction[], order: string): string[] => {
+            const sorted = items.map(keyOf).sort()
+            return order === 'asc' ? sorted : sorted.reverse()
+          }
+          const lists = answered.filter((a) => a.url.pathname === '/api/v1/transactions/')
+          expect.soft(lists.length, 'the page listed transactions').toBeGreaterThan(0)
+          for (const a of lists) {
+            const order = a.url.searchParams.get('order') ?? 'desc'
+            const items = (a.body as PaginatedResponse<Transaction>).items
+            expect.soft(items.map(keyOf), `${a.url.search} is in ${order} order`).toEqual(inOrder(items, order))
+          }
+          for (const order of ['desc', 'asc']) {
+            const all = transactionsFor(data, new URLSearchParams({ order, limit: '100', offset: '0' }))
+            expect.soft(all.items.map(keyOf), `every row in ${order} order by date then id`).toEqual(inOrder(data.transactions, order))
+          }
         }
         if (p.name === 'allocations') {
           // Allocations asks once per entry type: each list holds that type only, and the two never share an entry.

@@ -821,7 +821,7 @@ function pageFor<T>(items: T[], query: URLSearchParams): PaginatedResponse<T> {
 
 /**
  * `GET /transactions/` as the pages ask it: `start_date` and `end_date` (inclusive, by Manila day), `order`
- * (newest first unless `asc`), `limit` and `offset`.
+ * (newest first unless `asc`, by date then id as the API sorts), `limit` and `offset`. Sorted before it is paged.
  */
 export function transactionsFor(data: HouseholdData, query: URLSearchParams): PaginatedResponse<Transaction> {
   only(query, ['start_date', 'end_date', 'order', 'limit', 'offset'])
@@ -829,7 +829,10 @@ export function transactionsFor(data: HouseholdData, query: URLSearchParams): Pa
   const start = query.get('start_date')?.slice(0, 10)
   const end = query.get('end_date')?.slice(0, 10)
   const matches = data.transactions.filter((t) => (!start || dayOf(t) >= start) && (!end || dayOf(t) <= end))
-  const ordered = query.get('order') === 'asc' ? [...matches].reverse() : matches
+  // The API's order: transaction_date, then id, both ascending for `asc` and both descending otherwise.
+  const whenOf = (t: Transaction): string => (t.view === 'limited' ? t.date : t.transaction_date)
+  const sign = query.get('order') === 'asc' ? 1 : -1
+  const ordered = [...matches].sort((a, b) => sign * (whenOf(a).localeCompare(whenOf(b)) || a.id - b.id))
   return pageFor(ordered, query)
 }
 
