@@ -21,7 +21,7 @@
  * `wishlistRoutes(data)` answers the Allocations Wishlist tab's calls with an empty wishlist.
  *
  * `with*` helpers derive a variant for one state (a main account, one account's balance, zero-amount rows,
- * a zero forecast event, dollars, a long account history, long Due card lists); `cardStatements` answers the card's
+ * a zero forecast event, dollars, five currencies, a long account history, long Due card lists); `cardStatements` answers the card's
  * statements; the create factories (`createdAccount`, `createAccountRoute`,
  * `householdCreateRoutes`) answer the dialogs' saves.
  */
@@ -1391,6 +1391,31 @@ export const withDollars = (data: HouseholdData): HouseholdData => {
           category_breakdown: { 'Dining out': dining },
         },
       ],
+    },
+  }
+}
+
+/**
+ * A variant in five currencies (PHP, USD, EUR, GBP, JPY): the dollar variant plus empty euro, pound and yen rows, so
+ * the dashboard's currency control has five choices.
+ */
+export const withFiveCurrencies = (data: HouseholdData): HouseholdData => {
+  const dollars = withDollars(data)
+  const extra = ['EUR', 'GBP', 'JPY'] as const
+  const { snapshot } = dollars
+  return {
+    ...dollars,
+    snapshot: {
+      ...snapshot,
+      currencies: [...snapshot.currencies, ...extra],
+      balances: { ...snapshot.balances, by_currency: [...snapshot.balances.by_currency, ...extra.map((currency) => ({ currency, total: 0, available_cash: 0 }))] },
+      monthly_summary: {
+        ...snapshot.monthly_summary,
+        by_currency: [
+          ...snapshot.monthly_summary.by_currency,
+          ...extra.map((currency) => ({ currency, monthly_income: 0, monthly_expenses: 0, moved_in: 0, moved_out: 0, monthly_disposable: 0 })),
+        ],
+      },
     },
   }
 }
