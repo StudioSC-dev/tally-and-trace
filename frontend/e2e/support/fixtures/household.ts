@@ -9,7 +9,7 @@
  * Three variants:
  * - `household`: the busy month. Shared-account rows, recurring entries, an overdue payable,
  *   a card with a closed statement, 18 upcoming occurrences and quick balances.
- * - `calmHousehold`: the same household with nothing overdue, negative or failed.
+ * - `calmHousehold`: the same household with nothing overdue, negative, failed or over a budget limit.
  * - `emptyHousehold`: the accounts only, with no transactions or recurring entries.
  *
  * `householdRoutes(data)` answers every call the dashboard, Transactions and Allocations make
@@ -23,6 +23,7 @@ import type {
   Allocation,
   BudgetEntry,
   CardCredit,
+  CardCreditDetail,
   CardStatementDue,
   CashflowTimeline,
   CashflowTimelineEvent,
@@ -35,6 +36,7 @@ import type {
   HouseholdShares,
   HouseholdView,
   InstallmentPlans,
+  LimitedBudgetEntry,
   PaginatedResponse,
   Payable,
   RecurrenceFrequency,
@@ -248,6 +250,7 @@ const transactions: Transaction[] = [
   tx('2026-03-08', 'Move to emergency fund', 10000, payroll, 29, 'transfer', {
     transfer_from_account_id: payroll.id,
     transfer_to_account_id: savings.id,
+    transfer_fee: 25,
   }),
   tx('2026-03-07', 'Logo design, Kapé Co.', 18500, payroll, 30, 'credit'),
   tx('2026-03-07', 'Dinner, Manam', 2140, card, 23, 'debit', { tags: [tripTag] }),
@@ -278,14 +281,21 @@ const alloc = (a: Partial<Allocation> & Pick<Allocation, 'id' | 'name' | 'alloca
   created_at: '2025-06-01T00:00:00',
   ...a,
 })
+/**
+ * The one envelope over its limit (120%). The busy month has it; `calmHousehold` leaves it out, since a calm household
+ * is over no limit. The other budgets sit at 50, 80, 85 and 100 percent of theirs.
+ */
+const OVER_BUDGET = alloc({ id: 70, name: 'Shopping', allocation_type: 'budget', account_id: payroll.id, current_amount: 6000, target_amount: 5000, period_frequency: 'monthly', period_start: '2026-03-01', period_end: '2026-03-31' })
 const allocations: Allocation[] = [
   alloc({ id: 61, name: 'Emergency fund', allocation_type: 'savings', current_amount: 186400, target_amount: 300000, monthly_target: 10000 }),
   alloc({ id: 62, name: 'Japan trip, October', allocation_type: 'goal', current_amount: 42500, target_amount: 120000, target_date: '2026-10-01', monthly_target: 11000 }),
   alloc({ id: 63, name: 'New laptop', allocation_type: 'goal', current_amount: 31800, target_amount: 75000, target_date: '2026-08-15' }),
   alloc({ id: 64, name: 'Christmas gifts', allocation_type: 'savings', current_amount: 6000, target_amount: 25000, monthly_target: 2000 }),
-  alloc({ id: 65, name: 'Groceries', allocation_type: 'budget', account_id: payroll.id, current_amount: 9605.3, target_amount: 18000, period_frequency: 'monthly', period_start: '2026-03-01', period_end: '2026-03-31' }),
-  alloc({ id: 66, name: 'Dining out', allocation_type: 'budget', account_id: payroll.id, current_amount: 2770, target_amount: 5000, period_frequency: 'monthly', period_start: '2026-03-01', period_end: '2026-03-31' }),
-  alloc({ id: 67, name: 'Transport', allocation_type: 'budget', account_id: payroll.id, current_amount: 3081, target_amount: 4500, period_frequency: 'monthly', period_start: '2026-03-01', period_end: '2026-03-31' }),
+  alloc({ id: 66, name: 'Dining out', allocation_type: 'budget', account_id: payroll.id, current_amount: 2500, target_amount: 5000, period_frequency: 'monthly', period_start: '2026-03-01', period_end: '2026-03-31' }),
+  alloc({ id: 67, name: 'Transport', allocation_type: 'budget', account_id: payroll.id, current_amount: 3600, target_amount: 4500, period_frequency: 'monthly', period_start: '2026-03-01', period_end: '2026-03-31' }),
+  alloc({ id: 65, name: 'Groceries', allocation_type: 'budget', account_id: payroll.id, current_amount: 15300, target_amount: 18000, period_frequency: 'monthly', period_start: '2026-03-01', period_end: '2026-03-31' }),
+  alloc({ id: 69, name: 'Utilities', allocation_type: 'budget', account_id: payroll.id, current_amount: 6000, target_amount: 6000, period_frequency: 'monthly', period_start: '2026-03-01', period_end: '2026-03-31' }),
+  OVER_BUDGET,
   alloc({ id: 68, name: 'Car maintenance', allocation_type: 'savings', current_amount: 14250, target_amount: 30000 }),
 ]
 
@@ -596,6 +606,7 @@ interface Parts {
   /** Replaces the shared categories and tags, for the variant that tests saved colours. */
   categories?: Category[]
   tags?: Tag[]
+  allocations: Allocation[]
 }
 
 /** Builds a variant's API answers from its parts, so every variant stays self-consistent. */
@@ -704,7 +715,7 @@ function build(parts: Parts): HouseholdData {
       ],
     },
     forecast_next_3_months: [],
-    goals_progress: allocations
+    goals_progress: parts.allocations
       .filter((a) => a.allocation_type !== 'budget' && a.target_amount)
       .slice(0, 3)
       .map((a) => ({
@@ -756,7 +767,7 @@ function build(parts: Parts): HouseholdData {
     categories: categoryList,
     tags: tagList,
     transactions: parts.transactions,
-    allocations,
+    allocations: parts.allocations,
     entries: parts.entries,
     upcoming: parts.upcoming,
     payables: parts.payables,
@@ -781,6 +792,7 @@ export const household: HouseholdData = build({
   payables,
   cardStatements: [cardStatement],
   occurrences,
+  allocations,
 })
 
 /**
@@ -795,7 +807,49 @@ export const calmHousehold: HouseholdData = build({
   payables: payables.filter((p) => !p.overdue && p !== statementPayable),
   cardStatements: [],
   occurrences,
+  allocations: allocations.filter((a) => a.id !== OVER_BUDGET.id),
 })
+
+/**
+ * Two recurring entries Mara sees as `limited` (another household member's, with only the allowlisted fields): one
+ * expense and one income. Not part of any variant; a spec adds them to `/budget-entries/` when it needs that renderer.
+ */
+export const limitedRecurring: LimitedBudgetEntry[] = [
+  {
+    view: 'limited',
+    id: 9101,
+    permissions: recPerms,
+    created_by: 'Jun R.',
+    display_name: 'Water refill service',
+    amount: 350,
+    currency: 'PHP',
+    entry_type: 'expense',
+    cadence: 'monthly',
+    next_occurrence: '2026-03-20',
+    end_date: null,
+    category_name: 'Utilities',
+    account: null,
+    counterpart: null,
+    tags: [],
+  },
+  {
+    view: 'limited',
+    id: 9102,
+    permissions: recPerms,
+    created_by: 'Jun R.',
+    display_name: 'Condo parking rental income',
+    amount: 3500,
+    currency: 'PHP',
+    entry_type: 'income',
+    cadence: 'monthly',
+    next_occurrence: '2026-03-25',
+    end_date: null,
+    category_name: 'Rental',
+    account: null,
+    counterpart: null,
+    tags: [],
+  },
+]
 
 /** A household that has set up its accounts but recorded nothing yet. */
 export const emptyHousehold: HouseholdData = build({
@@ -806,6 +860,7 @@ export const emptyHousehold: HouseholdData = build({
   payables: [],
   cardStatements: [],
   occurrences: [],
+  allocations,
 })
 
 /**
@@ -853,6 +908,7 @@ export const colouredHousehold: HouseholdData = build({
   payables,
   cardStatements: [cardStatement],
   occurrences,
+  allocations,
   categories: colouredCategories,
   tags: [...tags, ...legacyTags, upperBlueTag],
 })
@@ -901,11 +957,17 @@ function pageFor<T>(items: T[], query: URLSearchParams): PaginatedResponse<T> {
  * (newest first unless `asc`, by date then id as the API sorts), `limit` and `offset`. Sorted before it is paged.
  */
 export function transactionsFor(data: HouseholdData, query: URLSearchParams): PaginatedResponse<Transaction> {
-  only(query, ['start_date', 'end_date', 'order', 'limit', 'offset'])
+  only(query, ['start_date', 'end_date', 'order', 'limit', 'offset', 'account_ids'])
+  const accountIds = query.getAll('account_ids').map(Number)
+  const touches = (t: Transaction): boolean =>
+    accountIds.length === 0 ||
+    (t.view === 'limited'
+      ? accountIds.includes(t.account?.id ?? -1)
+      : [t.account_id, t.transfer_from_account_id, t.transfer_to_account_id].some((id) => id != null && accountIds.includes(id)))
   const dayOf = (t: Transaction): string => (t.view === 'limited' ? t.date : t.transaction_date).slice(0, 10)
   const start = query.get('start_date')?.slice(0, 10)
   const end = query.get('end_date')?.slice(0, 10)
-  const matches = data.transactions.filter((t) => (!start || dayOf(t) >= start) && (!end || dayOf(t) <= end))
+  const matches = data.transactions.filter((t) => touches(t) && (!start || dayOf(t) >= start) && (!end || dayOf(t) <= end))
   // The API's order: transaction_date, then id, both ascending for `asc` and both descending otherwise.
   const whenOf = (t: Transaction): string => (t.view === 'limited' ? t.date : t.transaction_date)
   const sign = query.get('order') === 'asc' ? 1 : -1
@@ -950,6 +1012,29 @@ export const householdRoutes = (data: HouseholdData = household): ApiRoute[] => 
   apiRoute<ReceivedHouseholdShare[]>('GET', '/shares/received/household', []),
   apiRoute<HouseholdShares>('GET', '/tags/household/shares', { tag_id: householdTag.id, shares: [] }),
 ]
+
+/**
+ * What the account detail page (`/accounts/:id`) asks for, answered from `data`: the account, its transactions
+ * (`transactionsFor` filters them by `account_ids`) and, for a credit card, an empty credit panel.
+ */
+export const accountDetailRoutes = (data: HouseholdData, accountId: number): ApiRoute[] => {
+  const account = data.accounts.find((a) => a.id === accountId)
+  if (!account) throw new Error(`no account ${accountId} in the fixture`)
+  const credit: CardCreditDetail = {
+    account_id: account.id,
+    name: account.name,
+    currency: 'PHP',
+    credit: null,
+    rule: null,
+    statements: [],
+    open_cycle: null,
+    unposted: null,
+  }
+  return [
+    apiRoute<Account>('GET', `/accounts/${accountId}`, account),
+    apiRoute<CardCreditDetail>('GET', `/cards/${accountId}/credit`, credit),
+  ]
+}
 
 /**
  * Signs in as the household's user, freezes the clock on `HOUSEHOLD_NOW` and fakes the API

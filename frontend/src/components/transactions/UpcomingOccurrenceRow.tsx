@@ -1,5 +1,6 @@
 import { movedText, RECURRING_ACTION_LABELS, upcomingOccurrenceRow } from '@tally-trace/shared'
 import type { CreditCheck, RecurringAction, UpcomingOccurrence } from '@tally-trace/shared'
+import { amountClass } from '../../utils/amount'
 import { formatCurrency } from '../../utils/currency'
 import type { CurrencyCode } from '../../utils/currency'
 import { CreditCheckBadge } from '../CreditSummary'
@@ -43,7 +44,7 @@ interface Props {
 export function UpcomingOccurrenceRow({ occurrence, scheduled, credit, onRecord, onReview, onChangeDate, touch = false, disabled = false }: Props) {
   const size = touch ? ' min-h-11 min-w-11' : ''
   const view = upcomingOccurrenceRow(occurrence, scheduled)
-  const amountClass = occurrence.is_transfer ? 'text-ink' : occurrence.entry_type === 'income' ? 'text-ok' : 'text-danger'
+  const amountClassName = amountClass(!occurrence.is_transfer && occurrence.entry_type === 'income' ? 'in' : 'out')
   const sign = occurrence.is_transfer ? '' : occurrence.entry_type === 'income' ? '+' : '-'
   const accountLabel = occurrence.is_transfer
     ? `${occurrence.account_name ?? 'Source'} → ${occurrence.transfer_to_account_name ?? 'Destination'}`
@@ -80,7 +81,7 @@ export function UpcomingOccurrenceRow({ occurrence, scheduled, credit, onRecord,
           {credit && <CreditCheckBadge check={credit} />}
         </div>
         <div className="flex-shrink-0 space-y-1 text-right">
-          <p className={`text-sm font-semibold ${amountClass}`} data-testid="upcoming-occurrence-amount">
+          <p className={`text-sm font-semibold ${amountClassName}`} data-testid="upcoming-occurrence-amount">
             {sign}
             {formatCurrency(occurrence.amount, occurrence.currency as CurrencyCode)}
           </p>
