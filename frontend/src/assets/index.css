@@ -95,9 +95,10 @@
   --dur-base: 160ms; /* dialog fade */
   --ease: cubic-bezier(.3,0,.2,1);
 
-  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
-  --font-serif: 'Instrument Serif', ui-serif, Georgia, serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  /* One face (design-system rule 10): the serif and mono names stay so existing classes resolve, as aliases. */
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-serif: var(--font-sans);
+  --font-mono: var(--font-sans);
 
   color-scheme: light;
 }
@@ -179,7 +180,7 @@ body {
   font-weight: 400;
   /*
     Tabular figures app-wide. Nearly every number here is money or a date in a
-    column, and Inter's proportional digits do not align down a ledger — the
+    column, and proportional digits do not align down a ledger — the
     decimal points visibly drift. Set once on the body rather than at hundreds
     of format() call sites; `.tnum` remains for anything outside this tree.
   */
@@ -204,10 +205,7 @@ body {
 */
 @layer components {
   /*
-    Section headings. Deliberately NOT the display serif: at subhead sizes
-    Instrument Serif's single 400 weight reads thin and fussy. Bold sans gives
-    these the weight to actually divide a page. The serif is reserved for
-    display type — page titles, card titles, and figures.
+    Section headings. Bold sans gives these the weight to actually divide a page.
   */
   .subhead {
     font-family: var(--font-sans);
@@ -232,7 +230,7 @@ body {
 
   /*
     Tabular figures. Aligning decimal columns is the whole point of a ledger,
-    and Inter's proportional digits do not line up.
+    and proportional digits do not line up.
   */
   .tnum {
     font-variant-numeric: tabular-nums;
@@ -395,9 +393,8 @@ body {
 }
 
 /*
-  Instrument Serif ships a single 400 weight — bolding it synthesises a fake
-  weight and looks muddy, so display headings get tighter tracking for presence
-  instead of more weight. Outside @layer so it wins over the font-serif utility.
+  Display headings keep weight 400 and get tighter tracking for presence instead
+  of more weight. Outside @layer so it wins over the font-serif utility.
 */
 .font-serif {
   font-weight: 400;
