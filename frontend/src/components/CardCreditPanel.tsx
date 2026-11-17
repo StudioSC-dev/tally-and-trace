@@ -86,7 +86,7 @@ export function CardCreditPanel({ account }: { account: Account }) {
       <section className="card p-4 sm:p-5 space-y-4" data-testid="card-credit-panel-loading" aria-busy="true">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <Skeleton className="h-7 w-52" />
-          <Skeleton className="h-[38px] w-[59px]" />
+          <Skeleton className="h-10 w-14" />
         </div>
         <div className="space-y-1">
           <div className="space-y-1">
@@ -95,7 +95,7 @@ export function CardCreditPanel({ account }: { account: Account }) {
           </div>
           <Skeleton className="h-4 w-full" />
         </div>
-        <div className="border border-line p-3 space-y-1 min-h-[126px]">
+        <div className="border border-line p-3 space-y-1 min-h-32">
           <Skeleton className="h-5 w-3/5" />
           <Skeleton className="h-4 w-2/5" />
           <Skeleton className="h-4 w-4/5" />

@@ -74,6 +74,25 @@ module.exports = {
 
         // The dialog backdrop, used with an alpha (`bg-scrim/60`)
         scrim: 'rgb(var(--scrim) / <alpha-value>)',
+
+        // Tag and category swatches (1..8) and spending-chart colours (1..5)
+        swatch: {
+          1: 'rgb(var(--swatch-1) / <alpha-value>)',
+          2: 'rgb(var(--swatch-2) / <alpha-value>)',
+          3: 'rgb(var(--swatch-3) / <alpha-value>)',
+          4: 'rgb(var(--swatch-4) / <alpha-value>)',
+          5: 'rgb(var(--swatch-5) / <alpha-value>)',
+          6: 'rgb(var(--swatch-6) / <alpha-value>)',
+          7: 'rgb(var(--swatch-7) / <alpha-value>)',
+          8: 'rgb(var(--swatch-8) / <alpha-value>)',
+        },
+        chart: {
+          1: 'rgb(var(--chart-1) / <alpha-value>)',
+          2: 'rgb(var(--chart-2) / <alpha-value>)',
+          3: 'rgb(var(--chart-3) / <alpha-value>)',
+          4: 'rgb(var(--chart-4) / <alpha-value>)',
+          5: 'rgb(var(--chart-5) / <alpha-value>)',
+        },
       },
       /*
         Columnar pad type scale (docs/design-system.md): IBM Plex Sans runs

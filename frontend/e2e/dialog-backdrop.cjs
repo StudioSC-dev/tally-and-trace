@@ -1,5 +1,5 @@
 // Browser checks for STU-644: an open dialog's backdrop covers the whole viewport on every page.
-// The shared overlay (`fixed inset-0 overflow-y-auto bg-black/60`) is a sibling inside `space-y-6`
+// The shared overlay (`fixed inset-0 overflow-y-auto bg-scrim/60`) is a sibling inside `space-y-6`
 // containers on some pages, and that rule gave it a 24px margin-top, so the backdrop started 24px
 // down and the top nav stayed visible above it.
 //   accounts_backdrop_full_viewport: the Add Account dialog open, at 390x844 and 1280x800: the
@@ -61,7 +61,7 @@ const DIALOGS = [
   { name: 'category', route: '/settings', open: (p) => p.getByRole('button', { name: 'Add category', exact: true }) },
   { name: 'tag', route: '/settings', open: (p) => p.getByRole('button', { name: 'Add tag', exact: true }) },
 ]
-const OVERLAY = '.fixed.inset-0.overflow-y-auto.bg-black\\/60'
+const OVERLAY = '.fixed.inset-0.overflow-y-auto.bg-scrim\\/60'
 
 /** A user with one account and a few rows (a fixed shape, so the layout is the same every run). */
 async function seedUser(tag) {

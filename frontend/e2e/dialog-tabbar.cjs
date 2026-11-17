@@ -58,7 +58,7 @@ const DIALOGS = [
   { name: 'category', route: '/settings', open: (p) => p.getByRole('button', { name: 'Add category', exact: true }) },
   { name: 'tag', route: '/settings', open: (p) => p.getByRole('button', { name: 'Add tag', exact: true }) },
 ]
-const OVERLAY = '.fixed.inset-0.overflow-y-auto.bg-black\\/60'
+const OVERLAY = '.fixed.inset-0.overflow-y-auto.bg-scrim\\/60'
 
 /** A user with one account and a few rows (a fixed shape, so the layout is the same every run). */
 async function seedUser(tag) {
