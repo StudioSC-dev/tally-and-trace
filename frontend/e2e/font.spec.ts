@@ -20,12 +20,17 @@ interface PageCase {
   /** The row's name (account, description or entry name) and its amount, located inside the row. */
   label: (row: Locator) => Locator
   amount: (row: Locator) => Locator
+  /**
+   * What renders after the row and moves it: on Transactions the due list (fed by /dashboard/due, about 165px
+   * above the first row once it arrives); on the dashboard the payables panel. The scenario waits for it explicitly.
+   */
+  late?: (page: Page) => Locator
 }
 
 /** The three pages. `row` is the fixed locator for the first content row of each. */
 const PAGES: PageCase[] = [
-  { name: 'dashboard', path: '/', row: (page) => page.getByTestId('quick-balance-tile').first(), label: (row) => row.getByTestId('quick-balance-name'), amount: (row) => row.getByTestId('quick-balance-balance') },
-  { name: 'transactions', path: '/transactions', row: (page) => page.locator('article[data-transaction-id]').first(), label: (row) => row.locator('p.text-base'), amount: (row) => row.locator('p.text-lg') },
+  { name: 'dashboard', path: '/', row: (page) => page.getByTestId('quick-balance-tile').first(), late: (page) => page.getByTestId('payables'), label: (row) => row.getByTestId('quick-balance-name'), amount: (row) => row.getByTestId('quick-balance-balance') },
+  { name: 'transactions', path: '/transactions', row: (page) => page.locator('article[data-transaction-id]').first(), late: (page) => page.getByTestId('due-list'), label: (row) => row.locator('p.text-base'), amount: (row) => row.locator('p.text-lg') },
   { name: 'allocations', path: '/allocations', row: (page) => page.locator('[data-testid^="kind-section-"] article').first(), label: (row) => row.locator('p.text-base'), amount: (row) => row.locator('p.text-lg') },
 ]
 
@@ -34,19 +39,6 @@ async function open(page: Page, c: PageCase): Promise<void> {
   await page.goto(c.path)
   await expect(c.row(page)).toBeVisible()
   await page.waitForLoadState('networkidle')
-}
-
-/** Waits for the mocked requests to finish, then returns the locator's y once two reads 100ms apart agree. */
-async function settledY(page: Page, row: Locator): Promise<number> {
-  await page.waitForLoadState('networkidle')
-  let last = Number.NaN
-  for (let i = 0; i < 50; i += 1) {
-    const y = (await row.boundingBox())?.y ?? Number.NaN
-    if (y === last) return y
-    last = y
-    await page.waitForTimeout(100)
-  }
-  throw new Error(`the row's y never settled (last ${last})`)
 }
 
 test.describe('One face: IBM Plex Sans (STU-676)', () => {
@@ -74,12 +66,16 @@ test.describe('One face: IBM Plex Sans (STU-676)', () => {
   for (const c of PAGES) {
     test(`no Google Fonts request (${c.name})`, async ({ page, baseURL }) => {
       const urls: string[] = []
+      const served: string[] = []
       page.on('request', (r) => urls.push(r.url()))
+      page.on('response', (r) => {
+        const u = new URL(r.url())
+        if (u.origin === new URL(baseURL ?? '').origin && /\.woff2$/.test(u.pathname) && r.ok() && r.status() === 200) served.push(r.url())
+      })
       await open(page, c)
       const google = urls.filter((u) => /fonts\.googleapis\.com|fonts\.gstatic\.com/.test(new URL(u).host))
       expect(google, 'requests to Google Fonts hosts').toEqual([])
-      const own = urls.filter((u) => new URL(u).origin === new URL(baseURL ?? '').origin && /\.woff2$/.test(new URL(u).pathname))
-      expect(own.length, 'a .woff2 served from the app origin').toBeGreaterThan(0)
+      await expect.poll(() => served.length, { message: 'a .woff2 answered 200 from the app origin' }).toBeGreaterThan(0)
       expect.soft(read('index.html'), 'index.html has no preconnect to Google Fonts').not.toMatch(/preconnect[^>]*fonts\.g(oogleapis|static)\.com/)
       await shot(page, `no-google-${c.name}`)
     })
@@ -153,12 +149,16 @@ test.describe('One face: IBM Plex Sans (STU-676)', () => {
       await page.goto(c.path)
       const row = c.row(page)
       await expect(row).toBeVisible()
-      const before = await settledY(page, row)
+      if (c.late) await expect(c.late(page), 'the block that renders after the row is in place').toBeVisible()
+      await page.waitForLoadState('networkidle')
+      // The page's own 0.3s fade-in (translateY) is finished before the baseline; it is not a font effect.
+      await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)))
+      const before = (await row.boundingBox())?.y ?? Number.NaN
       await page.evaluate(async () => {
         await document.fonts.ready
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
       })
-      const after = await settledY(page, row)
+      const after = (await row.boundingBox())?.y ?? Number.NaN
       expect.soft(aborted, 'font files were requested and aborted').toBeGreaterThan(0)
       expect(Math.abs(after - before), `first row y moved from ${before} to ${after}`).toBeLessThanOrEqual(2)
       for (const [what, part] of [['label', c.label(row)], ['amount', c.amount(row)]] as const) {
