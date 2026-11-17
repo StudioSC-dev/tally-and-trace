@@ -59,6 +59,11 @@ interface Group {
    * they were, so the one-selected rule does not apply (the ticket's Tags exception, used for every such picker).
    */
   multi?: 'toggle'
+  /**
+   * The group is colour swatches: each keeps its own fill and the chosen one is ringed in the ink token, so the
+   * leaf background and spine rule do not apply to it.
+   */
+  swatch?: true
   /** The group is inside a dialog: screenshots are of the viewport. */
   dialog?: boolean
   /** Opens the route and shows the group, with `selected` chosen. */
@@ -996,10 +1001,65 @@ const INVENTORY: Group[] = [
       expect(lastCall(seen, '/household/1/transactions')).toBeDefined()
     },
   },
+  {
+    key: 'settings-tag-colour',
+    route: '/settings (Add tag)',
+    what: 'Settings, Add tag: Colour swatches (Swatch, single-select, ringed in ink)',
+    kind: 'pressed',
+    swatch: true,
+    dialog: true,
+    open: async (page) => {
+      const api = await openPage(page, '/settings', 'Settings')
+      await page.getByRole('button', { name: 'Add tag', exact: true }).click()
+      await expect(page.getByRole('group', { name: 'Colour' })).toBeVisible()
+      return api
+    },
+    group: (page) => page.getByRole('group', { name: 'Colour' }),
+    selected: 'Colour #2563eb',
+    other: 'Colour #7c3aed',
+    effect: 'Violet becomes the colour: the custom colour field reads #7c3aed, the string the form saves',
+    before: async (page) => {
+      await expect(page.getByRole('group', { name: 'Colour' }).locator('input[type="color"]')).toHaveValue('#2563eb')
+    },
+    after: async (page) => {
+      await expect(page.getByRole('group', { name: 'Colour' }).locator('input[type="color"]')).toHaveValue('#7c3aed')
+    },
+  },
+  {
+    key: 'settings-category-colour',
+    route: '/settings (Add category)',
+    what: 'Settings, Add category: Colour swatches (Swatch, single-select, ringed in ink)',
+    kind: 'pressed',
+    swatch: true,
+    dialog: true,
+    open: async (page) => {
+      const api = await openPage(page, '/settings', 'Settings')
+      await page.getByRole('button', { name: 'Add category', exact: true }).click()
+      await expect(page.getByRole('group', { name: 'Colour' })).toBeVisible()
+      return api
+    },
+    group: (page) => page.getByRole('group', { name: 'Colour' }),
+    selected: 'Colour #2563eb',
+    other: 'Colour #7c3aed',
+    effect: 'Violet becomes the colour: the custom colour field reads #7c3aed, the string the form saves',
+    before: async (page) => {
+      await expect(page.getByRole('group', { name: 'Colour' }).locator('input[type="color"]')).toHaveValue('#2563eb')
+    },
+    after: async (page) => {
+      await expect(page.getByRole('group', { name: 'Colour' }).locator('input[type="color"]')).toHaveValue('#7c3aed')
+    },
+  },
 ]
 
 /** Light-theme computed styles a selected control must have (supplementary to the direct checks in AC1). */
-async function expectSelected(el: Locator): Promise<void> {
+async function expectSelected(el: Locator, swatch?: true): Promise<void> {
+  if (swatch) {
+    await expect(el).toHaveClass(/\bis-selected\b/)
+    await expect(el).toHaveCSS('border-top-width', '2px')
+    await expect(el).toHaveCSS('border-top-color', INK)
+    await expect(el).toHaveCSS('box-shadow', 'none')
+    return
+  }
   await expect(el).toHaveCSS('background-color', LEAF)
   await expect(el).toHaveCSS('color', INK)
   await expect(el).toHaveCSS('font-weight', '600')
@@ -1010,7 +1070,13 @@ async function expectSelected(el: Locator): Promise<void> {
 }
 
 /** Light-theme computed styles an unselected control must have (supplementary to the direct checks in AC3). */
-async function expectQuiet(el: Locator): Promise<void> {
+async function expectQuiet(el: Locator, swatch?: true): Promise<void> {
+  if (swatch) {
+    await expect(el).not.toHaveClass(/\bis-selected\b/)
+    await expect(el).toHaveCSS('border-top-color', TRANSPARENT)
+    await expect(el).toHaveCSS('box-shadow', 'none')
+    return
+  }
   await expect(el).toHaveCSS('background-color', TRANSPARENT)
   await expect(el).toHaveCSS('color', BODY)
   await expect(el).toHaveCSS('font-weight', /^(400|500)$/)
@@ -1146,6 +1212,12 @@ test.describe('Selection is not an action (STU-679)', () => {
       const selected = optionOf(page, g, g.selected)
       await expect(selected).toBeVisible()
       if (g.kind === 'switch') await expect(selected).toHaveAttribute('aria-checked', 'true')
+      if (g.swatch) {
+        await expectSelected(selected, g.swatch)
+        await expect(selected).not.toHaveCSS('background-color', LEAF)
+        await evidence(page, g, `ring-${g.key}`, selected)
+        return
+      }
       await expect(selected).toHaveCSS('background-color', LEAF)
       await expect(selected).toHaveCSS('color', INK)
       await expect(selected).toHaveCSS('font-weight', '600')
@@ -1165,6 +1237,11 @@ test.describe('Selection is not an action (STU-679)', () => {
       await expect(quiet).toBeVisible()
       if (g.kind === 'switch') await expect(quiet).toHaveAttribute('aria-checked', 'false')
       else await expect(quiet).not.toHaveClass(/\bis-selected\b/)
+      if (g.swatch) {
+        await expectQuiet(quiet, g.swatch)
+        await evidence(page, g, `quiet-${g.key}`, quiet)
+        return
+      }
       await expect(quiet).toHaveCSS('background-color', TRANSPARENT)
       await expect(quiet).toHaveCSS('color', BODY)
       await expect(quiet).toHaveCSS('font-weight', /^(400|500)$/)
@@ -1228,8 +1305,8 @@ test.describe('Selection is not an action (STU-679)', () => {
       await choose(page, g, g.other)
       await expectAriaChoice(page, g, g.other)
       await expect(itemsOf(page, g).and(page.locator('.is-selected'))).toHaveCount(1)
-      await expectSelected(second)
-      await expectQuiet(first)
+      await expectSelected(second, g.swatch)
+      await expectQuiet(first, g.swatch)
       await evidence(page, g, `follows-${g.key}`, second)
     })
 
@@ -1402,7 +1479,7 @@ test.describe('Selection is not an action (STU-679)', () => {
     }
     expect(files.length, 'source files were read').toBeGreaterThan(50)
     expect(hits, 'bg-ink text-paper conditionals in frontend/src').toEqual([])
-    expect(ariaSites.map((s) => s.split(':')[0]).sort(), 'aria-pressed and role="tab" are rendered by the shared components only').toEqual([
+    expect([...new Set(ariaSites.map((s) => s.split(':')[0]))].sort(), 'aria-pressed and role="tab" are rendered by the shared components only').toEqual([
       'components/SegmentedControl.tsx',
       'components/Tabs.tsx',
     ])
