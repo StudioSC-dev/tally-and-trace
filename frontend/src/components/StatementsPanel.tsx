@@ -1,7 +1,8 @@
 import { LoadingLine } from './Loading'
 import { useGetAccountStatementsQuery } from '../store/api'
 import type { Account } from '../store/api'
-import { formatCurrency, CurrencyCode } from '../utils/currency'
+import type { CurrencyCode } from '../utils/currency'
+import { formatSigned } from '../utils/amount'
 import { estimateText, estimateTitle, formatCoded } from '../utils/fx'
 import type { EstimateLabels } from '../utils/fx'
 
@@ -51,7 +52,7 @@ export function StatementsPanel({ account }: { account: Account }) {
               Closes {formatDay(statement.close_date)} · due {formatDay(statement.due_date)}
             </span>
             <span className="flex items-center gap-2">
-              <span className="font-semibold text-ink">{formatCurrency(statement.amount_due, currency)}</span>
+              <span className="font-semibold text-ink">{formatSigned(statement.amount_due, currency)}</span>
               <span className={`text-xs font-semibold capitalize ${STATUS_STYLES[statement.status]}`}>
                 {statement.status}
               </span>

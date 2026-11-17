@@ -1,16 +1,20 @@
-import { CURRENCY_CONFIGS, formatCurrency } from './currency'
+import { CURRENCY_CONFIGS } from './currency'
 import type { CurrencyCode } from './currency'
+import { formatSigned, readsZero } from './amount'
 import type { Estimate, FxMeta } from '@tally-trace/shared'
 
-/** A figure written with its currency code ("USD 80.00"), the form an estimate uses. */
+/**
+ * A figure written with its currency code ("USD 80.00"), the form an estimate uses. A negative one leads with a minus
+ * sign (U+2212) before the code, "−USD 80.00", and a zero is never signed.
+ */
 export const formatCoded = (amount: number, currency: CurrencyCode): string => {
   const decimals = CURRENCY_CONFIGS[currency]?.decimalPlaces ?? 2
-  const number = amount.toLocaleString('en-US', {
+  const number = Math.abs(amount).toLocaleString('en-US', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
     useGrouping: true,
   })
-  return `${currency} ${number}`
+  return amount < 0 && !readsZero(number) ? `−${currency} ${number}` : `${currency} ${number}`
 }
 
 /** The labels of a converted or unconverted full row (all absent when it needed no conversion). */
@@ -32,7 +36,7 @@ export const estimateText = (amount: number | null, currency: CurrencyCode, labe
   if (labels.estimated) {
     return original !== null ? `≈ ${formatCoded(amount, currency)} (${original})` : `≈ ${formatCoded(amount, currency)}`
   }
-  return formatCurrency(amount, currency)
+  return formatSigned(amount, currency)
 }
 
 /** Hover text for an estimate: the rate, the day it is for and whether it is stale. */
