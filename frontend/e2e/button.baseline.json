@@ -1500,6 +1500,259 @@
         ],
         "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosDashboardYour financial overviewTagAll tagsHouseholdJapan tripweekmonthyearPeriod applies to actual totals, not the projection.Quick balancesChoose up to 6 accounts and put them in order.CancelSaveDebitBPI Payroll‹›✕CreditHSBC Red Mastercard‹›✕E-walletGCash‹›✕+ Add account3 of 6Cash-Flow TimelineYour running balance over the next 60 days. It shows the low point before payday, not just month-end.DetailsOn track in PHP: the lowest projected balance is ₱71,769.85 on Mar 13, 2026.Opening₱84,250.40Trough₱71,769.85Close (60d)₱106,040.10Financial SnapshotActuals cover month to date; the projection runs from today to month end.Month to dateActual totals (Month to date)Total income (MTD)₱33,500.00Total expenses (MTD)₱51,821.20Net flow (MTD)₱-18,321.20TodayNet worth₱329,764.35All your accounts, shared and Household accounts, cards and loans included. Not the same as available cash.ProjectedAvailable cash₱343,230.90Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.Budget Envelope StatusCurrent month spending against your envelope limits.5Dining outRemaining ₱2,500.00Limit ₱5,000.00 · Spent ₱2,500.00TransportRemaining ₱900.00Limit ₱4,500.00 · Spent ₱3,600.00GroceriesRemaining ₱2,700.00Limit ₱18,000.00 · Spent ₱15,300.00UtilitiesRemaining ₱0.00Limit ₱6,000.00 · Spent ₱6,000.00ShoppingRemaining ₱0.00Limit ₱5,000.00 · Spent ₱6,000.00Upcoming PayablesCash going out in the next 30 days: bills, card statements and loan payments.6Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI PayrollOverdueHMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll8 days remainingRentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll20 days remainingPLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll25 days remainingHSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll28 days remainingMeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll29 days remainingAlso coming upPayrollMar 15th, 2026 · Money in · Scheduled₱41,250.00PayrollMar 30th, 2026 · Money in · Scheduled₱41,250.00HomeAccountsTransactionsGoals"
       },
+      "quick-balances-editor-pinned": {
+        "controls": [
+          {
+            "name": "₱Tally & Trace",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(229, 231, 235) | 0px"
+          },
+          {
+            "name": "Dashboard",
+            "height": 38,
+            "icons": 1,
+            "variant": null,
+            "selection": true,
+            "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(22, 36, 28) | 0px"
+          },
+          {
+            "name": "Forecast",
+            "height": 38,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Accounts",
+            "height": 38,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Transactions",
+            "height": 38,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Allocations",
+            "height": 38,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Toggle theme",
+            "height": 36,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "MSMara Santos",
+            "height": 48,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "week",
+            "height": 32,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+          },
+          {
+            "name": "month",
+            "height": 32,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(229, 231, 235) | 0px"
+          },
+          {
+            "name": "year",
+            "height": 32,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+          },
+          {
+            "name": "Reset to defaults",
+            "height": 44,
+            "icons": 0,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Cancel",
+            "height": 44,
+            "icons": 0,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Save",
+            "height": 44,
+            "icons": 0,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Move GCash earlier",
+            "height": 44,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Move GCash later",
+            "height": 44,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Remove GCash",
+            "height": 44,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Move HSBC Red Mastercard earlier",
+            "height": 44,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Move HSBC Red Mastercard later",
+            "height": 44,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Remove HSBC Red Mastercard",
+            "height": 44,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Move BPI Payroll earlier",
+            "height": 44,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Move BPI Payroll later",
+            "height": 44,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Remove BPI Payroll",
+            "height": 44,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "+ Add account",
+            "height": 44,
+            "icons": 0,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Details",
+            "height": 20,
+            "icons": 0,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+            "height": 60,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+            "height": 60,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+            "height": 60,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+            "height": 60,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+            "height": 60,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
+            "height": 60,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          }
+        ],
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosDashboardYour financial overviewTagAll tagsHouseholdJapan tripweekmonthyearPeriod applies to actual totals, not the projection.Quick balancesChoose up to 6 accounts and put them in order.Reset to defaultsCancelSaveE-walletGCash‹›✕CreditHSBC Red Mastercard‹›✕DebitBPI Payroll‹›✕+ Add account3 of 6Cash-Flow TimelineYour running balance over the next 60 days. It shows the low point before payday, not just month-end.DetailsOn track in PHP: the lowest projected balance is ₱71,769.85 on Mar 13, 2026.Opening₱84,250.40Trough₱71,769.85Close (60d)₱106,040.10Financial SnapshotActuals cover month to date; the projection runs from today to month end.Month to dateActual totals (Month to date)Total income (MTD)₱33,500.00Total expenses (MTD)₱51,821.20Net flow (MTD)₱-18,321.20TodayNet worth₱329,764.35All your accounts, shared and Household accounts, cards and loans included. Not the same as available cash.ProjectedAvailable cash₱343,230.90Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.Budget Envelope StatusCurrent month spending against your envelope limits.5Dining outRemaining ₱2,500.00Limit ₱5,000.00 · Spent ₱2,500.00TransportRemaining ₱900.00Limit ₱4,500.00 · Spent ₱3,600.00GroceriesRemaining ₱2,700.00Limit ₱18,000.00 · Spent ₱15,300.00UtilitiesRemaining ₱0.00Limit ₱6,000.00 · Spent ₱6,000.00ShoppingRemaining ₱0.00Limit ₱5,000.00 · Spent ₱6,000.00Upcoming PayablesCash going out in the next 30 days: bills, card statements and loan payments.6Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI PayrollOverdueHMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll8 days remainingRentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll20 days remainingPLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll25 days remainingHSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll28 days remainingMeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll29 days remainingAlso coming upPayrollMar 15th, 2026 · Money in · Scheduled₱41,250.00PayrollMar 30th, 2026 · Money in · Scheduled₱41,250.00HomeAccountsTransactionsGoals"
+      },
       "transaction-create": {
         "controls": [
           {
@@ -2380,6 +2633,91 @@
         ],
         "text": "Add categoryNameTypeExpenseIncomeColourDescription (optional)CreateCancel"
       },
+      "settings-category-edit": {
+        "controls": [
+          {
+            "name": "Colour #2563eb",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(123, 159, 232) | rgb(45, 59, 51) | 400 | none | rgb(22, 36, 28) | 9999px"
+          },
+          {
+            "name": "Colour #7c3aed",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(169, 140, 230) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #16a34a",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(95, 187, 126) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #f97316",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(232, 145, 79) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #db2777",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(232, 127, 176) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #0891b2",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(79, 185, 207) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #ca8a04",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(201, 168, 30) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #dc2626",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(236, 122, 114) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Update",
+            "height": 46,
+            "icons": 0,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Cancel",
+            "height": 46,
+            "icons": 0,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          }
+        ],
+        "text": "Edit categoryNameTypeExpenseIncomeColourDescription (optional)UpdateCancel"
+      },
       "settings-tag": {
         "controls": [
           {
@@ -2464,6 +2802,91 @@
           }
         ],
         "text": "Add tagNameColourCreateCancel"
+      },
+      "settings-tag-edit": {
+        "controls": [
+          {
+            "name": "Colour #2563eb",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(123, 159, 232) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #7c3aed",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(169, 140, 230) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #16a34a",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(95, 187, 126) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #f97316",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(232, 145, 79) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #db2777",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(232, 127, 176) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #0891b2",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(79, 185, 207) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #ca8a04",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(201, 168, 30) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #dc2626",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(236, 122, 114) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Update",
+            "height": 46,
+            "icons": 0,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Cancel",
+            "height": 46,
+            "icons": 0,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          }
+        ],
+        "text": "Edit tagNameColourUpdateCancel"
       },
       "wishlist-item": {
         "controls": [
@@ -2665,6 +3088,7 @@
     "effects": {
       "dashboard | Edit | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -2723,6 +3147,7 @@
           "checkbox:false",
           "select-one:"
         ],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 1,
         "headings": [
@@ -2781,6 +3206,7 @@
       },
       "transactions | Hide | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -2820,6 +3246,7 @@
           "select-one:2026-03-08",
           "date:2026-03-08"
         ],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 2,
         "headings": [
@@ -2869,6 +3296,7 @@
         "fields": [
           "date:2026-03-08"
         ],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 2,
         "headings": [
@@ -2911,6 +3339,7 @@
       },
       "transactions | Pay | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 2,
         "headings": [
@@ -2957,6 +3386,7 @@
       },
       "transactions | View previous month | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -2999,6 +3429,7 @@
       },
       "transactions | Spending breakdown | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 2,
         "headings": [
@@ -3051,6 +3482,7 @@
       },
       "transactions | Show filters | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -3132,6 +3564,7 @@
           "select-one:0",
           "textarea:"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 1,
         "headings": [
@@ -3188,6 +3621,7 @@
           "select-one:2026-04-09",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -3240,6 +3674,7 @@
           "select-one:2026-04-09",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -3292,6 +3727,7 @@
           "select-one:2026-04-04",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -3344,6 +3780,7 @@
           "select-one:2026-04-04",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -3396,6 +3833,7 @@
           "select-one:2026-04-01",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -3447,6 +3885,7 @@
           "select-one:2026-04-10",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -3498,6 +3937,7 @@
           "select-one:2026-04-06",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -3549,6 +3989,7 @@
           "select-one:2026-04-08",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -3600,6 +4041,7 @@
           "select-one:2026-03-20",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -3651,6 +4093,7 @@
           "select-one:2026-03-18",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -3702,6 +4145,7 @@
           "select-one:2026-03-27",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -3753,6 +4197,7 @@
           "select-one:2026-03-14",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -3804,6 +4249,7 @@
           "select-one:2026-03-15",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -3856,6 +4302,7 @@
           "date:2026-03-12",
           "number:41250"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -3911,6 +4358,7 @@
           "number:0",
           "textarea:"
         ],
+        "rows": [],
         "url": "/accounts",
         "dialogs": 1,
         "headings": [
@@ -3951,6 +4399,7 @@
       },
       "settings | JSON | 1": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 0,
         "headings": [
@@ -4010,6 +4459,7 @@
       },
       "settings | CSV (ZIP) | 1": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 0,
         "headings": [
@@ -4074,6 +4524,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -4147,6 +4598,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -4215,6 +4667,7 @@
       },
       "settings | Delete | 1": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -4280,6 +4733,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -4348,6 +4802,7 @@
       },
       "settings | Delete | 2": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -4413,6 +4868,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -4481,6 +4937,7 @@
       },
       "settings | Delete | 3": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -4546,6 +5003,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -4614,6 +5072,7 @@
       },
       "settings | Delete | 4": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -4679,6 +5138,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -4747,6 +5207,7 @@
       },
       "settings | Delete | 5": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -4812,6 +5273,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -4880,6 +5342,7 @@
       },
       "settings | Delete | 6": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -4945,6 +5408,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -5013,6 +5477,7 @@
       },
       "settings | Delete | 7": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -5078,6 +5543,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -5146,6 +5612,7 @@
       },
       "settings | Delete | 8": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -5211,6 +5678,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -5279,6 +5747,7 @@
       },
       "settings | Delete | 9": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -5344,6 +5813,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -5412,6 +5882,7 @@
       },
       "settings | Delete | 10": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -5477,6 +5948,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -5545,6 +6017,7 @@
       },
       "settings | Delete | 11": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -5608,6 +6081,7 @@
           "text:",
           "color:#2563eb"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -5679,6 +6153,7 @@
           "text:Household",
           "color:#3f6b5c"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -5750,6 +6225,7 @@
           "text:Japan trip",
           "color:#a35f2a"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -5818,6 +6294,7 @@
       },
       "settings | Delete tag Japan trip | 1": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -5878,6 +6355,7 @@
       },
       "settings | Look up | 1": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 0,
         "headings": [
@@ -5946,6 +6424,7 @@
           "url:",
           "textarea:"
         ],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 1,
         "headings": [
@@ -5993,6 +6472,7 @@
           "number:",
           "date:2026-06-30"
         ],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 1,
         "headings": [
@@ -6044,6 +6524,7 @@
           "number:0",
           "number:65000"
         ],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 1,
         "headings": [
@@ -6094,6 +6575,7 @@
       },
       "allocations-wishlist | Mark as purchased | 1": {
         "fields": [],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 0,
         "headings": [
@@ -6141,6 +6623,7 @@
           "url:",
           "textarea:For freelance work"
         ],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 1,
         "headings": [
@@ -6180,6 +6663,7 @@
       },
       "allocations-wishlist | Delete | 1": {
         "fields": [],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 2,
         "headings": [
@@ -6226,6 +6710,7 @@
           "number:",
           "date:"
         ],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 1,
         "headings": [
@@ -6277,6 +6762,7 @@
           "number:0",
           "number:3500"
         ],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 1,
         "headings": [
@@ -6327,6 +6813,7 @@
       },
       "allocations-wishlist | Mark as purchased | 2": {
         "fields": [],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 0,
         "headings": [
@@ -6374,6 +6861,7 @@
           "url:",
           "textarea:"
         ],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 1,
         "headings": [
@@ -6413,6 +6901,7 @@
       },
       "allocations-wishlist | Delete | 2": {
         "fields": [],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 2,
         "headings": [
@@ -6451,6 +6940,7 @@
       },
       "quick-balances-editor | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -6492,6 +6982,7 @@
       },
       "quick-balances-editor | Save | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -6535,6 +7026,7 @@
       },
       "quick-balances-editor | Move BPI Payroll later | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -6584,6 +7076,7 @@
       },
       "quick-balances-editor | Remove BPI Payroll | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -6630,6 +7123,7 @@
       },
       "quick-balances-editor | Move HSBC Red Mastercard earlier | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -6679,6 +7173,7 @@
       },
       "quick-balances-editor | Move HSBC Red Mastercard later | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -6728,6 +7223,7 @@
       },
       "quick-balances-editor | Remove HSBC Red Mastercard | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -6774,6 +7270,7 @@
       },
       "quick-balances-editor | Move GCash earlier | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -6823,6 +7320,7 @@
       },
       "quick-balances-editor | Remove GCash | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -6869,6 +7367,7 @@
       },
       "quick-balances-editor | + Add account | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -6919,8 +7418,547 @@
         ],
         "requests": []
       },
+      "quick-balances-editor-pinned | Reset to defaults | 1": {
+        "fields": [],
+        "rows": [
+          "DebitBPI Payroll₱84,250.40",
+          "CreditHSBC Red MastercardOwed ₱18,742.30",
+          "E-walletGCash₱3,415.75"
+        ],
+        "url": "/",
+        "dialogs": 0,
+        "headings": [
+          "Dashboard",
+          "Quick balances",
+          "Cash-Flow Timeline",
+          "Financial Snapshot",
+          "Actual totals (Month to date)",
+          "Projected",
+          "Budget Envelope Status",
+          "Upcoming Payables",
+          "Also coming up"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Dashboard",
+          "Forecast",
+          "Accounts",
+          "Transactions",
+          "Allocations",
+          "Toggle theme",
+          "MSMara Santos",
+          "week",
+          "month",
+          "year",
+          "Edit",
+          "DebitBPI Payroll₱84,250.40",
+          "CreditHSBC Red MastercardOwed ₱18,742.30",
+          "E-walletGCash₱3,415.75",
+          "Details",
+          "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+          "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+          "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+          "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+          "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+          "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll"
+        ],
+        "requests": [
+          "PUT /dashboard/quick-balances {\"account_ids\":[]}"
+        ]
+      },
+      "quick-balances-editor-pinned | Cancel | 1": {
+        "fields": [],
+        "rows": [],
+        "url": "/",
+        "dialogs": 0,
+        "headings": [
+          "Dashboard",
+          "Quick balances",
+          "Cash-Flow Timeline",
+          "Financial Snapshot",
+          "Actual totals (Month to date)",
+          "Projected",
+          "Budget Envelope Status",
+          "Upcoming Payables",
+          "Also coming up"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Dashboard",
+          "Forecast",
+          "Accounts",
+          "Transactions",
+          "Allocations",
+          "Toggle theme",
+          "MSMara Santos",
+          "week",
+          "month",
+          "year",
+          "Edit",
+          "E-walletGCash₱3,415.75",
+          "CreditHSBC Red MastercardOwed ₱18,742.30",
+          "DebitBPI Payroll₱84,250.40",
+          "Details",
+          "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+          "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+          "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+          "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+          "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+          "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll"
+        ],
+        "requests": []
+      },
+      "quick-balances-editor-pinned | Save | 1": {
+        "fields": [],
+        "rows": [],
+        "url": "/",
+        "dialogs": 0,
+        "headings": [
+          "Dashboard",
+          "Quick balances",
+          "Cash-Flow Timeline",
+          "Financial Snapshot",
+          "Actual totals (Month to date)",
+          "Projected",
+          "Budget Envelope Status",
+          "Upcoming Payables",
+          "Also coming up"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Dashboard",
+          "Forecast",
+          "Accounts",
+          "Transactions",
+          "Allocations",
+          "Toggle theme",
+          "MSMara Santos",
+          "week",
+          "month",
+          "year",
+          "Edit",
+          "E-walletGCash₱3,415.75",
+          "CreditHSBC Red MastercardOwed ₱18,742.30",
+          "DebitBPI Payroll₱84,250.40",
+          "Details",
+          "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+          "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+          "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+          "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+          "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+          "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll"
+        ],
+        "requests": [
+          "PUT /dashboard/quick-balances {\"account_ids\":[13,15,11]}"
+        ]
+      },
+      "quick-balances-editor-pinned | Move GCash later | 1": {
+        "fields": [],
+        "rows": [],
+        "url": "/",
+        "dialogs": 0,
+        "headings": [
+          "Dashboard",
+          "Quick balances",
+          "Cash-Flow Timeline",
+          "Financial Snapshot",
+          "Actual totals (Month to date)",
+          "Projected",
+          "Budget Envelope Status",
+          "Upcoming Payables",
+          "Also coming up"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Dashboard",
+          "Forecast",
+          "Accounts",
+          "Transactions",
+          "Allocations",
+          "Toggle theme",
+          "MSMara Santos",
+          "week",
+          "month",
+          "year",
+          "Reset to defaults",
+          "Cancel",
+          "Save",
+          "Move HSBC Red Mastercard earlier",
+          "Move HSBC Red Mastercard later",
+          "Remove HSBC Red Mastercard",
+          "Move GCash earlier",
+          "Move GCash later",
+          "Remove GCash",
+          "Move BPI Payroll earlier",
+          "Move BPI Payroll later",
+          "Remove BPI Payroll",
+          "+ Add account",
+          "Details",
+          "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+          "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+          "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+          "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+          "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+          "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll"
+        ],
+        "requests": []
+      },
+      "quick-balances-editor-pinned | Remove GCash | 1": {
+        "fields": [],
+        "rows": [],
+        "url": "/",
+        "dialogs": 0,
+        "headings": [
+          "Dashboard",
+          "Quick balances",
+          "Cash-Flow Timeline",
+          "Financial Snapshot",
+          "Actual totals (Month to date)",
+          "Projected",
+          "Budget Envelope Status",
+          "Upcoming Payables",
+          "Also coming up"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Dashboard",
+          "Forecast",
+          "Accounts",
+          "Transactions",
+          "Allocations",
+          "Toggle theme",
+          "MSMara Santos",
+          "week",
+          "month",
+          "year",
+          "Reset to defaults",
+          "Cancel",
+          "Save",
+          "Move HSBC Red Mastercard earlier",
+          "Move HSBC Red Mastercard later",
+          "Remove HSBC Red Mastercard",
+          "Move BPI Payroll earlier",
+          "Move BPI Payroll later",
+          "Remove BPI Payroll",
+          "+ Add account",
+          "Details",
+          "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+          "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+          "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+          "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+          "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+          "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll"
+        ],
+        "requests": []
+      },
+      "quick-balances-editor-pinned | Move HSBC Red Mastercard earlier | 1": {
+        "fields": [],
+        "rows": [],
+        "url": "/",
+        "dialogs": 0,
+        "headings": [
+          "Dashboard",
+          "Quick balances",
+          "Cash-Flow Timeline",
+          "Financial Snapshot",
+          "Actual totals (Month to date)",
+          "Projected",
+          "Budget Envelope Status",
+          "Upcoming Payables",
+          "Also coming up"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Dashboard",
+          "Forecast",
+          "Accounts",
+          "Transactions",
+          "Allocations",
+          "Toggle theme",
+          "MSMara Santos",
+          "week",
+          "month",
+          "year",
+          "Reset to defaults",
+          "Cancel",
+          "Save",
+          "Move HSBC Red Mastercard earlier",
+          "Move HSBC Red Mastercard later",
+          "Remove HSBC Red Mastercard",
+          "Move GCash earlier",
+          "Move GCash later",
+          "Remove GCash",
+          "Move BPI Payroll earlier",
+          "Move BPI Payroll later",
+          "Remove BPI Payroll",
+          "+ Add account",
+          "Details",
+          "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+          "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+          "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+          "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+          "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+          "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll"
+        ],
+        "requests": []
+      },
+      "quick-balances-editor-pinned | Move HSBC Red Mastercard later | 1": {
+        "fields": [],
+        "rows": [],
+        "url": "/",
+        "dialogs": 0,
+        "headings": [
+          "Dashboard",
+          "Quick balances",
+          "Cash-Flow Timeline",
+          "Financial Snapshot",
+          "Actual totals (Month to date)",
+          "Projected",
+          "Budget Envelope Status",
+          "Upcoming Payables",
+          "Also coming up"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Dashboard",
+          "Forecast",
+          "Accounts",
+          "Transactions",
+          "Allocations",
+          "Toggle theme",
+          "MSMara Santos",
+          "week",
+          "month",
+          "year",
+          "Reset to defaults",
+          "Cancel",
+          "Save",
+          "Move GCash earlier",
+          "Move GCash later",
+          "Remove GCash",
+          "Move BPI Payroll earlier",
+          "Move BPI Payroll later",
+          "Remove BPI Payroll",
+          "Move HSBC Red Mastercard earlier",
+          "Move HSBC Red Mastercard later",
+          "Remove HSBC Red Mastercard",
+          "+ Add account",
+          "Details",
+          "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+          "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+          "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+          "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+          "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+          "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll"
+        ],
+        "requests": []
+      },
+      "quick-balances-editor-pinned | Remove HSBC Red Mastercard | 1": {
+        "fields": [],
+        "rows": [],
+        "url": "/",
+        "dialogs": 0,
+        "headings": [
+          "Dashboard",
+          "Quick balances",
+          "Cash-Flow Timeline",
+          "Financial Snapshot",
+          "Actual totals (Month to date)",
+          "Projected",
+          "Budget Envelope Status",
+          "Upcoming Payables",
+          "Also coming up"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Dashboard",
+          "Forecast",
+          "Accounts",
+          "Transactions",
+          "Allocations",
+          "Toggle theme",
+          "MSMara Santos",
+          "week",
+          "month",
+          "year",
+          "Reset to defaults",
+          "Cancel",
+          "Save",
+          "Move GCash earlier",
+          "Move GCash later",
+          "Remove GCash",
+          "Move BPI Payroll earlier",
+          "Move BPI Payroll later",
+          "Remove BPI Payroll",
+          "+ Add account",
+          "Details",
+          "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+          "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+          "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+          "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+          "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+          "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll"
+        ],
+        "requests": []
+      },
+      "quick-balances-editor-pinned | Move BPI Payroll earlier | 1": {
+        "fields": [],
+        "rows": [],
+        "url": "/",
+        "dialogs": 0,
+        "headings": [
+          "Dashboard",
+          "Quick balances",
+          "Cash-Flow Timeline",
+          "Financial Snapshot",
+          "Actual totals (Month to date)",
+          "Projected",
+          "Budget Envelope Status",
+          "Upcoming Payables",
+          "Also coming up"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Dashboard",
+          "Forecast",
+          "Accounts",
+          "Transactions",
+          "Allocations",
+          "Toggle theme",
+          "MSMara Santos",
+          "week",
+          "month",
+          "year",
+          "Reset to defaults",
+          "Cancel",
+          "Save",
+          "Move GCash earlier",
+          "Move GCash later",
+          "Remove GCash",
+          "Move BPI Payroll earlier",
+          "Move BPI Payroll later",
+          "Remove BPI Payroll",
+          "Move HSBC Red Mastercard earlier",
+          "Move HSBC Red Mastercard later",
+          "Remove HSBC Red Mastercard",
+          "+ Add account",
+          "Details",
+          "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+          "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+          "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+          "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+          "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+          "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll"
+        ],
+        "requests": []
+      },
+      "quick-balances-editor-pinned | Remove BPI Payroll | 1": {
+        "fields": [],
+        "rows": [],
+        "url": "/",
+        "dialogs": 0,
+        "headings": [
+          "Dashboard",
+          "Quick balances",
+          "Cash-Flow Timeline",
+          "Financial Snapshot",
+          "Actual totals (Month to date)",
+          "Projected",
+          "Budget Envelope Status",
+          "Upcoming Payables",
+          "Also coming up"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Dashboard",
+          "Forecast",
+          "Accounts",
+          "Transactions",
+          "Allocations",
+          "Toggle theme",
+          "MSMara Santos",
+          "week",
+          "month",
+          "year",
+          "Reset to defaults",
+          "Cancel",
+          "Save",
+          "Move GCash earlier",
+          "Move GCash later",
+          "Remove GCash",
+          "Move HSBC Red Mastercard earlier",
+          "Move HSBC Red Mastercard later",
+          "Remove HSBC Red Mastercard",
+          "+ Add account",
+          "Details",
+          "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+          "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+          "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+          "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+          "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+          "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll"
+        ],
+        "requests": []
+      },
+      "quick-balances-editor-pinned | + Add account | 1": {
+        "fields": [],
+        "rows": [],
+        "url": "/",
+        "dialogs": 0,
+        "headings": [
+          "Dashboard",
+          "Quick balances",
+          "Cash-Flow Timeline",
+          "Financial Snapshot",
+          "Actual totals (Month to date)",
+          "Projected",
+          "Budget Envelope Status",
+          "Upcoming Payables",
+          "Also coming up"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Dashboard",
+          "Forecast",
+          "Accounts",
+          "Transactions",
+          "Allocations",
+          "Toggle theme",
+          "MSMara Santos",
+          "week",
+          "month",
+          "year",
+          "Reset to defaults",
+          "Cancel",
+          "Save",
+          "Move GCash earlier",
+          "Move GCash later",
+          "Remove GCash",
+          "Move HSBC Red Mastercard earlier",
+          "Move HSBC Red Mastercard later",
+          "Remove HSBC Red Mastercard",
+          "Move BPI Payroll earlier",
+          "Move BPI Payroll later",
+          "Remove BPI Payroll",
+          "+ Add account",
+          "Metrobank Savings(PHP)",
+          "Cash on hand(PHP)",
+          "BDO Joint household(PHP)",
+          "Details",
+          "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+          "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+          "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+          "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+          "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+          "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll"
+        ],
+        "requests": []
+      },
       "transaction-create | Create Transaction | 1": {
         "fields": [],
+        "rows": [
+          "Button checkMar 12th, 2026BPI PayrollUncategorizedPostedExpenseby Mara S.₱120.00"
+        ],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -6976,6 +8014,9 @@
           "checkbox:true",
           "checkbox:false",
           "select-one:"
+        ],
+        "rows": [
+          "Button checkMar 12th, 2026BPI PayrollUncategorizedPostedExpenseby Mara S.₱120.00"
         ],
         "url": "/transactions",
         "dialogs": 1,
@@ -7037,6 +8078,7 @@
       },
       "transaction-create | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -7084,6 +8126,7 @@
           "checkbox:true",
           "checkbox:true"
         ],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 1,
         "headings": [
@@ -7142,6 +8185,9 @@
       },
       "transaction-create-installment | Create Transaction | 1": {
         "fields": [],
+        "rows": [
+          "Button check laptopMar 12th, 2026HSBC Red MastercardUncategorizedPostedExpenseby Mara S.₱2,000.00"
+        ],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -7198,6 +8244,9 @@
           "checkbox:false",
           "checkbox:false",
           "select-one:"
+        ],
+        "rows": [
+          "Button check laptopMar 12th, 2026HSBC Red MastercardUncategorizedPostedExpenseby Mara S.₱2,000.00"
         ],
         "url": "/transactions",
         "dialogs": 1,
@@ -7259,6 +8308,7 @@
       },
       "transaction-create-installment | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -7300,6 +8350,7 @@
         "fields": [
           "file:"
         ],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 1,
         "headings": [
@@ -7361,6 +8412,7 @@
           "checkbox:false",
           "select-one:"
         ],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 1,
         "headings": [
@@ -7413,6 +8465,7 @@
       },
       "transaction-actions | Delete Transaction | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 3,
         "headings": [
@@ -7465,6 +8518,7 @@
         "fields": [
           "file:"
         ],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 1,
         "headings": [
@@ -7512,6 +8566,7 @@
       },
       "transaction-delete-confirm | Delete transaction | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -7558,6 +8613,7 @@
       },
       "spending-breakdown | Close | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -7597,6 +8653,7 @@
       },
       "due-mark-paid | Close | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -7636,6 +8693,7 @@
       },
       "due-mark-paid | Mark paid | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -7684,6 +8742,7 @@
       },
       "due-mark-paid | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -7723,6 +8782,7 @@
       },
       "due-pay | Close | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -7762,6 +8822,7 @@
       },
       "due-pay | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -7801,6 +8862,7 @@
       },
       "due-change-date | Close | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -7840,6 +8902,7 @@
       },
       "due-change-date | Save | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -7887,6 +8950,9 @@
       },
       "recurring-create | Save Recurring Entry | 1": {
         "fields": [],
+        "rows": [
+          "Water deliveryRecurring expenseMonthlyScheduledNext Mar 12th, 2026TodayAccount: BPI Payrollby Mara S.IndefiniteMark paid₱350.00"
+        ],
         "url": "/allocations",
         "dialogs": 0,
         "headings": [
@@ -7922,6 +8988,7 @@
           "Mark paid",
           "Mark paid",
           "Mark paid",
+          "Mark paid",
           "Mark received"
         ],
         "requests": [
@@ -7934,6 +9001,7 @@
       },
       "recurring-create | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 0,
         "headings": [
@@ -7975,6 +9043,7 @@
       },
       "recurring-charged | Close | 1": {
         "fields": [],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 0,
         "headings": [
@@ -8016,6 +9085,7 @@
       },
       "recurring-charged | Charged | 1": {
         "fields": [],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 0,
         "headings": [
@@ -8066,6 +9136,7 @@
       },
       "recurring-charged | Posted | 1": {
         "fields": [],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 0,
         "headings": [
@@ -8116,6 +9187,7 @@
       },
       "recurring-charged | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 0,
         "headings": [
@@ -8156,26 +9228,21 @@
         "requests": []
       },
       "account-create | Create Account | 1": {
-        "fields": [
-          "text:",
-          "select-one:checking",
-          "checkbox:false",
-          "select-one:PHP",
-          "number:0",
-          "textarea:"
+        "fields": [],
+        "rows": [
+          "Maya savingscheckingActiveCurrency: PHP₱0.00ActiveTransactions"
         ],
         "url": "/accounts",
-        "dialogs": 1,
+        "dialogs": 0,
         "headings": [
           "Accounts",
-          "Individual (5)",
-          "Debit (2)",
+          "Individual (6)",
+          "Debit (3)",
           "Credit (1)",
           "E-wallet (1)",
           "Cash (1)",
           "Shared (1)",
-          "Debit (1)",
-          "Create Account"
+          "Debit (1)"
         ],
         "buttons": [
           "₱Tally & Trace",
@@ -8188,22 +9255,22 @@
           "MSMara Santos",
           "Add Account",
           "View transactions for BPI Payroll",
+          "View transactions for Maya savings",
           "View transactions for Metrobank Savings",
           "View transactions for HSBC Red Mastercard",
           "View transactions for GCash",
           "View transactions for Cash on hand",
-          "View transactions for BDO Joint household",
-          "",
-          "Household",
-          "Japan trip",
-          "Active",
-          "Create Account",
-          "Cancel"
+          "View transactions for BDO Joint household"
         ],
-        "requests": []
+        "requests": [
+          "GET /accounts/?limit=1000",
+          "GET /cards/credit",
+          "POST /accounts/ {\"name\":\"Maya savings\",\"account_type\":\"checking\",\"balance\":0,\"description\":\"\",\"currency\":\"PHP\",\"days_until_due_date\":21,\"is_spending_wallet\":false,\"is_active\":true,\"tag_ids\":[]}"
+        ]
       },
       "account-create | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/accounts",
         "dialogs": 0,
         "headings": [
@@ -8237,6 +9304,7 @@
       },
       "account-actions | View transactions | 1": {
         "fields": [],
+        "rows": [],
         "url": "/accounts/11",
         "dialogs": 0,
         "headings": [
@@ -8265,6 +9333,7 @@
       },
       "account-actions | Mark as inactive | 1": {
         "fields": [],
+        "rows": [],
         "url": "/accounts",
         "dialogs": 1,
         "headings": [
@@ -8318,6 +9387,7 @@
           "number:84250.4",
           "textarea:"
         ],
+        "rows": [],
         "url": "/accounts",
         "dialogs": 1,
         "headings": [
@@ -8358,6 +9428,7 @@
       },
       "account-actions | Share account | 1": {
         "fields": [],
+        "rows": [],
         "url": "/accounts",
         "dialogs": 3,
         "headings": [
@@ -8408,6 +9479,7 @@
       },
       "account-actions | Delete account | 1": {
         "fields": [],
+        "rows": [],
         "url": "/accounts",
         "dialogs": 3,
         "headings": [
@@ -8453,6 +9525,7 @@
       },
       "share-account | Remove | 1": {
         "fields": [],
+        "rows": [],
         "url": "/accounts",
         "dialogs": 4,
         "headings": [
@@ -8499,6 +9572,7 @@
           "email:lia@example.com",
           "select-one:viewer"
         ],
+        "rows": [],
         "url": "/accounts",
         "dialogs": 2,
         "headings": [
@@ -8541,6 +9615,7 @@
       },
       "share-account-found | Remove | 1": {
         "fields": [],
+        "rows": [],
         "url": "/accounts",
         "dialogs": 4,
         "headings": [
@@ -8588,6 +9663,7 @@
           "email:lia@example.com",
           "select-one:viewer"
         ],
+        "rows": [],
         "url": "/accounts",
         "dialogs": 2,
         "headings": [
@@ -8631,7 +9707,11 @@
       "share-account-found | Share with Lia M. | 1": {
         "fields": [
           "select-one:editor",
+          "select-one:viewer",
           "email:"
+        ],
+        "rows": [
+          "Lia M.ViewerEditorAdminRemove"
         ],
         "url": "/accounts",
         "dialogs": 2,
@@ -8666,6 +9746,7 @@
           "View transactions for BDO Joint household",
           "Close share dialog",
           "Remove",
+          "Remove",
           "Look up"
         ],
         "requests": [
@@ -8677,6 +9758,7 @@
       },
       "installment-review | Close | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -8715,6 +9797,7 @@
       },
       "installment-review | Record 1 month and turn on auto-post | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -8762,6 +9845,7 @@
       },
       "installment-review | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -8800,6 +9884,132 @@
       },
       "settings-category | Create | 1": {
         "fields": [],
+        "rows": [
+          "Pet careExpenseEditDelete"
+        ],
+        "url": "/settings",
+        "dialogs": 0,
+        "headings": [
+          "Settings",
+          "Cash-flow timeline",
+          "Export your data",
+          "Categories",
+          "Tags",
+          "Household sharing",
+          "People who can see your Household",
+          "Add a person"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Dashboard",
+          "Forecast",
+          "Accounts",
+          "Transactions",
+          "Allocations",
+          "Toggle theme",
+          "MSMara Santos",
+          "JSON",
+          "CSV (ZIP)",
+          "Add category",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Add tag",
+          "Recolour tag Household",
+          "Delete tag Household",
+          "Edit tag Japan trip",
+          "Delete tag Japan trip",
+          "Look up"
+        ],
+        "requests": [
+          "GET /categories/",
+          "POST /categories/ {\"name\":\"Pet care\",\"description\":\"\",\"color\":\"#2563eb\",\"is_expense\":true}"
+        ]
+      },
+      "settings-category | Cancel | 1": {
+        "fields": [],
+        "rows": [],
+        "url": "/settings",
+        "dialogs": 0,
+        "headings": [
+          "Settings",
+          "Cash-flow timeline",
+          "Export your data",
+          "Categories",
+          "Tags",
+          "Household sharing",
+          "People who can see your Household",
+          "Add a person"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Dashboard",
+          "Forecast",
+          "Accounts",
+          "Transactions",
+          "Allocations",
+          "Toggle theme",
+          "MSMara Santos",
+          "JSON",
+          "CSV (ZIP)",
+          "Add category",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Add tag",
+          "Recolour tag Household",
+          "Delete tag Household",
+          "Edit tag Japan trip",
+          "Delete tag Japan trip",
+          "Look up"
+        ],
+        "requests": []
+      },
+      "settings-category-edit | Update | 1": {
+        "fields": [],
+        "rows": [
+          "Pet careIncomeEditDelete"
+        ],
         "url": "/settings",
         "dialogs": 0,
         "headings": [
@@ -8855,11 +10065,12 @@
         ],
         "requests": [
           "GET /categories/",
-          "POST /categories/ {\"name\":\"Pet care\",\"description\":\"\",\"color\":\"#2563eb\",\"is_expense\":true}"
+          "PUT /categories/21 {\"name\":\"Pet care\",\"description\":\"\",\"color\":\"#2563eb\",\"is_expense\":false}"
         ]
       },
-      "settings-category | Cancel | 1": {
+      "settings-category-edit | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 0,
         "headings": [
@@ -8917,6 +10128,72 @@
       },
       "settings-tag | Create | 1": {
         "fields": [],
+        "rows": [
+          "Pet careEditDelete"
+        ],
+        "url": "/settings",
+        "dialogs": 0,
+        "headings": [
+          "Settings",
+          "Cash-flow timeline",
+          "Export your data",
+          "Categories",
+          "Tags",
+          "Household sharing",
+          "People who can see your Household",
+          "Add a person"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Dashboard",
+          "Forecast",
+          "Accounts",
+          "Transactions",
+          "Allocations",
+          "Toggle theme",
+          "MSMara Santos",
+          "JSON",
+          "CSV (ZIP)",
+          "Add category",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Add tag",
+          "Recolour tag Household",
+          "Delete tag Household",
+          "Edit tag Japan trip",
+          "Delete tag Japan trip",
+          "Edit tag Pet care",
+          "Delete tag Pet care",
+          "Look up"
+        ],
+        "requests": [
+          "GET /tags/",
+          "POST /tags/ {\"name\":\"Pet care\",\"color\":\"#2563eb\"}"
+        ]
+      },
+      "settings-tag | Cancel | 1": {
+        "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 0,
         "headings": [
@@ -8970,13 +10247,75 @@
           "Delete tag Japan trip",
           "Look up"
         ],
+        "requests": []
+      },
+      "settings-tag-edit | Update | 1": {
+        "fields": [],
+        "rows": [
+          "Pet careEditDelete"
+        ],
+        "url": "/settings",
+        "dialogs": 0,
+        "headings": [
+          "Settings",
+          "Cash-flow timeline",
+          "Export your data",
+          "Categories",
+          "Tags",
+          "Household sharing",
+          "People who can see your Household",
+          "Add a person"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Dashboard",
+          "Forecast",
+          "Accounts",
+          "Transactions",
+          "Allocations",
+          "Toggle theme",
+          "MSMara Santos",
+          "JSON",
+          "CSV (ZIP)",
+          "Add category",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Add tag",
+          "Recolour tag Household",
+          "Delete tag Household",
+          "Edit tag Pet care",
+          "Delete tag Pet care",
+          "Look up"
+        ],
         "requests": [
+          "GET /accounts/?is_active=true&limit=1000",
           "GET /tags/",
-          "POST /tags/ {\"name\":\"Pet care\",\"color\":\"#2563eb\"}"
+          "PUT /tags/42 {\"name\":\"Pet care\",\"color\":\"#a35f2a\"}"
         ]
       },
-      "settings-tag | Cancel | 1": {
+      "settings-tag-edit | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 0,
         "headings": [
@@ -9034,6 +10373,9 @@
       },
       "wishlist-item | Add | 1": {
         "fields": [],
+        "rows": [
+          "mediumStanding deskSavings targetBudget envelope₱12,000.00"
+        ],
         "url": "/allocations?tab=wishlist",
         "dialogs": 0,
         "headings": [
@@ -9063,6 +10405,11 @@
           "Budget envelope",
           "Mark as purchased",
           "Edit",
+          "Delete",
+          "Savings target",
+          "Budget envelope",
+          "Mark as purchased",
+          "Edit",
           "Delete"
         ],
         "requests": [
@@ -9073,6 +10420,7 @@
       },
       "wishlist-item | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 0,
         "headings": [
@@ -9108,6 +10456,9 @@
       },
       "allocation-create | Create Budget Envelope | 1": {
         "fields": [],
+        "rows": [
+          "Pet careBudget EnvelopeBPI PayrollDining outCadence: MonthlyStarts Mar 1, 2026Ends Mar 31, 2026ActiveSpending limit₱3,000.00Spent this period₱0.000.0% of limit usedRemaining₱3,000.00Active"
+        ],
         "url": "/allocations?tab=budgets",
         "dialogs": 0,
         "headings": [
@@ -9136,6 +10487,7 @@
       },
       "allocation-create | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/allocations?tab=budgets",
         "dialogs": 0,
         "headings": [
@@ -9161,6 +10513,7 @@
       },
       "allocation-actions | Pause allocation | 1": {
         "fields": [],
+        "rows": [],
         "url": "/allocations?tab=budgets",
         "dialogs": 1,
         "headings": [
@@ -9204,6 +10557,7 @@
           "number:2500",
           "number:5000"
         ],
+        "rows": [],
         "url": "/allocations?tab=budgets",
         "dialogs": 1,
         "headings": [
@@ -9244,6 +10598,7 @@
       },
       "allocation-actions | Delete allocation | 1": {
         "fields": [],
+        "rows": [],
         "url": "/allocations?tab=budgets",
         "dialogs": 3,
         "headings": [
@@ -9279,6 +10634,7 @@
       },
       "payable-detail | Close | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -10797,6 +12153,251 @@
         ],
         "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosDashboardYour financial overviewTagAll tagsHouseholdJapan tripweekmonthyearPeriod applies to actual totals, not the projection.Quick balancesChoose up to 6 accounts and put them in order.CancelSaveDebitBPI Payroll‹›✕CreditHSBC Red Mastercard‹›✕E-walletGCash‹›✕+ Add account3 of 6Cash-Flow TimelineYour running balance over the next 60 days. It shows the low point before payday, not just month-end.DetailsOn track in PHP: the lowest projected balance is ₱71,769.85 on Mar 13, 2026.Opening₱84,250.40Trough₱71,769.85Close (60d)₱106,040.10Financial SnapshotActuals cover month to date; the projection runs from today to month end.Month to dateActual totals (Month to date)Total income (MTD)₱33,500.00Total expenses (MTD)₱51,821.20Net flow (MTD)₱-18,321.20TodayNet worth₱329,764.35All your accounts, shared and Household accounts, cards and loans included. Not the same as available cash.ProjectedAvailable cash₱343,230.90Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.Budget Envelope StatusCurrent month spending against your envelope limits.5Dining outRemaining ₱2,500.00Limit ₱5,000.00 · Spent ₱2,500.00TransportRemaining ₱900.00Limit ₱4,500.00 · Spent ₱3,600.00GroceriesRemaining ₱2,700.00Limit ₱18,000.00 · Spent ₱15,300.00UtilitiesRemaining ₱0.00Limit ₱6,000.00 · Spent ₱6,000.00ShoppingRemaining ₱0.00Limit ₱5,000.00 · Spent ₱6,000.00Upcoming PayablesCash going out in the next 30 days: bills, card statements and loan payments.6Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI PayrollOverdueHMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll8 days remainingRentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll20 days remainingPLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll25 days remainingHSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll28 days remainingMeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll29 days remainingAlso coming upPayrollMar 15th, 2026 · Money in · Scheduled₱41,250.00PayrollMar 30th, 2026 · Money in · Scheduled₱41,250.00HomeAccountsTransactionsGoals"
       },
+      "quick-balances-editor-pinned": {
+        "controls": [
+          {
+            "name": "₱Tally & Trace",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(229, 231, 235) | 0px"
+          },
+          {
+            "name": "Toggle theme",
+            "height": 36,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "MSMara Santos",
+            "height": 48,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "week",
+            "height": 32,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+          },
+          {
+            "name": "month",
+            "height": 32,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(229, 231, 235) | 0px"
+          },
+          {
+            "name": "year",
+            "height": 32,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+          },
+          {
+            "name": "Reset to defaults",
+            "height": 44,
+            "icons": 0,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Cancel",
+            "height": 44,
+            "icons": 0,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Save",
+            "height": 44,
+            "icons": 0,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Move GCash earlier",
+            "height": 44,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Move GCash later",
+            "height": 44,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Remove GCash",
+            "height": 44,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Move HSBC Red Mastercard earlier",
+            "height": 44,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Move HSBC Red Mastercard later",
+            "height": 44,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Remove HSBC Red Mastercard",
+            "height": 44,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Move BPI Payroll earlier",
+            "height": 44,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Move BPI Payroll later",
+            "height": 44,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Remove BPI Payroll",
+            "height": 44,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "+ Add account",
+            "height": 44,
+            "icons": 0,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Details",
+            "height": 20,
+            "icons": 0,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+            "height": 60,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+            "height": 60,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+            "height": 60,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+            "height": 60,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+            "height": 60,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
+            "height": 60,
+            "icons": 1,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Home",
+            "height": 64,
+            "icons": 2,
+            "variant": null,
+            "selection": true,
+            "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(229, 231, 235) | 0px"
+          },
+          {
+            "name": "Accounts",
+            "height": 64,
+            "icons": 2,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Transactions",
+            "height": 64,
+            "icons": 2,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Goals",
+            "height": 64,
+            "icons": 2,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          }
+        ],
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosDashboardYour financial overviewTagAll tagsHouseholdJapan tripweekmonthyearPeriod applies to actual totals, not the projection.Quick balancesChoose up to 6 accounts and put them in order.Reset to defaultsCancelSaveE-walletGCash‹›✕CreditHSBC Red Mastercard‹›✕DebitBPI Payroll‹›✕+ Add account3 of 6Cash-Flow TimelineYour running balance over the next 60 days. It shows the low point before payday, not just month-end.DetailsOn track in PHP: the lowest projected balance is ₱71,769.85 on Mar 13, 2026.Opening₱84,250.40Trough₱71,769.85Close (60d)₱106,040.10Financial SnapshotActuals cover month to date; the projection runs from today to month end.Month to dateActual totals (Month to date)Total income (MTD)₱33,500.00Total expenses (MTD)₱51,821.20Net flow (MTD)₱-18,321.20TodayNet worth₱329,764.35All your accounts, shared and Household accounts, cards and loans included. Not the same as available cash.ProjectedAvailable cash₱343,230.90Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.Budget Envelope StatusCurrent month spending against your envelope limits.5Dining outRemaining ₱2,500.00Limit ₱5,000.00 · Spent ₱2,500.00TransportRemaining ₱900.00Limit ₱4,500.00 · Spent ₱3,600.00GroceriesRemaining ₱2,700.00Limit ₱18,000.00 · Spent ₱15,300.00UtilitiesRemaining ₱0.00Limit ₱6,000.00 · Spent ₱6,000.00ShoppingRemaining ₱0.00Limit ₱5,000.00 · Spent ₱6,000.00Upcoming PayablesCash going out in the next 30 days: bills, card statements and loan payments.6Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI PayrollOverdueHMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll8 days remainingRentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll20 days remainingPLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll25 days remainingHSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll28 days remainingMeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll29 days remainingAlso coming upPayrollMar 15th, 2026 · Money in · Scheduled₱41,250.00PayrollMar 30th, 2026 · Money in · Scheduled₱41,250.00HomeAccountsTransactionsGoals"
+      },
       "transaction-create": {
         "controls": [
           {
@@ -11677,6 +13278,91 @@
         ],
         "text": "Add categoryNameTypeExpenseIncomeColourDescription (optional)CreateCancel"
       },
+      "settings-category-edit": {
+        "controls": [
+          {
+            "name": "Colour #2563eb",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(123, 159, 232) | rgb(45, 59, 51) | 400 | none | rgb(22, 36, 28) | 9999px"
+          },
+          {
+            "name": "Colour #7c3aed",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(169, 140, 230) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #16a34a",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(95, 187, 126) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #f97316",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(232, 145, 79) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #db2777",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(232, 127, 176) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #0891b2",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(79, 185, 207) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #ca8a04",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(201, 168, 30) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #dc2626",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(236, 122, 114) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Update",
+            "height": 46,
+            "icons": 0,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Cancel",
+            "height": 46,
+            "icons": 0,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          }
+        ],
+        "text": "Edit categoryNameTypeExpenseIncomeColourDescription (optional)UpdateCancel"
+      },
       "settings-tag": {
         "controls": [
           {
@@ -11761,6 +13447,91 @@
           }
         ],
         "text": "Add tagNameColourCreateCancel"
+      },
+      "settings-tag-edit": {
+        "controls": [
+          {
+            "name": "Colour #2563eb",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(123, 159, 232) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #7c3aed",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(169, 140, 230) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #16a34a",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(95, 187, 126) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #f97316",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(232, 145, 79) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #db2777",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(232, 127, 176) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #0891b2",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(79, 185, 207) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #ca8a04",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(201, 168, 30) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Colour #dc2626",
+            "height": 28,
+            "icons": 0,
+            "variant": null,
+            "selection": true,
+            "look": "rgb(236, 122, 114) | rgb(45, 59, 51) | 400 | none | rgba(0, 0, 0, 0) | 9999px"
+          },
+          {
+            "name": "Update",
+            "height": 46,
+            "icons": 0,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          },
+          {
+            "name": "Cancel",
+            "height": 46,
+            "icons": 0,
+            "variant": null,
+            "selection": false,
+            "look": ""
+          }
+        ],
+        "text": "Edit tagNameColourUpdateCancel"
       },
       "wishlist-item": {
         "controls": [
@@ -11962,6 +13733,7 @@
     "effects": {
       "dashboard | Edit | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -12019,6 +13791,7 @@
           "checkbox:false",
           "select-one:"
         ],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 1,
         "headings": [
@@ -12076,6 +13849,7 @@
       },
       "transactions | Hide | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -12114,6 +13888,7 @@
           "select-one:2026-03-08",
           "date:2026-03-08"
         ],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 2,
         "headings": [
@@ -12162,6 +13937,7 @@
         "fields": [
           "date:2026-03-08"
         ],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 2,
         "headings": [
@@ -12203,6 +13979,7 @@
       },
       "transactions | Pay | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 2,
         "headings": [
@@ -12248,6 +14025,7 @@
       },
       "transactions | View previous month | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -12289,6 +14067,7 @@
       },
       "transactions | Spending breakdown | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 2,
         "headings": [
@@ -12340,6 +14119,7 @@
       },
       "transactions | Show filters | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -12420,6 +14200,7 @@
           "select-one:0",
           "textarea:"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 1,
         "headings": [
@@ -12479,6 +14260,7 @@
           "select-one:2026-04-09",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -12534,6 +14316,7 @@
           "select-one:2026-04-09",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -12589,6 +14372,7 @@
           "select-one:2026-04-04",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -12644,6 +14428,7 @@
           "select-one:2026-04-04",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -12699,6 +14484,7 @@
           "select-one:2026-04-01",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -12753,6 +14539,7 @@
           "select-one:2026-04-10",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -12807,6 +14594,7 @@
           "select-one:2026-04-06",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -12861,6 +14649,7 @@
           "select-one:2026-04-08",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -12915,6 +14704,7 @@
           "select-one:2026-03-20",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -12969,6 +14759,7 @@
           "select-one:2026-03-18",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -13023,6 +14814,7 @@
           "select-one:2026-03-27",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -13077,6 +14869,7 @@
           "select-one:2026-03-14",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -13131,6 +14924,7 @@
           "select-one:2026-03-15",
           "date:2026-03-12"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -13186,6 +14980,7 @@
           "date:2026-03-12",
           "number:41250"
         ],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 2,
         "headings": [
@@ -13244,6 +15039,7 @@
           "number:0",
           "textarea:"
         ],
+        "rows": [],
         "url": "/accounts",
         "dialogs": 1,
         "headings": [
@@ -13283,6 +15079,7 @@
       },
       "settings | JSON | 1": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 0,
         "headings": [
@@ -13341,6 +15138,7 @@
       },
       "settings | CSV (ZIP) | 1": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 0,
         "headings": [
@@ -13404,6 +15202,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -13476,6 +15275,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -13543,6 +15343,7 @@
       },
       "settings | Delete | 1": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -13607,6 +15408,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -13674,6 +15476,7 @@
       },
       "settings | Delete | 2": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -13738,6 +15541,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -13805,6 +15609,7 @@
       },
       "settings | Delete | 3": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -13869,6 +15674,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -13936,6 +15742,7 @@
       },
       "settings | Delete | 4": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -14000,6 +15807,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -14067,6 +15875,7 @@
       },
       "settings | Delete | 5": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -14131,6 +15940,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -14198,6 +16008,7 @@
       },
       "settings | Delete | 6": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -14262,6 +16073,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -14329,6 +16141,7 @@
       },
       "settings | Delete | 7": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -14393,6 +16206,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -14460,6 +16274,7 @@
       },
       "settings | Delete | 8": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -14524,6 +16339,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -14591,6 +16407,7 @@
       },
       "settings | Delete | 9": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -14655,6 +16472,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -14722,6 +16540,7 @@
       },
       "settings | Delete | 10": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -14786,6 +16605,7 @@
           "color:#2563eb",
           "text:"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -14853,6 +16673,7 @@
       },
       "settings | Delete | 11": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -14915,6 +16736,7 @@
           "text:",
           "color:#2563eb"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -14985,6 +16807,7 @@
           "text:Household",
           "color:#3f6b5c"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -15055,6 +16878,7 @@
           "text:Japan trip",
           "color:#a35f2a"
         ],
+        "rows": [],
         "url": "/settings",
         "dialogs": 1,
         "headings": [
@@ -15122,6 +16946,7 @@
       },
       "settings | Delete tag Japan trip | 1": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 2,
         "headings": [
@@ -15181,6 +17006,7 @@
       },
       "settings | Look up | 1": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 0,
         "headings": [
@@ -15248,6 +17074,7 @@
           "url:",
           "textarea:"
         ],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 1,
         "headings": [
@@ -15294,6 +17121,7 @@
           "number:",
           "date:2026-06-30"
         ],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 1,
         "headings": [
@@ -15344,6 +17172,7 @@
           "number:0",
           "number:65000"
         ],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 1,
         "headings": [
@@ -15393,6 +17222,7 @@
       },
       "allocations-wishlist | Mark as purchased | 1": {
         "fields": [],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 0,
         "headings": [
@@ -15439,6 +17269,7 @@
           "url:",
           "textarea:For freelance work"
         ],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 1,
         "headings": [
@@ -15477,6 +17308,7 @@
       },
       "allocations-wishlist | Delete | 1": {
         "fields": [],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 2,
         "headings": [
@@ -15522,6 +17354,7 @@
           "number:",
           "date:"
         ],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 1,
         "headings": [
@@ -15572,6 +17405,7 @@
           "number:0",
           "number:3500"
         ],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 1,
         "headings": [
@@ -15621,6 +17455,7 @@
       },
       "allocations-wishlist | Mark as purchased | 2": {
         "fields": [],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 0,
         "headings": [
@@ -15667,6 +17502,7 @@
           "url:",
           "textarea:"
         ],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 1,
         "headings": [
@@ -15705,6 +17541,7 @@
       },
       "allocations-wishlist | Delete | 2": {
         "fields": [],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 2,
         "headings": [
@@ -15742,6 +17579,7 @@
       },
       "quick-balances-editor | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -15782,6 +17620,7 @@
       },
       "quick-balances-editor | Save | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -15824,6 +17663,7 @@
       },
       "quick-balances-editor | Move BPI Payroll later | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -15872,6 +17712,7 @@
       },
       "quick-balances-editor | Remove BPI Payroll | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -15917,6 +17758,7 @@
       },
       "quick-balances-editor | Move HSBC Red Mastercard earlier | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -15965,6 +17807,7 @@
       },
       "quick-balances-editor | Move HSBC Red Mastercard later | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -16013,6 +17856,7 @@
       },
       "quick-balances-editor | Remove HSBC Red Mastercard | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -16058,6 +17902,7 @@
       },
       "quick-balances-editor | Move GCash earlier | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -16106,6 +17951,7 @@
       },
       "quick-balances-editor | Remove GCash | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -16151,6 +17997,7 @@
       },
       "quick-balances-editor | + Add account | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
@@ -16200,8 +18047,536 @@
         ],
         "requests": []
       },
+      "quick-balances-editor-pinned | Reset to defaults | 1": {
+        "fields": [],
+        "rows": [
+          "DebitBPI Payroll₱84,250.40",
+          "CreditHSBC Red MastercardOwed ₱18,742.30",
+          "E-walletGCash₱3,415.75"
+        ],
+        "url": "/",
+        "dialogs": 0,
+        "headings": [
+          "Dashboard",
+          "Quick balances",
+          "Cash-Flow Timeline",
+          "Financial Snapshot",
+          "Actual totals (Month to date)",
+          "Projected",
+          "Budget Envelope Status",
+          "Upcoming Payables",
+          "Also coming up"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Toggle theme",
+          "MSMara Santos",
+          "week",
+          "month",
+          "year",
+          "Edit",
+          "DebitBPI Payroll₱84,250.40",
+          "CreditHSBC Red MastercardOwed ₱18,742.30",
+          "E-walletGCash₱3,415.75",
+          "Details",
+          "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+          "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+          "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+          "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+          "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+          "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
+          "Home",
+          "Accounts",
+          "Transactions",
+          "Goals"
+        ],
+        "requests": [
+          "PUT /dashboard/quick-balances {\"account_ids\":[]}"
+        ]
+      },
+      "quick-balances-editor-pinned | Cancel | 1": {
+        "fields": [],
+        "rows": [],
+        "url": "/",
+        "dialogs": 0,
+        "headings": [
+          "Dashboard",
+          "Quick balances",
+          "Cash-Flow Timeline",
+          "Financial Snapshot",
+          "Actual totals (Month to date)",
+          "Projected",
+          "Budget Envelope Status",
+          "Upcoming Payables",
+          "Also coming up"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Toggle theme",
+          "MSMara Santos",
+          "week",
+          "month",
+          "year",
+          "Edit",
+          "E-walletGCash₱3,415.75",
+          "CreditHSBC Red MastercardOwed ₱18,742.30",
+          "DebitBPI Payroll₱84,250.40",
+          "Details",
+          "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+          "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+          "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+          "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+          "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+          "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
+          "Home",
+          "Accounts",
+          "Transactions",
+          "Goals"
+        ],
+        "requests": []
+      },
+      "quick-balances-editor-pinned | Save | 1": {
+        "fields": [],
+        "rows": [],
+        "url": "/",
+        "dialogs": 0,
+        "headings": [
+          "Dashboard",
+          "Quick balances",
+          "Cash-Flow Timeline",
+          "Financial Snapshot",
+          "Actual totals (Month to date)",
+          "Projected",
+          "Budget Envelope Status",
+          "Upcoming Payables",
+          "Also coming up"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Toggle theme",
+          "MSMara Santos",
+          "week",
+          "month",
+          "year",
+          "Edit",
+          "E-walletGCash₱3,415.75",
+          "CreditHSBC Red MastercardOwed ₱18,742.30",
+          "DebitBPI Payroll₱84,250.40",
+          "Details",
+          "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+          "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+          "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+          "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+          "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+          "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
+          "Home",
+          "Accounts",
+          "Transactions",
+          "Goals"
+        ],
+        "requests": [
+          "PUT /dashboard/quick-balances {\"account_ids\":[13,15,11]}"
+        ]
+      },
+      "quick-balances-editor-pinned | Move GCash later | 1": {
+        "fields": [],
+        "rows": [],
+        "url": "/",
+        "dialogs": 0,
+        "headings": [
+          "Dashboard",
+          "Quick balances",
+          "Cash-Flow Timeline",
+          "Financial Snapshot",
+          "Actual totals (Month to date)",
+          "Projected",
+          "Budget Envelope Status",
+          "Upcoming Payables",
+          "Also coming up"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Toggle theme",
+          "MSMara Santos",
+          "week",
+          "month",
+          "year",
+          "Reset to defaults",
+          "Cancel",
+          "Save",
+          "Move HSBC Red Mastercard earlier",
+          "Move HSBC Red Mastercard later",
+          "Remove HSBC Red Mastercard",
+          "Move GCash earlier",
+          "Move GCash later",
+          "Remove GCash",
+          "Move BPI Payroll earlier",
+          "Move BPI Payroll later",
+          "Remove BPI Payroll",
+          "+ Add account",
+          "Details",
+          "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+          "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+          "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+          "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+          "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+          "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
+          "Home",
+          "Accounts",
+          "Transactions",
+          "Goals"
+        ],
+        "requests": []
+      },
+      "quick-balances-editor-pinned | Remove GCash | 1": {
+        "fields": [],
+        "rows": [],
+        "url": "/",
+        "dialogs": 0,
+        "headings": [
+          "Dashboard",
+          "Quick balances",
+          "Cash-Flow Timeline",
+          "Financial Snapshot",
+          "Actual totals (Month to date)",
+          "Projected",
+          "Budget Envelope Status",
+          "Upcoming Payables",
+          "Also coming up"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Toggle theme",
+          "MSMara Santos",
+          "week",
+          "month",
+          "year",
+          "Reset to defaults",
+          "Cancel",
+          "Save",
+          "Move HSBC Red Mastercard earlier",
+          "Move HSBC Red Mastercard later",
+          "Remove HSBC Red Mastercard",
+          "Move BPI Payroll earlier",
+          "Move BPI Payroll later",
+          "Remove BPI Payroll",
+          "+ Add account",
+          "Details",
+          "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+          "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+          "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+          "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+          "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+          "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
+          "Home",
+          "Accounts",
+          "Transactions",
+          "Goals"
+        ],
+        "requests": []
+      },
+      "quick-balances-editor-pinned | Move HSBC Red Mastercard earlier | 1": {
+        "fields": [],
+        "rows": [],
+        "url": "/",
+        "dialogs": 0,
+        "headings": [
+          "Dashboard",
+          "Quick balances",
+          "Cash-Flow Timeline",
+          "Financial Snapshot",
+          "Actual totals (Month to date)",
+          "Projected",
+          "Budget Envelope Status",
+          "Upcoming Payables",
+          "Also coming up"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Toggle theme",
+          "MSMara Santos",
+          "week",
+          "month",
+          "year",
+          "Reset to defaults",
+          "Cancel",
+          "Save",
+          "Move HSBC Red Mastercard earlier",
+          "Move HSBC Red Mastercard later",
+          "Remove HSBC Red Mastercard",
+          "Move GCash earlier",
+          "Move GCash later",
+          "Remove GCash",
+          "Move BPI Payroll earlier",
+          "Move BPI Payroll later",
+          "Remove BPI Payroll",
+          "+ Add account",
+          "Details",
+          "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+          "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+          "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+          "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+          "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+          "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
+          "Home",
+          "Accounts",
+          "Transactions",
+          "Goals"
+        ],
+        "requests": []
+      },
+      "quick-balances-editor-pinned | Move HSBC Red Mastercard later | 1": {
+        "fields": [],
+        "rows": [],
+        "url": "/",
+        "dialogs": 0,
+        "headings": [
+          "Dashboard",
+          "Quick balances",
+          "Cash-Flow Timeline",
+          "Financial Snapshot",
+          "Actual totals (Month to date)",
+          "Projected",
+          "Budget Envelope Status",
+          "Upcoming Payables",
+          "Also coming up"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Toggle theme",
+          "MSMara Santos",
+          "week",
+          "month",
+          "year",
+          "Reset to defaults",
+          "Cancel",
+          "Save",
+          "Move GCash earlier",
+          "Move GCash later",
+          "Remove GCash",
+          "Move BPI Payroll earlier",
+          "Move BPI Payroll later",
+          "Remove BPI Payroll",
+          "Move HSBC Red Mastercard earlier",
+          "Move HSBC Red Mastercard later",
+          "Remove HSBC Red Mastercard",
+          "+ Add account",
+          "Details",
+          "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+          "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+          "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+          "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+          "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+          "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
+          "Home",
+          "Accounts",
+          "Transactions",
+          "Goals"
+        ],
+        "requests": []
+      },
+      "quick-balances-editor-pinned | Remove HSBC Red Mastercard | 1": {
+        "fields": [],
+        "rows": [],
+        "url": "/",
+        "dialogs": 0,
+        "headings": [
+          "Dashboard",
+          "Quick balances",
+          "Cash-Flow Timeline",
+          "Financial Snapshot",
+          "Actual totals (Month to date)",
+          "Projected",
+          "Budget Envelope Status",
+          "Upcoming Payables",
+          "Also coming up"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Toggle theme",
+          "MSMara Santos",
+          "week",
+          "month",
+          "year",
+          "Reset to defaults",
+          "Cancel",
+          "Save",
+          "Move GCash earlier",
+          "Move GCash later",
+          "Remove GCash",
+          "Move BPI Payroll earlier",
+          "Move BPI Payroll later",
+          "Remove BPI Payroll",
+          "+ Add account",
+          "Details",
+          "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+          "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+          "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+          "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+          "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+          "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
+          "Home",
+          "Accounts",
+          "Transactions",
+          "Goals"
+        ],
+        "requests": []
+      },
+      "quick-balances-editor-pinned | Move BPI Payroll earlier | 1": {
+        "fields": [],
+        "rows": [],
+        "url": "/",
+        "dialogs": 0,
+        "headings": [
+          "Dashboard",
+          "Quick balances",
+          "Cash-Flow Timeline",
+          "Financial Snapshot",
+          "Actual totals (Month to date)",
+          "Projected",
+          "Budget Envelope Status",
+          "Upcoming Payables",
+          "Also coming up"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Toggle theme",
+          "MSMara Santos",
+          "week",
+          "month",
+          "year",
+          "Reset to defaults",
+          "Cancel",
+          "Save",
+          "Move GCash earlier",
+          "Move GCash later",
+          "Remove GCash",
+          "Move BPI Payroll earlier",
+          "Move BPI Payroll later",
+          "Remove BPI Payroll",
+          "Move HSBC Red Mastercard earlier",
+          "Move HSBC Red Mastercard later",
+          "Remove HSBC Red Mastercard",
+          "+ Add account",
+          "Details",
+          "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+          "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+          "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+          "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+          "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+          "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
+          "Home",
+          "Accounts",
+          "Transactions",
+          "Goals"
+        ],
+        "requests": []
+      },
+      "quick-balances-editor-pinned | Remove BPI Payroll | 1": {
+        "fields": [],
+        "rows": [],
+        "url": "/",
+        "dialogs": 0,
+        "headings": [
+          "Dashboard",
+          "Quick balances",
+          "Cash-Flow Timeline",
+          "Financial Snapshot",
+          "Actual totals (Month to date)",
+          "Projected",
+          "Budget Envelope Status",
+          "Upcoming Payables",
+          "Also coming up"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Toggle theme",
+          "MSMara Santos",
+          "week",
+          "month",
+          "year",
+          "Reset to defaults",
+          "Cancel",
+          "Save",
+          "Move GCash earlier",
+          "Move GCash later",
+          "Remove GCash",
+          "Move HSBC Red Mastercard earlier",
+          "Move HSBC Red Mastercard later",
+          "Remove HSBC Red Mastercard",
+          "+ Add account",
+          "Details",
+          "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+          "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+          "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+          "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+          "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+          "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
+          "Home",
+          "Accounts",
+          "Transactions",
+          "Goals"
+        ],
+        "requests": []
+      },
+      "quick-balances-editor-pinned | + Add account | 1": {
+        "fields": [],
+        "rows": [],
+        "url": "/",
+        "dialogs": 0,
+        "headings": [
+          "Dashboard",
+          "Quick balances",
+          "Cash-Flow Timeline",
+          "Financial Snapshot",
+          "Actual totals (Month to date)",
+          "Projected",
+          "Budget Envelope Status",
+          "Upcoming Payables",
+          "Also coming up"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Toggle theme",
+          "MSMara Santos",
+          "week",
+          "month",
+          "year",
+          "Reset to defaults",
+          "Cancel",
+          "Save",
+          "Move GCash earlier",
+          "Move GCash later",
+          "Remove GCash",
+          "Move HSBC Red Mastercard earlier",
+          "Move HSBC Red Mastercard later",
+          "Remove HSBC Red Mastercard",
+          "Move BPI Payroll earlier",
+          "Move BPI Payroll later",
+          "Remove BPI Payroll",
+          "+ Add account",
+          "Metrobank Savings(PHP)",
+          "Cash on hand(PHP)",
+          "BDO Joint household(PHP)",
+          "Details",
+          "Emergency fund top-upMar 8th, 2026 · ₱10,000.00Scheduled · Manual · from BPI Payroll",
+          "HMO dependent add-onMar 20th, 2026 · ₱1,450.00Scheduled · Manual · from BPI Payroll",
+          "RentApr 1st, 2026 · ₱22,000.00Scheduled · Manual · from BPI Payroll",
+          "PLDT FibrApr 6th, 2026 · ₱1,899.00Scheduled · Autopay · from BPI Payroll",
+          "HSBC Red Mastercard statementApr 9th, 2026 · ₱6,261.75Card statement · from BPI Payroll",
+          "MeralcoApr 10th, 2026 · ₱4,600.00Scheduled · Manual · from BPI Payroll",
+          "Home",
+          "Accounts",
+          "Transactions",
+          "Goals"
+        ],
+        "requests": []
+      },
       "transaction-create | Create Transaction | 1": {
         "fields": [],
+        "rows": [
+          "Button checkMar 12th, 2026BPI PayrollUncategorizedPostedExpenseby Mara S.₱120.00"
+        ],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -16256,6 +18631,9 @@
           "checkbox:true",
           "checkbox:false",
           "select-one:"
+        ],
+        "rows": [
+          "Button checkMar 12th, 2026BPI PayrollUncategorizedPostedExpenseby Mara S.₱120.00"
         ],
         "url": "/transactions",
         "dialogs": 1,
@@ -16316,6 +18694,7 @@
       },
       "transaction-create | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -16362,6 +18741,7 @@
           "checkbox:true",
           "checkbox:true"
         ],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 1,
         "headings": [
@@ -16419,6 +18799,9 @@
       },
       "transaction-create-installment | Create Transaction | 1": {
         "fields": [],
+        "rows": [
+          "Button check laptopMar 12th, 2026HSBC Red MastercardUncategorizedPostedExpenseby Mara S.₱2,000.00"
+        ],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -16474,6 +18857,9 @@
           "checkbox:false",
           "checkbox:false",
           "select-one:"
+        ],
+        "rows": [
+          "Button check laptopMar 12th, 2026HSBC Red MastercardUncategorizedPostedExpenseby Mara S.₱2,000.00"
         ],
         "url": "/transactions",
         "dialogs": 1,
@@ -16534,6 +18920,7 @@
       },
       "transaction-create-installment | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -16574,6 +18961,7 @@
         "fields": [
           "file:"
         ],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 1,
         "headings": [
@@ -16634,6 +19022,7 @@
           "checkbox:false",
           "select-one:"
         ],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 1,
         "headings": [
@@ -16685,6 +19074,7 @@
       },
       "transaction-actions | Delete Transaction | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 3,
         "headings": [
@@ -16736,6 +19126,7 @@
         "fields": [
           "file:"
         ],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 1,
         "headings": [
@@ -16782,6 +19173,7 @@
       },
       "transaction-delete-confirm | Delete transaction | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -16827,6 +19219,7 @@
       },
       "spending-breakdown | Close | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -16865,6 +19258,7 @@
       },
       "due-mark-paid | Close | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -16903,6 +19297,7 @@
       },
       "due-mark-paid | Mark paid | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -16950,6 +19345,7 @@
       },
       "due-mark-paid | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -16988,6 +19384,7 @@
       },
       "due-pay | Close | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -17026,6 +19423,7 @@
       },
       "due-pay | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -17064,6 +19462,7 @@
       },
       "due-change-date | Close | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -17102,6 +19501,7 @@
       },
       "due-change-date | Save | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -17148,6 +19548,9 @@
       },
       "recurring-create | Save Recurring Entry | 1": {
         "fields": [],
+        "rows": [
+          "Water deliveryRecurring expenseMonthlyScheduledNext Mar 12th, 2026TodayAccount: BPI Payrollby Mara S.IndefiniteMark paid₱350.00"
+        ],
         "url": "/allocations",
         "dialogs": 0,
         "headings": [
@@ -17182,6 +19585,7 @@
           "Mark paid",
           "Show 1 more tag: Household",
           "Mark paid",
+          "Mark paid",
           "Mark received",
           "Home",
           "Accounts",
@@ -17198,6 +19602,7 @@
       },
       "recurring-create | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 0,
         "headings": [
@@ -17242,6 +19647,7 @@
       },
       "recurring-charged | Close | 1": {
         "fields": [],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 0,
         "headings": [
@@ -17286,6 +19692,7 @@
       },
       "recurring-charged | Charged | 1": {
         "fields": [],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 0,
         "headings": [
@@ -17339,6 +19746,7 @@
       },
       "recurring-charged | Posted | 1": {
         "fields": [],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 0,
         "headings": [
@@ -17392,6 +19800,7 @@
       },
       "recurring-charged | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/allocations",
         "dialogs": 0,
         "headings": [
@@ -17435,26 +19844,21 @@
         "requests": []
       },
       "account-create | Create Account | 1": {
-        "fields": [
-          "text:",
-          "select-one:checking",
-          "checkbox:false",
-          "select-one:PHP",
-          "number:0",
-          "textarea:"
+        "fields": [],
+        "rows": [
+          "Maya savingscheckingActiveCurrency: PHP₱0.00ActiveTransactions"
         ],
         "url": "/accounts",
-        "dialogs": 1,
+        "dialogs": 0,
         "headings": [
           "Accounts",
-          "Individual (5)",
-          "Debit (2)",
+          "Individual (6)",
+          "Debit (3)",
           "Credit (1)",
           "E-wallet (1)",
           "Cash (1)",
           "Shared (1)",
-          "Debit (1)",
-          "Create Account"
+          "Debit (1)"
         ],
         "buttons": [
           "₱Tally & Trace",
@@ -17462,26 +19866,26 @@
           "MSMara Santos",
           "Add Account",
           "View transactions for BPI Payroll",
+          "View transactions for Maya savings",
           "View transactions for Metrobank Savings",
           "View transactions for HSBC Red Mastercard",
           "View transactions for GCash",
           "View transactions for Cash on hand",
           "View transactions for BDO Joint household",
-          "",
-          "Household",
-          "Japan trip",
-          "Active",
-          "Create Account",
-          "Cancel",
           "Home",
           "Accounts",
           "Transactions",
           "Goals"
         ],
-        "requests": []
+        "requests": [
+          "GET /accounts/?limit=1000",
+          "GET /cards/credit",
+          "POST /accounts/ {\"name\":\"Maya savings\",\"account_type\":\"checking\",\"balance\":0,\"description\":\"\",\"currency\":\"PHP\",\"days_until_due_date\":21,\"is_spending_wallet\":false,\"is_active\":true,\"tag_ids\":[]}"
+        ]
       },
       "account-create | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/accounts",
         "dialogs": 0,
         "headings": [
@@ -17514,6 +19918,7 @@
       },
       "account-actions | View transactions | 1": {
         "fields": [],
+        "rows": [],
         "url": "/accounts/11",
         "dialogs": 0,
         "headings": [
@@ -17541,6 +19946,7 @@
       },
       "account-actions | Mark as inactive | 1": {
         "fields": [],
+        "rows": [],
         "url": "/accounts",
         "dialogs": 1,
         "headings": [
@@ -17593,6 +19999,7 @@
           "number:84250.4",
           "textarea:"
         ],
+        "rows": [],
         "url": "/accounts",
         "dialogs": 1,
         "headings": [
@@ -17632,6 +20039,7 @@
       },
       "account-actions | Share account | 1": {
         "fields": [],
+        "rows": [],
         "url": "/accounts",
         "dialogs": 3,
         "headings": [
@@ -17681,6 +20089,7 @@
       },
       "account-actions | Delete account | 1": {
         "fields": [],
+        "rows": [],
         "url": "/accounts",
         "dialogs": 3,
         "headings": [
@@ -17725,6 +20134,7 @@
       },
       "share-account | Remove | 1": {
         "fields": [],
+        "rows": [],
         "url": "/accounts",
         "dialogs": 4,
         "headings": [
@@ -17770,6 +20180,7 @@
           "email:lia@example.com",
           "select-one:viewer"
         ],
+        "rows": [],
         "url": "/accounts",
         "dialogs": 2,
         "headings": [
@@ -17811,6 +20222,7 @@
       },
       "share-account-found | Remove | 1": {
         "fields": [],
+        "rows": [],
         "url": "/accounts",
         "dialogs": 4,
         "headings": [
@@ -17857,6 +20269,7 @@
           "email:lia@example.com",
           "select-one:viewer"
         ],
+        "rows": [],
         "url": "/accounts",
         "dialogs": 2,
         "headings": [
@@ -17899,7 +20312,11 @@
       "share-account-found | Share with Lia M. | 1": {
         "fields": [
           "select-one:editor",
+          "select-one:viewer",
           "email:"
+        ],
+        "rows": [
+          "Lia M.ViewerEditorAdminRemove"
         ],
         "url": "/accounts",
         "dialogs": 2,
@@ -17929,6 +20346,7 @@
           "View transactions for BDO Joint household",
           "Close share dialog",
           "Remove",
+          "Remove",
           "Look up",
           "Home",
           "Accounts",
@@ -17944,6 +20362,7 @@
       },
       "installment-review | Close | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -17981,6 +20400,7 @@
       },
       "installment-review | Record 1 month and turn on auto-post | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -18027,6 +20447,7 @@
       },
       "installment-review | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/transactions",
         "dialogs": 0,
         "headings": [
@@ -18064,6 +20485,130 @@
       },
       "settings-category | Create | 1": {
         "fields": [],
+        "rows": [
+          "Pet careExpenseEditDelete"
+        ],
+        "url": "/settings",
+        "dialogs": 0,
+        "headings": [
+          "Settings",
+          "Cash-flow timeline",
+          "Export your data",
+          "Categories",
+          "Tags",
+          "Household sharing",
+          "People who can see your Household",
+          "Add a person"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Toggle theme",
+          "MSMara Santos",
+          "JSON",
+          "CSV (ZIP)",
+          "Add category",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Add tag",
+          "Recolour tag Household",
+          "Delete tag Household",
+          "Edit tag Japan trip",
+          "Delete tag Japan trip",
+          "Look up",
+          "Home",
+          "Accounts",
+          "Transactions",
+          "Goals"
+        ],
+        "requests": [
+          "GET /categories/",
+          "POST /categories/ {\"name\":\"Pet care\",\"description\":\"\",\"color\":\"#2563eb\",\"is_expense\":true}"
+        ]
+      },
+      "settings-category | Cancel | 1": {
+        "fields": [],
+        "rows": [],
+        "url": "/settings",
+        "dialogs": 0,
+        "headings": [
+          "Settings",
+          "Cash-flow timeline",
+          "Export your data",
+          "Categories",
+          "Tags",
+          "Household sharing",
+          "People who can see your Household",
+          "Add a person"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Toggle theme",
+          "MSMara Santos",
+          "JSON",
+          "CSV (ZIP)",
+          "Add category",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Add tag",
+          "Recolour tag Household",
+          "Delete tag Household",
+          "Edit tag Japan trip",
+          "Delete tag Japan trip",
+          "Look up",
+          "Home",
+          "Accounts",
+          "Transactions",
+          "Goals"
+        ],
+        "requests": []
+      },
+      "settings-category-edit | Update | 1": {
+        "fields": [],
+        "rows": [
+          "Pet careIncomeEditDelete"
+        ],
         "url": "/settings",
         "dialogs": 0,
         "headings": [
@@ -18118,11 +20663,12 @@
         ],
         "requests": [
           "GET /categories/",
-          "POST /categories/ {\"name\":\"Pet care\",\"description\":\"\",\"color\":\"#2563eb\",\"is_expense\":true}"
+          "PUT /categories/21 {\"name\":\"Pet care\",\"description\":\"\",\"color\":\"#2563eb\",\"is_expense\":false}"
         ]
       },
-      "settings-category | Cancel | 1": {
+      "settings-category-edit | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 0,
         "headings": [
@@ -18179,6 +20725,71 @@
       },
       "settings-tag | Create | 1": {
         "fields": [],
+        "rows": [
+          "Pet careEditDelete"
+        ],
+        "url": "/settings",
+        "dialogs": 0,
+        "headings": [
+          "Settings",
+          "Cash-flow timeline",
+          "Export your data",
+          "Categories",
+          "Tags",
+          "Household sharing",
+          "People who can see your Household",
+          "Add a person"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Toggle theme",
+          "MSMara Santos",
+          "JSON",
+          "CSV (ZIP)",
+          "Add category",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Add tag",
+          "Recolour tag Household",
+          "Delete tag Household",
+          "Edit tag Japan trip",
+          "Delete tag Japan trip",
+          "Edit tag Pet care",
+          "Delete tag Pet care",
+          "Look up",
+          "Home",
+          "Accounts",
+          "Transactions",
+          "Goals"
+        ],
+        "requests": [
+          "GET /tags/",
+          "POST /tags/ {\"name\":\"Pet care\",\"color\":\"#2563eb\"}"
+        ]
+      },
+      "settings-tag | Cancel | 1": {
+        "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 0,
         "headings": [
@@ -18231,13 +20842,74 @@
           "Transactions",
           "Goals"
         ],
+        "requests": []
+      },
+      "settings-tag-edit | Update | 1": {
+        "fields": [],
+        "rows": [
+          "Pet careEditDelete"
+        ],
+        "url": "/settings",
+        "dialogs": 0,
+        "headings": [
+          "Settings",
+          "Cash-flow timeline",
+          "Export your data",
+          "Categories",
+          "Tags",
+          "Household sharing",
+          "People who can see your Household",
+          "Add a person"
+        ],
+        "buttons": [
+          "₱Tally & Trace",
+          "Toggle theme",
+          "MSMara Santos",
+          "JSON",
+          "CSV (ZIP)",
+          "Add category",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Edit",
+          "Delete",
+          "Add tag",
+          "Recolour tag Household",
+          "Delete tag Household",
+          "Edit tag Pet care",
+          "Delete tag Pet care",
+          "Look up",
+          "Home",
+          "Accounts",
+          "Transactions",
+          "Goals"
+        ],
         "requests": [
+          "GET /accounts/?is_active=true&limit=1000",
           "GET /tags/",
-          "POST /tags/ {\"name\":\"Pet care\",\"color\":\"#2563eb\"}"
+          "PUT /tags/42 {\"name\":\"Pet care\",\"color\":\"#a35f2a\"}"
         ]
       },
-      "settings-tag | Cancel | 1": {
+      "settings-tag-edit | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/settings",
         "dialogs": 0,
         "headings": [
@@ -18294,6 +20966,9 @@
       },
       "wishlist-item | Add | 1": {
         "fields": [],
+        "rows": [
+          "mediumStanding deskSavings targetBudget envelope₱12,000.00"
+        ],
         "url": "/allocations?tab=wishlist",
         "dialogs": 0,
         "headings": [
@@ -18319,6 +20994,11 @@
           "Mark as purchased",
           "Edit",
           "Delete",
+          "Savings target",
+          "Budget envelope",
+          "Mark as purchased",
+          "Edit",
+          "Delete",
           "Home",
           "Accounts",
           "Transactions",
@@ -18332,6 +21012,7 @@
       },
       "wishlist-item | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/allocations?tab=wishlist",
         "dialogs": 0,
         "headings": [
@@ -18366,6 +21047,9 @@
       },
       "allocation-create | Create Budget Envelope | 1": {
         "fields": [],
+        "rows": [
+          "Pet careBudget EnvelopeBPI PayrollDining outCadence: MonthlyStarts Mar 1, 2026Ends Mar 31, 2026ActiveSpending limit₱3,000.00Spent this period₱0.000.0% of limit usedRemaining₱3,000.00Active"
+        ],
         "url": "/allocations?tab=budgets",
         "dialogs": 0,
         "headings": [
@@ -18393,6 +21077,7 @@
       },
       "allocation-create | Cancel | 1": {
         "fields": [],
+        "rows": [],
         "url": "/allocations?tab=budgets",
         "dialogs": 0,
         "headings": [
@@ -18417,6 +21102,7 @@
       },
       "allocation-actions | Pause allocation | 1": {
         "fields": [],
+        "rows": [],
         "url": "/allocations?tab=budgets",
         "dialogs": 1,
         "headings": [
@@ -18459,6 +21145,7 @@
           "number:2500",
           "number:5000"
         ],
+        "rows": [],
         "url": "/allocations?tab=budgets",
         "dialogs": 1,
         "headings": [
@@ -18498,6 +21185,7 @@
       },
       "allocation-actions | Delete allocation | 1": {
         "fields": [],
+        "rows": [],
         "url": "/allocations?tab=budgets",
         "dialogs": 3,
         "headings": [
@@ -18532,6 +21220,7 @@
       },
       "payable-detail | Close | 1": {
         "fields": [],
+        "rows": [],
         "url": "/",
         "dialogs": 0,
         "headings": [
