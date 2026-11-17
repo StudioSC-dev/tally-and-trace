@@ -36,6 +36,7 @@ import type {
   HouseholdShares,
   HouseholdView,
   InstallmentPlans,
+  LimitedBudgetEntry,
   PaginatedResponse,
   Payable,
   RecurrenceFrequency,
@@ -793,6 +794,47 @@ export const calmHousehold: HouseholdData = build({
   cardStatements: [],
   occurrences,
 })
+
+/**
+ * Two recurring entries Mara sees as `limited` (another household member's, with only the allowlisted fields): one
+ * expense and one income. Not part of any variant; a spec adds them to `/budget-entries/` when it needs that renderer.
+ */
+export const limitedRecurring: LimitedBudgetEntry[] = [
+  {
+    view: 'limited',
+    id: 9101,
+    permissions: recPerms,
+    created_by: 'Jun R.',
+    display_name: 'Water refill service',
+    amount: 350,
+    currency: 'PHP',
+    entry_type: 'expense',
+    cadence: 'monthly',
+    next_occurrence: '2026-03-20',
+    end_date: null,
+    category_name: 'Utilities',
+    account: null,
+    counterpart: null,
+    tags: [],
+  },
+  {
+    view: 'limited',
+    id: 9102,
+    permissions: recPerms,
+    created_by: 'Jun R.',
+    display_name: 'Condo parking rental income',
+    amount: 3500,
+    currency: 'PHP',
+    entry_type: 'income',
+    cadence: 'monthly',
+    next_occurrence: '2026-03-25',
+    end_date: null,
+    category_name: 'Rental',
+    account: null,
+    counterpart: null,
+    tags: [],
+  },
+]
 
 /** A household that has set up its accounts but recorded nothing yet. */
 export const emptyHousehold: HouseholdData = build({
