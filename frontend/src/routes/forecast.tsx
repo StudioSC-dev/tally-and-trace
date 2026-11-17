@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
 import { formatCurrency } from '../utils/currency'
-import { formatSigned } from '../utils/amount'
+import { amountSign, formatAmount, formatSigned } from '../utils/amount'
 import { estimateText, estimateTitle } from '../utils/fx'
 import { CurrencyControl } from '../components/CurrencyControl'
 import { useSelectedCurrency } from '../hooks/useSelectedCurrency'
@@ -103,8 +103,7 @@ function ForecastPage() {
   // A converted event reads "≈ PHP 4,640.00 (USD 80.00)"; a limited one has no labels to show.
   const signedEvent = (e: CashflowTimelineEvent | LimitedTimelineEvent) => {
     const amount = timelineEventAmount(e)
-    const sign = amount >= 0 ? '+' : '−'
-    return `${sign}${e.view === 'limited' ? format(Math.abs(amount)) : estimateText(Math.abs(amount), currency, e)}`
+    return `${amountSign(amount, currency)}${e.view === 'limited' ? format(Math.abs(amount)) : estimateText(Math.abs(amount), currency, e)}`
   }
 
   return (
@@ -229,7 +228,7 @@ function ForecastPage() {
                   {overflowPulls.map((m, i) => (
                     <li key={`${m.date}-${m.to_account_id}-${i}`} className="flex flex-wrap gap-x-2">
                       <span className="text-muted">{longDate(m.date)}</span>
-                      <span className="font-medium text-danger">−{format(m.amount)}</span>
+                      <span className="font-medium text-danger">{formatAmount('negative', m.amount, currency)}</span>
                       <span className="text-body">to {m.to_account_name ?? 'another account'} ({m.name})</span>
                     </li>
                   ))}

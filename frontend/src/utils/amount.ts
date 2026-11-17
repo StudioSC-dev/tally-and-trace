@@ -16,8 +16,8 @@ const CLASSES: Record<AmountKind, string> = {
 /** The semantic class for `kind`; call sites use this instead of choosing a colour. */
 export const amountClass = (kind: AmountKind): string => CLASSES[kind]
 
-/** True when currency text shows no non-zero digit (the symbols have none), so the amount rounds to zero. */
-const readsZero = (text: string): boolean => !/[1-9]/.test(text)
+/** True when currency text shows no non-zero digit (the symbols and codes have none), so the amount rounds to zero. */
+export const readsZero = (text: string): boolean => !/[1-9]/.test(text)
 
 /**
  * Any amount that can fall below zero, as text: the one shared formatter for signed amounts in the web app. A negative
@@ -27,6 +27,15 @@ const readsZero = (text: string): boolean => !/[1-9]/.test(text)
 export function formatSigned(amount: number, currency: CurrencyCode): string {
   const magnitude = formatCurrency(Math.abs(amount), currency)
   return amount < 0 && !readsZero(magnitude) ? `−${magnitude}` : magnitude
+}
+
+/**
+ * The sign a figure written as its magnitude leads with: `+` above zero, a minus sign (U+2212) below it, and none when
+ * it reads as zero in `currency`. For figures whose text is built around the magnitude (an estimate, "≈ PHP 80.00").
+ */
+export function amountSign(amount: number, currency: CurrencyCode): '+' | '−' | '' {
+  if (readsZero(formatCurrency(Math.abs(amount), currency))) return ''
+  return amount > 0 ? '+' : '−'
 }
 
 /**

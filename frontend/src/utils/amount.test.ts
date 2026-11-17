@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatAmount, formatBalance, formatSigned } from './amount'
+import { amountSign, formatAmount, formatBalance, formatSigned } from './amount'
 
 describe('formatSigned', () => {
   it('leads a negative amount with a minus sign, never a hyphen', () => {
@@ -30,5 +30,13 @@ describe('formatAmount and formatBalance', () => {
     expect(formatAmount('negative', -0.004, 'PHP')).toBe('₱0.00')
     expect(formatAmount('in', 0, 'PHP')).toBe('₱0.00')
     expect(formatAmount('in', 41250, 'PHP')).toBe('+₱41,250.00')
+  })
+})
+
+describe('amountSign', () => {
+  it('is + above zero, a minus sign below, and nothing for a figure that reads as zero', () => {
+    expect(amountSign(80, 'PHP')).toBe('+')
+    expect(amountSign(-80, 'PHP')).toBe('−')
+    for (const amount of [0, -0, 0.004, -0.004]) expect(amountSign(amount, 'PHP')).toBe('')
   })
 })
