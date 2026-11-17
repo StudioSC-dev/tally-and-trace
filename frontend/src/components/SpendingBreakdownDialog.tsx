@@ -12,7 +12,7 @@ import { apiErrorMessage } from '../utils/apiError'
 import { formatCurrency } from '../utils/currency'
 import type { CurrencyCode } from '../utils/currency'
 import { CurrencyControl } from './CurrencyControl'
-import { chartColor, displayColor, tokenColor } from '../utils/palette'
+import { chartColor, tokenColor } from '../utils/palette'
 
 // Rows the list can't be filtered by, and the "Other" slice, are drawn neutral.
 const NEUTRAL_COLOR = tokenColor('muted')
@@ -120,8 +120,9 @@ export function SpendingBreakdownDialog({
   }, [])
 
   const format = (amount: number) => formatCurrency(amount, currency)
-  const colorFor = (index: number, color: string | undefined, drillable: boolean) =>
-    !drillable ? NEUTRAL_COLOR : color ? displayColor(color, NEUTRAL_COLOR) : chartColor(index)
+  // Drillable slices and rows cycle through the chart tokens; a saved category colour is not used here.
+  const colorFor = (index: number, drillable: boolean) =>
+    !drillable ? NEUTRAL_COLOR : chartColor(index)
 
   let body
   if (isLoading) {
@@ -168,7 +169,7 @@ export function SpendingBreakdownDialog({
                     strokeDasharray={`${length} ${DONUT_CIRCUMFERENCE - length}`}
                     strokeDashoffset={-slice.offset * DONUT_CIRCUMFERENCE}
                     className={drillable ? 'cursor-pointer hover:opacity-80' : undefined}
-                    style={{ stroke: colorFor(index, slice.color, drillable) }}
+                    style={{ stroke: colorFor(index, drillable) }}
                     onClick={sliceDrill ? () => onSelectCategory(sliceDrill) : undefined}
                   >
                     <title>{`${slice.name}: ${format(slice.amount)}${drillable ? ' (click to filter the list)' : ''}`}</title>
@@ -185,7 +186,7 @@ export function SpendingBreakdownDialog({
         <ul className="divide-y divide-line/50 text-sm">
           {breakdown.rows.map((row, index) => {
             const rowDrill = row.drill
-            const color = colorFor(index, row.color, rowDrill !== null)
+            const color = colorFor(index, rowDrill !== null)
             const cells = (
               <>
                 <span className="flex min-w-0 items-center gap-2">
@@ -236,7 +237,7 @@ export function SpendingBreakdownDialog({
                     <span className="flex min-w-0 items-center gap-2">
                       <span
                         className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
-                        style={{ backgroundColor: colorFor(index, row.color, rowDrill !== null) }}
+                        style={{ backgroundColor: colorFor(index, rowDrill !== null) }}
                       />
                       <span className="truncate font-medium text-ink">{row.name}</span>
                     </span>
