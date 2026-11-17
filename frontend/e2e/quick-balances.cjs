@@ -14,7 +14,7 @@
 //   (b) the card tile shows Due with its date, the Unbilled line, then Available with
 //       "shared with BDO Platinum Mastercard"; the other tiles show their balance
 //   (c) tapping a tile opens /accounts/<id>
-//   (d) at 390px: 2 columns, debit and e-wallet side by side with the credit tile full width below, no horizontal scroll, 44px targets
+//   (d) at 390px: one column of account lines, full width and ruled, in slot order, no horizontal scroll, 44px targets
 //   (e) a failed quick-balances request shows the section's Retry while the rest of the
 //       dashboard renders; Retry loads the tiles
 //   (f) recording a payment from Security Bank to the card updates both tiles without a
@@ -234,33 +234,30 @@ async function tapTile(browser) {
 
 // (d) Phone layout.
 async function phone(browser) {
-  console.log('\n=== (d) at 390px: 2 columns, the credit tile spans the row, no horizontal scroll, 44px targets')
+  console.log('\n=== (d) at 390px: one column of ruled account lines, no horizontal scroll, 44px targets')
   const { ctx, page } = await newPage(browser, { viewport: { width: 390, height: 844 } })
   await uiLogin(page, owner)
   await openDashboard(page)
   const m = await page.evaluate(() => {
-    const grid = document.querySelector('[data-testid="quick-balance-tile"]').parentElement
-    const rect = (id) => {
-      const r = document.querySelector(`[data-testid="quick-balance-tile"][data-type="${id}"]`).getBoundingClientRect()
-      return { x: r.x, w: r.width, h: r.height }
-    }
-    const top = (id) => document.querySelector(`[data-testid="quick-balance-tile"][data-type="${id}"]`).getBoundingClientRect().top
-    const g = grid.getBoundingClientRect()
+    const list = document.querySelector('[data-testid="quick-balance-lines"]')
+    const l = list.getBoundingClientRect()
+    const lines = [...list.querySelectorAll('[data-testid="quick-balance-tile"]')].map((e) => {
+      const r = e.getBoundingClientRect()
+      const s = getComputedStyle(e)
+      return { x: r.x, w: r.width, top: r.top, h: r.height, type: e.getAttribute('data-type'), rule: s.borderTopWidth, fill: s.backgroundColor }
+    })
     return {
-      columns: getComputedStyle(grid).gridTemplateColumns.split(' ').length,
-      gridWidth: g.width,
-      checking: rect('checking'), checkingTop: top('checking'), walletTop: top('e_wallet'), creditTop: top('credit'), credit: rect('credit'), wallet: rect('e_wallet'),
+      listX: l.x, listWidth: l.width, lines,
       scrollW: document.documentElement.scrollWidth, clientW: document.documentElement.clientWidth,
-      heights: [...document.querySelectorAll('[data-testid="quick-balance-tile"]')].map((e) => e.getBoundingClientRect().height),
     }
   })
-  check('(d) the grid has 2 columns', m.columns, 2)
-  check('(d) the credit tile spans the row', Math.abs(m.credit.w - m.gridWidth) < 1, true)
-  check('(d) the other tiles take one column each', [m.checking.w < m.gridWidth * 0.6, m.wallet.w < m.gridWidth * 0.6], [true, true])
-  check('(d) the debit and e-wallet tiles share the first row', Math.abs(m.checkingTop - m.walletTop) < 1, true)
-  check('(d) the credit tile sits below them', m.creditTop > m.checkingTop + m.checking.h - 1, true)
+  check('(d) the lines read in slot order: checking, credit, e-wallet', m.lines.map((x) => x.type), ['checking', 'credit', 'e_wallet'])
+  check('(d) every line spans the list', m.lines.every((x) => Math.abs(x.w - m.listWidth) < 1 && Math.abs(x.x - m.listX) < 1), true)
+  check('(d) each line sits below the one before', m.lines.every((x, i) => i === 0 || x.top >= m.lines[i - 1].top + m.lines[i - 1].h - 1), true)
+  check('(d) a rule above every line but the first', m.lines.map((x) => x.rule), ['0px', '1px', '1px'])
+  check('(d) no line has a fill', m.lines.every((x) => x.fill === 'rgba(0, 0, 0, 0)'), true)
   check('(d) no horizontal scroll', m.scrollW <= m.clientW, true)
-  check('(d) every tile is at least 44px tall', m.heights.every((h) => h >= 44), true)
+  check('(d) every line is at least 44px tall', m.lines.every((x) => x.h >= 44), true)
   await ctx.close()
 }
 

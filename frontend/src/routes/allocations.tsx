@@ -58,7 +58,8 @@ import { WishlistPanel } from '../components/WishlistPanel'
 import { RecurringEntryFormModal } from '../components/RecurringEntryFormModal'
 import { EntryCreditWarningRow, KindCreditLines } from '../components/AllocationsCredit'
 import type { KindCreditState } from '../components/AllocationsCredit'
-import { TagChips } from '../components/TagChips'
+import { ListSheet } from '../components/ListSheet'
+import { Row } from '../components/Row'
 import { TagFilter } from '../components/TagFilter'
 import { MarkPaidDialog } from '../components/MarkPaidDialog'
 import { InstallmentReviewDialog } from '../components/InstallmentReviewDialog'
@@ -1349,57 +1350,36 @@ export function AllocationsPage() {
   // A Limited entry shows only its allowlisted fields; a hidden account is a neutral name
   // with no id, so nothing here links into it. It is read-only: its flags decide whether a
   // delete is offered.
-  const renderLimitedEntryCard = (entry: LimitedBudgetEntry) => (
-    <article key={entry.id} className="card p-4 sm:p-5" data-testid="limited-entry">
-      <div className="flex flex-col gap-3">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <p className="text-base font-semibold text-ink">{entry.display_name ?? 'Recurring entry'}</p>
-            <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-wide text-muted">
-              <span>{entry.entry_type === 'income' ? 'Recurring Income' : 'Recurring Expense'}</span>
-              <span className="text-muted">•</span>
-              <span>{formatCadenceLabel(entry.cadence)}</span>
-            </div>
-          </div>
-          <div className="text-right">
-            <p className={`text-lg font-bold ${amountClass(entry.entry_type === 'income' ? 'in' : 'out')}`}>
-              {formatAmount(entry.entry_type === 'income' ? 'in' : 'out', entry.amount, entry.currency)}
-            </p>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2 text-xs text-body">
-          <span className="inline-flex items-center gap-1 px-2 py-1 text-ink">
-            Next {formatFullDate(entry.next_occurrence)}
-          </span>
-          {entry.account && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
-              Account: {entry.account.name}
-            </span>
-          )}
-          {entry.counterpart && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
-              Transfer to: {entry.counterpart.name}
-            </span>
-          )}
-          {entry.category_name && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
-              Category: {entry.category_name}
-            </span>
-          )}
-          {entry.end_date && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
-              Ends {formatFullDate(entry.end_date)}
-            </span>
-          )}
-          {entry.created_by && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1" data-testid="created-by">
-              by {entry.created_by}
-            </span>
-          )}
-          <TagChips tags={entry.tags} />
-        </div>
-        {entry.permissions.can_delete && (
-          <div>
+  const renderLimitedEntryCard = (entry: LimitedBudgetEntry) => {
+    // A limited entry has no opener, so its facts wrap onto a second line instead of being cut.
+    const facts = [
+      entry.account && <span key="account">Account: {entry.account.name}</span>,
+      entry.counterpart && <span key="counterpart">Transfer to: {entry.counterpart.name}</span>,
+      entry.category_name && <span key="category">Category: {entry.category_name}</span>,
+      entry.end_date && <span key="ends">Ends {formatFullDate(entry.end_date)}</span>,
+      entry.created_by && (
+        <span key="by" data-testid="created-by">
+          by {entry.created_by}
+        </span>
+      ),
+    ].filter(Boolean)
+    return (
+      <Row
+        key={entry.id}
+        kind="limited-entry"
+        wrap
+        title={entry.display_name ?? 'Recurring entry'}
+        tags={entry.tags}
+        meta={
+          <>
+            <span>{entry.entry_type === 'income' ? 'Recurring Income' : 'Recurring Expense'}</span>
+            <span>{formatCadenceLabel(entry.cadence)}</span>
+            <span className="text-ink">Next {formatFullDate(entry.next_occurrence)}</span>
+          </>
+        }
+        details={[
+          facts.length > 0 && <p className="space-x-3 text-muted">{facts}</p>,
+          entry.permissions.can_delete && (
             <button
               type="button"
               onClick={() => handleDeleteBudgetEntry(entry)}
@@ -1407,11 +1387,16 @@ export function AllocationsPage() {
             >
               Delete recurring entry
             </button>
-          </div>
-        )}
-      </div>
-    </article>
-  )
+          ),
+        ]}
+        amount={
+          <p className={`text-lg font-bold ${amountClass(entry.entry_type === 'income' ? 'in' : 'out')}`}>
+            {formatAmount(entry.entry_type === 'income' ? 'in' : 'out', entry.amount, entry.currency)}
+          </p>
+        }
+      />
+    )
+  }
 
   const renderBudgetEntryCard = (entry: BudgetEntry) => {
     if (isLimited(entry)) {
@@ -1463,10 +1448,12 @@ export function AllocationsPage() {
     const actions =
       entry.is_active && remaining !== 0 ? recurringActionsFor({ ...entry, can_mark_paid: entry.permissions.can_post }) : []
 
+    const canDeleteOnly = !canEdit && entry.permissions.can_delete
+
     return (
-      <article
+      <Row
         key={entry.id}
-        className={`card p-4 sm:p-5 transition-colors duration-200 ${canEdit ? 'hover:bg-sunken cursor-pointer' : ''} ${ entry.is_active ? '' : 'opacity-60' }`}
+        className={`transition-colors duration-200 ${canEdit ? 'hover:bg-sunken cursor-pointer' : ''} ${ entry.is_active ? '' : 'opacity-60' }`}
         onClick={canEdit ? () => openRecurringModal(entry) : undefined}
         role={canEdit ? 'button' : undefined}
         tabIndex={canEdit ? 0 : undefined}
@@ -1480,91 +1467,37 @@ export function AllocationsPage() {
               }
             : undefined
         }
-      >
-        <div className="flex flex-col gap-3">
-          <div className="flex items-start justify-between gap-4">
-            <div className="space-y-1">
-              <p className="text-base font-semibold text-ink">{entry.name}</p>
-              <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-wide text-muted">
-                <span>{entry.entry_type === 'income' ? 'Recurring Income' : 'Recurring Expense'}</span>
-                <span className="text-muted">•</span>
-                <span>{cadenceLabel}</span>
-                <span className="text-muted">•</span>
-                <span>{settlementLabel(entry.settlement)}</span>
-                {!entry.is_active && (
-                  <>
-                    <span className="text-muted">•</span>
-                    <span>Paused</span>
-                  </>
-                )}
-                  </div>
-              {entry.description && <p className="text-sm text-body">{entry.description}</p>}
-            </div>
-            <div className="text-right">
-              <p
-                className={`text-lg font-bold ${amountClass(amountKind)}`}
-              >
-                {amountLabel}
-              </p>
-              <p className="text-xs text-muted">{cadenceLabel}</p>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2 text-xs text-body">
-            <span className="inline-flex items-center gap-1 px-2 py-1 text-ink">
-              Next {formatFullDate(entry.next_occurrence)}
-            </span>
-            <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
-              {formatRelativeDate(entry.next_occurrence)}
-            </span>
+        title={entry.name}
+        tags={entry.tags}
+        meta={
+          <>
+            <span>{entry.entry_type === 'income' ? 'Recurring Income' : 'Recurring Expense'}</span>
+            <span>{cadenceLabel}</span>
+            <span>{settlementLabel(entry.settlement)}</span>
+            {!entry.is_active && <span>Paused</span>}
+            <span className="text-ink">Next {formatFullDate(entry.next_occurrence)}</span>
+            <span>{formatRelativeDate(entry.next_occurrence)}</span>
             {entry.lead_time_days > 0 && (
-              <span className="inline-flex items-center gap-1 px-2 py-1 text-ink">
+              <span className="text-ink">
                 Reminder {entry.lead_time_days} day{entry.lead_time_days === 1 ? '' : 's'} ahead
               </span>
             )}
-            {account && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
-                Account: {account.name}
-              </span>
-            )}
-            {transferTo && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
-                Transfer to: {transferTo.name}
-              </span>
-            )}
-            {categoryName && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
-                Category: {categoryName}
-              </span>
-            )}
-            {entry.created_by && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1" data-testid="created-by">
-                by {entry.created_by}
-              </span>
-            )}
-            {allocation && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
-                Envelope: {allocation.name}
-              </span>
-            )}
-            <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
-              {endLabel}
-            </span>
-            {remaining !== null && remaining > 0 && (
-              <span className="inline-flex items-center gap-1 rounded-full text-ink px-2 py-1">
-                {remaining} left
-              </span>
-            )}
-            {remaining === 0 && (
-              <span className="inline-flex items-center gap-1 rounded-full text-ok px-2 py-1">
-                Fully paid
-              </span>
-            )}
-            <TagChips tags={entry.tags} />
-          </div>
-          {creditWarning && <EntryCreditWarningRow warning={creditWarning} />}
-          {showAutoPost && (
+            {account && <span>Account: {account.name}</span>}
+            {transferTo && <span>Transfer to: {transferTo.name}</span>}
+            {categoryName && <span>Category: {categoryName}</span>}
+            {entry.created_by && <span data-testid="created-by">by {entry.created_by}</span>}
+            {allocation && <span>Envelope: {allocation.name}</span>}
+            <span>{endLabel}</span>
+            {remaining !== null && remaining > 0 && <span className="text-ink">{remaining} left</span>}
+            {remaining === 0 && <span className="text-ok">Fully paid</span>}
+          </>
+        }
+        details={[
+          entry.description && <p>{entry.description}</p>,
+          creditWarning && <EntryCreditWarningRow warning={creditWarning} />,
+          showAutoPost && (
             <div className="flex flex-wrap items-center gap-2 text-xs text-body" data-testid="installment-auto-post" data-source={`budget_entry:${entry.id}`}>
-              <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1" data-testid="installment-auto-post-state" data-state={autoPostState}>
+              <span className="font-semibold text-ink" data-testid="installment-auto-post-state" data-state={autoPostState}>
                 {AUTO_POST_STATE_LABELS[autoPostState]}
               </span>
               {canEdit && autoPostState !== 'on' && (
@@ -1595,9 +1528,11 @@ export function AllocationsPage() {
                 </Button>
               )}
             </div>
-          )}
-          {actions.length > 0 && (
-            <div className="flex flex-wrap gap-2">
+          ),
+        ]}
+        actions={
+          actions.length > 0 || canDeleteOnly ? (
+            <>
               {actions.map((action) => (
                 <Button
                   key={action}
@@ -1613,24 +1548,29 @@ export function AllocationsPage() {
                   {RECURRING_ACTION_LABELS[action]}
                 </Button>
               ))}
-            </div>
-          )}
-          {!canEdit && entry.permissions.can_delete && (
-            <div>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  void handleDeleteBudgetEntry(entry)
-                }}
-                className="text-sm text-danger hover:underline"
-              >
-                Delete recurring entry
-              </button>
-            </div>
-          )}
-        </div>
-      </article>
+              {canDeleteOnly && (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    void handleDeleteBudgetEntry(entry)
+                  }}
+                  className="text-sm text-danger hover:underline"
+                >
+                  Delete recurring entry
+                </button>
+              )}
+            </>
+          ) : undefined
+        }
+        amount={
+          <p
+            className={`text-lg font-bold ${amountClass(amountKind)}`}
+          >
+            {amountLabel}
+          </p>
+        }
+      />
     )
   }
 
@@ -1776,7 +1716,7 @@ export function AllocationsPage() {
               <span className="text-sm text-muted">{group.entries.length}</span>
             </header>
             {renderKindCredit(group)}
-            <div className="grid grid-cols-1 gap-3">{group.entries.map(renderBudgetEntryCard)}</div>
+            <ListSheet>{group.entries.map(renderBudgetEntryCard)}</ListSheet>
           </section>
         ))}
       </>
