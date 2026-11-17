@@ -3479,7 +3479,7 @@ export function TransactionsPage() {
                       {actionTransferMeta?.transferFeeLabel && (
                         <div className="flex justify-between gap-3">
                           <dt>Transfer Fee</dt>
-                          <dd className="text-right text-danger">{actionTransferMeta.transferFeeLabel}</dd>
+                          <dd className={`text-right ${amountClass('out')}`}>{actionTransferMeta.transferFeeLabel}</dd>
                         </div>
                       )}
                     </>

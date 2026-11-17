@@ -1283,7 +1283,7 @@ export function AllocationsPage() {
                 )}
                 <div className="flex items-center justify-between text-sm text-body">
                   <span>Spent this period</span>
-                  <span className="font-semibold text-danger">{format(usedAmount)}</span>
+                  <span className={`font-semibold ${amountClass('out')}`}>{format(usedAmount)}</span>
                 </div>
                 {limitAmount !== null && limitAmount > 0 && (
                   <BudgetUsageBar usagePercentage={usagePercentage} />
@@ -1989,7 +1989,7 @@ export function AllocationsPage() {
                       </p>
                     )}
                     <p className="mt-2 text-sm text-muted">
-                      Spent <span className="font-semibold text-danger">{format(actionAllocation.current_amount)}</span>
+                      Spent <span className={`font-semibold ${amountClass('out')}`}>{format(actionAllocation.current_amount)}</span>
                     </p>
                     {actionAllocationUsagePct !== null && actionAllocationLimit !== null && actionAllocationLimit > 0 && (
                       <BudgetUsageBar usagePercentage={actionAllocationUsagePct} />

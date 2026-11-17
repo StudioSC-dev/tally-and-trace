@@ -22,3 +22,10 @@ export function formatAmount(kind: AmountKind, amount: number, currency: Currenc
   if (kind === 'negative') return `−${formatCurrency(Math.abs(amount), currency)}`
   return formatCurrency(amount, currency)
 }
+
+/** The class for an account balance: ledger ink, or the red pencil when it is below zero. */
+export const balanceClass = (balance: number): string => amountClass(balance < 0 ? 'negative' : 'out')
+
+/** An account balance as text: a negative one leads with a minus sign, any other is plain currency. */
+export const formatBalance = (balance: number, currency: CurrencyCode): string =>
+  formatAmount(balance < 0 ? 'negative' : 'out', balance, currency)
