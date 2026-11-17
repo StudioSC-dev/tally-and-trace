@@ -635,21 +635,21 @@ export function TransactionsPage() {
   const dateRangeSummary = useMemo(() => {
     if (isScheduled) {
       const scheduled = scheduledRange(partitionDay, scheduledFrom, scheduledThrough)
-      return `${formatDateWithOrdinal(parseDateInput(scheduled.start))} → ${formatDateWithOrdinal(parseDateInput(scheduled.end))}`
+      return `${formatDateWithOrdinal(parseDateInput(scheduled.start))} to ${formatDateWithOrdinal(parseDateInput(scheduled.end))}`
     }
     if (!startDate && !endDate) {
       return 'All dates'
     }
     const startLabel = startDate ? formatDateWithOrdinal(parseDateInput(startDate)) : 'Beginning'
     const endLabel = endDate ? formatDateWithOrdinal(parseDateInput(endDate)) : 'Present'
-    return `${startLabel} → ${endLabel}`
+    return `${startLabel} to ${endLabel}`
   }, [isScheduled, partitionDay, scheduledFrom, scheduledThrough, startDate, endDate])
 
   // The dialog reads the same dates; an open side is "Any date".
   const breakdownRangeLabel = useMemo(() => {
     const startLabel = startDate ? formatDateWithOrdinal(parseDateInput(startDate)) : 'Any date'
     const endLabel = endDate ? formatDateWithOrdinal(parseDateInput(endDate)) : 'Any date'
-    return `${startLabel} → ${endLabel}`
+    return `${startLabel} to ${endLabel}`
   }, [startDate, endDate])
 
   const todayMonthStart = useMemo(() => getMonthStart(new Date()), [])
@@ -1266,7 +1266,7 @@ export function TransactionsPage() {
     if (type !== 'transfer') {
       if (selectedFormAccount?.account_type === 'savings' && type === 'debit') {
         return {
-          text: 'Taking money out of savings is usually a transfer to another account, not an expense — record it as a Transfer so your net worth stays accurate.',
+          text: 'Taking money out of savings is usually a transfer to another account, not an expense, so record it as a Transfer so your net worth stays accurate.',
           suggestTransfer: true,
         }
       }
@@ -2516,7 +2516,7 @@ export function TransactionsPage() {
         ? budgetEntries.find((entry) => entry.id === transaction.budget_entry_id)
         : undefined
       const scheduleLabel = budgetEntry
-        ? `${budgetEntry.name} • ${formatCadenceLabel(budgetEntry.cadence)}`
+        ? `${budgetEntry.name} (${formatCadenceLabel(budgetEntry.cadence)})`
         : null
 
       return {
@@ -2683,7 +2683,6 @@ export function TransactionsPage() {
       scheduleLabel,
     } = getTransactionMeta(transaction)
     const rowDate = transactionDate(transaction)
-    const relativeDate = relativeEntryDay(rowDate, today)
     const exactDate = formatEntryDate(rowDate)
     const status = transactionStatus(transaction, today)
     const postedDay =
@@ -2727,11 +2726,10 @@ export function TransactionsPage() {
         title={description}
         meta={
           <>
-            <span>{relativeDate}</span>
             <span>{exactDate}</span>
             <span>
               {transaction.transaction_type === 'transfer'
-                ? `${sourceLabel} → ${destinationLabel}`
+                ? `${sourceLabel} to ${destinationLabel}`
                 : accountLabel}
             </span>
             <span>
@@ -2805,7 +2803,7 @@ export function TransactionsPage() {
                 Saving…
               </>
             ) : editable ? (
-              'Not saved — tap to edit'
+              'Not saved, tap to edit'
             ) : (
               'Not saved'
             )}
@@ -3416,7 +3414,7 @@ export function TransactionsPage() {
                       </div>
                       {actionTransferMeta?.transferFeeLabel && (
                         <div className="flex justify-between gap-3">
-                          <dt>Transfer Fee</dt>
+                          <dt>Transfer fee</dt>
                           <dd className={`text-right ${amountClass('out')}`}>{actionTransferMeta.transferFeeLabel}</dd>
                         </div>
                       )}
@@ -3437,7 +3435,7 @@ export function TransactionsPage() {
                         <dd>{formatCurrency(actionSchedule.amount, actionSchedule.currency)}</dd>
                       </div>
                       <div className="flex justify-between gap-3">
-                        <dt>Next Occurrence</dt>
+                        <dt>Next occurrence</dt>
                         <dd>{formatEntryDate(actionSchedule.next_occurrence)}</dd>
                       </div>
                       {actionSchedule.lead_time_days ? (
@@ -3814,7 +3812,7 @@ export function TransactionsPage() {
               </div>
               <div>
                 <label className="label" id="transaction-account-label">
-                  {formData.transaction_type === 'transfer' ? 'From Account' : 'Account'}
+                  {formData.transaction_type === 'transfer' ? 'From account' : 'Account'}
                 </label>
                 <AccountPicker
                   mode="single"
@@ -3847,7 +3845,7 @@ export function TransactionsPage() {
               
               {formData.transaction_type === 'transfer' && (
               <div>
-                  <label className="label" id="transaction-destination-label">Destination Account</label>
+                  <label className="label" id="transaction-destination-label">Destination account</label>
                   <AccountPicker
                     mode="single"
                     deselectable
@@ -3927,7 +3925,7 @@ export function TransactionsPage() {
               )}
 
               <div>
-                <label className="label">Transaction Type</label>
+                <label className="label">Transaction type</label>
                 <SegmentedControl
                   className="flex flex-wrap gap-2"
                   aria-label="Transaction type"
@@ -4071,7 +4069,7 @@ export function TransactionsPage() {
 
               {formData.transaction_type === 'transfer' && (
               <div>
-                  <label className="label">{transferIntoLoan ? 'Interest' : 'Transfer Fee'}</label>
+                  <label className="label">{transferIntoLoan ? 'Interest' : 'Transfer fee'}</label>
                   <div className="relative">
                     <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-muted text-sm">
                       {formCurrencySymbol}
@@ -4156,7 +4154,7 @@ export function TransactionsPage() {
               
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                  <label className="label">Transaction Date</label>
+                  <label className="label">Transaction date</label>
                 <input
                   ref={transactionDateInput}
                   type="date"
@@ -4188,7 +4186,7 @@ export function TransactionsPage() {
                 )}
               </div>
               <div>
-                  <label className="label">Posting Date (optional)</label>
+                  <label className="label">Posting date (optional)</label>
                 <input
                   ref={postingDateInput}
                   type="date"
@@ -4319,7 +4317,7 @@ export function TransactionsPage() {
                       <option value="">None</option>
                       {matchingBudgetEntries.map((entry) => (
                         <option key={entry.id} value={entry.id}>
-                          {entry.name} • {formatCadenceLabel(entry.cadence)} • {formatCurrency(entry.amount, entry.currency)}
+                          {entry.name} ({formatCadenceLabel(entry.cadence)}, {formatCurrency(entry.amount, entry.currency)})
                         </option>
                       ))}
                     </select>

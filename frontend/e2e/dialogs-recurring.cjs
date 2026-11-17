@@ -7,7 +7,7 @@
 // placeholder option has a value); (c) "After runs" with the count cleared;
 // (d) a refused delete (409) keeps the Confirm open with the server's reason, then a
 // retry deletes it; (e) an amount off the 0.01 step shows the browser's own text;
-// (f) a negative Lead Time and (g) a Day of month above 31 do likewise; (h) a constrained
+// (f) a negative lead time and (g) a Day of month above 31 do likewise; (h) a constrained
 // control with no data-field gets the form-level message and focus, never a popup.
 // Starts its own API and web app against a throwaway database (./_local_stack.cjs) and
 // seeds through the API. Not wired into CI and not part of `pnpm build`. Run steps: see
@@ -258,7 +258,7 @@ async function scenarioD(browser) {
   }
 }
 
-// (f) A negative Lead Time: the browser's min check runs, its text shown inline.
+// (f) A negative lead time: the browser's min check runs, its text shown inline.
 async function scenarioF(browser) {
   console.log('\n=== (f) lead time -1 (below min): the browser\'s message shown inline, nothing sent')
   const { ctx, page, native, log } = await openAllocations(browser)

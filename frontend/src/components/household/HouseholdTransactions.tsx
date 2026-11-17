@@ -67,7 +67,7 @@ function Row({
         <p className="text-xs text-muted">
           {formatDay(transactionDate(transaction))} · {TYPE_LABELS[transaction.transaction_type]}
           {accountName ? ` · ${accountName}` : ''}
-          {counterpart ? ` → ${counterpart}` : ''}
+          {counterpart ? ` to ${counterpart}` : ''}
           {status !== 'posted' ? ` · ${status === 'pending' ? 'Pending' : 'Planned'}` : ''}
         </p>
         <div className="flex flex-wrap items-center gap-2 text-xs text-body">

@@ -206,7 +206,7 @@ export function Dashboard() {
   const periodIncome = summaryRow?.total_income ?? 0
   const periodExpenses = summaryRow?.total_expenses ?? 0
   const periodNet = summaryRow?.net_flow ?? 0
-  const periodHeadingLabel = selectedPeriod === 'year' ? 'Year to Date' : selectedPeriod === 'month' ? 'Month to Date' : 'Week to Date'
+  const periodHeadingLabel = selectedPeriod === 'year' ? 'Year to date' : selectedPeriod === 'month' ? 'Month to date' : 'Week to date'
   const periodTag = selectedPeriod === 'year' ? 'YTD' : selectedPeriod === 'month' ? 'MTD' : 'WTD'
   // period_end is exclusive (the 1st of next month); step back a calendar day, immune to DST.
   const projectionEnd = (() => {
@@ -336,9 +336,9 @@ export function Dashboard() {
           <h3 className="text-lg font-semibold text-ink mb-2">Error Loading Data</h3>
           <p className="text-body mb-4">There was an issue loading your financial data.</p>
           <div className="text-sm text-muted space-y-1">
-            {snapshotQuery.isError && <p>• Balances and projection: {getErrorDetail(snapshotError) ?? 'Failed to load'}</p>}
-            {summaryQuery.isError && <p>• Period totals: {getErrorDetail(summaryError) ?? 'Failed to load'}</p>}
-            {allocationsQuery.isError && <p>• Budgets: {getErrorDetail(allocationsError) ?? 'Failed to load'}</p>}
+            {snapshotQuery.isError && <p>Balances and projection: {getErrorDetail(snapshotError) ?? 'Failed to load'}</p>}
+            {summaryQuery.isError && <p>Period totals: {getErrorDetail(summaryError) ?? 'Failed to load'}</p>}
+            {allocationsQuery.isError && <p>Budgets: {getErrorDetail(allocationsError) ?? 'Failed to load'}</p>}
           </div>
           <button
             type="button"
@@ -393,13 +393,13 @@ export function Dashboard() {
                 {`Actuals cover ${selectedPeriod === 'year' ? 'year to date' : selectedPeriod === 'month' ? 'month to date' : 'week to date'}; the projection runs from today to month end.`}
               </p>
             </div>
-            <span className="badge badge-info capitalize">{periodHeadingLabel}</span>
+            <span className="badge badge-info">{periodHeadingLabel}</span>
           </div>
         </div>
         <div className="p-4 sm:p-6 grid gap-6 lg:grid-cols-2">
           <div className="space-y-4">
-            <h3 className="text-xs font-semibold text-muted uppercase tracking-wide">
-              Actual Totals ({periodHeadingLabel})
+            <h3 className="text-xs font-semibold text-muted">
+              Actual totals ({periodHeadingLabel})
             </h3>
             <div aria-busy={totalsPending}>
               {totalsPending && <span role="status" className="sr-only">Loading actual totals</span>}
@@ -422,7 +422,7 @@ export function Dashboard() {
             </div>
             <div className="border-t border-line pt-3" aria-busy={snapshotPhase === 'pending'}>
               {snapshotPhase === 'pending' && <span role="status" className="sr-only">Loading net worth</span>}
-              <h4 className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">Today</h4>
+              <h4 className="text-xs font-semibold text-muted mb-2">Today</h4>
               <dl>
                 <div className="flex items-center justify-between">
                   <dt className="text-sm text-muted">Net worth</dt>
@@ -439,7 +439,7 @@ export function Dashboard() {
             </div>
           </div>
           <div className="space-y-4">
-            <h3 className="text-xs font-semibold text-muted uppercase tracking-wide">
+            <h3 className="text-xs font-semibold text-muted">
               Projected{projectionEnd ? ` to ${formatDateWithOrdinal(projectionEnd)}` : ''}
             </h3>
             <div aria-busy={snapshotPhase === 'pending'}>
@@ -474,7 +474,7 @@ export function Dashboard() {
             </p>
             {closings && (closings.by_account.length > 0 || closings.unassigned_closing !== 0) && (
               <div data-testid="account-closings">
-                <h4 className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">Closing balance by account</h4>
+                <h4 className="text-xs font-semibold text-muted mb-2">Closing balance by account</h4>
                 <dl className="space-y-2">
                   {closings.by_account.map((closing) => (
                     <div key={closing.account_id} className="flex items-center justify-between">
@@ -640,7 +640,7 @@ export function Dashboard() {
           )}
           {otherUpcoming.length > 0 && (
             <div className="border-t border-line p-4 sm:p-6 space-y-3" data-testid="other-upcoming">
-              <h3 className="text-xs font-semibold text-muted uppercase tracking-wide">Also coming up</h3>
+              <h3 className="text-xs font-semibold text-muted">Also coming up</h3>
               {otherUpcoming.slice(0, MAX_OTHER_UPCOMING_SHOWN).map((item, index) => {
                 // The face amount, never a limited event's `cash_delta` (0 for a Household bill).
                 const { amount, direction } = upcomingItemAmount(item)

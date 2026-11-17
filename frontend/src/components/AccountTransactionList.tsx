@@ -2,7 +2,6 @@ import {
   accountLeg,
   formatEntryDate,
   postingDay,
-  relativeEntryDay,
   transactionCategoryName,
   transactionDate,
   transactionDescription,
@@ -77,9 +76,7 @@ export function AccountTransactionRow({ row, accountId, accountCurrency, account
     >
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0 space-y-2">
-          <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted">
-            <span>{relativeEntryDay(date, today)}</span>
-            <span className="hidden md:inline">•</span>
+          <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-muted">
             <span>{formatEntryDate(date)}</span>
           </div>
           <p className="text-base font-semibold text-ink">{description}</p>
