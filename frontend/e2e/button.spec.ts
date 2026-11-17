@@ -12,22 +12,28 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
 import type { Locator, Page, Request } from '@playwright/test'
-import type { Account } from '@tally-trace/shared'
-import { apiRoute, mockApi } from './support/mockApi'
+import type { Account, Category, QuickBalances, Tag, WishlistItem } from '@tally-trace/shared'
+import { addRoutes, apiRoute, mockApi } from './support/mockApi'
 import type { ApiMock, ApiRoute } from './support/mockApi'
 import { shot } from './support/shot'
 import {
+  accountSharesRoute,
   createAccountRoute,
   createdAccount,
   household,
   householdCreateRoutes,
   householdDialogRoutes,
+  householdRoutes,
   householdSaveRoutes,
   householdWishlist,
   householdWishlistRoutes,
   installmentReviewRoutes,
   mockHousehold,
   newAccountInput,
+  savedAllocation,
+  savedEntry,
+  savedTransaction,
+  sharedWithMatch,
   withInstallmentReview,
 } from './support/fixtures/household'
 import type { HouseholdData } from './support/fixtures/household'
@@ -148,6 +154,17 @@ interface Surface {
    * arguments and result) rather than the form's validation.
    */
   fill?: Record<string, (page: Page) => Promise<void>>
+  /** For a seeded save that adds or changes a list row: what the lists read once it lands, and that row. */
+  saved?: Record<string, Saved>
+}
+
+/**
+ * A save's resulting row. `routes` replace the list reads just before the click, so the refetch the save triggers
+ * returns the saved record; `row` finds the rows it shows, and AC6 compares their text with the base's.
+ */
+interface Saved {
+  routes: ApiRoute[]
+  row: (page: Page) => Locator
 }
 
 /** Picks an account in a form's account picker, opening the folded field first when it is folded. */
@@ -199,6 +216,78 @@ const fillShare = async (page: Page): Promise<void> => {
 }
 const fillHouseholdShare = async (page: Page): Promise<void> => {
   await page.getByTestId('household-share-email').fill('lia@example.com')
+}
+
+const fillAccount = async (page: Page): Promise<void> => {
+  await dialogOf(page).getByPlaceholder('Enter account name').fill(newAccountInput.name)
+}
+
+/** The rows (list items, table rows and cards) that show `text`. */
+const rowsWith = (page: Page, text: string): Locator => page.locator('li, tr, article').filter({ hasText: text })
+
+const accountNamed = (name: string): Account => {
+  const account = household.accounts.find((a) => a.name === name)
+  if (!account) throw new Error(`the fixture has no ${name}`)
+  return account
+}
+const PAYROLL = accountNamed('BPI Payroll')
+const CARD = accountNamed('HSBC Red Mastercard')
+const DINING_OUT = household.categories.find((c) => c.name === 'Dining out')?.id ?? 0
+/** The category Settings lists first, whose Edit opens the category Update, and the tag whose Edit opens the tag Update. */
+const FIRST_CATEGORY = household.categories[0]
+const TRIP_TAG = 'Japan trip'
+/** The name every seeded category, tag and allocation save sends. */
+const SAVED_NAME = 'Pet care'
+
+/** What the seeded saves leave in their lists: each list re-read with the saved record, and that record's row. */
+const savedRow = (data: HouseholdData, text: string): Saved => ({ routes: householdRoutes(data), row: (p) => rowsWith(p, text) })
+const SAVED_TRANSACTION = savedRow({ ...household, transactions: [savedTransaction(household, 990, 'Button check', 120, PAYROLL.id), ...household.transactions] }, 'Button check')
+const SAVED_INSTALLMENT = savedRow(
+  { ...household, transactions: [savedTransaction(household, 991, 'Button check laptop', 2000, CARD.id), ...household.transactions] },
+  'Button check laptop',
+)
+const SAVED_ENTRY = savedRow({ ...household, entries: [...household.entries, savedEntry(household, 990, 'Water delivery', 350, PAYROLL.id)] }, 'Water delivery')
+const SAVED_ALLOCATION = savedRow(
+  {
+    ...household,
+    allocations: [
+      ...household.allocations,
+      savedAllocation({
+        id: 69,
+        name: SAVED_NAME,
+        allocation_type: 'budget',
+        account_id: PAYROLL.id,
+        current_amount: 0,
+        target_amount: 3000,
+        period_frequency: 'monthly',
+        period_start: '2026-03-01',
+        period_end: '2026-04-01',
+        configuration: { category_ids: [DINING_OUT] },
+      }),
+    ],
+  },
+  SAVED_NAME,
+)
+const newCategory: Category = { id: 90, name: SAVED_NAME, description: '', color: '#2563eb', is_expense: true, kind: 'expense', is_active: true, created_at: `${household.today}T09:00:00Z` }
+const SAVED_CATEGORY = savedRow({ ...household, categories: [...household.categories, newCategory] }, SAVED_NAME)
+const UPDATED_CATEGORY = savedRow({ ...household, categories: household.categories.map((c) => (c.id === FIRST_CATEGORY.id ? { ...c, name: SAVED_NAME } : c)) }, SAVED_NAME)
+const newTag: Tag = { id: 90, name: SAVED_NAME, color: '#2563eb', is_system: false, created_at: `${household.today}T09:00:00Z` }
+const SAVED_TAG = savedRow({ ...household, tags: [...household.tags, newTag] }, SAVED_NAME)
+const UPDATED_TAG = savedRow({ ...household, tags: household.tags.map((t) => (t.name === TRIP_TAG ? { ...t, name: SAVED_NAME } : t)) }, SAVED_NAME)
+/** The account AC6's Create Account saves: only the name is filled, so the rest is the form's defaults. */
+const formAccount = createdAccount(household, 91, { name: newAccountInput.name, account_type: 'checking', balance: 0, description: '', currency: 'PHP', is_spending_wallet: false, is_active: true, tag_ids: [] })
+const SAVED_ACCOUNT = savedRow({ ...household, accounts: [...household.accounts, formAccount] }, newAccountInput.name)
+const newWish: WishlistItem = { id: 803, user_id: household.user.id, name: 'Standing desk', estimated_cost: 12000, currency: 'PHP', priority: 'medium', is_purchased: false, created_at: `${household.today}T09:00:00Z` }
+const SAVED_WISH: Saved = { routes: householdWishlistRoutes([...householdWishlist, newWish]), row: (p) => rowsWith(p, newWish.name) }
+const SAVED_SHARE: Saved = { routes: [accountSharesRoute(household, PAYROLL, [sharedWithMatch(household, PAYROLL)])], row: (p) => rowsWith(p, 'Lia M.') }
+
+/** Quick balances Mara pinned in reverse order, so the editor offers Reset to defaults. */
+const PINNED_BALANCES: QuickBalances = { ...household.quickBalances, pinned: true, tiles: [...household.quickBalances.tiles].reverse() }
+const PINNED = { ...household, quickBalances: PINNED_BALANCES }
+/** Reset to defaults saves no pins: the dashboard reads the default tiles again. */
+const RESET_BALANCES: Saved = {
+  routes: [apiRoute<QuickBalances>('PUT', '/dashboard/quick-balances', household.quickBalances), apiRoute<QuickBalances>('GET', '/dashboard/quick-balances', household.quickBalances)],
+  row: (p) => p.getByTestId('quick-balance-tile'),
 }
 
 /** The categories Settings lists, each with Edit and Delete. */
@@ -285,6 +374,19 @@ const STATES: Surface[] = [
     },
     migrated: ['Cancel', 'Save', ...QUICK_BALANCES.flatMap((name) => [`Move ${name} earlier`, `Move ${name} later`, `Remove ${name}`]), '+ Add account'],
   },
+  {
+    key: 'quick-balances-editor-pinned',
+    dialog: false,
+    open: async (p) => {
+      const api = await openPage(p, '/', 'Dashboard', [], PINNED)
+      await p.getByTestId('quick-balances-edit').click()
+      await expect(p.getByTestId('quick-balances-reset')).toBeVisible()
+      await settle(p)
+      return api
+    },
+    migrated: ['Reset to defaults', 'Cancel', 'Save', ...PINNED_BALANCES.tiles.flatMap(({ name }) => [`Move ${name} earlier`, `Move ${name} later`, `Remove ${name}`]), '+ Add account'],
+    saved: { 'Reset to defaults': RESET_BALANCES },
+  },
 ]
 
 const DIALOGS: Surface[] = [
@@ -294,6 +396,7 @@ const DIALOGS: Surface[] = [
     open: (p) => openDialog(p, '/transactions', 'Transactions', (q) => q.getByRole('button', { name: 'Add Transaction', exact: true }).first(), 'Create Transaction'),
     migrated: ['Create Transaction', 'Save and add another', 'Cancel'],
     fill: { 'Create Transaction': fillTransaction, 'Save and add another': fillTransaction },
+    saved: { 'Create Transaction': SAVED_TRANSACTION, 'Save and add another': SAVED_TRANSACTION },
   },
   {
     key: 'transaction-create-installment',
@@ -309,6 +412,7 @@ const DIALOGS: Surface[] = [
     },
     migrated: ['Change', 'Create Transaction', 'Save and add another', 'Cancel'],
     fill: { 'Create Transaction': fillInstallment, 'Save and add another': fillInstallment },
+    saved: { 'Create Transaction': SAVED_INSTALLMENT, 'Save and add another': SAVED_INSTALLMENT },
   },
   {
     key: 'transaction-actions',
@@ -358,6 +462,7 @@ const DIALOGS: Surface[] = [
     open: (p) => openDialog(p, '/allocations', 'Allocations', (q) => q.getByRole('button', { name: 'Add Recurring Entry', exact: true }), 'Add Recurring Entry'),
     migrated: ['Save Recurring Entry', 'Cancel'],
     fill: { 'Save Recurring Entry': fillRecurring },
+    saved: { 'Save Recurring Entry': SAVED_ENTRY },
   },
   {
     key: 'recurring-charged',
@@ -368,8 +473,10 @@ const DIALOGS: Surface[] = [
   {
     key: 'account-create',
     dialog: true,
-    open: (p) => openDialog(p, '/accounts', 'Accounts', (q) => q.getByRole('button', { name: 'Add Account', exact: true }), 'Create Account'),
+    open: (p) => openDialog(p, '/accounts', 'Accounts', (q) => q.getByRole('button', { name: 'Add Account', exact: true }), 'Create Account', [createAccountRoute([formAccount])]),
     migrated: ['Create Account', 'Cancel'],
+    fill: { 'Create Account': fillAccount },
+    saved: { 'Create Account': SAVED_ACCOUNT },
   },
   {
     key: 'account-actions',
@@ -406,6 +513,7 @@ const DIALOGS: Surface[] = [
       return api
     },
     migrated: ['Remove', 'Look up', 'Share with Lia M.'],
+    saved: { 'Share with Lia M.': SAVED_SHARE },
   },
   {
     key: 'installment-review',
@@ -426,6 +534,15 @@ const DIALOGS: Surface[] = [
     open: (p) => openDialog(p, '/settings', 'Settings', (q) => q.getByRole('button', { name: 'Add category', exact: true }), 'Add category'),
     migrated: ['Create', 'Cancel'],
     fill: { Create: fillName },
+    saved: { Create: SAVED_CATEGORY },
+  },
+  {
+    key: 'settings-category-edit',
+    dialog: true,
+    open: (p) => openDialog(p, '/settings', 'Settings', (q) => rowsWith(q, FIRST_CATEGORY.name).getByRole('button', { name: 'Edit', exact: true }).first(), 'Edit category'),
+    migrated: ['Update', 'Cancel'],
+    fill: { Update: fillName },
+    saved: { Update: UPDATED_CATEGORY },
   },
   {
     key: 'settings-tag',
@@ -433,6 +550,15 @@ const DIALOGS: Surface[] = [
     open: (p) => openDialog(p, '/settings', 'Settings', (q) => q.getByRole('button', { name: 'Add tag', exact: true }), 'Add tag'),
     migrated: ['Create', 'Cancel'],
     fill: { Create: fillName },
+    saved: { Create: SAVED_TAG },
+  },
+  {
+    key: 'settings-tag-edit',
+    dialog: true,
+    open: (p) => openDialog(p, '/settings', 'Settings', (q) => q.getByRole('button', { name: `Edit tag ${TRIP_TAG}`, exact: true }), 'Edit tag'),
+    migrated: ['Update', 'Cancel'],
+    fill: { Update: fillName },
+    saved: { Update: UPDATED_TAG },
   },
   {
     key: 'wishlist-item',
@@ -440,6 +566,7 @@ const DIALOGS: Surface[] = [
     open: (p) => openDialog(p, '/allocations?tab=wishlist', 'Allocations', (q) => q.getByRole('button', { name: 'Add item', exact: true }), 'Add item'),
     migrated: ['Add', 'Cancel'],
     fill: { Add: fillWishlist },
+    saved: { Add: SAVED_WISH },
   },
   {
     key: 'allocation-create',
@@ -447,6 +574,7 @@ const DIALOGS: Surface[] = [
     open: (p) => openDialog(p, '/allocations?tab=budgets', 'Allocations', (q) => q.getByRole('button', { name: 'Add Allocation', exact: true }), 'Create Budget Envelope'),
     migrated: ['Create Budget Envelope', 'Cancel'],
     fill: { 'Create Budget Envelope': fillAllocation },
+    saved: { 'Create Budget Envelope': SAVED_ALLOCATION },
   },
   {
     key: 'allocation-actions',
@@ -515,10 +643,12 @@ interface Effect {
   buttons: string[]
   /** The top dialog's fields after the click, as `type:value` (`type:true` for a ticked box): a reset form reads empty. */
   fields: string[]
+  /** The text of each row a seeded save produced or changed (`Saved.row`), innermost first match only. */
+  rows: string[]
 }
 
 /** The visible screen after a click: the URL, the open dialogs, the headings, every button and link, and the form. */
-async function screenOf(page: Page): Promise<Omit<Effect, 'requests'>> {
+async function screenOf(page: Page, row?: Locator): Promise<Omit<Effect, 'requests'>> {
   const url = new URL(page.url())
   // evaluateAll reads whatever is open now and never waits, so a dialog that closes while it is read gives [].
   const fields = await page.locator(DIALOG).evaluateAll((roots) =>
@@ -531,8 +661,17 @@ async function screenOf(page: Page): Promise<Omit<Effect, 'requests'>> {
             return el.type === 'checkbox' || el.type === 'radio' ? `${el.type}:${el.checked}` : `${el.type}:${el.value}`
           }),
   )
+  // A row nested in another matching row counts once, as the innermost.
+  const rows = row
+    ? await row.evaluateAll((els) =>
+        els
+          .filter((e) => (e as HTMLElement).offsetParent !== null && !els.some((o) => o !== e && e.contains(o)))
+          .map((e) => (e.textContent ?? '').replace(/\s+/g, ' ').trim()),
+      )
+    : []
   return {
     fields,
+    rows,
     url: `${url.pathname}${url.search}`,
     dialogs: await page.locator(DIALOG).count(),
     headings: await page
@@ -546,7 +685,7 @@ async function screenOf(page: Page): Promise<Omit<Effect, 'requests'>> {
 const QUIET_MS = 500
 const QUIET_TRIES = 20
 
-async function effectOf(page: Page, target: Locator): Promise<Effect> {
+async function effectOf(page: Page, target: Locator, row?: Locator): Promise<Effect> {
   const seen: string[] = []
   const onRequest = (r: Request): void => {
     const url = new URL(r.url())
@@ -557,12 +696,12 @@ async function effectOf(page: Page, target: Locator): Promise<Effect> {
   await target.click()
   // A save refetches what it invalidates after it lands, and a dialog fills in after its lookups: read the effect
   // only once neither the requests nor the screen have changed for QUIET_MS.
-  let screen = await screenOf(page)
+  let screen = await screenOf(page, row)
   for (let i = 0; i < QUIET_TRIES; i += 1) {
     const count = seen.length
     await settle(page)
     await page.waitForTimeout(QUIET_MS)
-    const next = await screenOf(page)
+    const next = await screenOf(page, row)
     const still = seen.length === count && JSON.stringify(next) === JSON.stringify(screen)
     screen = next
     if (still) break
@@ -889,10 +1028,12 @@ test.describe('AC6: button migration preserves surrounding behavior and layout',
         await s.open(page)
         const seed = s.fill?.[c.name]
         if (seed) await seed(page)
+        const saved = s.saved?.[c.name]
+        if (saved) await addRoutes(page, saved.routes)
         const target = await controlAt(scopeOf(page, s), c.name, c.nth)
         const project = testInfo.project.name
         const enabled = await target.isEnabled()
-        const effect = enabled ? await effectOf(page, target) : null
+        const effect = enabled ? await effectOf(page, target, saved?.row(page)) : null
         await viewportShot(page, `effect-${c.key.replace(/[^a-z0-9]+/gi, '-')}`)
         if (RECORD) {
           record(project, (b) => {

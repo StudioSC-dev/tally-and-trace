@@ -1440,21 +1440,32 @@ export const householdDialogRoutes = (data: HouseholdData): ApiRoute[] => [
 /** The person the share dialog's lookup finds. */
 export const SHARE_MATCH: UserMatch = { id: 3, display_name: 'Lia M.' }
 
+/** The share `POST /accounts/{id}/shares` answers for Lia, the person the lookup finds. */
+export const sharedWithMatch = (data: HouseholdData, account: Account): AccountShare => ({
+  id: 400 + account.id,
+  account_id: account.id,
+  user_id: SHARE_MATCH.id,
+  display_name: SHARE_MATCH.display_name,
+  role: 'viewer',
+  created_at: `${data.today}T09:00:00Z`,
+})
+
+/** `GET /accounts/{id}/shares`: Jun can edit, so the share dialog lists a person it can remove, then any `added`. */
+export const accountSharesRoute = (data: HouseholdData, account: Account, added: AccountShare[] = []): ApiRoute =>
+  apiRoute<AccountShares>('GET', `/accounts/${account.id}/shares`, {
+    account_id: account.id,
+    owner: { user_id: data.user.id, display_name: `${data.user.first_name} ${data.user.last_name}`, role: 'owner' },
+    shares: [{ id: 300 + account.id, account_id: account.id, user_id: 2, display_name: 'Jun R.', role: 'editor', created_at: '2026-02-01T09:00:00Z' }, ...added],
+  })
+
 export const householdSaveRoutes = (data: HouseholdData): ApiRoute[] => [
   ...data.transactions.filter((t) => t.view !== 'limited').map((t) => apiRoute<Transaction>('PUT', `/transactions/${t.id}`, t)),
   ...data.accounts.flatMap((a) => [
     apiRoute<Account>('GET', `/accounts/${a.id}`, a),
     apiRoute<Account>('PUT', `/accounts/${a.id}`, a),
-    apiRoute<AccountShares>('GET', `/accounts/${a.id}/shares`, {
-      account_id: a.id,
-      owner: { user_id: data.user.id, display_name: `${data.user.first_name} ${data.user.last_name}`, role: 'owner' },
-      // Jun can edit, so the share dialog lists a person it can remove.
-      shares: [{ id: 300 + a.id, account_id: a.id, user_id: 2, display_name: 'Jun R.', role: 'editor', created_at: '2026-02-01T09:00:00Z' }],
-    }),
+    accountSharesRoute(data, a),
   ]),
-  ...data.accounts.map((a) =>
-    apiRoute<AccountShare>('POST', `/accounts/${a.id}/shares`, { id: 400 + a.id, account_id: a.id, user_id: SHARE_MATCH.id, display_name: SHARE_MATCH.display_name, role: 'viewer', created_at: `${data.today}T09:00:00Z` }, 201),
-  ),
+  ...data.accounts.map((a) => apiRoute<AccountShare>('POST', `/accounts/${a.id}/shares`, sharedWithMatch(data, a), 201)),
   // The share dialog's lookup finds one person by exact email.
   queryRoute<UserMatch>('GET', '/users/lookup', (q) => {
     only(q, ['email'])
@@ -1466,6 +1477,9 @@ export const householdSaveRoutes = (data: HouseholdData): ApiRoute[] => [
   apiRoute<RepeatingCreated>('POST', '/transactions/repeating', { transaction: tx(data.today, 'New installment', 2000, card, 0), entry: entry('New installment', 'expense', 2000, data.today, card) }, 201),
   apiRoute<Category>('POST', '/categories/', { id: 90, name: 'New category', is_expense: true, kind: 'expense', is_active: true, created_at: `${data.today}T09:00:00Z` }, 201),
   apiRoute<Tag>('POST', '/tags/', { id: 90, name: 'New tag', color: '#5B7553', is_system: false, created_at: `${data.today}T09:00:00Z` }, 201),
+  // Settings' category and tag Update.
+  ...data.categories.map((c) => apiRoute<Category>('PUT', `/categories/${c.id}`, c)),
+  ...data.tags.map((t) => apiRoute<Tag>('PUT', `/tags/${t.id}`, t)),
   // Settings' two exports; the browser saves whatever comes back.
   apiRoute<Record<string, never>>('GET', '/data/export.json', {}),
   apiRoute<Record<string, never>>('GET', '/data/export.csv', {}),
@@ -1549,3 +1563,19 @@ export const installmentReviewRoutes = (): ApiRoute[] => [
     outcomes: [{ occurrence_date: '2026-02-20', outcome: 'recorded' }],
   }),
 ]
+
+/**
+ * Records as the lists return them once a save has landed, for the button spec, which reads the row a save
+ * produced: a debit on `accountId` dated today, a monthly expense due today, and an allocation.
+ */
+export const savedTransaction = (data: HouseholdData, id: number, description: string, amount: number, accountId: number): Transaction => {
+  const account = data.accounts.find((a) => a.id === accountId)
+  if (!account) throw new Error(`no account ${accountId}`)
+  return tx(data.today, description, amount, account, 0, 'debit', { id, category_id: undefined })
+}
+export const savedEntry = (data: HouseholdData, id: number, name: string, amount: number, accountId: number): BudgetEntry => {
+  const account = data.accounts.find((a) => a.id === accountId)
+  if (!account) throw new Error(`no account ${accountId}`)
+  return entry(name, 'expense', amount, data.today, account, { id })
+}
+export const savedAllocation = alloc
