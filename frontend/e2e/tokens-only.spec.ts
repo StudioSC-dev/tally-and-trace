@@ -19,7 +19,7 @@ import {
 } from './support/fixtures/household'
 import type { HouseholdData } from './support/fixtures/household'
 import { shot } from './support/shot'
-import type { Category, Tag } from '@tally-trace/shared'
+import type { Account, Category, PaginatedResponse, Tag, Transaction, TransactionSummary } from '@tally-trace/shared'
 
 // This spec lives in <repo>/frontend/e2e.
 const FRONTEND = fileURLToPath(new URL('..', import.meta.url))
@@ -119,8 +119,8 @@ const isWrite = (request: string): boolean => !request.startsWith('GET ')
 /** The only files that may hold a colour literal: the token definitions and the palette module. */
 const COLOUR_ALLOW = ['src/assets/index.css', 'src/utils/palette.ts']
 const RAW_HEX = /#[0-9a-fA-F]{3,8}\b/g
-// `rgb(var(--token))` reads a token; any other rgb( or rgba( is a raw colour.
-const RAW_RGB = /\brgba?\((?!\s*var\()/g
+// Any rgb( or rgba( outside the allow-list; components read tokens through the palette module's helpers.
+const RAW_RGB = /\brgba?\(/g
 const RAW_CLASS = /\b(?:bg|border|text)-(?:black|white)\b/g
 
 test.describe('tokens-only sweep (STU-691)', () => {
@@ -129,7 +129,7 @@ test.describe('tokens-only sweep (STU-691)', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible()
     // The scan is not vacuous: each pattern finds a sample it must reject.
     expect('color: #7c3aed; fill: rgba(0, 0, 0, .5)'.match(RAW_HEX)).toHaveLength(1)
-    expect('fill: rgba(0, 0, 0, .5); rgb(0 0 0)'.match(RAW_RGB)).toHaveLength(2)
+    expect('fill: rgba(0, 0, 0, .5); rgb(var(--ink))'.match(RAW_RGB)).toHaveLength(2)
     expect('bg-black/60 border-black/10 text-white'.match(RAW_CLASS)).toHaveLength(3)
     expect(sourceFiles().length).toBeGreaterThan(50)
     expect(COLOUR_ALLOW.every((f) => fs.existsSync(path.join(FRONTEND, f)))).toBe(true)
@@ -176,13 +176,13 @@ test.describe('tokens-only sweep (STU-691)', () => {
   const PX_ALLOW: { file: string; token: string; reason: string }[] = []
   const ARBITRARY_PX = /-\[\d+px\]/g
   const SCOPED = ['w-[59px]', 'h-[38px]', 'h-[150px]', 'min-h-[126px]', 'pl-[18px]']
-  /** Each scoped class, where it was, what replaces it, and the size the replacement resolves to. */
+  /** Each scoped class, where it was, and what replaces it. */
   const REPLACED = [
-    { was: 'w-[59px]', file: 'src/components/CardCreditPanel.tsx', now: 'w-14', prop: 'width', px: 56 },
-    { was: 'h-[38px]', file: 'src/components/CardCreditPanel.tsx', now: 'h-10', prop: 'height', px: 40 },
-    { was: 'h-[150px]', file: 'src/components/CashflowTimelineCard.tsx', now: 'h-36', prop: 'height', px: 144 },
-    { was: 'min-h-[126px]', file: 'src/components/CardCreditPanel.tsx', now: 'min-h-32', prop: 'min-height', px: 128 },
-    { was: 'pl-[18px]', file: 'src/components/SpendingBreakdownDialog.tsx', now: 'pl-5', prop: 'padding-left', px: 20 },
+    { was: 'w-[59px]', file: 'src/components/CardCreditPanel.tsx', now: 'w-14' },
+    { was: 'h-[38px]', file: 'src/components/CardCreditPanel.tsx', now: 'h-10' },
+    { was: 'h-[150px]', file: 'src/components/CashflowTimelineCard.tsx', now: 'h-36' },
+    { was: 'min-h-[126px]', file: 'src/components/CardCreditPanel.tsx', now: 'min-h-32' },
+    { was: 'pl-[18px]', file: 'src/components/SpendingBreakdownDialog.tsx', now: 'pl-5' },
   ]
 
   test('no arbitrary pixel sizes', async ({ page }) => {
@@ -196,26 +196,77 @@ test.describe('tokens-only sweep (STU-691)', () => {
     await shot(page, 'no-arbitrary-px')
   })
 
+  /** Leaves requests to `pattern` unanswered, so the page stays on its loading skeleton. It wins over the mock. */
+  const hold = async (page: Page, pattern: RegExp): Promise<void> => {
+    await page.route(pattern, () => undefined)
+  }
+
+  /** The real element for each scoped class: the skeleton on its page, or the line in the open dialog. */
+  const measured = async (page: Page, now: string): Promise<{ box: { width: number; height: number }; px: Record<string, number> }> => {
+    let el: Locator
+    if (now === 'w-14' || now === 'h-10' || now === 'min-h-32') {
+      await mockHousehold(page)
+      const card = household.accounts.find((a) => a.account_type === 'credit')
+      if (!card) throw new Error('the fixture has no credit card')
+      await mockApi(page, [], {
+        allow: [
+          apiRoute<Account>('GET', `/accounts/${card.id}`, card),
+          apiRoute<PaginatedResponse<Transaction>>('GET', '/transactions/', { items: [], total: 0, has_more: false }),
+        ],
+      })
+      await hold(page, /\/api\/v1\/cards\/\d+\/credit/)
+      await page.goto(`/accounts/${card.id}`)
+      const panel = page.locator('[data-testid="card-credit-panel-loading"]')
+      await expect(panel).toBeVisible()
+      el = now === 'min-h-32' ? panel.locator('.min-h-32') : panel.locator('.h-10.w-14')
+    } else if (now === 'h-36') {
+      await mockHousehold(page)
+      await hold(page, /\/api\/v1\/forecast\/timeline/)
+      await page.goto('/')
+      el = page.locator('[data-testid="timeline-pending"] .h-36')
+    } else {
+      // A computed row ("Transfer fees") has no category to filter by, so its line carries the padding.
+      await mockHousehold(page)
+      await mockApi(page, [], {
+        allow: [
+          apiRoute<TransactionSummary>('GET', '/transactions/summary/period', {
+            ...household.summary,
+            by_currency: household.summary.by_currency.map((row) => ({
+              ...row,
+              category_breakdown: { ...row.category_breakdown, 'Transfer fees': { income: 0, expenses: 120 } },
+            })),
+          }),
+        ],
+      })
+      await page.goto('/transactions')
+      await page.getByRole('button', { name: 'Spending breakdown' }).click()
+      el = page.getByText("Can't filter the list by this.").first()
+    }
+    await expect(el).toBeVisible()
+    const box = await el.boundingBox()
+    const px = await el.evaluate((e) => {
+      const c = getComputedStyle(e)
+      return { width: parseFloat(c.width), height: parseFloat(c.height), 'min-height': parseFloat(c.minHeight), 'padding-left': parseFloat(c.paddingLeft) }
+    })
+    return { box: { width: box?.width ?? NaN, height: box?.height ?? NaN }, px }
+  }
+
+  const EXPECT: Record<string, { measure: (m: Awaited<ReturnType<typeof measured>>) => number; px: number }> = {
+    'w-14': { measure: (m) => m.box.width, px: 56 },
+    'h-10': { measure: (m) => m.box.height, px: 40 },
+    'h-36': { measure: (m) => m.box.height, px: 144 },
+    'min-h-32': { measure: (m) => m.px['min-height'] ?? NaN, px: 128 },
+    'pl-5': { measure: (m) => m.px['padding-left'] ?? NaN, px: 20 },
+  }
+
   for (const r of REPLACED) {
     test(`no arbitrary pixel sizes: ${r.was} becomes ${r.now}`, async ({ page }) => {
-      await open(page, '/')
-      await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible()
       expect(read(r.file)).not.toContain(r.was)
       expect(read(r.file)).toContain(r.now)
-      // A probe element carrying the replacement class resolves to a size on the 4px grid.
-      const px = await page.evaluate(
-        ({ cls, prop }) => {
-          const el = document.createElement('div')
-          el.className = cls
-          document.getElementById('root')?.appendChild(el)
-          const value = parseFloat(getComputedStyle(el).getPropertyValue(prop))
-          el.remove()
-          return value
-        },
-        { cls: r.now, prop: r.prop },
-      )
-      expect(px).toBe(r.px)
-      expect(px % 4).toBe(0)
+      const m = await measured(page, r.now)
+      const want = EXPECT[r.now]
+      expect(want?.measure(m)).toBe(want?.px)
+      expect((want?.px ?? 1) % 4).toBe(0)
       await shot(page, `px-${r.now}`)
     })
   }
@@ -235,9 +286,9 @@ test.describe('tokens-only sweep (STU-691)', () => {
       await viewportShot(page, `swatches-${theme}`)
     })
 
-    // Categories without a saved colour: the slices are the chart tokens, in order.
+    // Categories with saved colours (a legacy swatch and a custom one) still draw the chart tokens, in order.
     test(`swatches and charts come from tokens: chart slices, ${theme}`, async ({ page }) => {
-      await open(page, '/transactions')
+      await open(page, '/transactions', colouredHousehold)
       await setTheme(page, theme)
       await page.getByRole('button', { name: 'Spending breakdown' }).click()
       const slices = page.locator('svg[aria-label="Spending by category"] circle')
@@ -246,11 +297,12 @@ test.describe('tokens-only sweep (STU-691)', () => {
       const muted = rgbOf(await token(page, 'muted'))
       const count = await slices.count()
       expect(count).toBeGreaterThan(1)
-      expect(await style(slices.first(), 'stroke')).toBe(chart[0])
-      expect(await style(slices.nth(1), 'stroke')).toBe(chart[1])
       for (let i = 0; i < count; i++) {
-        expect.soft([...chart, muted], `slice ${i}`).toContain(await style(slices.nth(i), 'stroke'))
+        // A slice that filters the list takes the next chart token; one that cannot is drawn neutral.
+        const drillable = (await slices.nth(i).getAttribute('class'))?.includes('cursor-pointer') === true
+        expect.soft(await style(slices.nth(i), 'stroke'), `slice ${i}`).toBe(drillable ? chart[i % chart.length] : muted)
       }
+      expect(await style(slices.first(), 'stroke')).toBe(chart[0])
       await viewportShot(page, `chart-${theme}`)
     })
   }
