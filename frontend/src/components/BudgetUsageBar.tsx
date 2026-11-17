@@ -1,15 +1,9 @@
+import { budgetFillClass } from '../utils/budgetFill'
+
 interface Props {
   /** What the envelope has spent, and its limit (above zero), in the same currency. */
   spent: number
   limit: number
-}
-
-/** The fill's colour: muted below 80% of the limit, warn up to and including it, danger only above it. */
-function budgetFillClass(spent: number, limit: number): string {
-  if (spent > limit) return 'bg-danger'
-  // Compared as integers of the limit (spent >= 80% of limit) so 80% exactly is never lost to float rounding.
-  if (spent * 5 >= limit * 4) return 'bg-warn'
-  return 'bg-muted'
 }
 
 /**
