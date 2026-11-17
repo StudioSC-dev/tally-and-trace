@@ -39,7 +39,7 @@ export function Navigation() {
   // so the base holds only layout; the state classes live in the active/inactive
   // props so an active link never carries the inactive colours as well.
   const navLinkBase = "inline-flex items-center border-b-2 px-3 py-2 text-sm transition-colors duration-200"
-  const navLinkInactive = "border-transparent text-body hover:border-line"
+  const navLinkInactive = "border-transparent text-body"
   const navLinkActive = "border-ink text-ink"
 
   return (

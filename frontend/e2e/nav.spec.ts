@@ -146,6 +146,14 @@ for (const d of DESTINATIONS) {
     // The wordmark links home too, so the router marks it current on the dashboard; it is not a page link.
     expect(rules.filter((r) => r.current === 'page' && !r.name.endsWith('Tally & Trace')).map((r) => r.name), 'no other page link is current').toEqual([])
     await viewportShot(page, `active-${d.marker}`)
+    // Hovering an inactive link draws no rule either (Forecast is never one of the four destinations).
+    const forecast = bar.getByRole('link', { name: 'Forecast', exact: true })
+    await forecast.hover()
+    await page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a instanceof CSSTransition).map((a) => a.finished)))
+    expect(await forecast.evaluate((e) => e.matches(':hover')), 'the pointer is on the Forecast link').toBe(true)
+    expect(await ruleOf(forecast), 'a hovered inactive link has no bottom rule').toBe('none')
+    expect(await css(forecast, 'box-shadow'), 'a hovered inactive link has no shadow rule').toBe('none')
+    await viewportShot(page, `active-${d.marker}-hover`)
   })
 }
 
