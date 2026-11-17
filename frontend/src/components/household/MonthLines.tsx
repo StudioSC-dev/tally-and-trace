@@ -46,7 +46,7 @@ export function MonthLines({ row }: { row: HouseholdMonthRow }) {
           data-testid="household-month-currency"
           data-currency={block.currency}
         >
-          <dt className="col-span-2 text-xs font-semibold uppercase tracking-wide text-muted sm:col-span-3">
+          <dt className="col-span-2 text-xs font-semibold text-muted sm:col-span-3">
             {block.currency}
           </dt>
           {LINES.filter(({ key }) => block[key] !== 0).map(({ key, label }) => (

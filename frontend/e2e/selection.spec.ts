@@ -143,7 +143,7 @@ async function openTransactionDialog(page: Page): Promise<ApiMock> {
 
 /** Picks an account in the transaction dialog's compact account field, which then folds to one line. */
 async function pickAccount(page: Page, name: string): Promise<void> {
-  await dialogOf(page).getByRole('group', { name: /^(From )?Account$/ }).getByRole('button', { name: new RegExp(`^${name}`) }).click()
+  await dialogOf(page).getByRole('group', { name: /^(From account|Account)$/ }).getByRole('button', { name: new RegExp(`^${name}`) }).click()
   await expect(dialogOf(page).locator('[data-field="account_id"] [data-picker-value]')).toContainText(name)
 }
 
@@ -468,12 +468,12 @@ const INVENTORY: Group[] = [
     group: (page) => dialogOf(page).getByRole('group', { name: 'Transaction type' }),
     selected: 'Expense',
     other: 'Transfer',
-    effect: 'Transfer adds the Destination Account field',
+    effect: 'Transfer adds the Destination account field',
     before: async (page) => {
       await expect(dialogOf(page).locator('#transaction-destination-label')).toHaveCount(0)
     },
     after: async (page) => {
-      await expect(dialogOf(page).locator('#transaction-destination-label')).toHaveText('Destination Account')
+      await expect(dialogOf(page).locator('#transaction-destination-label')).toHaveText('Destination account')
     },
   },
   {
@@ -506,18 +506,18 @@ const INVENTORY: Group[] = [
   {
     key: 'transaction-dialog-destination',
     route: '/transactions (Add Transaction, Transfer)',
-    what: 'Add Transaction: Destination Account rows (AccountPicker compact rows, Segment)',
+    what: 'Add Transaction: Destination account rows (AccountPicker compact rows, Segment)',
     kind: 'pressed',
     dialog: true,
     open: async (page) => {
       const api = await openTransactionDialog(page)
       await dialogOf(page).getByRole('group', { name: 'Transaction type' }).getByRole('button', { name: 'Transfer' }).click()
       await pickAccount(page, 'BPI Payroll')
-      await dialogOf(page).getByRole('group', { name: 'Destination Account', exact: true }).getByRole('button', { name: /^Metrobank Savings/ }).click()
+      await dialogOf(page).getByRole('group', { name: 'Destination account', exact: true }).getByRole('button', { name: /^Metrobank Savings/ }).click()
       await changeOf(page, 'transfer_to_account_id').click()
       return api
     },
-    group: (page) => dialogOf(page).getByRole('group', { name: 'Destination Account', exact: true }),
+    group: (page) => dialogOf(page).getByRole('group', { name: 'Destination account', exact: true }),
     items: (page) => dialogOf(page).locator('[data-field="transfer_to_account_id"] [data-picker-option]'),
     selected: /^Metrobank Savings/,
     other: /^GCash/,

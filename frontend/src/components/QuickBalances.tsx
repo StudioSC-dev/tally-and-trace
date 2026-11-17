@@ -16,7 +16,7 @@ function LineView({ line, headline }: { line: TileLine; headline: boolean }) {
   const size = line.secondary ? 'text-xs' : headline ? 'text-lg font-semibold' : 'text-sm'
   return (
     <p className={`${size} ${TONE[line.tone]} break-words`} data-testid={`quick-balance-${line.id}`}>
-      {line.label !== null && <span className="text-xs font-medium uppercase tracking-wide text-muted mr-1">{line.label}</span>}
+      {line.label !== null && <span className="text-xs font-medium text-muted mr-1">{line.label}</span>}
       {line.label !== null && ' '}
       {line.text}
     </p>
@@ -35,7 +35,7 @@ function Tile({ tile, defaultCurrency, noLimit }: { tile: QuickBalanceTile; defa
       className="group focus-ring flex min-h-11 items-start justify-between gap-4 py-3"
     >
       <div className="min-w-0 flex-1">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+        <p className="text-xs font-semibold text-muted">
           {tileGroupLabel(tile)}
           {tile.currency !== defaultCurrency && <span className="ml-2" data-testid="quick-balance-currency">{tile.currency}</span>}
         </p>
@@ -74,7 +74,7 @@ function AddGroups({ groups, onPick }: { groups: readonly PickerGroup[]; onPick:
     <>
       {groups.map((g) => (
         <div key={g.key} role="group" aria-label={g.label ?? undefined} data-testid="quick-balance-add-group" data-group={g.key} className="space-y-1">
-          {g.label !== null && <p className="text-xs font-semibold uppercase tracking-wide text-muted">{g.label}</p>}
+          {g.label !== null && <p className="text-xs font-semibold text-muted">{g.label}</p>}
           {g.options.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {g.options.map((o) => (
@@ -180,7 +180,7 @@ function PinEditor({ tiles, pinned, onDone }: { tiles: QuickBalanceTile[]; pinne
           return (
             <li key={id} data-testid="quick-balance-edit-row" data-account-id={id} className="flex items-center gap-2">
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted">{account ? tileGroupLabel(account) : ''}</p>
+                <p className="text-xs font-semibold text-muted">{account ? tileGroupLabel(account) : ''}</p>
                 <p className="text-sm font-medium text-ink truncate" data-testid="quick-balance-edit-name">{name}</p>
               </div>
               <button type="button" data-testid={`quick-balance-move-earlier-${id}`} aria-label={`Move ${name} earlier`} disabled={index === 0} onClick={() => move(index, 'earlier')} className={ICON_ACTION}>

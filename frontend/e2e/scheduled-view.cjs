@@ -221,8 +221,8 @@ async function farRows(browser) {
     [await page.getByRole('button', { name: 'View previous month' }).count(), await page.getByRole('button', { name: /Spending breakdown/ }).count()], [0, 0])
   const api1 = await get(u.token, `/transactions/scheduled?limit=100`)
   check('(a) the page lists what the API returns', rows.map((r) => r.day), api1.items.map((i) => i.day))
-  check('(a) the range reads tomorrow through a year ahead',
-    (await page.locator('p', { hasText: 'Date range:' }).textContent()).replace(/\s+/g, ' ').includes('→'), true)
+  check('(a) the range reads tomorrow to a year ahead',
+    (await page.locator('p', { hasText: 'Date range:' }).textContent()).replace(/\s+/g, ' ').includes(' to '), true)
   await page.locator('[data-testid="view-to-date"]').click()
   await page.locator(VIEW).waitFor({ state: 'detached' })
   check('(a) To date is back, with no view in the URL', [await pressed(page, 'to-date'), new URL(page.url()).searchParams.get('view')], ['true', null])

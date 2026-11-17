@@ -72,8 +72,8 @@ async function openRecurring(page: Page, data: HouseholdData = household): Promi
 }
 
 const amountOf = (rows: Locator): Locator => rows.locator('p.text-lg.font-bold')
-const expenseRows = (scope: Locator): Locator => scope.locator('article').filter({ hasText: /Expense/ })
-const incomeRows = (scope: Locator): Locator => scope.locator('article').filter({ hasText: /Income/ })
+const expenseRows = (scope: Locator): Locator => scope.locator('article').filter({ hasText: /[Ee]xpense/ })
+const incomeRows = (scope: Locator): Locator => scope.locator('article').filter({ hasText: /[Ii]ncome/ })
 
 /** A viewport screenshot (for overlays), saved under `shot()`'s naming. */
 async function viewportShot(page: Page, name: string): Promise<void> {
@@ -359,7 +359,7 @@ test.describe('amount classes', () => {
     const main = await openRecurring(page)
     const full = main.locator('article:not([data-row-kind="limited-entry"])')
     for (const [kind, cls] of [['Income', 'amount-in'], ['Expense', 'amount-out']] as const) {
-      const amounts = amountOf(full.filter({ hasText: new RegExp(`Recurring ${kind}`) }))
+      const amounts = amountOf(full.filter({ hasText: new RegExp(`Recurring ${kind.toLowerCase()}`) }))
       const count = await amounts.count()
       expect(count, `the full renderer lists recurring ${kind} entries`).toBeGreaterThan(0)
       expect(await semanticOf(amounts), `every full recurring ${kind} amount`).toEqual(same(count, cls))
@@ -376,10 +376,10 @@ test.describe('amount classes', () => {
     await expect(limited.first()).toBeVisible()
     expect(await limited.count(), 'the limited renderer lists both entries').toBe(2)
     for (const [kind, cls] of [['Income', 'amount-in'], ['Expense', 'amount-out']] as const) {
-      const amounts = amountOf(limited.filter({ hasText: new RegExp(`Recurring ${kind}`) }))
+      const amounts = amountOf(limited.filter({ hasText: new RegExp(`Recurring ${kind.toLowerCase()}`) }))
       expect(await semanticOf(amounts), `the limited recurring ${kind} amount`).toEqual([cls])
     }
-    expect(await textsOf(amountOf(limited.filter({ hasText: /Recurring Income/ }))), 'the limited income amount starts with +').toEqual(['+₱3,500.00'])
+    expect(await textsOf(amountOf(limited.filter({ hasText: /Recurring income/ }))), 'the limited income amount starts with +').toEqual(['+₱3,500.00'])
     await shot(page, 'classes-limited-recurring')
   })
 

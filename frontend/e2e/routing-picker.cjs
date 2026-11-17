@@ -1,4 +1,4 @@
-// Browser checks for STU-244: the account routing picker ("Paid From" and "Overflow To" on
+// Browser checks for STU-244: the account routing picker ("Paid from" and "Overflow to" on
 // a card's edit form) matches the edited account's owner by `owner_id`, not by display
 // name. (a) same-name-owners: two owners with one display name each share an account with
 // the same admin; editing the first owner's card offers only that owner's account shared
@@ -60,24 +60,24 @@ async function scenarioA(browser) {
     await page.getByRole('button', { name: 'Edit account' }).click()
     const details = page.getByRole('button', { name: 'Show details' })
     if (await details.count()) await details.click()
-    const paidFrom = page.locator('label:text-is("Paid From") + select')
+    const paidFrom = page.locator('label:text-is("Paid from") + select')
     await paidFrom.waitFor()
     await h.waitQuiet(page)
     const want = [String(firstBank.id)]
     await h.check('a.same-name-owners', 'B', async () => {
       const got = await offered(paidFrom)
       return JSON.stringify(got.sort()) === JSON.stringify(want) ||
-        `Paid From offers ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`
+        `Paid from offers ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`
     })
     await h.check('a.not-the-other-owner', 'B', async () => {
       const got = await offered(paidFrom)
       return !got.includes(String(secondBank.id)) || 'the same-name owner\'s account is offered'
     })
     await paidFrom.selectOption(String(firstBank.id))
-    const overflow = page.locator('label:text-is("Overflow To") + select')
+    const overflow = page.locator('label:text-is("Overflow to") + select')
     await h.check('a.overflow-same-owner', 'B', async () => {
       const got = await offered(overflow)
-      return got.length === 0 || `Overflow To offers ${JSON.stringify(got)} (only the one same-owner account exists)`
+      return got.length === 0 || `Overflow to offers ${JSON.stringify(got)} (only the one same-owner account exists)`
     })
     await h.check('a.saves', 'B', async () => {
       const saved = page.waitForResponse((r) => r.request().method() === 'PUT' && new URL(r.url()).pathname.endsWith(`/accounts/${card.id}`))

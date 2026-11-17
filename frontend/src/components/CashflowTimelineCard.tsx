@@ -22,10 +22,10 @@ export function CashflowTimelineCard({ tag, currency }: { tag?: number; currency
         <div className="flex items-center justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold text-ink">Cash-Flow Timeline</h2>
-            <p className="text-sm text-muted">Your running balance over the next 60 days — before payday, not just month-end.</p>
+            <p className="text-sm text-muted">Your running balance over the next 60 days. It shows the low point before payday, not just month-end.</p>
           </div>
           <Link to="/forecast" className="text-sm font-medium text-ink hover:underline flex-shrink-0">
-            Details →
+            Details
           </Link>
         </div>
       </div>
@@ -58,7 +58,7 @@ export function CashflowTimelineCard({ tag, currency }: { tag?: number; currency
 
             {shortfalls.length > 0 && (
               <p className="text-xs text-warn">
-                ⚠ {shortfalls.length} funding shortfall{shortfalls.length === 1 ? '' : 's'} — a bill can't be covered from its funding account.{' '}
+                ⚠ {shortfalls.length} funding shortfall{shortfalls.length === 1 ? '' : 's'}: a bill can't be covered from its funding account.{' '}
                 <Link to="/forecast" className="underline">See details</Link>
               </p>
             )}
@@ -70,7 +70,7 @@ export function CashflowTimelineCard({ tag, currency }: { tag?: number; currency
                 { label: 'Close (60d)', value: row.closing_balance, color: row.closing_balance < 0 ? 'text-danger' : 'text-ok' },
               ].map(({ label, value, color }) => (
                 <div key={label} className="py-2">
-                  <dt className="text-xs uppercase tracking-wide text-muted">{label}</dt>
+                  <dt className="text-xs text-muted">{label}</dt>
                   <dd className={`text-sm font-semibold ${color}`}>{format(value)}</dd>
                 </div>
               ))}

@@ -169,7 +169,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
-                <label htmlFor="firstName" className={labelClass}>First Name</label>
+                <label htmlFor="firstName" className={labelClass}>First name</label>
                 <input
                   id="firstName"
                   name="firstName"
@@ -182,7 +182,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
                 />
               </div>
               <div>
-                <label htmlFor="lastName" className={labelClass}>Last Name</label>
+                <label htmlFor="lastName" className={labelClass}>Last name</label>
                 <input
                   id="lastName"
                   name="lastName"
@@ -197,7 +197,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
             </div>
 
             <div>
-              <label htmlFor="email" className={labelClass}>Email Address</label>
+              <label htmlFor="email" className={labelClass}>Email address</label>
               <input
                 id="email"
                 name="email"
@@ -212,7 +212,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
             </div>
 
             <div>
-              <label htmlFor="defaultCurrency" className={labelClass}>Default Currency</label>
+              <label htmlFor="defaultCurrency" className={labelClass}>Default currency</label>
               <select
                 id="defaultCurrency"
                 name="defaultCurrency"
@@ -290,7 +290,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
             </div>
 
             <div>
-              <label htmlFor="confirmPassword" className={labelClass}>Confirm Password</label>
+              <label htmlFor="confirmPassword" className={labelClass}>Confirm password</label>
               <div className="relative">
                 <input
                   id="confirmPassword"
