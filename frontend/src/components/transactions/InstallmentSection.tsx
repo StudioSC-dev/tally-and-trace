@@ -4,6 +4,7 @@ import { INSTALLMENT_MONTH_PICKS, formatEntryDate, parseInstallmentMonths, parse
 import { installmentErrorId, installmentErrorProps } from './installmentField'
 import type { InstallmentField } from './installmentField'
 import { Segment } from '../SegmentedControl'
+import { Button } from '../Button'
 
 /** An Installment field's error, shown under its field (the total's is shown on the Amount box). */
 export function InstallmentFieldError({ field, message }: { field: InstallmentField; message: string | undefined }) {
@@ -130,14 +131,9 @@ export function InstallmentSection({
                   </>
                 )}
               </p>
-              <button
-                type="button"
-                onClick={() => setChanging(true)}
-                className="min-h-11 rounded-full bg-sunken px-4 py-1.5 text-sm font-medium text-body hover:bg-sunken focus-ring"
-                data-testid="installment-change"
-              >
+              <Button variant="secondary" onClick={() => setChanging(true)} className="min-h-11 px-4 py-1.5 text-sm" data-testid="installment-change">
                 Change
-              </button>
+              </Button>
             </div>
           ) : (
             <div>
