@@ -14,8 +14,8 @@ import type { WishlistItem, WishlistItemPriority } from '../store/api'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
 import { Button } from './Button'
 
-/** A row's icon action: 5px padding plus the Button's 1px border keeps the old 6px around a 16px icon. */
-const ICON_ACTION = 'p-[5px]'
+/** A row's icon action: 4px padding and the Button's 1px border, held at 28px square, the old 6px around a 16px icon. */
+const ICON_ACTION = 'p-1 min-h-7 min-w-7'
 
 const PRIORITIES: WishlistItemPriority[] = ['critical', 'high', 'medium', 'low']
 
