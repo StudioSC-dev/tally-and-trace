@@ -53,31 +53,35 @@ export function Row({ title, badges, tags = [], meta, details = [], actions, amo
   const tagKey = tags.map((t) => `${t.id}:${t.name}`).join('|')
 
   // Fit the tags to the title line: measure every chip (and the widest "+N") on an invisible ruler, keep the title's
-  // minimum width and any badges, and show the chips that fit. Runs before paint and again when the line resizes.
-  useLayoutEffect(() => {
+  // minimum width and any badges, and show the chips that fit. It runs before paint after every render, so a new
+  // title or a badge that appears or goes (a save in flight) refits at once, and again whenever the line resizes.
+  const fitRef = useRef<() => void>(() => undefined)
+  fitRef.current = () => {
     const line = lineRef.current
     const ruler = rulerRef.current
     if (!line || !ruler) return
-    const fit = () => {
-      const widths = [...ruler.children].map((c) => c.getBoundingClientRect().width)
-      const more = widths.pop() ?? 0
-      const titleWidth = line.querySelector<HTMLElement>('[data-row-title]')?.scrollWidth ?? 0
-      const badgeWidth = [...line.querySelectorAll<HTMLElement>('[data-row-badge]')].reduce((w, e) => w + e.getBoundingClientRect().width + LINE_GAP_PX, 0)
-      const room = line.clientWidth - Math.min(titleWidth, TITLE_MIN_PX) - LINE_GAP_PX - badgeWidth
-      let used = 0
-      let fits = 0
-      for (let i = 0; i < widths.length; i++) {
-        const next = used + (i > 0 ? CHIP_GAP_PX : 0) + widths[i]
-        const after = i + 1 < widths.length ? CHIP_GAP_PX + more : 0
-        if (next + after > room) break
-        used = next
-        fits = i + 1
-      }
-      setShown(fits)
+    const widths = [...ruler.children].map((c) => c.getBoundingClientRect().width)
+    const more = widths.pop() ?? 0
+    const titleWidth = line.querySelector<HTMLElement>('[data-row-title]')?.scrollWidth ?? 0
+    const badgeWidth = [...line.querySelectorAll<HTMLElement>('[data-row-badge]')].reduce((w, e) => w + e.getBoundingClientRect().width + LINE_GAP_PX, 0)
+    const room = line.clientWidth - Math.min(titleWidth, TITLE_MIN_PX) - LINE_GAP_PX - badgeWidth
+    let used = 0
+    let fits = 0
+    for (let i = 0; i < widths.length; i++) {
+      const next = used + (i > 0 ? CHIP_GAP_PX : 0) + widths[i]
+      const after = i + 1 < widths.length ? CHIP_GAP_PX + more : 0
+      if (next + after > room) break
+      used = next
+      fits = i + 1
     }
-    fit()
-    if (typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(fit)
+    setShown(fits)
+  }
+  useLayoutEffect(() => fitRef.current())
+  useLayoutEffect(() => {
+    const line = lineRef.current
+    const ruler = rulerRef.current
+    if (!line || !ruler || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => fitRef.current())
     observer.observe(line)
     observer.observe(ruler)
     return () => observer.disconnect()

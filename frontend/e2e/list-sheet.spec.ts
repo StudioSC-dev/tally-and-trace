@@ -160,20 +160,23 @@ interface Measured {
   tagged: boolean
 }
 
-/** Every row's height, its meta lines, and whether it carries its own controls or badges. */
+/** How far a row's measured pitch may drift from the fixture (subpixel layout), in px. */
+const PITCH_SLACK = 0.5
+
+/** Every row's pitch (its height between rules: the box less its bottom rule), its meta lines, and whether it carries its own controls or tags. */
 const measure = (rows: Locator): Promise<Measured[]> =>
   rows.evaluateAll((all) =>
     all.map((e) => ({
       name: (e.querySelector('p')?.textContent ?? '').trim(),
       kind: e.getAttribute('data-row-kind'),
-      height: e.getBoundingClientRect().height,
+      height: e.getBoundingClientRect().height - parseFloat(getComputedStyle(e).borderBottomWidth),
       metaLines: e.querySelectorAll('[data-testid="row-meta"]').length,
       actions: e.querySelectorAll('[data-testid="row-actions"] button').length,
       tagged: e.querySelector('[data-testid="row-tags"]') !== null,
     })),
   )
 
-const offPitch = (rows: Measured[], want: number): string[] => rows.filter((r) => Math.abs(r.height - want) > 1).map((r) => `${r.name}: ${r.height}px`)
+const offPitch = (rows: Measured[], want: number): string[] => rows.filter((r) => Math.abs(r.height - want) > PITCH_SLACK).map((r) => `${r.name}: ${r.height}px`)
 
 const PITCH_CASES = [
   {
@@ -208,7 +211,7 @@ for (const c of PITCH_CASES) {
       expect(limited.filter((r) => r.metaLines < 2).map((r) => r.name), 'limited entries with fewer than two meta lines').toEqual([])
     }
     for (const r of one) {
-      expect.soft(Math.abs(r.height - want), `${c.surface} row "${r.name}" is ${want}px (measured ${r.height}px)`).toBeLessThanOrEqual(1)
+      expect.soft(Math.abs(r.height - want), `${c.surface} row "${r.name}" is ${want}px (measured ${r.height}px)`).toBeLessThanOrEqual(PITCH_SLACK)
     }
     expect(offPitch(one, want), `${c.surface} rows with one meta line that are not ${want}px`).toEqual([])
     await shot(page, `pitch-${c.surface}`)
@@ -220,16 +223,12 @@ const MANY = colouredHousehold.transactions.find((t) => t.view !== 'limited' && 
 /** The title keeps at least this much of its line (or all of itself, when shorter). */
 const TITLE_MIN = 96
 
-test('rows keep an even pitch: many tags', async ({ page }, testInfo) => {
-  if (!MANY || MANY.view === 'limited') throw new Error('no multi-tag transaction in the fixture')
-  const tags = (MANY.tags ?? []).map((t) => t.name)
-  expect(tags.length, 'the fixture row carries many tags').toBeGreaterThanOrEqual(8)
-  await mockHousehold(page, colouredHousehold)
-  await page.goto('/transactions')
-  const row = page.locator('article[data-transaction-id]').filter({ has: page.getByText(MANY.description ?? '', { exact: true }) })
-  await expect(row).toHaveCount(1)
-  await page.evaluate(() => document.fonts.ready)
-  const want = PITCH[testInfo.project.name]
+/**
+ * Checks a tagged row's title line: the title keeps its minimum (or all of itself) from its first character, every
+ * chip and "+N" sits between the title (and any badge) and the amount's box, the chips shown are the first tags in
+ * order with a "+N" naming the rest, and the row holds one meta line at the project's pitch. Returns the tags in "+N".
+ */
+async function checkTagLine(row: Locator, tags: string[], project: string, label: string): Promise<string[]> {
   const m = await row.evaluate((r) => {
     const box = (e: Element) => {
       const b = e.getBoundingClientRect()
@@ -241,38 +240,64 @@ test('rows keep an even pitch: many tags', async ({ page }, testInfo) => {
       range.setStart(title.firstChild, 0)
       range.setEnd(title.firstChild, 1)
     }
+    const badges = r.querySelector('[data-testid="row-badges"]')
     const marks = [...r.querySelectorAll<HTMLElement>('[data-testid="row-tags"] > [data-testid="tag-chip"], [data-testid="row-tags-more"]')]
     return {
-      height: r.getBoundingClientRect().height,
+      height: r.getBoundingClientRect().height - parseFloat(getComputedStyle(r).borderBottomWidth),
       metaLines: r.querySelectorAll('[data-testid="row-meta"]').length,
       title: title ? { ...box(title), natural: title.scrollWidth, scrolled: title.scrollLeft, firstChar: range.getBoundingClientRect().left } : null,
+      badges: badges ? box(badges) : null,
       amount: box(r.querySelector('[data-testid="row-amount"]') as Element),
       chips: marks.filter((e) => e.dataset.testid === 'tag-chip').map((e) => ({ name: (e.textContent ?? '').trim(), ...box(e) })),
       more: marks.filter((e) => e.dataset.testid === 'row-tags-more').map((e) => ({ text: (e.textContent ?? '').trim(), label: e.getAttribute('aria-label') ?? '', ...box(e) })),
     }
   })
   const title = m.title
-  if (!title) throw new Error('the row has no title')
+  if (!title) throw new Error(`${label}: the row has no title`)
   // The title stays readable: its minimum width (or all of it when shorter), starting at its first character.
-  expect(title.width, `the title keeps ${TITLE_MIN}px or all of itself (measured ${title.width}px of ${title.natural}px)`).toBeGreaterThanOrEqual(Math.min(title.natural, TITLE_MIN) - 1)
-  expect(title.scrolled, 'the title is not scrolled').toBe(0)
-  expect(Math.abs(title.firstChar - title.left), "the title's first character is at its left edge").toBeLessThanOrEqual(1)
-  // Nothing on the title line paints over the title or the amount.
+  expect(title.width, `${label}: the title keeps ${TITLE_MIN}px or all of itself (measured ${title.width}px of ${title.natural}px)`).toBeGreaterThanOrEqual(Math.min(title.natural, TITLE_MIN) - 1)
+  expect(title.scrolled, `${label}: the title is not scrolled`).toBe(0)
+  expect(Math.abs(title.firstChar - title.left), `${label}: the title's first character is at its left edge`).toBeLessThanOrEqual(1)
+  // Nothing on the title line paints over the title, a badge or the amount.
+  const after = m.badges ? m.badges.right : title.right
+  if (m.badges) {
+    expect.soft(m.badges.left, `${label}: the badge starts after the title`).toBeGreaterThanOrEqual(title.right - 0.5)
+    expect.soft(m.badges.right, `${label}: the badge ends before the amount's box`).toBeLessThanOrEqual(m.amount.left + 0.5)
+  }
   for (const c of [...m.chips, ...m.more]) {
     const name = 'name' in c ? c.name : c.text
-    expect.soft(c.left, `${name} starts after the title`).toBeGreaterThanOrEqual(title.right - 0.5)
-    expect.soft(c.right, `${name} ends before the amount's box`).toBeLessThanOrEqual(m.amount.left + 0.5)
+    expect.soft(c.left, `${label}: ${name} starts after the title${m.badges ? ' and the badge' : ''}`).toBeGreaterThanOrEqual(after - 0.5)
+    expect.soft(c.right, `${label}: ${name} ends before the amount's box`).toBeLessThanOrEqual(m.amount.left + 0.5)
   }
   // What shows is the tags in order, then "+N" for the rest, which names them for a screen reader.
   const shown = m.chips.map((c) => c.name)
   const rest = tags.slice(shown.length)
-  expect(shown, 'the shown chips are the first tags').toEqual(tags.slice(0, shown.length))
-  if (testInfo.project.name === 'phone') expect(rest.length, 'a phone cannot fit every tag, so some are summarised').toBeGreaterThan(0)
-  expect(m.more.map((x) => x.text), 'a "+N" for the tags that do not fit').toEqual(rest.length > 0 ? [`+${rest.length}`] : [])
-  if (rest.length > 0) expect(m.more[0].label, '"+N" names the rest').toBe(`Show ${rest.length} more tags: ${rest.join(', ')}`)
+  expect(shown, `${label}: the shown chips are the first tags`).toEqual(tags.slice(0, shown.length))
+  if (project === 'phone') expect(rest.length, `${label}: a phone cannot fit every tag, so some are summarised`).toBeGreaterThan(0)
+  expect(m.more.map((x) => x.text), `${label}: a "+N" for the tags that do not fit`).toEqual(rest.length > 0 ? [`+${rest.length}`] : [])
+  if (rest.length > 0) expect(m.more[0].label, `${label}: "+N" names the rest`).toBe(`Show ${rest.length} more tags: ${rest.join(', ')}`)
   // The row holds the pitch.
-  expect(m.metaLines, 'the row carries one meta line').toBe(1)
-  expect(Math.abs(m.height - want), `the row is ${want}px (measured ${m.height}px)`).toBeLessThanOrEqual(1)
+  const want = PITCH[project]
+  expect(m.metaLines, `${label}: the row carries one meta line`).toBe(1)
+  expect(Math.abs(m.height - want), `${label}: the row is ${want}px (measured ${m.height}px)`).toBeLessThanOrEqual(PITCH_SLACK)
+  return rest
+}
+
+async function openManyTags(page: Page): Promise<{ row: Locator; tags: string[] }> {
+  if (!MANY || MANY.view === 'limited') throw new Error('no multi-tag transaction in the fixture')
+  const tags = (MANY.tags ?? []).map((t) => t.name)
+  expect(tags.length, 'the fixture row carries many tags').toBeGreaterThanOrEqual(8)
+  await mockHousehold(page, colouredHousehold)
+  await page.goto('/transactions')
+  const row = page.locator('article[data-transaction-id]').filter({ has: page.getByText(MANY.description ?? '', { exact: true }) })
+  await expect(row).toHaveCount(1)
+  await page.evaluate(() => document.fonts.ready)
+  return { row, tags }
+}
+
+test('rows keep an even pitch: many tags', async ({ page }, testInfo) => {
+  const { row, tags } = await openManyTags(page)
+  const rest = await checkTagLine(row, tags, testInfo.project.name, 'many tags')
   await row.scrollIntoViewIfNeeded()
   await viewportShot(page, 'many-tags')
   if (rest.length > 0) {
@@ -289,6 +314,22 @@ test('rows keep an even pitch: many tags', async ({ page }, testInfo) => {
     expect(await row.locator('[data-row-tags-rest]').count(), 'Enter closes the line again').toBe(0)
     expect(await actionModal(page).count(), 'Enter on "+N" does not open the row').toBe(0)
   }
+})
+
+test('rows keep an even pitch: many tags while saving', async ({ page }, testInfo) => {
+  const { row, tags } = await openManyTags(page)
+  await checkTagLine(row, tags, testInfo.project.name, 'before the save')
+  // Hold the delete, so the row keeps its "Deleting…" badge on the title line.
+  await page.route('**/api/v1/transactions/**', (route) => (route.request().method() === 'DELETE' ? undefined : route.fallback()))
+  await row.click({ position: { x: 8, y: 8 } })
+  await actionModal(page).getByRole('button', { name: 'Delete Transaction' }).click()
+  await page.getByRole('button', { name: 'Delete transaction', exact: true }).click()
+  await expect(row.getByTestId('row-saving')).toHaveText('Deleting…')
+  // The tags refit around the badge in the same frame: no resize of the line is needed.
+  await checkTagLine(row, tags, testInfo.project.name, 'while deleting')
+  await row.scrollIntoViewIfNeeded()
+  await viewportShot(page, 'many-tags-saving')
+  await page.unrouteAll({ behavior: 'ignoreErrors' })
 })
 
 /** Adds an expense from the Add Transaction dialog; the API refuses it, so it stays on the list as a pending row, which is returned. */
@@ -331,7 +372,7 @@ test('rows keep an even pitch: pending row', async ({ page }, testInfo) => {
   const [measured] = await measure(pending)
   const want = PITCH[testInfo.project.name]
   expect(measured.metaLines, 'the pending row carries one meta line').toBe(1)
-  expect(Math.abs(measured.height - want), `the pending row is ${want}px (measured ${measured.height}px)`).toBeLessThanOrEqual(1)
+  expect(Math.abs(measured.height - want), `the pending row is ${want}px (measured ${measured.height}px)`).toBeLessThanOrEqual(PITCH_SLACK)
   await shot(page, 'pitch-pending')
 })
 

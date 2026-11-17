@@ -202,7 +202,8 @@ Fields have no box. They are written on a ruled line (an underline in `line-stro
     (or all of itself when shorter), and the row shows the tags that fit after it and
     any badges, then a "+N" chip-button for the rest. "+N" names the hidden tags in
     its label and opens a line under the row with their chips, without opening the
-    row. The fit is measured before paint and again when the line resizes.
+    row. The fit is measured before paint after every render (so a new title or a
+    saving badge refits at once) and again when the line resizes.
   - A row with one meta line is 56px between rules on desktop and 64px on a phone,
     whatever badges, tags or controls it carries.
   - Hooks: `data-testid="row"` (fixed; callers cannot replace it), `row-meta` (one per
