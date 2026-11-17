@@ -111,7 +111,7 @@
     {
       "id": "settings-categories",
       "file": "frontend/src/routes/settings.tsx",
-      "line": 258,
+      "line": 257,
       "token": "line",
       "property": "borderTopColor",
       "selector": "ul.divide-line\\/50",
@@ -124,7 +124,7 @@
     {
       "id": "settings-tags",
       "file": "frontend/src/routes/settings.tsx",
-      "line": 301,
+      "line": 300,
       "token": "line",
       "property": "borderTopColor",
       "selector": "ul.divide-line\\/50",

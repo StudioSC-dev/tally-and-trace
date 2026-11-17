@@ -12,10 +12,10 @@ import { apiErrorMessage } from '../utils/apiError'
 import { formatCurrency } from '../utils/currency'
 import type { CurrencyCode } from '../utils/currency'
 import { CurrencyControl } from './CurrencyControl'
+import { chartColor, displayColor, tokenColor } from '../utils/palette'
 
-const FALLBACK_CATEGORY_COLORS = ['#2563eb', '#7c3aed', '#16a34a', '#f97316', '#db2777']
 // Rows the list can't be filtered by, and the "Other" slice, are drawn neutral.
-const NEUTRAL_COLOR = '#6B7280'
+const NEUTRAL_COLOR = tokenColor('muted')
 
 const DONUT_RADIUS = 48
 const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS
@@ -121,7 +121,7 @@ export function SpendingBreakdownDialog({
 
   const format = (amount: number) => formatCurrency(amount, currency)
   const colorFor = (index: number, color: string | undefined, drillable: boolean) =>
-    !drillable ? NEUTRAL_COLOR : color ?? FALLBACK_CATEGORY_COLORS[index % FALLBACK_CATEGORY_COLORS.length] ?? NEUTRAL_COLOR
+    !drillable ? NEUTRAL_COLOR : color ? displayColor(color, NEUTRAL_COLOR) : chartColor(index)
 
   let body
   if (isLoading) {
@@ -164,11 +164,11 @@ export function SpendingBreakdownDialog({
                     cy="60"
                     r={DONUT_RADIUS}
                     fill="none"
-                    stroke={colorFor(index, slice.color, drillable)}
                     strokeWidth="18"
                     strokeDasharray={`${length} ${DONUT_CIRCUMFERENCE - length}`}
                     strokeDashoffset={-slice.offset * DONUT_CIRCUMFERENCE}
                     className={drillable ? 'cursor-pointer hover:opacity-80' : undefined}
+                    style={{ stroke: colorFor(index, slice.color, drillable) }}
                     onClick={sliceDrill ? () => onSelectCategory(sliceDrill) : undefined}
                   >
                     <title>{`${slice.name}: ${format(slice.amount)}${drillable ? ' (click to filter the list)' : ''}`}</title>
@@ -272,7 +272,7 @@ export function SpendingBreakdownDialog({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[60] overflow-y-auto bg-black/60 px-4 py-6"
+      className="fixed inset-0 z-[60] overflow-y-auto bg-scrim/60 px-4 py-6"
       onClick={onClose}
       data-testid="spending-breakdown-dialog"
     >

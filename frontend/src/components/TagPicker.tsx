@@ -1,8 +1,7 @@
 import { LoadingLine } from './Loading'
 import { Link } from '@tanstack/react-router'
 import { useGetTagsQuery } from '../store/api'
-
-const FALLBACK_COLOR = '#9ca3af'
+import { displayColor, NO_COLOR } from '../utils/palette'
 
 /**
  * Multi-select of the caller's tags. With `warnHousehold` (the account form) it says what
@@ -52,8 +51,8 @@ export function TagPicker({
               >
                 <span
                   aria-hidden
-                  className="h-2 w-2 shrink-0 rounded-full border border-black/10"
-                  style={{ backgroundColor: tag.color || FALLBACK_COLOR }}
+                  className="h-2 w-2 shrink-0 rounded-full border border-line"
+                  style={{ backgroundColor: displayColor(tag.color, NO_COLOR) }}
                 />
                 {tag.name}
               </button>
