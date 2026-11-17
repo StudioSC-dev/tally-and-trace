@@ -186,6 +186,23 @@ Fields have no box. They are written on a ruled line (an underline in `line-stro
   - The sheet is leaf, `radius-md`, one `line` border, no shadow.
   - Rows are ruled, radius 0.
   - Amounts are right-aligned on one column edge.
+- **`ListSheet` and `Row` (`frontend/src/components/`):**
+  - `ListSheet` is the sheet: leaf (`surface`), `radius-md`, one `line` border, no
+    shadow. It clips its rows to its corners. Hook: `data-testid="list-sheet"`.
+  - `Row` is one line on it: an `<article>`, radius 0, with a 1px `line` rule under
+    every row but the last. The title (`text-base`, 600) and one meta line
+    (`text-xs`, `muted`, cut to one line) sit on the left; the amount sits in its own
+    right-aligned slot, so the amounts of a sheet share one right edge. Anything more
+    (tags, notes, the row's own controls) goes on lines below.
+  - A row with one meta line and nothing below is 56px between rules on desktop and
+    64px on a phone.
+  - Hooks: `data-testid="row"`, `row-meta`, `row-amount` and `row-extra`. Click,
+    keyboard and ARIA attributes pass through to the `<article>`.
+  - Used by Transactions and the Allocations Recurring tab (one sheet per kind
+    section). Budget and savings allocations stay `.card` panels: each is a goal with
+    its own progress, not a list line.
+  - The dashboard's quick balances are account lines on their panel, ruled with
+    `line`, figures right-aligned, with no tile fill.
 - **Status, as a dot and a word:** 13px 500 in the status colour. "Overdue" and
   negative balances are the only red text.
 
@@ -197,7 +214,7 @@ The shared components later tickets add. Each is marked planned until its ticket
 |---|---|---|
 | `Button` | planned | the four variants above, one component for every action |
 | `SegmentedControl` / `Tabs` | planned | the selection rule, shared by every tab and segment |
-| `ListSheet` and `Row` | planned | one leaf sheet with ruled rows, figures on one right edge |
+| `ListSheet` and `Row` | landed (STU-681) | one leaf sheet with ruled rows, figures on one right edge (see below) |
 | `StatusText` | planned | status as a dot and a word |
 | `EmptyState` | planned | an empty list's message and its one action |
 | `Icon` | planned | Phosphor Regular at 20px, `currentColor` |
