@@ -21,6 +21,7 @@ import {
 import type { CurrencyCode } from '../store/api'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 import { formatCurrency } from '../utils/currency'
+import { balanceClass, formatBalance } from '../utils/amount'
 
 export const Route = createFileRoute('/accounts_/$accountId')({
   component: AccountDetailPage,
@@ -178,10 +179,10 @@ function AccountDetailPage() {
         <div className="flex flex-wrap items-baseline justify-between gap-3">
           <p className="text-sm text-muted">Balance ({account.currency})</p>
           <p
-            className={`text-2xl font-bold ${account.balance >= 0 ? 'text-ok' : 'text-danger'}`}
+            className={`text-2xl font-bold ${balanceClass(account.balance)}`}
             data-testid="account-detail-balance"
           >
-            {formatCurrency(account.balance, currency)}
+            {formatBalance(account.balance, currency)}
           </p>
         </div>
         {account.account_type === 'credit' && account.credit_limit != null && (
