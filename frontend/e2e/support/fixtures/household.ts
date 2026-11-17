@@ -857,6 +857,29 @@ export const colouredHousehold: HouseholdData = build({
   tags: [...tags, ...legacyTags, upperBlueTag],
 })
 
+/**
+ * The summary with a computed "Transfer fees" row: money spent that belongs to no category, so the spending
+ * breakdown cannot filter the list by it. The fee is added to the totals, so the summary stays consistent.
+ */
+export function withTransferFees(data: HouseholdData, fee: number): TransactionSummary {
+  const { summary } = data
+  const net = (income: number, expenses: number): number => round2(income - expenses)
+  return {
+    ...summary,
+    summary: {
+      ...summary.summary,
+      total_expenses: round2(summary.summary.total_expenses + fee),
+      net_flow: net(summary.summary.total_income, summary.summary.total_expenses + fee),
+    },
+    by_currency: summary.by_currency.map((row) => ({
+      ...row,
+      total_expenses: round2(row.total_expenses + fee),
+      net_flow: net(row.total_income, row.total_expenses + fee),
+      category_breakdown: { ...row.category_breakdown, 'Transfer fees': { income: 0, expenses: fee } },
+    })),
+  }
+}
+
 const pageOf = <T>(items: T[]): PaginatedResponse<T> => ({ items, total: items.length, has_more: false })
 
 /** Throws on a query parameter outside `known`, so the fake never ignores a filter a page sends. */

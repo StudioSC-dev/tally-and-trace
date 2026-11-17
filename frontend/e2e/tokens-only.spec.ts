@@ -16,6 +16,7 @@ import {
   legacyTags,
   mockHousehold,
   upperBlueTag,
+  withTransferFees,
 } from './support/fixtures/household'
 import type { HouseholdData } from './support/fixtures/household'
 import { shot } from './support/shot'
@@ -229,13 +230,7 @@ test.describe('tokens-only sweep (STU-691)', () => {
       await mockHousehold(page)
       await mockApi(page, [], {
         allow: [
-          apiRoute<TransactionSummary>('GET', '/transactions/summary/period', {
-            ...household.summary,
-            by_currency: household.summary.by_currency.map((row) => ({
-              ...row,
-              category_breakdown: { ...row.category_breakdown, 'Transfer fees': { income: 0, expenses: 120 } },
-            })),
-          }),
+          apiRoute<TransactionSummary>('GET', '/transactions/summary/period', withTransferFees(household, 120)),
         ],
       })
       await page.goto('/transactions')
@@ -267,7 +262,7 @@ test.describe('tokens-only sweep (STU-691)', () => {
       const want = EXPECT[r.now]
       expect(want?.measure(m)).toBe(want?.px)
       expect((want?.px ?? 1) % 4).toBe(0)
-      await shot(page, `px-${r.now}`)
+      await (r.now === 'pl-5' ? viewportShot : shot)(page, `px-${r.now}`)
     })
   }
 
