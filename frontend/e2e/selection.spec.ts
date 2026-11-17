@@ -78,6 +78,11 @@ interface Group {
   before: (page: Page, seen: URL[]) => Promise<void>
   /** Checks the existing effect after the pick, before anything is saved. */
   after: (page: Page, seen: URL[]) => Promise<void>
+  /**
+   * Controls outside the group that the pick is expected to take off the page (descriptors as `compareUnrelated`
+   * reports them), why, and a direct check that they are gone. Any other control that leaves the page fails the case.
+   */
+  gone?: { controls: string[]; why: string; check: (page: Page) => Promise<void> }
   /** Saves the form and checks what reaches the API, after the unrelated selections are checked. */
   submit?: (page: Page, api: ApiMock) => Promise<void>
 }
@@ -285,6 +290,13 @@ const INVENTORY: Group[] = [
       await expect(page).toHaveURL(/view=scheduled/)
       await expect(page.getByTestId('scheduled-view')).toBeVisible()
       await expect(page.getByTestId('scheduled-view').getByText('Palengke run').first()).toBeVisible()
+    },
+    gone: {
+      controls: ['Transactions pages › 1'],
+      why: 'Scheduled replaces the month list, and the list pager goes with it',
+      check: async (page) => {
+        await expect(page.getByRole('navigation', { name: 'Transactions pages' })).toHaveCount(0)
+      },
     },
   },
   {
@@ -1052,23 +1064,76 @@ async function choose(page: Page, g: Group, name: Name): Promise<void> {
   await settle(page)
 }
 
-/** Marks every selectable control outside the group and records its state, so a pick can be checked against them. */
-const watchUnrelated = (groupItems: Locator): Promise<number> =>
+/** One selectable control outside the group (pressed, tab, switch, or a current page or route), as it was before the pick. */
+interface Watched {
+  id: number
+  /** Group label and control text, e.g. `Entered by › Only mine`. */
+  desc: string
+  was: string
+  shown: boolean
+}
+
+/** What happened to the watched controls: values that moved, and controls that left the page. */
+interface UnrelatedChanges {
+  changed: string[]
+  gone: string[]
+}
+
+/**
+ * Marks every selectable control outside the group and records its descriptor, value and visibility in the test,
+ * so a pick can be checked against them. The record lives here, not on the element, so a control that is removed
+ * or replaced cannot drop out of the comparison.
+ */
+const watchUnrelated = (groupItems: Locator): Promise<Watched[]> =>
   groupItems.evaluateAll((own) => {
     const mine = new Set<Element>(own)
-    const all = [...document.querySelectorAll('[aria-pressed], [role="tab"], [role="switch"]')].filter((e) => !mine.has(e))
-    all.forEach((e, i) => {
-      e.setAttribute('data-e2e-watch', String(i))
-      e.setAttribute('data-e2e-was', e.getAttribute('aria-pressed') ?? e.getAttribute('aria-selected') ?? e.getAttribute('aria-checked') ?? '')
+    const describe = (e: Element): string => {
+      const box = e.closest('[role="group"], [role="tablist"], nav, [data-field]')
+      const labelledBy = box?.getAttribute('aria-labelledby')
+      const label = box?.getAttribute('aria-label') ?? (labelledBy ? document.getElementById(labelledBy)?.textContent : null) ?? box?.getAttribute('data-field') ?? ''
+      const text = e.getAttribute('aria-label') ?? e.textContent ?? ''
+      return `${label.replace(/\s+/g, ' ').trim()} › ${text.replace(/\s+/g, ' ').trim().slice(0, 60)}`
+    }
+    const valueOf = (e: Element): string => e.getAttribute('aria-pressed') ?? e.getAttribute('aria-selected') ?? e.getAttribute('aria-checked') ?? e.getAttribute('aria-current') ?? ''
+    const all = [...document.querySelectorAll('[aria-pressed], [role="tab"], [role="switch"], [aria-current]')].filter((e) => !mine.has(e))
+    return all.map((e, id) => {
+      e.setAttribute('data-e2e-watch', String(id))
+      return { id, desc: describe(e), was: valueOf(e), shown: e.checkVisibility() }
     })
-    return all.length
   })
-const changedUnrelated = (page: Page): Promise<string[]> =>
-  page.evaluate(() =>
-    [...document.querySelectorAll('[data-e2e-watch]')]
-      .filter((e) => (e.getAttribute('aria-pressed') ?? e.getAttribute('aria-selected') ?? e.getAttribute('aria-checked') ?? '') !== e.getAttribute('data-e2e-was'))
-      .map((e) => `${e.textContent?.trim()}: ${e.getAttribute('data-e2e-was')}`),
-  )
+
+/**
+ * Compares the watched controls with the page now. A marked control that is still there must keep its value. One
+ * that was removed or replaced counts as gone, unless a control with the same descriptor and the same value stands
+ * in its place (a remount); a stand-in with a different value is a change. A control that was visible and is now
+ * hidden counts as gone.
+ */
+const compareUnrelated = (page: Page, watched: Watched[]): Promise<UnrelatedChanges> =>
+  page.evaluate((list) => {
+    const describe = (e: Element): string => {
+      const box = e.closest('[role="group"], [role="tablist"], nav, [data-field]')
+      const labelledBy = box?.getAttribute('aria-labelledby')
+      const label = box?.getAttribute('aria-label') ?? (labelledBy ? document.getElementById(labelledBy)?.textContent : null) ?? box?.getAttribute('data-field') ?? ''
+      const text = e.getAttribute('aria-label') ?? e.textContent ?? ''
+      return `${label.replace(/\s+/g, ' ').trim()} › ${text.replace(/\s+/g, ' ').trim().slice(0, 60)}`
+    }
+    const valueOf = (e: Element): string => e.getAttribute('aria-pressed') ?? e.getAttribute('aria-selected') ?? e.getAttribute('aria-checked') ?? e.getAttribute('aria-current') ?? ''
+    const unmarked = [...document.querySelectorAll('[aria-pressed], [role="tab"], [role="switch"], [aria-current]')].filter((e) => !e.hasAttribute('data-e2e-watch'))
+    const changed: string[] = []
+    const gone: string[] = []
+    for (const w of list) {
+      const el = document.querySelector(`[data-e2e-watch="${w.id}"]`)
+      if (el) {
+        if (valueOf(el) !== w.was) changed.push(`${w.desc}: ${w.was} → ${valueOf(el)}`)
+        else if (w.shown && !el.checkVisibility()) gone.push(`${w.desc} (hidden)`)
+        continue
+      }
+      const standIns = unmarked.filter((e) => describe(e) === w.desc && (!w.shown || e.checkVisibility()))
+      if (standIns.length === 0) gone.push(w.desc)
+      else if (!standIns.some((e) => valueOf(e) === w.was)) changed.push(`${w.desc}: ${w.was} → ${valueOf(standIns[0])} (replaced)`)
+    }
+    return { changed, gone }
+  }, watched)
 
 /** Waits for the next `POST /accounts/` answer. */
 const accountCreated = (page: Page) => page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname === '/api/v1/accounts/')
@@ -1206,7 +1271,9 @@ test.describe('Selection is not an action (STU-679)', () => {
         await settle(page)
         await expect(sw).toHaveAttribute('aria-checked', 'false')
         await expectAccountSeeded(page)
-        expect(await changedUnrelated(page), `other selections keep their values (${watched} watched)`).toEqual([])
+        const unrelated = await compareUnrelated(page, watched)
+        expect(unrelated.changed, `other selections keep their values (${watched.length} watched)`).toEqual([])
+        expect(unrelated.gone, `no other selection leaves the page (${watched.length} watched)`).toEqual([])
         const inactive = accountCreated(page)
         await page.getByRole('button', { name: 'Create Account', exact: true }).click()
         expect(((await (await inactive).json()) as Account).is_active).toBe(false)
@@ -1225,7 +1292,11 @@ test.describe('Selection is not an action (STU-679)', () => {
       }
       await choose(page, g, g.other)
       await g.after(page, seen)
-      expect(await changedUnrelated(page), `other selections on the page keep their values (${watched} watched)`).toEqual([])
+      const unrelated = await compareUnrelated(page, watched)
+      expect(unrelated.changed, `other selections on the page keep their values (${watched.length} watched)`).toEqual([])
+      // Only the controls the inventory says the pick removes may leave, and each of them must be gone.
+      expect(unrelated.gone, `controls that leave the page (${watched.length} watched)${g.gone ? `: ${g.gone.why}` : ''}`).toEqual(g.gone?.controls ?? [])
+      if (g.gone) await g.gone.check(page)
       await evidence(page, g, `behaviour-${g.key}`)
       if (g.submit) await g.submit(page, api)
     })
