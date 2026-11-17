@@ -128,6 +128,13 @@ async function openAllocations(page: Page, tab: 'Savings' | 'Budgets', lists: St
 const card = (page: Page, name: string): Locator =>
   page.locator('article[role="button"]').filter({ has: page.getByText(name, { exact: true }) })
 
+// The date chips on a card: "Target <date>" on a savings card, "Ends <date>" on a budget card. The savings
+// card also has a "Target" amount label, which has no date after it, so the chip needs text after the word.
+const targetChip = (page: Page, name: string): Locator =>
+  card(page, name).locator('span').filter({ hasText: /^\s*Target\s+\S/ })
+const endChip = (page: Page, name: string): Locator =>
+  card(page, name).locator('span').filter({ hasText: /^\s*Ends\s+\S/ })
+
 const editForm = (page: Page): Locator =>
   page.locator('form').filter({ has: page.getByRole('button', { name: 'Update Allocation' }) })
 
@@ -163,6 +170,7 @@ test.describe('allocation dates on edit', () => {
       apiRoute<StoredAllocation>('PUT', `/allocations/${BUDGET_ID}`, savedBudget),
     ])
     await expect(card(page, goal.name)).toContainText(GOAL_TARGET_TEXT)
+    await expect(targetChip(page, goal.name)).toHaveCount(1)
 
     // Savings: clear the target date.
     let form = await openEdit(page, goal.name)
@@ -172,7 +180,7 @@ test.describe('allocation dates on edit', () => {
     await expect.poll(() => updates(api, GOAL_ID).length).toBe(1)
     expect(updates(api, GOAL_ID)[0]).toHaveProperty('target_date', null)
 
-    await expect(card(page, goal.name)).not.toContainText('9/15/2031')
+    await expect(targetChip(page, goal.name)).toHaveCount(0)
     form = await openEdit(page, goal.name)
     await expect(field(form, 'target_date')).toHaveValue('')
     await shot(page, 'savings-target-cleared')
@@ -182,6 +190,7 @@ test.describe('allocation dates on edit', () => {
     // Budget: clear the period end; the start stays.
     await page.getByRole('button', { name: 'Budgets', exact: true }).click()
     await expect(card(page, budget.name)).toContainText(BUDGET_END_CHIP)
+    await expect(endChip(page, budget.name)).toHaveCount(1)
     form = await openEdit(page, budget.name)
     await expect(field(form, 'period_end')).toHaveValue('2031-04-01')
     await field(form, 'period_end').fill('')
@@ -189,7 +198,7 @@ test.describe('allocation dates on edit', () => {
     await expect.poll(() => updates(api, BUDGET_ID).length).toBe(1)
     expect(updates(api, BUDGET_ID)[0]).toHaveProperty('period_end', null)
 
-    await expect(card(page, budget.name)).not.toContainText('Ends')
+    await expect(endChip(page, budget.name)).toHaveCount(0)
     await expect(card(page, budget.name)).toContainText(BUDGET_START_CHIP)
     form = await openEdit(page, budget.name)
     await expect(field(form, 'period_end')).toHaveValue('')
