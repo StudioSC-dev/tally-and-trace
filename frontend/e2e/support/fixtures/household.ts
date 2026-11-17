@@ -23,6 +23,7 @@ import type {
   Allocation,
   BudgetEntry,
   CardCredit,
+  CardCreditDetail,
   CardStatementDue,
   CashflowTimeline,
   CashflowTimelineEvent,
@@ -824,11 +825,17 @@ function pageFor<T>(items: T[], query: URLSearchParams): PaginatedResponse<T> {
  * (newest first unless `asc`, by date then id as the API sorts), `limit` and `offset`. Sorted before it is paged.
  */
 export function transactionsFor(data: HouseholdData, query: URLSearchParams): PaginatedResponse<Transaction> {
-  only(query, ['start_date', 'end_date', 'order', 'limit', 'offset'])
+  only(query, ['start_date', 'end_date', 'order', 'limit', 'offset', 'account_ids'])
+  const accountIds = query.getAll('account_ids').map(Number)
+  const touches = (t: Transaction): boolean =>
+    accountIds.length === 0 ||
+    (t.view === 'limited'
+      ? accountIds.includes(t.account?.id ?? -1)
+      : [t.account_id, t.transfer_from_account_id, t.transfer_to_account_id].some((id) => id != null && accountIds.includes(id)))
   const dayOf = (t: Transaction): string => (t.view === 'limited' ? t.date : t.transaction_date).slice(0, 10)
   const start = query.get('start_date')?.slice(0, 10)
   const end = query.get('end_date')?.slice(0, 10)
-  const matches = data.transactions.filter((t) => (!start || dayOf(t) >= start) && (!end || dayOf(t) <= end))
+  const matches = data.transactions.filter((t) => touches(t) && (!start || dayOf(t) >= start) && (!end || dayOf(t) <= end))
   // The API's order: transaction_date, then id, both ascending for `asc` and both descending otherwise.
   const whenOf = (t: Transaction): string => (t.view === 'limited' ? t.date : t.transaction_date)
   const sign = query.get('order') === 'asc' ? 1 : -1
@@ -873,6 +880,29 @@ export const householdRoutes = (data: HouseholdData = household): ApiRoute[] => 
   apiRoute<ReceivedHouseholdShare[]>('GET', '/shares/received/household', []),
   apiRoute<HouseholdShares>('GET', '/tags/household/shares', { tag_id: householdTag.id, shares: [] }),
 ]
+
+/**
+ * What the account detail page (`/accounts/:id`) asks for, answered from `data`: the account, its transactions
+ * (`transactionsFor` filters them by `account_ids`) and, for a credit card, an empty credit panel.
+ */
+export const accountDetailRoutes = (data: HouseholdData, accountId: number): ApiRoute[] => {
+  const account = data.accounts.find((a) => a.id === accountId)
+  if (!account) throw new Error(`no account ${accountId} in the fixture`)
+  const credit: CardCreditDetail = {
+    account_id: account.id,
+    name: account.name,
+    currency: 'PHP',
+    credit: null,
+    rule: null,
+    statements: [],
+    open_cycle: null,
+    unposted: null,
+  }
+  return [
+    apiRoute<Account>('GET', `/accounts/${accountId}`, account),
+    apiRoute<CardCreditDetail>('GET', `/cards/${accountId}/credit`, credit),
+  ]
+}
 
 /**
  * Signs in as the household's user, freezes the clock on `HOUSEHOLD_NOW` and fakes the API
