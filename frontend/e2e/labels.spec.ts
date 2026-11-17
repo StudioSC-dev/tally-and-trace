@@ -1,0 +1,384 @@
+// STU-677: sentence-case labels, plain counts and no template chrome. The API is faked in the browser with the shared
+// household fixture (`allUpcomingHousehold` where a count has to reach two digits); there is no backend.
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { expect, test } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
+import { shot } from './support/shot'
+import { allUpcomingHousehold, household, mockHousehold } from './support/fixtures/household'
+import type { HouseholdData } from './support/fixtures/household'
+
+// This spec lives in <repo>/frontend/e2e.
+const FRONTEND = fileURLToPath(new URL('..', import.meta.url))
+const SRC = path.join(FRONTEND, 'src')
+
+/** `muted` in the light theme (docs/design-system.md, Palette): #4A5950 as getComputedStyle reports it. */
+const MUTED = 'rgb(74, 89, 80)'
+/** The one date form the lists print, e.g. "Mar 12th, 2026". */
+const DATE = /[A-Z][a-z]{2} \d{1,2}(?:st|nd|rd|th), \d{4}/g
+
+async function open(page: Page, route: string, data: HouseholdData = household): Promise<void> {
+  await mockHousehold(page, data)
+  await page.goto(route)
+  await expect(page.locator('main h1').first()).toBeVisible()
+  await page.waitForLoadState('networkidle')
+}
+
+/** A viewport screenshot saved under shot()'s naming, for the dialogs (`position: fixed`). */
+async function viewportShot(page: Page, name: string): Promise<void> {
+  const info = test.info()
+  const file = path.join(info.project.outputDir, 'screens', `labels-${name}-${info.project.name}.png`)
+  await page.screenshot({ path: file, animations: 'disabled' })
+}
+
+/** The overlay of the open dialog (the shared `fixed inset-0` scrim around it). */
+const overlay = (page: Page): Locator => page.locator('.fixed.inset-0.overflow-y-auto').last()
+
+async function openAddTransaction(page: Page): Promise<Locator> {
+  await open(page, '/transactions')
+  await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+  await expect(overlay(page).getByText('Transaction type')).toBeVisible()
+  return overlay(page)
+}
+
+async function openRecurringEntry(page: Page): Promise<Locator> {
+  await open(page, '/allocations?tab=recurring')
+  await page.getByRole('button', { name: 'Add Recurring Entry' }).click()
+  await expect(overlay(page).getByRole('heading', { name: 'Add Recurring Entry' })).toBeVisible()
+  return overlay(page)
+}
+
+interface LabelStyle {
+  text: string
+  transform: string
+  spacing: string
+  size: string
+  weight: string
+  family: string
+  color: string
+}
+
+/** The visible `.label` elements under `scope`, with the computed style AC1 names. */
+const labelsIn = (scope: Locator): Promise<LabelStyle[]> =>
+  scope.evaluate((root) => {
+    const visible = (e: Element): boolean => {
+      const b = e.getBoundingClientRect()
+      const s = getComputedStyle(e)
+      return b.width > 0 && b.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'
+    }
+    return [...root.querySelectorAll('.label')].filter(visible).map((e) => {
+      const s = getComputedStyle(e)
+      return {
+        text: (e as HTMLElement).innerText.trim(),
+        transform: s.textTransform,
+        spacing: s.letterSpacing,
+        size: s.fontSize,
+        weight: s.fontWeight,
+        family: s.fontFamily,
+        color: s.color,
+      }
+    })
+  })
+
+/** Every visible element under `scope` (and `scope` itself) whose text is transformed to capitals, as "tag:text". */
+const uppercaseIn = (scope: Locator): Promise<{ scanned: number; found: string[] }> =>
+  scope.evaluate((root) => {
+    const all = [root, ...root.querySelectorAll('*')].filter((e) => {
+      const b = e.getBoundingClientRect()
+      return b.width > 0 && b.height > 0 && getComputedStyle(e).visibility !== 'hidden'
+    })
+    const found = all.filter((e) => getComputedStyle(e).textTransform === 'uppercase').map((e) => `${e.tagName}:${(e as HTMLElement).innerText.slice(0, 40)}`)
+    return { scanned: all.length, found }
+  })
+
+/** The small headings and term labels that used to be tracked capitals, in document order. Hidden ones are skipped. */
+const captionsIn = (scope: Locator): Promise<string[]> =>
+  scope.evaluate((root) =>
+    [...root.querySelectorAll('h3, h4, dt, th, .label')]
+      .filter((e) => e.getBoundingClientRect().width > 0)
+      .map((e) => (e as HTMLElement).innerText.trim()),
+  )
+
+interface Surface {
+  name: string
+  route: string
+  /** The `.label` texts the surface shows, held here as the sentence-case expectation. */
+  labels: string[]
+  /** The captions (`h3`, `h4`, `dt`, `th`, `.label`, `label`) it shows. */
+  captions: string[]
+}
+
+const DASHBOARD: Surface = {
+  name: 'dashboard',
+  route: '/',
+  labels: [],
+  captions: [
+    'Opening',
+    'Trough',
+    'Close (60d)',
+    'Actual totals (Month to date)',
+    'Total income (MTD)',
+    'Total expenses (MTD)',
+    'Net flow (MTD)',
+    'Today',
+    'Net worth',
+    'Projected',
+    'Available cash',
+    'Also coming up',
+  ],
+}
+const TRANSACTIONS: Surface = {
+  name: 'transactions',
+  route: '/transactions',
+  labels: ['Search transactions'],
+  captions: ['Search transactions'],
+}
+const ALLOCATIONS: Surface = { name: 'allocations', route: '/allocations?tab=recurring', labels: [], captions: [] }
+
+const ADD_TRANSACTION_LABELS = [
+  'Description',
+  'Account',
+  'Category',
+  'Transaction type',
+  'Amount',
+  'Transaction date',
+  'Posting date (optional)',
+  'Tags (optional)',
+  'Recurring entry (optional)',
+]
+
+test.describe('Labels, counts and chrome (STU-677)', () => {
+  for (const surface of [DASHBOARD, TRANSACTIONS, ALLOCATIONS]) {
+    test(`labels are sentence case: ${surface.name}`, async ({ page }) => {
+      await open(page, surface.route)
+      const main = page.locator('main')
+      const labels = await labelsIn(main)
+      expect.soft(labels.map((l) => l.text), `${surface.name} .label texts`).toEqual(surface.labels)
+      for (const l of labels) {
+        expect.soft(l.transform, `"${l.text}" text-transform`).toBe('none')
+        expect.soft(['normal', '0px'], `"${l.text}" letter-spacing ${l.spacing}`).toContain(l.spacing)
+        expect.soft(l.size, `"${l.text}" font-size`).toBe('13px')
+        expect.soft(l.weight, `"${l.text}" font-weight`).toBe('500')
+        expect.soft(l.family.startsWith('"IBM Plex Sans"'), `"${l.text}" font-family ${l.family}`).toBe(true)
+        expect.soft(l.color, `"${l.text}" colour is muted`).toBe(MUTED)
+      }
+      expect.soft(await captionsIn(main), `${surface.name} captions read in sentence case`).toEqual(surface.captions)
+      const caps = await uppercaseIn(main)
+      expect.soft(caps.scanned, 'the scan saw the page').toBeGreaterThan(50)
+      expect.soft(caps.found, `${surface.name}: nothing in main is uppercase`).toEqual([])
+      await shot(page, `labels-${surface.name}`)
+    })
+  }
+
+  test('labels are sentence case: add transaction dialog', async ({ page }) => {
+    const dialog = await openAddTransaction(page)
+    const labels = await labelsIn(dialog)
+    expect.soft(labels.map((l) => l.text), 'the dialog .label texts').toEqual(ADD_TRANSACTION_LABELS.filter((t) => t !== 'Mark as posted'))
+    for (const l of labels) {
+      expect.soft(l.transform, `"${l.text}" text-transform`).toBe('none')
+      expect.soft(['normal', '0px'], `"${l.text}" letter-spacing ${l.spacing}`).toContain(l.spacing)
+      expect.soft(l.size, `"${l.text}" font-size`).toBe('13px')
+      expect.soft(l.weight, `"${l.text}" font-weight`).toBe('500')
+      expect.soft(l.family.startsWith('"IBM Plex Sans"'), `"${l.text}" font-family ${l.family}`).toBe(true)
+      expect.soft(l.color, `"${l.text}" colour is muted`).toBe(MUTED)
+    }
+    const caps = await uppercaseIn(dialog)
+    expect.soft(caps.scanned, 'the scan saw the dialog').toBeGreaterThan(20)
+    expect.soft(caps.found, 'nothing in the dialog is uppercase').toEqual([])
+    await viewportShot(page, 'labels-add-transaction')
+  })
+
+  test('counts read as numbers', async ({ page }) => {
+    await open(page, '/transactions', allUpcomingHousehold)
+    const ids = ['due-count', 'due-not-posted-count', 'due-upcoming-count', 'due-subscriptions-count', 'due-installments-count']
+    for (const id of ids) {
+      const badge = page.getByTestId(id)
+      await expect.soft(badge, `${id} is on the page`).toBeVisible()
+      expect.soft(['normal', '0px'], `${id} letter-spacing ${await badge.evaluate((e) => getComputedStyle(e).letterSpacing)}`).toContain(await badge.evaluate((e) => getComputedStyle(e).letterSpacing))
+      expect.soft(await badge.evaluate((e) => getComputedStyle(e).backgroundColor), `${id} has no fill`).toBe('rgba(0, 0, 0, 0)')
+      expect.soft(await badge.evaluate((e) => getComputedStyle(e).fontVariantNumeric), `${id} figures`).toContain('tabular-nums')
+      expect.soft(await badge.evaluate((e) => getComputedStyle(e).fontSize), `${id} font-size`).toBe('12px')
+      expect.soft(await badge.evaluate((e) => getComputedStyle(e).color), `${id} colour is muted`).toBe(MUTED)
+    }
+    const textWidth = (badge: Locator): Promise<number> =>
+      badge.evaluate((e) => {
+        const range = document.createRange()
+        range.selectNodeContents(e)
+        return range.getBoundingClientRect().width
+      })
+    const two = page.getByTestId('due-upcoming-count')
+    await expect.soft(two, 'the upcoming count is 18').toHaveText('18')
+    const one = page.getByTestId('due-count')
+    await expect.soft(one, 'the due count is one digit').toHaveText('2')
+    const ratio = (await textWidth(two)) / (await textWidth(one))
+    expect.soft(ratio, `18 is ${ratio.toFixed(2)} times as wide as 2`).toBeGreaterThan(1.8)
+    expect.soft(ratio, `18 is ${ratio.toFixed(2)} times as wide as 2`).toBeLessThan(2.2)
+    await shot(page, 'counts')
+  })
+
+  test('period label is plain', async ({ page }) => {
+    await open(page, '/')
+    const badge = page.locator('.badge', { hasText: /^Month to date$/i })
+    await expect.soft(badge, 'one period badge').toHaveCount(1)
+    expect.soft(await badge.innerText(), 'the badge reads Month to date').toBe('Month to date')
+    expect.soft(['normal', '0px'], 'badge letter-spacing').toContain(await badge.evaluate((e) => getComputedStyle(e).letterSpacing))
+    expect.soft(await badge.evaluate((e) => getComputedStyle(e).textTransform), 'badge text-transform').toBe('none')
+    const heading = page.getByRole('heading', { name: /^Actual totals/ })
+    expect.soft(await heading.innerText(), 'the totals heading').toBe('Actual totals (Month to date)')
+    expect.soft(['normal', '0px'], 'heading letter-spacing').toContain(await heading.evaluate((e) => getComputedStyle(e).letterSpacing))
+    await shot(page, 'period-label')
+  })
+
+  const chrome = /•|→| — /
+  const chromeSurfaces: { name: string; text: (page: Page) => Promise<string>; anchor: string }[] = [
+    { name: 'dashboard', anchor: 'Cash-Flow Timeline', text: async (p) => (await open(p, '/'), p.locator('main').innerText()) },
+    { name: 'transactions', anchor: 'Date range:', text: async (p) => (await open(p, '/transactions'), p.locator('main').innerText()) },
+    { name: 'allocations', anchor: 'Recurring expense', text: async (p) => (await open(p, '/allocations?tab=recurring'), p.locator('main').innerText()) },
+    { name: 'add transaction dialog', anchor: 'Transaction type', text: async (p) => (await openAddTransaction(p)).innerText() },
+    { name: 'recurring entry dialog', anchor: 'Add Recurring Entry', text: async (p) => (await openRecurringEntry(p)).innerText() },
+  ]
+  for (const surface of chromeSurfaces) {
+    test(`no bullet, arrow or em-dash chrome: ${surface.name}`, async ({ page }) => {
+      const text = await surface.text(page)
+      expect.soft(text, `${surface.name} text was read`).toContain(surface.anchor)
+      expect.soft(text.length, `${surface.name} text is not empty`).toBeGreaterThan(200)
+      expect.soft(text.match(chrome)?.[0] ?? null, `${surface.name} has no bullet, arrow or em dash`).toBeNull()
+      if (surface.name.includes('dialog')) await viewportShot(page, `chrome-${surface.name.replace(/ /g, '-')}`)
+      else await shot(page, `chrome-${surface.name}`)
+    })
+  }
+
+  test('date facts are preserved and links carry no arrow', async ({ page }) => {
+    await open(page, '/transactions')
+    const rows = page.locator('article[role="button"]')
+    expect.soft(await rows.count(), 'the page lists its transactions').toBe(19)
+    const texts = await rows.allInnerTexts()
+    for (const text of texts) {
+      const name = text.split('\n').find((l) => l.trim() !== '' && !DATE.test(l)) ?? text.slice(0, 20)
+      DATE.lastIndex = 0
+      expect.soft(text.match(DATE)?.length ?? 0, `"${name}" shows one date`).toBe(1)
+      expect.soft(/\b(Today|Yesterday|Tomorrow)\b/i.test(text), `"${name}" has no relative-day label`).toBe(false)
+    }
+    // The row dated on the page's today keeps its date and drops the "Today" label.
+    const today = page.locator('article[role="button"]', { hasText: 'Puregold weekly groceries' })
+    expect.soft(await today.innerText(), 'the row dated today').toContain('Mar 12th, 2026')
+    const range = page.getByText(/^Date range:/)
+    expect.soft((await range.innerText()).replace(/\s+/g, ' '), 'the range keeps both endpoints').toBe('Date range: Mar 1st, 2026 to Mar 31st, 2026')
+    await shot(page, 'date-facts')
+
+    await open(page, '/')
+    const details = page.getByRole('link', { name: 'Details', exact: true })
+    await expect.soft(details, 'the Cash-flow card has one Details link').toHaveCount(1)
+    expect.soft((await details.innerText()).trim(), 'the link reads Details').toBe('Details')
+    expect.soft(await details.getAttribute('href'), 'the link goes to the forecast').toBe('/forecast')
+    await shot(page, 'details-link')
+  })
+
+  test('no tracked-capital utilities remain in source', async ({ page }) => {
+    const files: string[] = []
+    const walk = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name)
+        if (entry.isDirectory()) walk(full)
+        else if (entry.name.endsWith('.tsx')) files.push(full)
+      }
+    }
+    walk(SRC)
+    expect.soft(files.length, 'the source tree was read').toBeGreaterThan(40)
+    const found: string[] = []
+    for (const file of files) {
+      fs.readFileSync(file, 'utf8')
+        .split('\n')
+        .forEach((line, i) => {
+          // "One uppercase letter" is the password rule's wording in SignupForm, not a class.
+          if (line.trim() === 'One uppercase letter') return
+          if (/(?<![\w-])(uppercase|tracking-wide)(?![\w-])/.test(line)) found.push(`${path.relative(SRC, file)}:${i + 1}`)
+        })
+    }
+    expect.soft(found, 'no uppercase or tracking-wide class token in any .tsx').toEqual([])
+    const css = fs.readFileSync(path.join(SRC, 'assets', 'index.css'), 'utf8')
+    expect.soft(css.match(/\.(uppercase|tracking-wide)\b/)?.[0] ?? null, 'no shim restyles those utilities in the CSS').toBeNull()
+    await open(page, '/transactions')
+    await shot(page, 'source-scan')
+  })
+
+  test('meta strings use layout', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'phone', 'the 390px layout')
+    await open(page, '/allocations?tab=recurring')
+    const meta = page.locator('p', { hasText: /^Netflix Standard$/ }).first().locator('xpath=following-sibling::div[1]')
+    await expect.soft(meta, 'the line under the name').toBeVisible()
+    expect.soft(await meta.locator(':scope > *').count(), 'the meta line is separate elements').toBeGreaterThan(1)
+    expect.soft(await meta.innerText(), 'the meta line has no bullet').not.toContain('•')
+    const boxes = await meta.locator(':scope > *').evaluateAll((els) => els.map((e) => e.getBoundingClientRect()).map((r) => ({ x: r.x, y: r.y, right: r.right, bottom: r.bottom })))
+    expect.soft(boxes.length, 'three facts: kind, cadence, settlement').toBe(3)
+    // Each fact sits on its own box: a gap of 8px or more beside the one before it, or on the line below it.
+    boxes.slice(1).forEach((b, i) => {
+      const before = boxes[i]
+      const sameLine = b.y < before.bottom
+      expect.soft(sameLine ? b.x - before.right : b.y - before.bottom, `fact ${i + 2} is set apart from fact ${i + 1}`).toBeGreaterThanOrEqual(sameLine ? 8 : 0)
+    })
+    await shot(page, 'meta-layout')
+  })
+
+  test('chrome cleanup preserves facts and actions', async ({ page }) => {
+    // Allocations: each recurring entry's meta line keeps its kind, cadence and settlement.
+    await open(page, '/allocations?tab=recurring')
+    const entries: [string, string[]][] = [
+      ['Netflix Standard', ['Recurring expense', 'Monthly · day 9', 'Scheduled']],
+      ['Rent', ['Recurring expense', 'Monthly · day 1', 'Manual']],
+      ['PLDT Fibr', ['Recurring expense', 'Monthly · day 6', 'Auto-pay']],
+    ]
+    for (const [name, facts] of entries) {
+      const meta = await page.locator('p', { hasText: new RegExp(`^${name}$`) }).first().locator('xpath=following-sibling::div[1]').innerText()
+      for (const fact of facts) expect.soft(meta, `${name} keeps "${fact}"`).toContain(fact)
+    }
+    await expect.soft(page.getByText('Recurring income').first(), 'an income entry keeps its kind').toBeVisible()
+    await shot(page, 'facts-allocations')
+
+    // Transactions: a transfer row keeps both accounts, its category and who entered it; the range keeps both ends.
+    await open(page, '/transactions')
+    const transfer = await page.locator('article[role="button"]', { hasText: 'Move to emergency fund' }).innerText()
+    for (const fact of ['BPI Payroll', 'Metrobank Savings', 'Savings transfer', 'by Mara S.', 'Transfer', 'Mar 8th, 2026']) {
+      expect.soft(transfer, `the transfer row keeps "${fact}"`).toContain(fact)
+    }
+    const dinner = await page.locator('article[role="button"]', { hasText: 'Dinner, Manam' }).innerText()
+    for (const fact of ['HSBC Red Mastercard', 'Dining out', 'by Mara S.', 'Japan trip', 'Mar 7th, 2026']) {
+      expect.soft(dinner, `the tagged row keeps "${fact}"`).toContain(fact)
+    }
+    await shot(page, 'facts-transactions')
+
+    // The row action still opens the action dialog and then the edit form for the same transaction.
+    await page.getByText('Grab to Makati').click()
+    await expect.soft(overlay(page).getByText('Transaction Actions'), 'a row opens its action dialog').toBeVisible()
+    await expect.soft(overlay(page).getByText('Grab to Makati'), 'the dialog is for that row').toBeVisible()
+    await overlay(page).getByRole('button', { name: 'Edit Transaction' }).click()
+    await expect.soft(overlay(page).getByRole('heading', { name: 'Edit Transaction' }), 'Edit opens the edit form').toBeVisible()
+    await expect.soft(overlay(page).getByTestId('transaction-date'), 'the form holds that row date').toHaveValue('2026-03-11')
+    expect.soft(await overlay(page).locator('input').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value)), 'the form holds that row description').toContain('Grab to Makati')
+    await viewportShot(page, 'facts-row-action')
+
+    // The Add Transaction dialog's recurring-entry choices keep each entry's name, cadence and amount.
+    const dialog = await openAddTransaction(page)
+    const options = await dialog.locator('select option').allInnerTexts()
+    for (const [name, cadence, amount] of [['Rent', 'Monthly', '₱22,000.00'], ['Palengke run', 'Weekly', '₱1,300.00'], ['Yaya salary', 'Twice a month', '₱4,500.00']]) {
+      const option = options.find((o) => o.startsWith(name)) ?? ''
+      expect.soft(option, `${name}'s choice keeps its cadence and amount`).toContain(`${cadence}, ${amount}`)
+    }
+    await viewportShot(page, 'facts-add-transaction')
+
+    // The recurring-entry dialog keeps its fields under their sentence-case names.
+    const recurring = await openRecurringEntry(page)
+    for (const label of ['Name', 'Entry type', 'Account', 'Next occurrence', 'Lead time (days)']) {
+      await expect.soft(recurring.locator('label', { hasText: new RegExp(`^${label.replace(/[()]/g, '\\$&')}$`) }), `the dialog has "${label}"`).toHaveCount(1)
+    }
+    await viewportShot(page, 'facts-recurring')
+
+    // The Cash-flow card's Details link goes to the forecast page.
+    await open(page, '/')
+    await page.getByRole('link', { name: 'Details', exact: true }).click()
+    await expect.soft(page, 'Details opens the forecast').toHaveURL(/\/forecast$/)
+    await expect.soft(page.getByRole('heading', { level: 1, name: 'Cash-Flow Timeline' }), 'the forecast page shows').toBeVisible()
+    await shot(page, 'facts-details')
+  })
+})
