@@ -48,6 +48,8 @@ import { ScheduledView } from '../components/transactions/ScheduledView'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 import { keepsRetainedActual } from '../utils/retainedActual'
 import { SlowReload, Spinner } from '../components/Loading'
+import { Segment, SegmentedControl } from '../components/SegmentedControl'
+import { withSelection } from '../utils/selection'
 
 const TRANSACTION_TYPE_LABELS: Record<Transaction['transaction_type'], string> = {
   credit: 'Income',
@@ -2938,25 +2940,17 @@ export function TransactionsPage() {
 
       {/* Search and Filters */}
       <div ref={listCardRef} className="card p-4 sm:p-6 space-y-4" data-testid="transactions-list-card">
-        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="List view">
-          {([['to_date', 'To date'], ['scheduled', 'Scheduled']] as const).map(([value, label]) => {
-            const pressed = (value === 'scheduled') === isScheduled
-            return (
-              <button
-                type="button"
-                key={value}
-                onClick={() => showView(value)}
-                aria-pressed={pressed}
-                data-testid={`view-${value === 'scheduled' ? 'scheduled' : 'to-date'}`}
-                className={`min-h-11 px-4 py-2 text-sm font-semibold transition focus-ring ${
-                  pressed ? 'bg-ink text-paper' : 'border border-line bg-surface text-body hover:bg-sunken'
-                }`}
-              >
-                {label}
-              </button>
-            )
-          })}
-        </div>
+        <SegmentedControl
+          className="flex flex-wrap items-center gap-2"
+          aria-label="List view"
+          options={[
+            { value: 'to_date', label: 'To date', testId: 'view-to-date' },
+            { value: 'scheduled', label: 'Scheduled', testId: 'view-scheduled' },
+          ]}
+          value={isScheduled ? 'scheduled' : 'to_date'}
+          onChange={showView}
+          segmentClassName="min-h-11 px-4 py-2 text-sm focus-ring"
+        />
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="w-full lg:max-w-md">
             <label className="label">Search transactions</label>
@@ -3122,28 +3116,25 @@ export function TransactionsPage() {
             </div>
           <div>
               <h3 className="text-sm font-semibold text-body">Transaction types</h3>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button
-                  type="button"
+              <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Transaction types">
+                <Segment
+                  selected={selectedTypes.length === 0}
                   onClick={() => setSelectedTypes([])}
-                  className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${ selectedTypes.length === 0 ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
+                  className="px-3 py-1.5 text-sm"
                   disabled={selectedTypes.length === 0}
                 >
                   All types
-                </button>
-                {transactionTypeOptions.map((option) => {
-                  const isSelected = selectedTypes.includes(option.value)
-                  return (
-                    <button
-                      type="button"
-                      key={option.value}
-                      onClick={() => toggleTypeFilter(option.value)}
-                      className={`rounded-full px-3 py-1.5 text-sm font-medium capitalize transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
-                    >
-                      {option.label}
-                    </button>
-                  )
-                })}
+                </Segment>
+                {transactionTypeOptions.map((option) => (
+                  <Segment
+                    key={option.value}
+                    selected={selectedTypes.includes(option.value)}
+                    onClick={() => toggleTypeFilter(option.value)}
+                    className="px-3 py-1.5 text-sm capitalize"
+                  >
+                    {option.label}
+                  </Segment>
+                ))}
           </div>
         </div>
             <div>
@@ -3188,19 +3179,17 @@ export function TransactionsPage() {
       </div>
             <div>
               <h3 className="text-sm font-semibold text-body">Entered by</h3>
-              <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Entered by">
-                {([['everyone', 'Everyone'], ['me', 'Only mine']] as const).map(([value, label]) => (
-                  <button
-                    type="button"
-                    key={value}
-                    onClick={() => setEnteredBy(value)}
-                    aria-pressed={enteredBy === value}
-                    className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${ enteredBy === value ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+              <SegmentedControl
+                className="mt-2 flex flex-wrap gap-2"
+                aria-label="Entered by"
+                options={[
+                  { value: 'everyone', label: 'Everyone' },
+                  { value: 'me', label: 'Only mine' },
+                ]}
+                value={enteredBy}
+                onChange={setEnteredBy}
+                segmentClassName="px-3 py-1.5 text-sm"
+              />
               <p className="mt-2 text-xs text-muted">
                 Only mine keeps the rows you own, including ones someone else recorded for you from your recurring entries.
               </p>
@@ -3331,7 +3320,7 @@ export function TransactionsPage() {
                       key={item}
                       onClick={() => goToPage(item)}
                       aria-current={item === pageView.page ? 'page' : undefined}
-                      className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${ item === pageView.page ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
+                      className={withSelection(item === pageView.page, 'px-3 py-1.5 text-sm')}
                     >
                       {item}
                     </button>
@@ -3990,24 +3979,17 @@ export function TransactionsPage() {
 
               <div>
                 <label className="label">Transaction Type</label>
-                <div className="flex flex-wrap gap-2">
-                  {transactionTypeOptions.map((option) => {
-                    const isSelected = formData.transaction_type === option.value
-                    return (
-                      <button
-                        type="button"
-                        key={option.value}
-                        onClick={() => {
-                          markChanged('transaction_type')
-                          handleTypeChange(option.value)
-                        }}
-                        className={`rounded-full px-3 py-1.5 text-sm font-medium capitalize transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
-                      >
-                        {option.label}
-                      </button>
-                    )
-                  })}
-                </div>
+                <SegmentedControl
+                  className="flex flex-wrap gap-2"
+                  aria-label="Transaction type"
+                  options={transactionTypeOptions}
+                  value={formData.transaction_type}
+                  onChange={(value) => {
+                    markChanged('transaction_type')
+                    handleTypeChange(value)
+                  }}
+                  segmentClassName="px-3 py-1.5 text-sm capitalize"
+                />
                 {contextHint && (
                   <div className="mt-3 flex items-start gap-2 border border-line px-3 py-2 text-xs text-ink">
                     <svg className="mt-0.5 h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">

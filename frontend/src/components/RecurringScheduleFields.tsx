@@ -9,6 +9,7 @@ import type {
   SettlementControlState,
 } from '@tally-trace/shared'
 import { chargedOnCloseLabel, formatCadenceLabel } from '../utils/recurringEntry'
+import { SegmentedControl } from './SegmentedControl'
 
 /** The schedule controls that carry an inline error. */
 export type ScheduleFieldKey = 'day' | 'day_of_month' | 'end_date' | 'max_occurrences'
@@ -251,38 +252,32 @@ export function RecurringScheduleFields({
               <div className="space-y-3">
                 <div>
                   <label className="block text-sm font-medium text-body">Ends</label>
-                  <div className="mt-1 flex flex-wrap gap-2" {...(controlProps ? { role: 'group', 'aria-label': 'Ends', ...controlProps('end_mode') } : {})}>
-                    {[
-                      { value: 'indefinite', label: 'Keep running' },
-                      { value: 'on_date', label: 'On date' },
-                      { value: 'after_occurrences', label: 'After runs' },
-                    ].map(({ value, label }) => {
-                      const isSelected = draft.end_mode === value
-                      return (
-                        <button
-                          type="button"
-                          key={value}
-                          onClick={() =>
-                            onChange((prev) => ({
-                              ...prev,
-                              end_mode: value as ScheduleDraft['end_mode'],
-                              kind_choice: settleKindChoice(value === 'after_occurrences', state.kindValue, state.offerAutomatic),
-                              end_date: value === 'on_date' ? prev.end_date : undefined,
-                              max_occurrences:
-                                value === 'after_occurrences'
-                                  ? prev.max_occurrences && prev.max_occurrences > 0
-                                    ? prev.max_occurrences
-                                    : 6
-                                  : undefined,
-                            }))
-                          }
-                          className={`rounded-full px-3 py-1${touch ? ' min-h-11' : ''} text-sm font-medium transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
-                        >
-                          {label}
-                        </button>
-                      )
-                    })}
-                  </div>
+                  <SegmentedControl
+                    className="mt-1 flex flex-wrap gap-2"
+                    aria-label="Ends"
+                    {...controlProps?.('end_mode')}
+                    options={[
+                      { value: 'indefinite' as const, label: 'Keep running' },
+                      { value: 'on_date' as const, label: 'On date' },
+                      { value: 'after_occurrences' as const, label: 'After runs' },
+                    ]}
+                    value={draft.end_mode}
+                    onChange={(value) =>
+                      onChange((prev) => ({
+                        ...prev,
+                        end_mode: value,
+                        kind_choice: settleKindChoice(value === 'after_occurrences', state.kindValue, state.offerAutomatic),
+                        end_date: value === 'on_date' ? prev.end_date : undefined,
+                        max_occurrences:
+                          value === 'after_occurrences'
+                            ? prev.max_occurrences && prev.max_occurrences > 0
+                              ? prev.max_occurrences
+                              : 6
+                            : undefined,
+                      }))
+                    }
+                    segmentClassName={`px-3 py-1${touch ? ' min-h-11' : ''} text-sm`}
+                  />
                   {renderControlError?.('end_mode')}
   </div>
 

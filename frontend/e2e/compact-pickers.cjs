@@ -246,7 +246,7 @@ async function scenario2(browser) {
           return Math.abs(b.getBoundingClientRect().width - groupBox.width) > 1 || b.getBoundingClientRect().width < inner * 0.8
         }).map((b) => b.textContent.trim())
         const tops = rows.map((b) => Math.round(b.getBoundingClientRect().top))
-        const chips = rows.filter((b) => b.className.includes('rounded-full')).length
+        const chips = rows.filter((b) => b.classList.contains('inline-flex')).length
         return { n: rows.length, narrow, distinctTops: new Set(tops).size, chips }
       })
       return (got.n >= 9 && got.narrow.length === 0 && got.distinctTops === got.n && got.chips === 0) || JSON.stringify(got)
@@ -531,7 +531,7 @@ async function scenario7(browser) {
     await h.check('7.filters-keep-chips-not-rows', 'B', async () => {
       const got = await page.locator('[data-field="filter_accounts"]').evaluate((el) => ({
         rows: el.querySelectorAll('[data-picker-option], [data-picker-panel], [data-picker-list]').length,
-        chips: [...el.querySelectorAll('[data-picker-id]')].filter((b) => b.className.includes('rounded-full')).length,
+        chips: [...el.querySelectorAll('[data-picker-id]')].filter((b) => b.classList.contains('inline-flex')).length,
         ids: el.querySelectorAll('[data-picker-id]').length,
       }))
       return (got.rows === 0 && got.ids > 0 && got.chips === got.ids) || JSON.stringify(got)

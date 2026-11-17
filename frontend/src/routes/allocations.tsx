@@ -65,6 +65,7 @@ import { InstallmentReviewDialog } from '../components/InstallmentReviewDialog'
 import { useToast } from '../hooks/useToast'
 import { apiErrorMessage } from '../utils/apiError'
 import { SkeletonRows } from '../components/Loading'
+import { Segment } from '../components/SegmentedControl'
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000
 
@@ -1831,16 +1832,15 @@ export function AllocationsPage() {
               { value: 'savings' as const, label: 'Savings' },
               { value: 'wishlist' as const, label: 'Wishlist' },
             ].map((tab) => {
-              const isActive = activeTab === tab.value
           return (
-                  <button
+                  <Segment
                   key={tab.value}
-                  aria-pressed={isActive}
+                  selected={activeTab === tab.value}
                   onClick={() => setActiveTab(tab.value)}
-                  className={`px-4 py-2 text-sm font-semibold transition ${ isActive ? 'bg-ink text-paper' : 'text-body hover:bg-sunken' }`}
+                  className="px-4 py-2 text-sm"
                 >
                   {tab.label}
-                  </button>
+                  </Segment>
               )
             })}
           </nav>
@@ -2215,16 +2215,16 @@ export function AllocationsPage() {
                         {budgetCadenceOptions.map((cadence) => {
                           const isSelected = allocationForm.period_frequency === cadence
                           return (
-                            <button
-                              type="button"
+                            <Segment
                               key={cadence}
+                              selected={isSelected}
                               data-selected={isSelected ? 'true' : undefined}
                               aria-describedby={fieldProps('period_frequency')['aria-describedby']}
                               onClick={() => handleBudgetCadenceSelect(cadence)}
-                              className={`rounded-full px-3 py-1 text-sm font-medium transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
+                              className="px-3 py-1 text-sm"
                             >
                               {formatBudgetCadenceLabel(cadence)}
-                            </button>
+                            </Segment>
                           )
                         })}
                       </div>
