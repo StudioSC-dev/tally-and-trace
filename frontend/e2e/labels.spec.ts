@@ -485,4 +485,38 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
     await expect.soft(page.getByRole('heading', { level: 1, name: 'Cash-Flow Timeline' }), 'the forecast page shows').toBeVisible()
     await shot(page, 'facts-details')
   })
+
+  test('chrome cleanup preserves facts and actions: dashboard', async ({ page }) => {
+    // Every dashboard meta line, with the fixture-backed facts it showed at the PR base (c1910fd).
+    await open(page, '/')
+    const cashflow = page.locator('[data-onboarding="cashflow-timeline"]')
+    const snapshot = page.locator('[data-onboarding="financial-snapshot"]')
+    const tile = (name: string): Locator => page.getByTestId('quick-balance-tile').filter({ has: page.getByTestId('quick-balance-name').getByText(name, { exact: true }) })
+    const payable = (name: string): Locator => page.getByTestId('payable-row').filter({ has: page.getByText(name, { exact: true }) })
+    const upcoming = (index: number): Locator => page.getByTestId('other-upcoming-row').nth(index)
+    const lines: [string, Locator, string[]][] = [
+      ['the Cash-flow subtitle', cashflow, ['next 60 days', 'before payday', 'month-end']],
+      ['the Cash-flow figures', cashflow, ['Opening', '₱84,250.40', 'Trough', '₱71,769.85', 'Close (60d)', '₱106,040.10', 'Mar 13, 2026']],
+      ['the BPI Payroll quick balance', tile('BPI Payroll'), ['Debit', 'BPI Payroll', '₱84,250.40']],
+      ['the HSBC quick balance', tile('HSBC Red Mastercard'), ['Credit', 'HSBC Red Mastercard', 'Owed', '₱18,742.30']],
+      ['the GCash quick balance', tile('GCash'), ['E-wallet', 'GCash', '₱3,415.75']],
+      ['the period totals', snapshot, ['month to date', 'Actual totals (Month to date)', 'Total income (MTD)', '₱33,500.00', 'Total expenses (MTD)', '₱51,821.20', 'Net flow (MTD)', '₱-18,321.20']],
+      ['the snapshot today and projection', snapshot, ['Today', 'Net worth', '₱329,764.35', 'Projected', 'Available cash', '₱343,230.90']],
+      ['the Emergency fund top-up payable', payable('Emergency fund top-up'), ['Mar 8th, 2026', '₱10,000.00', 'Scheduled', 'Manual', 'from BPI Payroll', 'Overdue']],
+      ['the HMO dependent add-on payable', payable('HMO dependent add-on'), ['Mar 20th, 2026', '₱1,450.00', 'Scheduled', 'Manual', 'from BPI Payroll', '8 days remaining']],
+      ['the Rent payable', payable('Rent'), ['Apr 1st, 2026', '₱22,000.00', 'Scheduled', 'Manual', 'from BPI Payroll', '20 days remaining']],
+      ['the PLDT Fibr payable', payable('PLDT Fibr'), ['Apr 6th, 2026', '₱1,899.00', 'Scheduled', 'Autopay', 'from BPI Payroll', '25 days remaining']],
+      ['the HSBC statement payable', payable('HSBC Red Mastercard statement'), ['Apr 9th, 2026', '₱6,261.75', 'Card statement', 'from BPI Payroll', '28 days remaining']],
+      ['the Meralco payable', payable('Meralco'), ['Apr 10th, 2026', '₱4,600.00', 'Scheduled', 'Manual', 'from BPI Payroll', '29 days remaining']],
+      ['the first Also coming up row', upcoming(0), ['Payroll', 'Mar 15th, 2026', 'Money in', 'Scheduled', '₱41,250.00']],
+      ['the second Also coming up row', upcoming(1), ['Payroll', 'Mar 30th, 2026', 'Money in', 'Scheduled', '₱41,250.00']],
+    ]
+    for (const [what, scope, facts] of lines) {
+      for (const fact of facts) await expect.soft(scope, `${what} keeps "${fact}"`).toContainText(fact)
+    }
+    await expect.soft(snapshot.locator('.badge'), 'the period badge keeps its period').toHaveText('Month to date')
+    await expect.soft(page.getByTestId('payable-row'), 'every payable is still listed').toHaveCount(6)
+    await expect.soft(page.getByTestId('other-upcoming-row'), 'both incoming payrolls are still listed').toHaveCount(2)
+    await shot(page, 'facts-dashboard')
+  })
 })
