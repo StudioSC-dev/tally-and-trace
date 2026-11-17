@@ -35,8 +35,8 @@ const user: User = {
   created_at: '2026-01-01T00:00:00',
 }
 
-// The shared overlay (`fixed inset-0 overflow-y-auto bg-black/60`), excluding the confirm dialog (z-[100]).
-const OVERLAY = '.fixed.inset-0.overflow-y-auto.bg-black\\/60:not(.z-\\[100\\])'
+// The shared overlay (`fixed inset-0 overflow-y-auto bg-scrim/60`), excluding the confirm dialog (z-[100]).
+const OVERLAY = '.fixed.inset-0.overflow-y-auto.bg-scrim\\/60:not(.z-\\[100\\])'
 const TOL = 1
 
 const emptyPage = <T>(): PaginatedResponse<T> => ({ items: [], total: 0, has_more: false })

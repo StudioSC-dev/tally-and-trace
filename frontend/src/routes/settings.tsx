@@ -21,6 +21,7 @@ import { useConfirm } from '../hooks/useConfirm'
 import { localToday } from '@tally-trace/shared'
 import { accountPickerGroups } from '@tally-trace/shared'
 import { PickerOptGroups } from '../components/PickerOptGroups'
+import { DEFAULT_SWATCH_COLOR, displayColor, NO_COLOR, SWATCHES, swatchOf, tokenColor } from '../utils/palette'
 
 export const Route = createFileRoute('/settings')({
   component: SettingsPage,
@@ -33,8 +34,6 @@ const CATEGORY_KIND_BADGE = {
   income: { label: 'Income', text: 'text-ok', dot: 'bg-ok' },
   transfer: { label: 'Transfer', text: 'text-info', dot: 'bg-info' },
 } as const
-
-const DEFAULT_COLORS = ['#2563eb', '#7c3aed', '#16a34a', '#f97316', '#db2777', '#0891b2', '#ca8a04', '#dc2626']
 
 // The API's reason for a refused request (e.g. a duplicate tag name), or a fallback.
 const apiErrorMessage = (error: unknown, fallback: string) => {
@@ -70,7 +69,7 @@ function SettingsPage() {
   const [deleteCategory] = useDeleteCategoryMutation()
 
   // Category modal
-  const emptyCategory = { name: '', description: '', color: DEFAULT_COLORS[0], is_expense: true }
+  const emptyCategory = { name: '', description: '', color: DEFAULT_SWATCH_COLOR, is_expense: true }
   const [categoryModal, setCategoryModal] = useState(false)
   const [editingCategory, setEditingCategory] = useState<Category | null>(null)
   const [categoryForm, setCategoryForm] = useState(emptyCategory)
@@ -83,7 +82,7 @@ function SettingsPage() {
   const [deleteTag] = useDeleteTagMutation()
 
   // Tag modal
-  const emptyTag = { name: '', color: DEFAULT_COLORS[0] as string }
+  const emptyTag = { name: '', color: DEFAULT_SWATCH_COLOR }
   const [tagModal, setTagModal] = useState(false)
   const [editingTag, setEditingTag] = useState<Tag | null>(null)
   const [tagForm, setTagForm] = useState(emptyTag)
@@ -111,7 +110,7 @@ function SettingsPage() {
   const openCreateCategory = () => { setEditingCategory(null); setCategoryForm(emptyCategory); setCategoryModal(true) }
   const openEditCategory = (c: Category) => {
     setEditingCategory(c)
-    setCategoryForm({ name: c.name, description: c.description || '', color: c.color || DEFAULT_COLORS[0], is_expense: c.is_expense })
+    setCategoryForm({ name: c.name, description: c.description || '', color: c.color || DEFAULT_SWATCH_COLOR, is_expense: c.is_expense })
     setCategoryModal(true)
   }
   const submitCategory = async (ev: React.FormEvent) => {
@@ -136,7 +135,7 @@ function SettingsPage() {
   const openCreateTag = () => { setEditingTag(null); setTagForm(emptyTag); setTagError(null); setTagModal(true) }
   const openEditTag = (t: Tag) => {
     setEditingTag(t)
-    setTagForm({ name: t.name, color: t.color || DEFAULT_COLORS[0] })
+    setTagForm({ name: t.name, color: t.color || DEFAULT_SWATCH_COLOR })
     setTagError(null)
     setTagModal(true)
   }
@@ -259,7 +258,7 @@ function SettingsPage() {
             {categories.map((c) => (
               <li key={c.id} className="p-4 sm:px-6 flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3 min-w-0">
-                  <span className="h-4 w-4 rounded-full flex-shrink-0 border border-black/10" style={{ backgroundColor: c.color || '#9ca3af' }} />
+                  <span className="h-4 w-4 rounded-full flex-shrink-0 border border-line" style={{ backgroundColor: displayColor(c.color, NO_COLOR) }} />
                   <span className="font-medium text-ink truncate">{c.name}</span>
                   <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium ${CATEGORY_KIND_BADGE[categoryKindOf(c)].text}`}>
                     <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${CATEGORY_KIND_BADGE[categoryKindOf(c)].dot}`} />
@@ -302,7 +301,7 @@ function SettingsPage() {
             {tags.map((t) => (
               <li key={t.id} className="p-4 sm:px-6 flex items-center justify-between gap-4" data-testid="tag-row">
                 <div className="flex items-center gap-3 min-w-0">
-                  <span className="h-4 w-4 rounded-full flex-shrink-0 border border-black/10" style={{ backgroundColor: t.color || '#9ca3af' }} />
+                  <span className="h-4 w-4 rounded-full flex-shrink-0 border border-line" style={{ backgroundColor: displayColor(t.color, NO_COLOR) }} />
                   <span className="font-medium text-ink truncate">{t.name}</span>
                   {t.is_system && <span className="badge text-muted">System</span>}
                 </div>
@@ -334,7 +333,7 @@ function SettingsPage() {
 
       {/* Tag modal */}
       {tagModal && (
-        <div className="modal-backdrop fixed inset-0 z-50 overflow-y-auto bg-black/60" onClick={() => setTagModal(false)}>
+        <div className="modal-backdrop fixed inset-0 z-50 overflow-y-auto bg-scrim/60" onClick={() => setTagModal(false)}>
           <div className="min-h-full flex items-center justify-center">
             <div className="bg-surface p-6 w-full max-w-md border border-line" onClick={(e) => e.stopPropagation()}>
               <h2 className="text-xl font-semibold text-ink mb-6">{editingTag ? (editingTag.is_system ? 'Recolour tag' : 'Edit tag') : 'Add tag'}</h2>
@@ -356,8 +355,8 @@ function SettingsPage() {
                 <div>
                   <label className="label">Colour</label>
                   <div className="flex items-center gap-2 flex-wrap">
-                    {DEFAULT_COLORS.map((col) => (
-                      <button key={col} type="button" onClick={() => setTagForm({ ...tagForm, color: col })} className={`h-7 w-7 rounded-full border-2 ${tagForm.color === col ? 'border-line' : 'border-transparent'}`} style={{ backgroundColor: col }} aria-label={`Colour ${col}`} />
+                    {SWATCHES.map(({ n, stored }) => (
+                      <button key={n} type="button" onClick={() => setTagForm({ ...tagForm, color: stored })} aria-pressed={swatchOf(tagForm.color) === n} className={`h-7 w-7 rounded-full border-2 ${swatchOf(tagForm.color) === n ? 'border-ink' : 'border-transparent'}`} style={{ backgroundColor: tokenColor(`swatch-${n}`) }} aria-label={`Colour ${stored}`} />
                     ))}
                     <input type="color" value={tagForm.color} onChange={(e) => setTagForm({ ...tagForm, color: e.target.value })} className="h-7 w-10 border border-line bg-transparent" aria-label="Custom colour" />
                   </div>
@@ -375,7 +374,7 @@ function SettingsPage() {
 
       {/* Category modal */}
       {categoryModal && (
-        <div className="modal-backdrop fixed inset-0 z-50 overflow-y-auto bg-black/60" onClick={() => setCategoryModal(false)}>
+        <div className="modal-backdrop fixed inset-0 z-50 overflow-y-auto bg-scrim/60" onClick={() => setCategoryModal(false)}>
           <div className="min-h-full flex items-center justify-center">
             <div className="bg-surface p-6 w-full max-w-md border border-line" onClick={(e) => e.stopPropagation()}>
               <h2 className="text-xl font-semibold text-ink mb-6">{editingCategory ? 'Edit category' : 'Add category'}</h2>
@@ -394,8 +393,8 @@ function SettingsPage() {
                 <div>
                   <label className="label">Colour</label>
                   <div className="flex items-center gap-2 flex-wrap">
-                    {DEFAULT_COLORS.map((col) => (
-                      <button key={col} type="button" onClick={() => setCategoryForm({ ...categoryForm, color: col })} className={`h-7 w-7 rounded-full border-2 ${categoryForm.color === col ? 'border-line' : 'border-transparent'}`} style={{ backgroundColor: col }} aria-label={`Colour ${col}`} />
+                    {SWATCHES.map(({ n, stored }) => (
+                      <button key={n} type="button" onClick={() => setCategoryForm({ ...categoryForm, color: stored })} aria-pressed={swatchOf(categoryForm.color) === n} className={`h-7 w-7 rounded-full border-2 ${swatchOf(categoryForm.color) === n ? 'border-ink' : 'border-transparent'}`} style={{ backgroundColor: tokenColor(`swatch-${n}`) }} aria-label={`Colour ${stored}`} />
                     ))}
                     <input type="color" value={categoryForm.color} onChange={(e) => setCategoryForm({ ...categoryForm, color: e.target.value })} className="h-7 w-10 border border-line bg-transparent" />
                   </div>

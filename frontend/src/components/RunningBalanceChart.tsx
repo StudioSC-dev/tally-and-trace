@@ -1,6 +1,7 @@
 import { useMemo, useId } from 'react'
 import type { CashflowTimeline } from '../store/api'
 import { timelineEventName } from '@tally-trace/shared'
+import { tokenColor } from '../utils/palette'
 
 /** The window, and one currency's timeline body (a `by_currency` row works). */
 export type ChartTimeline = Pick<
@@ -21,9 +22,9 @@ const W = 720
 // with the page instead of staying a saturated blue island on paper. The
 // balance series is ink: on a ledger the primary series is the subject, and
 // colour is reserved for the exceptions (shortfall, trough).
-const SERIES = 'rgb(var(--ink))'
-const DANGER = 'rgb(var(--danger))'
-const WARN = 'rgb(var(--warn))'
+const SERIES = tokenColor('ink')
+const DANGER = tokenColor('danger')
+const WARN = tokenColor('warn')
 
 const shortDate = (iso: string) => {
   const d = new Date(iso)
