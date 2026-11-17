@@ -1,5 +1,5 @@
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from 'react'
-import { withSelection } from '../utils/selection'
+import { swatchClass, withSelection } from '../utils/selection'
 
 type SegmentProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'type' | 'aria-pressed'> & {
   selected: boolean
@@ -11,6 +11,20 @@ type SegmentProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'type' | 'aria
  */
 export function Segment({ selected, className, ...rest }: SegmentProps) {
   return <button type="button" aria-pressed={selected} className={withSelection(selected, className)} {...rest} />
+}
+
+type SwatchProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'type' | 'aria-pressed' | 'color'> & {
+  selected: boolean
+  /** The swatch's fill, as CSS (a token such as `rgb(var(--swatch-1))`). */
+  color: string
+}
+
+/**
+ * One colour choice of a single-select group of swatches: a round button filled with its own colour and
+ * `aria-pressed`. The chosen swatch is ringed in the ink token; the fill never changes.
+ */
+export function Swatch({ selected, color, className, style, ...rest }: SwatchProps) {
+  return <button type="button" aria-pressed={selected} className={swatchClass(selected, className)} style={{ ...style, backgroundColor: color }} {...rest} />
 }
 
 export interface SegmentOption<T extends string | number> {

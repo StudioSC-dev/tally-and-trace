@@ -8,3 +8,10 @@ export const selectionClass = (selected: boolean): string => (selected ? 'seg is
 /** `selectionClass` followed by the caller's layout classes. */
 export const withSelection = (selected: boolean, className?: string): string =>
   className ? `${selectionClass(selected)} ${className}` : selectionClass(selected)
+
+/**
+ * A colour swatch's class names: `swatch` is a round, unringed choice and `swatch is-selected` the chosen one,
+ * marked by a ring in the ink token. The swatch keeps its own colour fill, so it never takes the leaf background.
+ */
+export const swatchClass = (selected: boolean, className?: string): string =>
+  `${selected ? 'swatch is-selected' : 'swatch'}${className ? ` ${className}` : ''}`

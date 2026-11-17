@@ -483,6 +483,21 @@ body {
     box-shadow: inset 0 -2px 0 rgb(var(--accent));
     border-radius: 0;
   }
+
+  /*
+    A colour swatch (the Settings colour pickers) keeps its own fill, so its
+    selection is a ring in the ink token rather than the leaf and spine.
+  */
+  .swatch {
+    @apply h-7 w-7 rounded-full border-2 border-transparent;
+    transition-property: border-color;
+    transition-duration: var(--dur-fast);
+    transition-timing-function: var(--ease);
+  }
+
+  .swatch.is-selected {
+    border-color: rgb(var(--ink));
+  }
 }
 
 /*
