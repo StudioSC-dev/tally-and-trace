@@ -6,9 +6,10 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
-import { accountDetailRoutes, calmHousehold, household, mockHousehold } from './support/fixtures/household'
+import { accountDetailRoutes, budgetEntriesFor, calmHousehold, household, limitedRecurring, mockHousehold } from './support/fixtures/household'
 import type { HouseholdData } from './support/fixtures/household'
-import { addRoutes, errorRoute } from './support/mockApi'
+import { addRoutes, apiRoute, errorRoute, queryRoute } from './support/mockApi'
+import type { BudgetEntry, CardStatementsResponse, PaginatedResponse } from '@tally-trace/shared'
 import { shot } from './support/shot'
 
 // This spec lives in <repo>/frontend/e2e.
@@ -282,20 +283,180 @@ test.describe('amount classes', () => {
       'src/components/transactions/UpcomingOccurrenceRow.tsx',
     ]
     const lines = (source: string, pattern: RegExp): string[] => source.split('\n').filter((l) => pattern.test(l))
+    const count = (source: string, pattern: RegExp): number => (source.match(pattern) ?? []).length
     for (const site of sites) {
       const source = readFrontend(site)
       expect(source, `${site} imports the shared amount helper`).toMatch(/from '(\.\.\/)+utils\/amount'/)
-      expect(source, `${site} picks its amount colour through the helper`).toMatch(/(amountClass|balanceClass)\(/)
       expect(lines(source, /text-danger/).filter((l) => /usedAmount|current_amount|transferFeeLabel|amountLabel|amountClass|expenses|entry_type|transaction_type|direction|formatAmount|formatBalance/.test(l)), `${site}: no amount is coloured text-danger directly`).toEqual([])
       expect(lines(source, /text-ok/).filter((l) => /amountLabel|entry_type|transaction_type|direction|formatAmount|formatBalance/.test(l) || (site !== 'src/routes/index.tsx' && /balance/i.test(l))), `${site}: no amount or balance is coloured text-ok directly`).toEqual([])
     }
-    for (const site of ['src/routes/accounts.tsx', 'src/routes/accounts_.$accountId.tsx']) {
-      const balances = lines(readFrontend(site), /\bbalance\b[^\n]*(text-ok|text-danger)|(text-ok|text-danger)[^\n]*\bbalance\b/)
-      expect(balances, `${site}: balances are classed through balanceClass`).toEqual([])
+    // Per site: the amount markup takes its class from the helper, and only from the helper. Any literal colour
+    // beside an amount's markup, or a lost helper call, fails here even when the rendered colour is unchanged.
+    const amountMarkup = /(text-lg font-bold|text-2xl font-bold \$\{|usedAmount\)|current_amount\)|Transfer Fee|transferFeeLabel|upcoming-occurrence-amount|account-transaction-amount)/
+    const sourceOf = Object.fromEntries(sites.map((site) => [site, readFrontend(site)] as const))
+    for (const site of sites) {
+      const literal = lines(sourceOf[site], /className=/).filter((l) => amountMarkup.test(l) && /\btext-(ok|ink|danger|body|muted)\b/.test(l) && !/row\.amount|format\(allocation\.current_amount\)|current_amount\)\}<\/p>/.test(l))
+      expect(literal, `${site}: no amount element names a literal text colour`).toEqual([])
     }
+    const expectCalls = (site: string, pattern: RegExp, n: number, what: string): void => {
+      expect(count(sourceOf[site], pattern), `${site}: ${what}`).toBe(n)
+    }
+    expectCalls('src/routes/allocations.tsx', /text-lg font-bold \$\{amountClass\(/g, 2, 'both recurring entry amounts take amountClass(')
+    expectCalls('src/routes/allocations.tsx', /font-semibold \$\{amountClass\('out'\)\}`\}>\{format\((usedAmount|actionAllocation\.current_amount)\)/g, 2, 'the budget card and modal Spent amounts are amount-out')
+    expectCalls('src/routes/allocations.tsx', /formatAmount\(/g, 2, 'both recurring entry amounts are formatted with formatAmount(')
+    expectCalls('src/routes/transactions.tsx', /const amountClassName = amountClass\(amountKind\)/g, 1, 'the row class comes from amountClass(amountKind)')
+    expectCalls('src/routes/transactions.tsx', /\$\{actionMeta\?\.amountClass \?\? ''\} font-medium/g, 1, 'the action modal Amount row uses the row class')
+    expectCalls('src/routes/transactions.tsx', /text-right \$\{amountClass\('out'\)\}`\}>\{actionTransferMeta\.transferFeeLabel/g, 1, 'the transfer fee is amount-out')
+    expectCalls('src/routes/accounts.tsx', /text-lg font-bold \$\{balanceClass\((account|actionAccount)\.balance\)\}/g, 2, 'the Accounts list and modal balances take balanceClass(')
+    expectCalls('src/routes/accounts_.$accountId.tsx', /text-2xl font-bold \$\{balanceClass\(account\.balance\)\}/g, 1, 'the detail balance takes balanceClass(')
+    expectCalls('src/components/AccountTransactionList.tsx', /const amountClassName = amountClass\(leg\.effectKnown && leg\.direction === 'in' \? 'in' : 'out'\)/g, 1, 'the row amount takes amountClass(')
+    expectCalls('src/components/transactions/UpcomingOccurrenceRow.tsx', /const amountClassName = amountClass\(/g, 1, 'the occurrence amount takes amountClass(')
+    expectCalls('src/routes/index.tsx', /color: amountClass\('out'\)/g, 1, 'Total expenses takes amountClass(')
     const helper = readFrontend('src/utils/amount.ts')
     expect(helper, 'the helper maps out, in and negative to the three classes').toMatch(/'amount-out'[\s\S]*'amount-in'[\s\S]*'amount-negative'/)
     await shot(page, 'classes-source')
+  })
+
+  /** The semantic class an amount carries (`amount-*`), or '' when it names none. */
+  const semanticOf = (els: Locator): Promise<string[]> =>
+    els.evaluateAll((all) => all.map((e) => [...e.classList].filter((c) => c.startsWith('amount-')).join(' ')))
+  const same = (n: number, cls: string): string[] => new Array<string>(n).fill(cls)
+
+  test('amount colour is a class, not a selector shim: recurring entries', async ({ page }) => {
+    const main = await openRecurring(page)
+    const full = main.locator('article:not([data-testid="limited-entry"])')
+    for (const [kind, cls] of [['Income', 'amount-in'], ['Expense', 'amount-out']] as const) {
+      const amounts = amountOf(full.filter({ hasText: new RegExp(`Recurring ${kind}`) }))
+      const count = await amounts.count()
+      expect(count, `the full renderer lists recurring ${kind} entries`).toBeGreaterThan(0)
+      expect(await semanticOf(amounts), `every full recurring ${kind} amount`).toEqual(same(count, cls))
+    }
+    await shot(page, 'classes-recurring')
+  })
+
+  test('amount colour is a class, not a selector shim: limited recurring entries', async ({ page }) => {
+    await mockHousehold(page)
+    const withLimited = { ...household, entries: [...household.entries, ...limitedRecurring] }
+    await addRoutes(page, [queryRoute<PaginatedResponse<BudgetEntry>>('GET', '/budget-entries/', (q) => budgetEntriesFor(withLimited, q))])
+    await page.goto('/allocations?tab=recurring')
+    const limited = page.getByTestId('limited-entry')
+    await expect(limited.first()).toBeVisible()
+    expect(await limited.count(), 'the limited renderer lists both entries').toBe(2)
+    for (const [kind, cls] of [['Income', 'amount-in'], ['Expense', 'amount-out']] as const) {
+      const amounts = amountOf(limited.filter({ hasText: new RegExp(`Recurring ${kind}`) }))
+      expect(await semanticOf(amounts), `the limited recurring ${kind} amount`).toEqual([cls])
+    }
+    expect(await textsOf(amountOf(limited.filter({ hasText: /Recurring Income/ }))), 'the limited income amount starts with +').toEqual(['+₱3,500.00'])
+    await shot(page, 'classes-limited-recurring')
+  })
+
+  test('amount colour is a class, not a selector shim: budget card spent', async ({ page }) => {
+    await open(page, '/allocations?tab=budgets')
+    const spent = page.getByText('Spent this period').locator('xpath=following-sibling::span')
+    await expect(spent.first()).toBeVisible()
+    const count = await spent.count()
+    expect(count, 'the Budgets tab lists budget cards').toBeGreaterThan(2)
+    expect(await semanticOf(spent), 'every budget card Spent amount').toEqual(same(count, 'amount-out'))
+    await shot(page, 'classes-budget-card')
+  })
+
+  test('amount colour is a class, not a selector shim: budget modal spent', async ({ page }) => {
+    await open(page, '/allocations?tab=budgets')
+    await page.locator('article').filter({ hasText: 'Groceries' }).first().click()
+    const spent = page.locator('.modal-backdrop').getByText(/^Spent/).locator('span')
+    await expect(spent).toBeVisible()
+    expect(await semanticOf(spent), 'the budget modal Spent amount').toEqual(['amount-out'])
+    await viewportShot(page, 'classes-budget-modal')
+  })
+
+  for (const [kind, description, cls] of [
+    ['expense', 'Puregold weekly groceries', 'amount-out'],
+    ['income', 'Logo design, Kapé Co.', 'amount-in'],
+  ] as const) {
+    test(`amount colour is a class, not a selector shim: transaction modal ${kind}`, async ({ page }) => {
+      const list = await openTransactions(page)
+      await list.locator('article[data-transaction-id]').filter({ hasText: description }).click()
+      const amount = page.locator('.modal-backdrop').getByText('Amount', { exact: true }).locator('xpath=following-sibling::dd')
+      await expect(amount).toBeVisible()
+      expect(await semanticOf(amount), `the modal Amount row for an ${kind}`).toEqual([cls])
+      await viewportShot(page, `classes-transaction-modal-${kind}`)
+    })
+  }
+
+  test('amount colour is a class, not a selector shim: transfer fee', async ({ page }) => {
+    const list = await openTransactions(page)
+    await list.locator('article[data-transaction-id]').filter({ hasText: 'Move to emergency fund' }).click()
+    const fee = page.locator('.modal-backdrop').getByText('Transfer Fee').locator('xpath=following-sibling::dd')
+    await expect(fee).toBeVisible()
+    expect(await semanticOf(fee), 'the transfer fee amount').toEqual(['amount-out'])
+    await viewportShot(page, 'classes-transfer-fee')
+  })
+
+  test('amount colour is a class, not a selector shim: Accounts list balances', async ({ page }) => {
+    await open(page, '/accounts')
+    const balances = page.locator('main p.text-lg.font-bold')
+    await expect(balances.first()).toBeVisible()
+    const classes = await semanticOf(balances)
+    expect(classes.length, 'Accounts lists a balance per account').toBe(household.accounts.length)
+    expect(classes.filter((c) => c === 'amount-negative').length, 'one negative balance (the card)').toBe(1)
+    expect(classes.filter((c) => c === 'amount-out').length, 'every other balance is amount-out').toBe(household.accounts.length - 1)
+    await shot(page, 'classes-accounts-balances')
+  })
+
+  for (const [name, cls] of [['GCash', 'amount-out'], ['HSBC Red Mastercard', 'amount-negative']] as const) {
+    test(`amount colour is a class, not a selector shim: Accounts action modal, ${name}`, async ({ page }) => {
+      await open(page, '/accounts')
+      await addRoutes(page, [
+        apiRoute<CardStatementsResponse>('GET', `/accounts/${CARD_ID}/statements`, { view: 'full', account_id: CARD_ID, name, currency: 'PHP', statements: [] }),
+      ])
+      await page.getByText(name, { exact: true }).first().click()
+      const balance = page.locator('.modal-backdrop p.text-lg.font-bold')
+      await expect(balance).toBeVisible()
+      expect(await semanticOf(balance), `the modal balance for ${name}`).toEqual([cls])
+      await viewportShot(page, `classes-accounts-modal-${name.split(' ')[0].toLowerCase()}`)
+    })
+  }
+
+  for (const [id, label, cls] of [[11, 'a positive balance', 'amount-out'], [15, 'a negative balance', 'amount-negative']] as const) {
+    test(`amount colour is a class, not a selector shim: account detail, ${label}`, async ({ page }) => {
+      await mockHousehold(page)
+      await addRoutes(page, accountDetailRoutes(household, id))
+      await page.goto(`/accounts/${id}`)
+      const detail = page.getByTestId('account-detail-balance')
+      await expect(detail).toBeVisible()
+      expect(await semanticOf(detail), `the detail balance (${label})`).toEqual([cls])
+      await shot(page, `classes-account-detail-${id}`)
+    })
+  }
+
+  test('amount colour is a class, not a selector shim: card and account transactions', async ({ page }) => {
+    await mockHousehold(page)
+    await addRoutes(page, [...accountDetailRoutes(household, CARD_ID), ...accountDetailRoutes(household, 11)])
+    await page.goto(`/accounts/${CARD_ID}`)
+    const debits = page.locator('[data-testid="account-transaction"][data-direction="out"]').getByTestId('account-transaction-amount')
+    await expect(debits.first()).toBeVisible()
+    expect(await semanticOf(debits), 'every card debit').toEqual(same(await debits.count(), 'amount-out'))
+    await shot(page, 'classes-card-debits')
+    await page.goto('/accounts/11')
+    const credits = page.locator('[data-testid="account-transaction"][data-direction="in"]').getByTestId('account-transaction-amount')
+    await expect(credits.first()).toBeVisible()
+    expect(await semanticOf(credits), 'every payroll credit').toEqual(same(await credits.count(), 'amount-in'))
+    expect((await textsOf(credits)).filter((t) => !t.startsWith('+')), 'every credit starts with +').toEqual([])
+    await shot(page, 'classes-account-credits')
+  })
+
+  test('amount colour is a class, not a selector shim: upcoming occurrences', async ({ page }) => {
+    await open(page, '/transactions')
+    await page.getByTestId('due-tab-upcoming').click()
+    const amounts = page.getByTestId('upcoming-occurrence-amount')
+    await expect(amounts.first()).toBeVisible()
+    const count = await amounts.count()
+    expect(count, 'Upcoming lists occurrences').toBeGreaterThan(2)
+    const texts = await textsOf(amounts)
+    const classes = await semanticOf(amounts)
+    expect(classes.filter((c, i) => c !== (texts[i].startsWith('+') ? 'amount-in' : 'amount-out')), 'each occurrence amount takes the class its sign says').toEqual([])
+    expect(new Set(classes), 'Upcoming shows both income and expense occurrences').toEqual(new Set(['amount-in', 'amount-out']))
+    await shot(page, 'classes-upcoming')
   })
 
   test('amount colour is a class, not a selector shim: rendered', async ({ page }) => {
