@@ -50,7 +50,9 @@ import { useRecentPicks } from '../hooks/useRecentPicks'
 import { useDeleteRecurringEntry } from '../hooks/useDeleteRecurringEntry'
 import { useManilaDay } from '../hooks/useManilaDay'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
-import { formatCurrency, CurrencyCode } from '../utils/currency'
+import { BudgetUsageBar } from '../components/BudgetUsageBar'
+import { amountClass, formatAmount } from '../utils/amount'
+import type { AmountKind } from '../utils/amount'
 import { formatCadenceLabel, formatScheduleLabel } from '../utils/recurringEntry'
 import { WishlistPanel } from '../components/WishlistPanel'
 import { RecurringEntryFormModal } from '../components/RecurringEntryFormModal'
@@ -99,8 +101,6 @@ const formatRelativeDate = (isoString: string) => {
   if (days > 0) return `In ${days} day${days === 1 ? '' : 's'}`
   return `${Math.abs(days)} day${days === -1 ? '' : 's'} ago`
 }
-
-const formatAmount = (amount: number, currency: CurrencyCode) => formatCurrency(amount, currency)
 
 // The allocation form's inline field errors (STU-410): one message under the field in place
 // of a browser popup. A key is a control's `data-field`.
@@ -1284,10 +1284,15 @@ export function AllocationsPage() {
                 )}
                 <div className="flex items-center justify-between text-sm text-body">
                   <span>Spent this period</span>
-                  <span className="font-semibold text-danger">{format(usedAmount)}</span>
+                  <span className={`font-semibold ${amountClass('out')}`}>{format(usedAmount)}</span>
                 </div>
                 {limitAmount !== null && limitAmount > 0 && (
-                  <BudgetUsageBar usagePercentage={usagePercentage} />
+                  <>
+                    <BudgetUsageBar spent={usedAmount} limit={limitAmount} />
+                    <p className="text-right text-xs font-medium text-muted">
+                      {Math.min(Math.max(usagePercentage, 0), 100).toFixed(1)}% of limit used
+                    </p>
+                  </>
                 )}
                 {limitAmount !== null && (
                   <div className="flex items-center justify-between text-sm text-body">
@@ -1355,8 +1360,8 @@ export function AllocationsPage() {
             </div>
           </div>
           <div className="text-right">
-            <p className={`text-lg font-bold ${entry.entry_type === 'income' ? 'text-ok' : 'text-danger'}`}>
-              {formatAmount(entry.amount, entry.currency)}
+            <p className={`text-lg font-bold ${amountClass(entry.entry_type === 'income' ? 'in' : 'out')}`}>
+              {formatAmount(entry.entry_type === 'income' ? 'in' : 'out', entry.amount, entry.currency)}
             </p>
           </div>
         </div>
@@ -1424,7 +1429,8 @@ export function AllocationsPage() {
       entry.is_active && (entry.kind === 'subscription' || entry.kind === 'bill') && entry.account_id !== undefined
         ? entryCreditWarning(creditByCard.get(entry.account_id)?.checks ?? [], entry.id)
         : null
-    const amountLabel = formatAmount(entry.amount, entry.currency)
+    const amountKind: AmountKind = entry.entry_type === 'income' ? 'in' : 'out'
+    const amountLabel = formatAmount(amountKind, entry.amount, entry.currency)
     const endDate = entry.end_date ? new Date(entry.end_date) : undefined
     // Installment "n of m". The backend decrements max_occurrences on each payment
     // (it means occurrences REMAINING), and occurrences_paid is the count materialised
@@ -1494,7 +1500,7 @@ export function AllocationsPage() {
             </div>
             <div className="text-right">
               <p
-                className={`text-lg font-bold ${ entry.entry_type === 'income' ? 'text-ok' : 'text-danger' }`}
+                className={`text-lg font-bold ${amountClass(amountKind)}`}
               >
                 {amountLabel}
               </p>
@@ -1989,10 +1995,15 @@ export function AllocationsPage() {
                       </p>
                     )}
                     <p className="mt-2 text-sm text-muted">
-                      Spent <span className="font-semibold text-danger">{format(actionAllocation.current_amount)}</span>
+                      Spent <span className={`font-semibold ${amountClass('out')}`}>{format(actionAllocation.current_amount)}</span>
                     </p>
                     {actionAllocationUsagePct !== null && actionAllocationLimit !== null && actionAllocationLimit > 0 && (
-                      <BudgetUsageBar usagePercentage={actionAllocationUsagePct} />
+                      <>
+                        <BudgetUsageBar spent={actionAllocation.current_amount} limit={actionAllocationLimit} />
+                        <p className="text-right text-xs font-medium text-muted">
+                          {Math.min(Math.max(actionAllocationUsagePct, 0), 100).toFixed(1)}% of limit used
+                        </p>
+                      </>
                     )}
                     {actionAllocationRemaining !== null && (
                       <p
@@ -2541,28 +2552,6 @@ export function AllocationsPage() {
         />
       )}
     </div>
-  )
-}
-
-const BudgetUsageBar: React.FC<{ usagePercentage: number }> = ({ usagePercentage }) => {
-  const clampedUsage = Math.min(Math.max(usagePercentage, 0), 100)
-  const remainingColor = clampedUsage >= 100 ? 'bg-sunken' : clampedUsage >= 80 ? 'bg-warn' : 'bg-ok'
-  const usageColor = clampedUsage >= 100 ? 'bg-danger' : clampedUsage >= 80 ? 'bg-danger' : 'bg-danger'
- 
-  return (
-    <>
-      <div className={`relative w-full overflow-hidden h-2 rounded-full transition-colors duration-300 ${remainingColor}`}>
-        {clampedUsage > 0 && (
-          <div
-            className={`absolute right-0 top-0 h-full transition-all duration-300 ${usageColor}`}
-            style={{ width: `${clampedUsage}%` }}
-          />
-        )}
-      </div>
-      <p className="text-right text-xs font-medium text-muted">
-        {clampedUsage.toFixed(1)}% of limit used
-      </p>
-    </>
   )
 }
 
