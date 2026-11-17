@@ -520,20 +520,17 @@ interface Effect {
 /** The visible screen after a click: the URL, the open dialogs, the headings, every button and link, and the form. */
 async function screenOf(page: Page): Promise<Omit<Effect, 'requests'>> {
   const url = new URL(page.url())
-  const open = page.locator(DIALOG)
-  const fields =
-    (await open.count()) === 0
+  // evaluateAll reads whatever is open now and never waits, so a dialog that closes while it is read gives [].
+  const fields = await page.locator(DIALOG).evaluateAll((roots) =>
+    roots.length === 0
       ? []
-      : await open
-          .last()
-          .evaluate((root) =>
-            Array.from(root.querySelectorAll('input, select, textarea'))
-              .filter((e) => (e as HTMLElement).offsetParent !== null)
-              .map((e) => {
-                const el = e as HTMLInputElement
-                return el.type === 'checkbox' || el.type === 'radio' ? `${el.type}:${el.checked}` : `${el.type}:${el.value}`
-              }),
-          )
+      : Array.from(roots[roots.length - 1].querySelectorAll('input, select, textarea'))
+          .filter((e) => (e as HTMLElement).offsetParent !== null)
+          .map((e) => {
+            const el = e as HTMLInputElement
+            return el.type === 'checkbox' || el.type === 'radio' ? `${el.type}:${el.checked}` : `${el.type}:${el.value}`
+          }),
+  )
   return {
     fields,
     url: `${url.pathname}${url.search}`,
