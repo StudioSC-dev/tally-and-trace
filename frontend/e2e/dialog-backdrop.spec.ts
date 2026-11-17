@@ -175,24 +175,22 @@ test.describe('dialog backdrop (STU-644)', () => {
     expect(fs.existsSync(await shot(page, 'accounts-backdrop'))).toBe(true)
   })
 
-  test('all pages backdrop covers the full viewport', async ({ page }) => {
-    for (const c of OTHERS) {
-      await test.step(c.name, async () => {
-        const overlay = await openDialog(page, c)
-        const off = offsets(page, overlay)
-        // The page content fades in under a transform for 0.3s, and a transformed ancestor makes the fixed
-        // overlay sit inside it, so the first measure can be mid-animation. Wait for the settled geometry.
-        await expect.poll(off.y, { message: `${c.name}: overlay y` }).toBeLessThanOrEqual(TOL)
-        await expect.poll(off.w, { message: `${c.name}: overlay width` }).toBeLessThanOrEqual(TOL)
-        await expect.poll(off.h, { message: `${c.name}: overlay height` }).toBeLessThanOrEqual(TOL)
-        const m = await measure(page, overlay)
-        expect.soft(Math.abs(m.rect.y), `${c.name}: overlay y`).toBeLessThanOrEqual(TOL)
-        expect.soft(Math.abs(m.rect.w - m.viewport.w), `${c.name}: overlay width`).toBeLessThanOrEqual(TOL)
-        expect.soft(Math.abs(m.rect.h - m.viewport.h), `${c.name}: overlay height`).toBeLessThanOrEqual(TOL)
-        await shot(page, `${c.name}-backdrop`)
-      })
-    }
-  })
+  for (const c of OTHERS) {
+    test(`${c.name} backdrop covers the full viewport`, async ({ page }) => {
+      const overlay = await openDialog(page, c)
+      const off = offsets(page, overlay)
+      // The page content fades in under a transform for 0.3s, and a transformed ancestor makes the fixed
+      // overlay sit inside it, so the first measure can be mid-animation. Wait for the settled geometry.
+      await expect.poll(off.y, { message: `${c.name}: overlay y` }).toBeLessThanOrEqual(TOL)
+      await expect.poll(off.w, { message: `${c.name}: overlay width` }).toBeLessThanOrEqual(TOL)
+      await expect.poll(off.h, { message: `${c.name}: overlay height` }).toBeLessThanOrEqual(TOL)
+      const m = await measure(page, overlay)
+      expect(Math.abs(m.rect.y), `${c.name}: overlay y`).toBeLessThanOrEqual(TOL)
+      expect(Math.abs(m.rect.w - m.viewport.w), `${c.name}: overlay width`).toBeLessThanOrEqual(TOL)
+      expect(Math.abs(m.rect.h - m.viewport.h), `${c.name}: overlay height`).toBeLessThanOrEqual(TOL)
+      await shot(page, `${c.name}-backdrop`)
+    })
+  }
 
   test('top nav is covered by the backdrop', async ({ page }) => {
     const overlay = await openDialog(page, ACCOUNT)
