@@ -15,13 +15,19 @@
  * `householdRoutes(data)` answers every call the dashboard, Transactions and Allocations make
  * on load; `mockHousehold(page, data)` signs in, freezes the clock on `HOUSEHOLD_TODAY` and
  * installs those routes.
+ *
+ * `with*` helpers derive a variant for one state (a main account, dollars, a long account
+ * history, long Due card lists); the create factories (`createdAccount`, `createAccountRoute`,
+ * `householdCreateRoutes`) answer the dialogs' saves.
  */
 import type { Page } from '@playwright/test'
 import type {
   Account,
+  AccountInput,
   AccountPermissions,
   Allocation,
   BudgetEntry,
+  BudgetEntryInput,
   CardCredit,
   CardStatementDue,
   CashflowTimeline,
@@ -38,6 +44,7 @@ import type {
   HouseholdTransactions,
   HouseholdUpcoming,
   HouseholdView,
+  InstallmentPlan,
   InstallmentPlans,
   PaginatedResponse,
   Payable,
@@ -50,13 +57,14 @@ import type {
   SharedFullTransaction,
   Tag,
   Transaction,
+  TransactionInput,
   TransactionSummary,
   UpcomingItem,
   UpcomingOccurrence,
   UpcomingOccurrences,
   User,
 } from '@tally-trace/shared'
-import { apiRoute, mockApi, queryRoute } from '../mockApi'
+import { apiRoute, mockApi, queryRoute, sequenceRoute } from '../mockApi'
 import type { ApiMock, ApiRoute } from '../mockApi'
 import { signedIn } from '../signedIn'
 
@@ -84,6 +92,8 @@ export interface HouseholdData {
   quickBalances: QuickBalances
   snapshot: DashboardSnapshot
   due: DashboardDue
+  /** `GET /budget-entries/installment-plans`: none in the built variants. */
+  installmentPlans: InstallmentPlan[]
   timeline: CashflowTimeline
   summary: TransactionSummary
 }
@@ -765,6 +775,7 @@ function build(parts: Parts): HouseholdData {
     quickBalances: quickBalancesFor(accounts),
     snapshot,
     due,
+    installmentPlans: [],
     timeline,
     summary,
   }
@@ -831,13 +842,16 @@ function pageFor<T>(items: T[], query: URLSearchParams): PaginatedResponse<T> {
  * `entered_by=me` (the caller's own rows, which the API sends as the `full` view).
  */
 export function transactionsFor(data: HouseholdData, query: URLSearchParams): PaginatedResponse<Transaction> {
-  only(query, ['start_date', 'end_date', 'order', 'limit', 'offset', 'account_ids', 'transaction_types', 'entered_by'])
+  only(query, ['start_date', 'end_date', 'order', 'limit', 'offset', 'account_ids', 'transaction_types', 'entered_by', 'category_names'])
   const dayOf = (t: Transaction): string => (t.view === 'limited' ? t.date : t.transaction_date).slice(0, 10)
   const start = query.get('start_date')?.slice(0, 10)
   const end = query.get('end_date')?.slice(0, 10)
   const accountIds = query.getAll('account_ids').map(Number)
   const types = query.getAll('transaction_types')
   const enteredBy = query.get('entered_by')
+  const categoryNames = query.getAll('category_names')
+  const categoryOf = (t: Transaction): string | undefined =>
+    t.view === 'shared_full' ? (t.category_name ?? undefined) : t.view === 'full' ? data.categories.find((c) => c.id === t.category_id)?.name : undefined
   if (enteredBy !== null && enteredBy !== 'me') throw new Error(`unhandled entered_by: ${enteredBy}`)
   const touches = (t: Transaction): boolean =>
     t.view !== 'limited' && [t.account_id, t.transfer_from_account_id, t.transfer_to_account_id].some((id) => id !== undefined && accountIds.includes(id))
@@ -847,6 +861,7 @@ export function transactionsFor(data: HouseholdData, query: URLSearchParams): Pa
       (!end || dayOf(t) <= end) &&
       (!accountIds.length || touches(t)) &&
       (!types.length || types.includes(t.transaction_type)) &&
+      (!categoryNames.length || categoryNames.includes(categoryOf(t) ?? '')) &&
       (enteredBy === null || t.view === 'full'),
   )
   // The API's order: transaction_date, then id, both ascending for `asc` and both descending otherwise.
@@ -901,7 +916,7 @@ export const householdRoutes = (data: HouseholdData = household): ApiRoute[] => 
   apiRoute<TransactionSummary>('GET', '/transactions/summary/period', data.summary),
   apiRoute<Category[]>('GET', '/categories/', data.categories),
   queryRoute<PaginatedResponse<BudgetEntry>>('GET', '/budget-entries/', (q) => budgetEntriesFor(data, q)),
-  apiRoute<InstallmentPlans>('GET', '/budget-entries/installment-plans', { items: [], auto_post_scheduled: true, today: data.today }),
+  apiRoute<InstallmentPlans>('GET', '/budget-entries/installment-plans', { items: data.installmentPlans, auto_post_scheduled: true, today: data.today }),
   apiRoute<UpcomingOccurrences>('GET', '/budget-entries/upcoming-occurrences', {
     items: data.occurrences,
     total: data.occurrences.length,
@@ -992,6 +1007,168 @@ export const householdViewRoutes = (data: HouseholdData = household): ApiRoute[]
       return { sharer, from: q.get('from') ?? month, to: q.get('to') ?? month, months: [monthRow] }
     }),
   ]
+}
+
+/**
+ * The account Mara fills in on Add Account in the selection specs: every field moved off its default (a savings
+ * account in dollars, a spending wallet, one tag, a balance and a note), so a later change to one control can be
+ * checked against the rest.
+ */
+export const newAccountInput = {
+  name: 'Maya savings',
+  account_type: 'savings',
+  is_spending_wallet: true,
+  currency: 'USD',
+  balance: 1500,
+  description: 'Rainy-day buffer',
+  tag_ids: [tripTag.id],
+} as const satisfies AccountInput
+
+/** What `POST /accounts/` answers for `sent`: the new account, owned by the household's user, its tags resolved. */
+export const createdAccount = (data: HouseholdData, id: number, sent: AccountInput): Account =>
+  acct({
+    id,
+    name: sent.name ?? '',
+    account_type: sent.account_type ?? 'checking',
+    balance: sent.balance ?? 0,
+    currency: sent.currency ?? 'PHP',
+    is_active: sent.is_active ?? true,
+    is_spending_wallet: sent.is_spending_wallet,
+    description: sent.description,
+    tags: data.tags.filter((t) => sent.tag_ids?.includes(t.id)),
+    owner_id: data.user.id,
+    created_at: `${data.today}T02:00:00`,
+  })
+
+/** `POST /accounts/` answering each create in turn with the next of `created` (201), the last one repeating. */
+export const createAccountRoute = (created: Account[]): ApiRoute =>
+  sequenceRoute<Account>('POST', '/accounts/', created.map((body) => ({ body, status: 201 })))
+
+/**
+ * The creates the Add Transaction, Add Recurring Entry and allocation dialogs send, answered with a record built
+ * from the variant's own accounts (201). The specs read what was sent from the mock's captured bodies.
+ */
+export const householdCreateRoutes = (data: HouseholdData): ApiRoute[] => {
+  const account = data.accounts[0]
+  const sentTransaction: TransactionInput = { description: 'New transaction', amount: 1, account_id: account.id, transaction_type: 'debit' }
+  const sentEntry: BudgetEntryInput = { name: 'New recurring entry', amount: 1, account_id: account.id, entry_type: 'expense' }
+  return [
+    apiRoute<Transaction>('POST', '/transactions/', tx(data.today, sentTransaction.description ?? '', sentTransaction.amount ?? 0, account, 22), 201),
+    apiRoute<BudgetEntry>('POST', '/budget-entries/', entry(sentEntry.name ?? '', 'expense', sentEntry.amount ?? 0, data.today, account), 201),
+    apiRoute<Allocation>('POST', '/allocations/', alloc({ id: 69, name: 'New allocation', allocation_type: 'budget', current_amount: 0, account_id: account.id }), 201),
+  ]
+}
+
+/**
+ * A variant that also holds dollars: the snapshot lists USD with a $1,250.00 balance, and this month's summary has
+ * a USD row with one $86.40 Dining out expense, so the dashboard and the spending breakdown offer a currency control.
+ */
+export const withDollars = (data: HouseholdData): HouseholdData => {
+  const { snapshot, summary } = data
+  const dining = { income: 0, expenses: 86.4 }
+  return {
+    ...data,
+    snapshot: {
+      ...snapshot,
+      currencies: [...snapshot.currencies, 'USD'],
+      balances: { ...snapshot.balances, by_currency: [...snapshot.balances.by_currency, { currency: 'USD', total: 1250, available_cash: 1250 }] },
+      monthly_summary: {
+        ...snapshot.monthly_summary,
+        by_currency: [
+          ...snapshot.monthly_summary.by_currency,
+          { currency: 'USD', monthly_income: 0, monthly_expenses: 0, moved_in: 0, moved_out: 0, monthly_disposable: 0 },
+        ],
+      },
+    },
+    summary: {
+      ...summary,
+      by_currency: [
+        ...summary.by_currency,
+        {
+          currency: 'USD',
+          total_income: 0,
+          total_expenses: dining.expenses,
+          moved_in: 0,
+          moved_out: 0,
+          net_flow: -dining.expenses,
+          transaction_count: 1,
+          category_breakdown: { 'Dining out': dining },
+        },
+      ],
+    },
+  }
+}
+
+/** The GCash rows the account-history variant adds: one jeepney top-up a day, 2 to 27 January. */
+const GCASH_HISTORY_DAYS = 26
+
+/**
+ * A variant whose GCash account has 30 rows, two pages of the account page's 25: its four March and February rows
+ * and 26 January top-ups, the oldest "GCash top-up, 2 January".
+ */
+export const withAccountHistory = (data: HouseholdData): HouseholdData => {
+  const older = Array.from({ length: GCASH_HISTORY_DAYS }, (_, i) => {
+    const day = GCASH_HISTORY_DAYS + 1 - i
+    return tx(`2026-01-${String(day).padStart(2, '0')}`, `GCash top-up, ${day} January`, 500, gcash, 25)
+  })
+  return { ...data, transactions: [...data.transactions, ...older] }
+}
+
+/** `GET /accounts/{id}` for every account in `data`, as the account page asks it. */
+export const accountDetailRoutes = (data: HouseholdData): ApiRoute[] => data.accounts.map((a) => apiRoute<Account>('GET', `/accounts/${a.id}`, a))
+
+const plan = (entryId: number, name: string, nextCharge: string, paymentsLeft: number, paymentsTotal: number): InstallmentPlan => ({
+  view: 'full',
+  entry_id: entryId,
+  name,
+  account_name: card.name,
+  amount: 2500,
+  remaining_total: 2500 * paymentsLeft,
+  currency: 'PHP',
+  next_charge: nextCharge,
+  effective_date: nextCharge,
+  missed: 0,
+  payments_left: paymentsLeft,
+  payments_total: paymentsTotal,
+  can_mark_paid: true,
+  auto_post: null,
+  block_reason: null,
+  can_review: false,
+  recordable: false,
+})
+
+/**
+ * A variant with more than a page (three rows) in every Due card tab: three more overdue payables, four rows not
+ * posted yet, two more subscriptions and four installment plans.
+ */
+export const withLongDueLists = (data: HouseholdData): HouseholdData => {
+  const overdue = (name: string, original: string, amount: number): Payable =>
+    payable({ due_date: data.today, original_date: original, overdue: true, name, amount, source: 'budget_entry', source_id: hmoEntry.id, occurrence_date: original, settlement: 'manual', can_mark_paid: true, kind: 'cash' })
+  const morePayables = [overdue('Condo dues', '2026-03-02', 3200), overdue('Pag-IBIG contribution', '2026-03-05', 200), overdue('SSS contribution', '2026-03-06', 1350)]
+  const unposted = [
+    tx('2026-03-12', 'Shopee order, pending', 1290, card, 22, 'debit', { is_posted: false }),
+    tx('2026-03-11', 'Lazada order, pending', 845, card, 22, 'debit', { is_posted: false }),
+    tx('2026-03-10', 'Foodpanda, pending', 512, card, 23, 'debit', { is_posted: false }),
+    tx('2026-03-09', 'Grab Food, pending', 388, card, 23, 'debit', { is_posted: false }),
+  ]
+  const youtube = entry('YouTube Premium', 'expense', 189, '2026-03-16', card, { anchor_day: 16, kind: 'subscription' })
+  const icloud = entry('iCloud+ 200GB', 'expense', 149, '2026-03-22', card, { anchor_day: 22, kind: 'subscription' })
+  const subscriptions = [...data.due.subscription_occurrences.items, occurrence(youtube, '2026-03-16', card), occurrence(icloud, '2026-03-22', card)]
+  return {
+    ...data,
+    due: {
+      ...data.due,
+      payables: [...data.due.payables, ...morePayables],
+      unposted: { items: unposted, total: unposted.length, page: 1, page_size: 50, has_more: false },
+      subscription_occurrences: { ...data.due.subscription_occurrences, items: subscriptions, total: subscriptions.length },
+    },
+    installmentPlans: [
+      plan(791, 'iPhone 16, 24 months', '2026-03-15', 18, 24),
+      plan(792, 'Aircon, 12 months', '2026-03-18', 7, 12),
+      plan(793, 'Washing machine, 6 months', '2026-03-25', 3, 6),
+      plan(794, 'Sofa, 12 months', '2026-04-02', 9, 12),
+    ],
+  }
 }
 
 /**
