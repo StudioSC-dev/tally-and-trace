@@ -597,8 +597,8 @@ test.describe('AC5: buttons have hover and disabled states', () => {
       await viewportShot(page, `hover-${variant}`)
     })
 
-    test(`buttons have hover and disabled states: ${variant} disabled`, async ({ page }, testInfo) => {
-      test.skip(testInfo.project.name !== 'desktop' || RECORD, 'checked with the hover cases, on desktop')
+    test(`buttons have hover and disabled states: ${variant} disabled`, async ({ page }) => {
+      test.skip(RECORD, 'a recording run only writes the baseline')
       const el = await example(variant)(page)
       await expect(el).toHaveAttribute('data-variant', variant)
       const rest = await looks(el)
