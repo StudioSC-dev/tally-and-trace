@@ -23,9 +23,14 @@ import {
   householdCreateRoutes,
   householdDialogRoutes,
   householdSaveRoutes,
+  householdWishlist,
+  householdWishlistRoutes,
+  installmentReviewRoutes,
   mockHousehold,
   newAccountInput,
+  withInstallmentReview,
 } from './support/fixtures/household'
+import type { HouseholdData } from './support/fixtures/household'
 
 // This spec lives in <repo>/frontend/e2e.
 const FRONTEND = fileURLToPath(new URL('..', import.meta.url))
@@ -85,17 +90,19 @@ const rowTransactionId = (): number => {
 }
 
 /** Extra routes the dialogs' lookups and saves need, answered with typed fixture data. */
-const extraRoutes = (): ApiRoute[] => [
-  ...householdCreateRoutes(household),
-  ...householdDialogRoutes(household),
-  ...householdSaveRoutes(household),
+const extraRoutes = (data: HouseholdData): ApiRoute[] => [
+  ...householdCreateRoutes(data),
+  ...householdDialogRoutes(data),
+  ...householdSaveRoutes(data),
+  ...householdWishlistRoutes(),
+  ...installmentReviewRoutes(),
   // The in-app Confirm's Delete sends the delete.
   apiRoute<Record<string, never>>('DELETE', `/transactions/${rowTransactionId()}`, {}),
 ]
 
-async function openPage(page: Page, route: string, heading: string, extra: ApiRoute[] = []): Promise<ApiMock> {
-  const api = await mockHousehold(page, household)
-  await mockApi(page, [...extraRoutes(), ...extra])
+async function openPage(page: Page, route: string, heading: string, extra: ApiRoute[] = [], data: HouseholdData = household): Promise<ApiMock> {
+  const api = await mockHousehold(page, data)
+  await mockApi(page, [...extraRoutes(data), ...extra])
   await page.goto(route)
   // The dev server compiles a route's chunk on its first visit; under a full parallel run that can pass 5s.
   await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible({ timeout: 15_000 })
@@ -136,7 +143,71 @@ interface Surface {
    * with that name.
    */
   migrated: string[]
+  /**
+   * Fills the surface's form so the named control submits a valid one: AC6 then compares a real save (its request,
+   * arguments and result) rather than the form's validation.
+   */
+  fill?: Record<string, (page: Page) => Promise<void>>
 }
+
+/** Picks an account in a form's account picker, opening the folded field first when it is folded. */
+async function pickAccount(page: Page, name: string): Promise<void> {
+  const field = dialogOf(page).locator('[data-field="account_id"]')
+  const chip = field.getByRole('button', { name: new RegExp(`^${name}`) })
+  const change = field.locator('[data-picker-change][aria-expanded="false"]')
+  await chip.or(change).first().waitFor()
+  if ((await chip.count()) === 0) await change.click()
+  await chip.first().click()
+  await expect(field.locator('[data-picker-value]')).toContainText(name)
+}
+
+/** Valid forms for the saves AC6 clicks: each fills only what its form requires. */
+const fillTransaction = async (page: Page): Promise<void> => {
+  await dialogOf(page).getByPlaceholder('Add notes about this transaction').fill('Button check')
+  await pickAccount(page, 'BPI Payroll')
+  await dialogOf(page).locator('input[type="number"][placeholder="0.00"]').first().fill('120')
+}
+const fillInstallment = async (page: Page): Promise<void> => {
+  await dialogOf(page).getByPlaceholder('Add notes about this transaction').fill('Button check laptop')
+  // An installment asks for the purchase total, split over the months picked.
+  await dialogOf(page).getByRole('textbox', { name: 'Purchase total' }).fill('12000')
+}
+const fillRecurring = async (page: Page): Promise<void> => {
+  await dialogOf(page).locator('input[type="text"]').first().fill('Water delivery')
+  await dialogOf(page).locator('select').first().selectOption('11')
+  await dialogOf(page).locator('input[type="number"]').first().fill('350')
+}
+const fillAllocation = async (page: Page): Promise<void> => {
+  await dialogOf(page).locator('input[type="text"]').first().fill('Pet care')
+  await dialogOf(page).locator('select').first().selectOption('11')
+  // A budget envelope tracks at least one category.
+  await dialogOf(page).getByRole('button', { name: 'Dining out', exact: true }).click()
+  // The empty amounts: a budget's spending limit, a savings tracker's target.
+  for (const amount of await dialogOf(page).locator('input[type="number"]').all()) {
+    if ((await amount.inputValue()) === '') await amount.fill('3000')
+  }
+}
+const fillName = async (page: Page): Promise<void> => {
+  await dialogOf(page).locator('input[type="text"], input:not([type])').first().fill('Pet care')
+}
+const fillWishlist = async (page: Page): Promise<void> => {
+  await dialogOf(page).getByPlaceholder('What are you saving for?').fill('Standing desk')
+  await dialogOf(page).locator('input[type="number"]').first().fill('12000')
+}
+const fillShare = async (page: Page): Promise<void> => {
+  await page.getByTestId('share-email').fill('lia@example.com')
+}
+const fillHouseholdShare = async (page: Page): Promise<void> => {
+  await page.getByTestId('household-share-email').fill('lia@example.com')
+}
+
+/** The categories Settings lists, each with Edit and Delete. */
+const SETTINGS_CATEGORIES = household.categories.filter((c) => c.is_active)
+/** The accounts the dashboard's Quick balances show, in order. */
+const QUICK_BALANCES = household.quickBalances.tiles.map((t) => t.name)
+
+/** The first budget envelope, whose panel opens the allocation actions. */
+const BUDGET = household.allocations.find((a) => a.allocation_type === 'budget')?.name ?? ''
 
 const PAGES: Surface[] = [
   { key: 'dashboard', dialog: false, open: (p) => openPage(p, '/', 'Dashboard'), migrated: ['Edit'] },
@@ -169,6 +240,51 @@ const PAGES: Surface[] = [
     migrated: ['Add Recurring Entry', 'Charged', 'Posted', 'Charged', 'Posted', ...Array<string>(9).fill('Mark paid'), 'Mark received'],
   },
   { key: 'accounts', dialog: false, open: (p) => openPage(p, '/accounts', 'Accounts'), migrated: ['Add Account'] },
+  {
+    key: 'settings',
+    dialog: false,
+    open: (p) => openPage(p, '/settings', 'Settings'),
+    migrated: [
+      'JSON',
+      'CSV (ZIP)',
+      'Add category',
+      ...SETTINGS_CATEGORIES.flatMap(() => ['Edit', 'Delete']),
+      'Add tag',
+      'Recolour tag Household',
+      'Delete tag Household',
+      'Edit tag Japan trip',
+      'Delete tag Japan trip',
+      'Look up',
+    ],
+    fill: { 'Look up': fillHouseholdShare },
+  },
+  {
+    key: 'allocations-wishlist',
+    dialog: false,
+    open: async (p) => {
+      const api = await openPage(p, '/allocations?tab=wishlist', 'Allocations')
+      await expect(p.getByText(householdWishlist[0].name, { exact: true })).toBeVisible()
+      await settle(p)
+      return api
+    },
+    migrated: ['Add item', ...householdWishlist.flatMap(() => ['Savings target', 'Budget envelope', 'Mark as purchased', 'Edit', 'Delete'])],
+  },
+]
+
+/** A page in a state that shows more migrated controls: the dashboard's Quick balances editor. */
+const STATES: Surface[] = [
+  {
+    key: 'quick-balances-editor',
+    dialog: false,
+    open: async (p) => {
+      const api = await openPage(p, '/', 'Dashboard')
+      await p.getByTestId('quick-balances-edit').click()
+      await expect(p.getByTestId('quick-balances-save')).toBeVisible()
+      await settle(p)
+      return api
+    },
+    migrated: ['Cancel', 'Save', ...QUICK_BALANCES.flatMap((name) => [`Move ${name} earlier`, `Move ${name} later`, `Remove ${name}`]), '+ Add account'],
+  },
 ]
 
 const DIALOGS: Surface[] = [
@@ -177,6 +293,22 @@ const DIALOGS: Surface[] = [
     dialog: true,
     open: (p) => openDialog(p, '/transactions', 'Transactions', (q) => q.getByRole('button', { name: 'Add Transaction', exact: true }).first(), 'Create Transaction'),
     migrated: ['Create Transaction', 'Save and add another', 'Cancel'],
+    fill: { 'Create Transaction': fillTransaction, 'Save and add another': fillTransaction },
+  },
+  {
+    key: 'transaction-create-installment',
+    dialog: true,
+    open: async (p) => {
+      const api = await surface('transaction-create').open(p)
+      await pickAccount(p, 'HSBC Red Mastercard')
+      await p.getByTestId('installment-toggle').check()
+      await p.getByTestId('installment-months-6').click()
+      await expect(p.getByTestId('installment-change')).toBeVisible()
+      await settle(p)
+      return api
+    },
+    migrated: ['Change', 'Create Transaction', 'Save and add another', 'Cancel'],
+    fill: { 'Create Transaction': fillInstallment, 'Save and add another': fillInstallment },
   },
   {
     key: 'transaction-actions',
@@ -225,6 +357,7 @@ const DIALOGS: Surface[] = [
     dialog: true,
     open: (p) => openDialog(p, '/allocations', 'Allocations', (q) => q.getByRole('button', { name: 'Add Recurring Entry', exact: true }), 'Add Recurring Entry'),
     migrated: ['Save Recurring Entry', 'Cancel'],
+    fill: { 'Save Recurring Entry': fillRecurring },
   },
   {
     key: 'recurring-charged',
@@ -245,6 +378,83 @@ const DIALOGS: Surface[] = [
     migrated: ['View transactions', 'Mark as inactive', 'Edit account', 'Share account', 'Delete account'],
   },
   {
+    key: 'share-account',
+    dialog: true,
+    open: async (p) => {
+      const api = await surface('account-actions').open(p)
+      await dialogOf(p).getByRole('button', { name: 'Share account' }).click()
+      // Since STU-635 every overlay is z-60, so the actions modal, later in the document, paints over the share dialog
+      // it opened (on main too). Closing it leaves the share dialog open and reachable.
+      await p.getByRole('button', { name: 'Close account actions modal' }).click()
+      await expect(p.getByTestId('share-email')).toBeVisible()
+      await expect(p.getByText('Jun R.', { exact: true })).toBeVisible()
+      await settle(p)
+      return api
+    },
+    migrated: ['Remove', 'Look up'],
+    fill: { 'Look up': fillShare },
+  },
+  {
+    key: 'share-account-found',
+    dialog: true,
+    open: async (p) => {
+      const api = await surface('share-account').open(p)
+      await fillShare(p)
+      await p.getByTestId('share-lookup').click()
+      await expect(p.getByTestId('share-submit')).toBeVisible()
+      await settle(p)
+      return api
+    },
+    migrated: ['Remove', 'Look up', 'Share with Lia M.'],
+  },
+  {
+    key: 'installment-review',
+    dialog: true,
+    open: async (p) => {
+      const api = await openPage(p, '/transactions', 'Transactions', [], withInstallmentReview(household))
+      await p.getByRole('tab', { name: /^Installments/ }).click()
+      await p.getByTestId('due-review').first().click()
+      await expect(p.getByTestId('installment-review-submit')).toBeVisible()
+      await settle(p)
+      return api
+    },
+    migrated: ['Close', 'Record 1 month and turn on auto-post', 'Cancel'],
+  },
+  {
+    key: 'settings-category',
+    dialog: true,
+    open: (p) => openDialog(p, '/settings', 'Settings', (q) => q.getByRole('button', { name: 'Add category', exact: true }), 'Add category'),
+    migrated: ['Create', 'Cancel'],
+    fill: { Create: fillName },
+  },
+  {
+    key: 'settings-tag',
+    dialog: true,
+    open: (p) => openDialog(p, '/settings', 'Settings', (q) => q.getByRole('button', { name: 'Add tag', exact: true }), 'Add tag'),
+    migrated: ['Create', 'Cancel'],
+    fill: { Create: fillName },
+  },
+  {
+    key: 'wishlist-item',
+    dialog: true,
+    open: (p) => openDialog(p, '/allocations?tab=wishlist', 'Allocations', (q) => q.getByRole('button', { name: 'Add item', exact: true }), 'Add item'),
+    migrated: ['Add', 'Cancel'],
+    fill: { Add: fillWishlist },
+  },
+  {
+    key: 'allocation-create',
+    dialog: true,
+    open: (p) => openDialog(p, '/allocations?tab=budgets', 'Allocations', (q) => q.getByRole('button', { name: 'Add Allocation', exact: true }), 'Create Budget Envelope'),
+    migrated: ['Create Budget Envelope', 'Cancel'],
+    fill: { 'Create Budget Envelope': fillAllocation },
+  },
+  {
+    key: 'allocation-actions',
+    dialog: true,
+    open: (p) => openDialog(p, '/allocations?tab=budgets', 'Allocations', (q) => q.locator('main article.card').filter({ has: q.getByText(BUDGET, { exact: true }) }), BUDGET),
+    migrated: ['Pause allocation', 'Edit allocation', 'Delete allocation'],
+  },
+  {
     key: 'payable-detail',
     dialog: true,
     open: (p) => openDialog(p, '/', 'Dashboard', (q) => q.getByTestId('payable-open').first(), /./),
@@ -252,7 +462,7 @@ const DIALOGS: Surface[] = [
   },
 ]
 
-const SURFACES = [...PAGES, ...DIALOGS]
+const SURFACES = [...PAGES, ...STATES, ...DIALOGS]
 const surface = (key: string): Surface => {
   const s = SURFACES.find((x) => x.key === key)
   if (!s) throw new Error(`no surface ${key}`)
@@ -282,7 +492,7 @@ const controlsIn = (scope: Locator): Promise<Control[]> =>
           const cs = getComputedStyle(e)
           const isSelection = e.closest(selection) !== null
           return {
-            name: (e.getAttribute('aria-label') ?? e.textContent ?? '').replace(/\s+/g, ' ').trim(),
+            name: (e.getAttribute('aria-label') ?? ((e.textContent ?? '').trim() || e.getAttribute('title') || '')).replace(/\s+/g, ' ').trim(),
             height: Math.round(e.getBoundingClientRect().height),
             icons: e.querySelectorAll('svg, img, [aria-hidden="true"]').length,
             variant: e.getAttribute('data-variant'),
@@ -303,12 +513,29 @@ interface Effect {
   dialogs: number
   headings: string[]
   buttons: string[]
+  /** The top dialog's fields after the click, as `type:value` (`type:true` for a ticked box): a reset form reads empty. */
+  fields: string[]
 }
 
-/** The visible screen after a click: the URL, the open dialogs, the headings and every button and link. */
+/** The visible screen after a click: the URL, the open dialogs, the headings, every button and link, and the form. */
 async function screenOf(page: Page): Promise<Omit<Effect, 'requests'>> {
   const url = new URL(page.url())
+  const open = page.locator(DIALOG)
+  const fields =
+    (await open.count()) === 0
+      ? []
+      : await open
+          .last()
+          .evaluate((root) =>
+            Array.from(root.querySelectorAll('input, select, textarea'))
+              .filter((e) => (e as HTMLElement).offsetParent !== null)
+              .map((e) => {
+                const el = e as HTMLInputElement
+                return el.type === 'checkbox' || el.type === 'radio' ? `${el.type}:${el.checked}` : `${el.type}:${el.value}`
+              }),
+          )
   return {
+    fields,
     url: `${url.pathname}${url.search}`,
     dialogs: await page.locator(DIALOG).count(),
     headings: await page
@@ -372,7 +599,7 @@ async function controlAt(scope: Locator, name: string, nth: number): Promise<Loc
       const every = Array.from(root.querySelectorAll('button, a'))
       const named = every
         .filter((e) => (e as HTMLElement).offsetParent !== null || getComputedStyle(e).position === 'fixed')
-        .filter((e) => (e.getAttribute('aria-label') ?? e.textContent ?? '').replace(/\s+/g, ' ').trim() === want)
+        .filter((e) => (e.getAttribute('aria-label') ?? ((e.textContent ?? '').trim() || e.getAttribute('title') || '')).replace(/\s+/g, ' ').trim() === want)
       const el = named[n]
       return el ? every.indexOf(el) : -1
     },
@@ -488,7 +715,7 @@ test.describe('AC2: no hand-rolled fills remain', () => {
             .filter((e) => e.closest(selection) === null)
             .map((e) => {
               const bg = getComputedStyle(e).backgroundColor
-              const name = (e.getAttribute('aria-label') ?? e.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 40)
+              const name = (e.getAttribute('aria-label') ?? ((e.textContent ?? '').trim() || e.getAttribute('title') || '')).replace(/\s+/g, ' ').trim().slice(0, 40)
               return {
                 control: `${e.tagName.toLowerCase()} "${name}"`,
                 oldFill: bg === green || bg === ink,
@@ -529,6 +756,20 @@ test.describe('AC3: row actions are secondary', () => {
       for (const el of await all.all()) await expect(el).toHaveAttribute('data-variant', ROW_VARIANTS)
     }
     await shot(page, 'row-actions-recurring')
+  })
+
+  test('row actions are secondary: Wishlist row Edit, Mark as purchased and the allocation shortcuts', async ({ page }) => {
+    test.skip(RECORD, 'a recording run only writes the baseline')
+    await surface('allocations-wishlist').open(page)
+    const rows = page.locator('article').filter({ has: page.getByRole('button', { name: 'Edit', exact: true }) })
+    expect(await rows.count(), 'wishlist rows with an Edit').toBe(householdWishlist.length)
+    for (const item of householdWishlist) {
+      const row = rows.filter({ has: page.getByText(item.name, { exact: true }) })
+      for (const name of ['Edit', 'Mark as purchased', 'Savings target', 'Budget envelope']) {
+        await expect(row.getByRole('button', { name, exact: true }), `${item.name}: ${name}`).toHaveAttribute('data-variant', ROW_VARIANTS)
+      }
+    }
+    await shot(page, 'row-actions-wishlist')
   })
 
   test('row actions are secondary: every row-level Edit', async ({ page }) => {
@@ -649,6 +890,8 @@ test.describe('AC6: button migration preserves surrounding behavior and layout',
     for (const c of migratedCases(s)) {
       test(`button migration preserves surrounding behavior and layout: ${c.key}`, async ({ page }, testInfo) => {
         await s.open(page)
+        const seed = s.fill?.[c.name]
+        if (seed) await seed(page)
         const target = await controlAt(scopeOf(page, s), c.name, c.nth)
         const project = testInfo.project.name
         const enabled = await target.isEnabled()
