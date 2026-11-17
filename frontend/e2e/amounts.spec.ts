@@ -72,8 +72,8 @@ async function openRecurring(page: Page, data: HouseholdData = household): Promi
 }
 
 const amountOf = (rows: Locator): Locator => rows.locator('p.text-lg.font-bold')
-const expenseRows = (scope: Locator): Locator => scope.locator('article').filter({ hasText: /Expense/ })
-const incomeRows = (scope: Locator): Locator => scope.locator('article').filter({ hasText: /Income/ })
+const expenseRows = (scope: Locator): Locator => scope.locator('article').filter({ hasText: /[Ee]xpense/ })
+const incomeRows = (scope: Locator): Locator => scope.locator('article').filter({ hasText: /[Ii]ncome/ })
 
 /** A viewport screenshot (for overlays), saved under `shot()`'s naming. */
 async function viewportShot(page: Page, name: string): Promise<void> {
@@ -379,7 +379,7 @@ test.describe('amount classes', () => {
       const amounts = amountOf(limited.filter({ hasText: new RegExp(`Recurring ${kind}`) }))
       expect(await semanticOf(amounts), `the limited recurring ${kind} amount`).toEqual([cls])
     }
-    expect(await textsOf(amountOf(limited.filter({ hasText: /Recurring Income/ }))), 'the limited income amount starts with +').toEqual(['+₱3,500.00'])
+    expect(await textsOf(amountOf(limited.filter({ hasText: /Recurring income/ }))), 'the limited income amount starts with +').toEqual(['+₱3,500.00'])
     await shot(page, 'classes-limited-recurring')
   })
 
