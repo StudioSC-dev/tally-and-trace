@@ -178,7 +178,8 @@ test.describe('One face: IBM Plex Sans (STU-676)', () => {
     const wordmark = page.getByText('Tally & Trace', { exact: true })
     await expect(wordmark).toBeVisible()
     await expect.soft(wordmark).toHaveCSS('font-size', '18px')
-    await expect.soft(wordmark).toHaveCSS('font-weight', '400')
+    // STU-684: the wordmark is Plex 600, in the text face (nav.spec.ts, AC6).
+    await expect.soft(wordmark).toHaveCSS('font-weight', '600')
     await expect.soft(wordmark).toHaveCSS('font-family', /^"IBM Plex Sans"/)
     // The wordmark sits in the fixed nav bar, so a viewport screenshot, saved under shot()'s naming.
     const info = test.info()
