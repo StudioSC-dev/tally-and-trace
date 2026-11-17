@@ -1,6 +1,7 @@
 import type { Account, QuickBalanceTile } from '../types/api'
 import { ACCOUNT_GROUPS, ACCOUNT_TYPE_GROUP } from './accountGroups'
 import { formatCurrency } from './currency'
+import type { CurrencyCode } from './currency'
 import { joinNames } from './cardCredit'
 import { parseEntryDate } from './entryDate'
 
@@ -64,9 +65,15 @@ export function tileHasNoLimit(
  * - `options.noLimit`: the caller knows this card has no credit limit of its own and shares none
  *   (from the account, which the API does not put on the tile), so a card with no `credit` shows a
  *   muted "No limit set" where Available would be. Without it, an absent `credit` shows nothing.
+ * - `options.money`: how an amount is written; `formatCurrency` when absent. The web app passes its signed formatter,
+ *   so a negative figure reads as it does everywhere else in the app and a zero is never signed.
  */
-export function tileLines(tile: QuickBalanceTile, options: { noLimit?: boolean } = {}): TileLine[] {
-  const money = (amount: number) => formatCurrency(amount, tile.currency)
+export function tileLines(
+  tile: QuickBalanceTile,
+  options: { noLimit?: boolean; money?: (amount: number, currency: CurrencyCode) => string } = {},
+): TileLine[] {
+  const format = options.money ?? formatCurrency
+  const money = (amount: number) => format(amount, tile.currency)
   if (tile.account_type === 'loan') return [line('owed', 'Owed', money(-tile.balance))]
   if (tile.account_type !== 'credit') return [line('balance', null, money(tile.balance))]
   const card = tile.card
