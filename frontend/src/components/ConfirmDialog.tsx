@@ -131,7 +131,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
   const dialog = view.open
     ? createPortal(
         <div
-          className="fixed inset-0 z-[100] overflow-y-auto bg-black/60 px-4 py-6"
+          className="fixed inset-0 z-[100] overflow-y-auto bg-scrim/60 px-4 py-6"
           onClick={() => flow.dismiss()}
           data-testid="confirm-dialog-overlay"
         >

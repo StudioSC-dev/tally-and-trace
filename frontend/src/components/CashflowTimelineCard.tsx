@@ -34,7 +34,7 @@ export function CashflowTimelineCard({ tag, currency }: { tag?: number; currency
         {currency === null || isLoading ? (
           <div className="space-y-4" aria-busy="true" data-testid="timeline-pending">
             <span role="status" className="sr-only">Loading the cash-flow timeline</span>
-            <Skeleton className="h-[150px] w-full" />
+            <Skeleton className="h-36 w-full" />
             <div className="grid grid-cols-3 gap-2">
               {[0, 1, 2].map((index) => (
                 <div key={index} className="bg-sunken/50 py-2 flex justify-center">

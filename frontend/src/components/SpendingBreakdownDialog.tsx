@@ -12,10 +12,10 @@ import { apiErrorMessage } from '../utils/apiError'
 import { formatCurrency } from '../utils/currency'
 import type { CurrencyCode } from '../utils/currency'
 import { CurrencyControl } from './CurrencyControl'
+import { chartColor, tokenColor } from '../utils/palette'
 
-const FALLBACK_CATEGORY_COLORS = ['#2563eb', '#7c3aed', '#16a34a', '#f97316', '#db2777']
 // Rows the list can't be filtered by, and the "Other" slice, are drawn neutral.
-const NEUTRAL_COLOR = '#6B7280'
+const NEUTRAL_COLOR = tokenColor('muted')
 
 const DONUT_RADIUS = 48
 const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS
@@ -120,8 +120,9 @@ export function SpendingBreakdownDialog({
   }, [])
 
   const format = (amount: number) => formatCurrency(amount, currency)
-  const colorFor = (index: number, color: string | undefined, drillable: boolean) =>
-    !drillable ? NEUTRAL_COLOR : color ?? FALLBACK_CATEGORY_COLORS[index % FALLBACK_CATEGORY_COLORS.length] ?? NEUTRAL_COLOR
+  // Drillable slices and rows cycle through the chart tokens; a saved category colour is not used here.
+  const colorFor = (index: number, drillable: boolean) =>
+    !drillable ? NEUTRAL_COLOR : chartColor(index)
 
   let body
   if (isLoading) {
@@ -164,11 +165,11 @@ export function SpendingBreakdownDialog({
                     cy="60"
                     r={DONUT_RADIUS}
                     fill="none"
-                    stroke={colorFor(index, slice.color, drillable)}
                     strokeWidth="18"
                     strokeDasharray={`${length} ${DONUT_CIRCUMFERENCE - length}`}
                     strokeDashoffset={-slice.offset * DONUT_CIRCUMFERENCE}
                     className={drillable ? 'cursor-pointer hover:opacity-80' : undefined}
+                    style={{ stroke: colorFor(index, drillable) }}
                     onClick={sliceDrill ? () => onSelectCategory(sliceDrill) : undefined}
                   >
                     <title>{`${slice.name}: ${format(slice.amount)}${drillable ? ' (click to filter the list)' : ''}`}</title>
@@ -185,7 +186,7 @@ export function SpendingBreakdownDialog({
         <ul className="divide-y divide-line/50 text-sm">
           {breakdown.rows.map((row, index) => {
             const rowDrill = row.drill
-            const color = colorFor(index, row.color, rowDrill !== null)
+            const color = colorFor(index, rowDrill !== null)
             const cells = (
               <>
                 <span className="flex min-w-0 items-center gap-2">
@@ -209,7 +210,7 @@ export function SpendingBreakdownDialog({
                 ) : (
                   <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-4 py-2">
                     {cells}
-                    <span className="col-span-3 -mt-1 pl-[18px] text-xs text-muted">Can't filter the list by this.</span>
+                    <span className="col-span-3 -mt-1 pl-5 text-xs text-muted">Can't filter the list by this.</span>
                   </div>
                 )}
               </li>
@@ -236,7 +237,7 @@ export function SpendingBreakdownDialog({
                     <span className="flex min-w-0 items-center gap-2">
                       <span
                         className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
-                        style={{ backgroundColor: colorFor(index, row.color, rowDrill !== null) }}
+                        style={{ backgroundColor: colorFor(index, rowDrill !== null) }}
                       />
                       <span className="truncate font-medium text-ink">{row.name}</span>
                     </span>
@@ -272,7 +273,7 @@ export function SpendingBreakdownDialog({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[60] overflow-y-auto bg-black/60 px-4 py-6"
+      className="fixed inset-0 z-[60] overflow-y-auto bg-scrim/60 px-4 py-6"
       onClick={onClose}
       data-testid="spending-breakdown-dialog"
     >

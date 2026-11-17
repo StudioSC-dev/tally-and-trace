@@ -1056,7 +1056,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     <button
       type="button"
       onClick={onSeeScheduled}
-      className="inline-flex min-h-[44px] items-center text-sm underline focus-ring"
+      className="inline-flex min-h-11 items-center text-sm underline focus-ring"
       data-testid="see-scheduled-link"
     >
       See everything scheduled

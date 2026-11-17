@@ -189,7 +189,7 @@ function ReviewShell({ entryId, name, review, loadError, refetch, onClose, onRev
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[60] overflow-y-auto bg-black/60 px-4 py-6"
+      className="fixed inset-0 z-[60] overflow-y-auto bg-scrim/60 px-4 py-6"
       onClick={onClose}
       data-testid="installment-review-overlay"
     >
@@ -369,7 +369,7 @@ function ReviewEditForm({ entryId, onBack, onDeleted }: { entryId: number; onBac
     )
   }
   return createPortal(
-    <div className="fixed inset-0 z-[60] overflow-y-auto bg-black/60 px-4 py-6" data-testid="installment-review-edit-overlay">
+    <div className="fixed inset-0 z-[60] overflow-y-auto bg-scrim/60 px-4 py-6" data-testid="installment-review-edit-overlay">
       <div className="flex min-h-full items-center justify-center">
         <div className="w-full max-w-md border border-line bg-surface p-5 sm:p-6 space-y-4" role="dialog" aria-modal="true" aria-label="Edit installment">
           {failed || (entry && !isDetailed(entry)) ? (
