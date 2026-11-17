@@ -189,6 +189,28 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
     await viewportShot(page, 'labels-add-transaction')
   })
 
+  // The budget and savings forms of Allocations: every `<label>` reads in sentence case, as held here.
+  const ALLOCATION_FORMS: { name: string; tab: string; mode?: string; labels: string[] }[] = [
+    { name: 'budget form', tab: 'budgets', labels: ['Account', 'Name', 'Description', 'Tracked categories', 'Budget cadence', 'Period start', 'Period end (optional)', 'Amount already spent', 'Spending limit'] },
+    { name: 'savings form', tab: 'savings', labels: ['Account', 'Name', 'Description', 'Tracking mode', 'Current amount', 'Target amount (optional)', 'Monthly target', 'Target date'] },
+    { name: 'savings form, combined account total', tab: 'savings', mode: 'Combined account total', labels: ['Account', 'Name', 'Description', 'Tracking mode', 'Accounts to aggregate', 'Current amount', 'Target amount (optional)', 'Monthly target', 'Target date'] },
+  ]
+  for (const form of ALLOCATION_FORMS) {
+    test(`labels are sentence case: allocations ${form.name}`, async ({ page }) => {
+      await open(page, `/allocations?tab=${form.tab}`)
+      await page.getByRole('button', { name: 'Add Allocation' }).click()
+      const dialog = overlay(page)
+      await expect(dialog.getByRole('heading', { name: /^Create / })).toBeVisible()
+      if (form.mode) await dialog.getByRole('button', { name: form.mode }).click()
+      const labels = await dialog.locator('label').evaluateAll((els) => els.filter((e) => e.getBoundingClientRect().width > 0).map((e) => (e as HTMLElement).innerText.trim()))
+      expect.soft(labels, `the ${form.name} label texts`).toEqual(form.labels)
+      const caps = await uppercaseIn(dialog)
+      expect.soft(caps.scanned, 'the scan saw the form').toBeGreaterThan(20)
+      expect.soft(caps.found, 'nothing in the form is uppercase').toEqual([])
+      await viewportShot(page, `labels-allocations-${form.name.replace(/[ ,]+/g, '-')}`)
+    })
+  }
+
   test('counts read as numbers', async ({ page }) => {
     await open(page, '/transactions', allUpcomingHousehold)
     const ids = ['due-count', 'due-not-posted-count', 'due-upcoming-count', 'due-subscriptions-count', 'due-installments-count']
