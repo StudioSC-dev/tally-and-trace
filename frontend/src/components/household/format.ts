@@ -1,5 +1,5 @@
 import type { CurrencyCode } from '../../utils/currency'
-import { formatCurrency } from '../../utils/currency'
+import { formatSigned } from '../../utils/amount'
 
 /** A calendar date (YYYY-MM-DD, or an ISO datetime) shown without a timezone shift. */
 export const formatDay = (value: string): string => {
@@ -18,7 +18,7 @@ export const formatMonth = (value: string): string => {
 }
 
 /** An amount in its own currency; the Household view never adds or converts across currencies. */
-export const money = (amount: number, currency: string): string => formatCurrency(amount, currency as CurrencyCode)
+export const money = (amount: number, currency: string): string => formatSigned(amount, currency as CurrencyCode)
 
 /** The current month as YYYY-MM, in local time. */
 export const thisMonth = (): string => {

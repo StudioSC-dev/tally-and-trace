@@ -6,11 +6,20 @@ import type { Transaction } from '../../store/api'
 import { apiErrorMessage } from '../../utils/apiError'
 import { useToday } from '../../hooks/useToday'
 import { TagChips } from '../TagChips'
-import { formatDay, money } from './format'
+import { formatDay } from './format'
+import { formatAmount } from '../../utils/amount'
+import type { AmountKind } from '../../utils/amount'
 import type { CurrencyCode } from '../../utils/currency'
 import { Button } from '../Button'
 
 const PAGE_SIZE = 20
+
+/** How each type's figure is signed: money in leads with `+`, money out with a minus sign, a transfer with nothing. */
+const TYPE_KINDS: Record<Transaction['transaction_type'], AmountKind> = {
+  debit: 'negative',
+  credit: 'in',
+  transfer: 'out',
+}
 
 const TYPE_LABELS: Record<Transaction['transaction_type'], string> = {
   debit: 'Expense',
@@ -46,7 +55,6 @@ function Row({
   // An unposted foreign debit or credit shows its face in its own currency; an unknown account keeps the stored figure.
   const accountCurrency = transaction.view === 'limited' ? undefined : accountCurrencies.get(transaction.account_id)
   const shown = accountCurrency ? rowAmount(transaction, accountCurrency) : { amount: transaction.amount, currency: transaction.currency }
-  const sign = transaction.transaction_type === 'credit' ? '+' : transaction.transaction_type === 'debit' ? '−' : ''
   return (
     <li
       className="flex flex-wrap items-start justify-between gap-3 px-3 py-3"
@@ -76,8 +84,7 @@ function Row({
         </div>
       </div>
       <p className="text-sm font-semibold text-ink" data-testid="household-transaction-amount">
-        {sign}
-        {money(shown.amount, shown.currency)}
+        {formatAmount(TYPE_KINDS[transaction.transaction_type], shown.amount, shown.currency as CurrencyCode)}
       </p>
     </li>
   )

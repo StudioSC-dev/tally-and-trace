@@ -4,6 +4,7 @@ import { accountPickerGroups, canAddPin, movePin, tileGroupLabel, tileHasNoLimit
 import type { Account, PickerGroup, QuickBalanceTile, TileLine } from '@tally-trace/shared'
 import { useGetAccountsQuery, useGetQuickBalancesQuery, usePutQuickBalancesMutation } from '../store/api'
 import { useCurrency } from '../hooks/useCurrency'
+import { formatSigned } from '../utils/amount'
 import { Skeleton } from './Loading'
 import { Button } from './Button'
 
@@ -25,7 +26,7 @@ function LineView({ line, headline }: { line: TileLine; headline: boolean }) {
 }
 
 function Tile({ tile, defaultCurrency, noLimit }: { tile: QuickBalanceTile; defaultCurrency: string; noLimit: boolean }) {
-  const lines = tileLines(tile, { noLimit })
+  const lines = tileLines(tile, { noLimit, money: formatSigned })
   return (
     <Link
       to="/accounts/$accountId"

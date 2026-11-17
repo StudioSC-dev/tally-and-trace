@@ -1,5 +1,5 @@
 import type { CashflowTimelineCurrencyRow } from '@tally-trace/shared'
-import { formatCurrency } from '../utils/currency'
+import { formatSigned } from '../utils/amount'
 import type { CurrencyCode } from '../utils/currency'
 
 const longDate = (iso: string | null) => {
@@ -46,7 +46,7 @@ export function ShortfallBanner({ rows, selected, days, compact = false, account
                 const when = longDate(row.trough_date)
                 return (
                   <li key={row.currency} data-testid={`shortfall-${row.currency}`}>
-                    <span className="font-semibold">{row.currency}</span>: lowest {formatCurrency(row.lowest_balance, row.currency)}{when ? ` on ${when}` : ''}
+                    <span className="font-semibold">{row.currency}</span>: lowest {formatSigned(row.lowest_balance, row.currency)}{when ? ` on ${when}` : ''}
                     {row.shortfalls.length > 1 ? ` (${row.shortfalls.length} points)` : ''}
                   </li>
                 )
@@ -54,7 +54,7 @@ export function ShortfallBanner({ rows, selected, days, compact = false, account
             </ul>
             {selectedShort && selectedRow && (
               <p className="text-danger mt-1">
-                {days !== undefined ? `The ${days}-day ` : 'The month-end '}close in {selectedRow.currency} is {formatCurrency(selectedRow.closing_balance, selectedRow.currency)}, but that isn't the problem: the timing is.
+                {days !== undefined ? `The ${days}-day ` : 'The month-end '}close in {selectedRow.currency} is {formatSigned(selectedRow.closing_balance, selectedRow.currency)}, but that isn't the problem: the timing is.
               </p>
             )}
           </div>
@@ -66,7 +66,7 @@ export function ShortfallBanner({ rows, selected, days, compact = false, account
             <path fillRule="evenodd" d="M16.704 5.29a1 1 0 00-1.408-1.42l-6.32 6.263-2.272-2.26a1 1 0 10-1.408 1.419l2.976 2.958a1 1 0 001.408 0l7.024-6.96z" clipRule="evenodd" />
           </svg>
           <p className="text-sm font-medium text-ok">
-            On track in {selectedRow.currency}: the lowest projected balance is {formatCurrency(selectedRow.lowest_balance, selectedRow.currency)}{selectedRow.trough_date ? ` on ${longDate(selectedRow.trough_date)}` : ' at the start of the window'}.
+            On track in {selectedRow.currency}: the lowest projected balance is {formatSigned(selectedRow.lowest_balance, selectedRow.currency)}{selectedRow.trough_date ? ` on ${longDate(selectedRow.trough_date)}` : ' at the start of the window'}.
           </p>
         </div>
       )}

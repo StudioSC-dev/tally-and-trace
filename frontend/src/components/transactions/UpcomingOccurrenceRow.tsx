@@ -1,7 +1,6 @@
 import { movedText, RECURRING_ACTION_LABELS, upcomingOccurrenceRow } from '@tally-trace/shared'
 import type { CreditCheck, RecurringAction, UpcomingOccurrence } from '@tally-trace/shared'
-import { amountClass } from '../../utils/amount'
-import { formatCurrency } from '../../utils/currency'
+import { amountClass, formatAmount } from '../../utils/amount'
 import type { CurrencyCode } from '../../utils/currency'
 import { CreditCheckBadge } from '../CreditSummary'
 import { Button } from '../Button'
@@ -49,7 +48,8 @@ export function UpcomingOccurrenceRow({ occurrence, scheduled, credit, onRecord,
   const size = touch ? ' min-h-11 min-w-11' : ''
   const view = upcomingOccurrenceRow(occurrence, scheduled)
   const amountClassName = amountClass(!occurrence.is_transfer && occurrence.entry_type === 'income' ? 'in' : 'out')
-  const sign = occurrence.is_transfer ? '' : occurrence.entry_type === 'income' ? '+' : '-'
+  // Money in leads with `+`, money out with a minus sign (U+2212), a transfer with nothing; a zero is never signed.
+  const signKind = occurrence.is_transfer ? 'out' : occurrence.entry_type === 'income' ? 'in' : 'negative'
   const accountLabel = occurrence.is_transfer
     ? `${occurrence.account_name ?? 'Source'} to ${occurrence.transfer_to_account_name ?? 'Destination'}`
     : occurrence.account_name
@@ -86,8 +86,7 @@ export function UpcomingOccurrenceRow({ occurrence, scheduled, credit, onRecord,
         </div>
         <div className="flex-shrink-0 space-y-1 text-right">
           <p className={`text-sm font-semibold ${amountClassName}`} data-testid="upcoming-occurrence-amount">
-            {sign}
-            {formatCurrency(occurrence.amount, occurrence.currency as CurrencyCode)}
+            {formatAmount(signKind, occurrence.amount, occurrence.currency as CurrencyCode)}
           </p>
           {(view.actions.length > 0 || view.review || (onChangeDate && occurrence.can_mark_paid)) && (
             <div className="flex flex-wrap justify-end gap-2">

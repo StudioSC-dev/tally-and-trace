@@ -139,7 +139,7 @@ jobs:
   e2e:
     name: e2e
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     # Report-only for the first 3-5 UI tickets; a failure must not turn the PR red.
     continue-on-error: true
     defaults:

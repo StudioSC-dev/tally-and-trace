@@ -11,7 +11,7 @@ import type { TransactionStatus } from '@tally-trace/shared'
 import { useId } from 'react'
 import type { CurrencyCode, Transaction } from '../store/api'
 import { formatCurrency } from '../utils/currency'
-import { amountClass } from '../utils/amount'
+import { amountClass, amountSign } from '../utils/amount'
 import { TagChips } from './TagChips'
 
 // Copied from the Transactions page; a follow-up extracts the row and removes the copy.
@@ -55,7 +55,7 @@ export function AccountTransactionRow({ row, accountId, accountCurrency, account
   const isTransferIn = isTransfer && leg.direction === 'in'
   const amountText = !leg.effectKnown
     ? `${isTransferIn ? 'Sent' : '≈'} ${formatCurrency(Math.abs(leg.signed), leg.currency)}`
-    : `${leg.signed > 0 ? '+' : leg.signed < 0 ? '−' : ''}${formatCurrency(Math.abs(leg.signed), leg.currency)}`
+    : `${amountSign(leg.signed, leg.currency)}${formatCurrency(Math.abs(leg.signed), leg.currency)}`
   // Shown, not hovered, so keyboard, touch and screen-reader users all get it.
   const effectNoteId = useId()
   const effectNote = leg.effectKnown

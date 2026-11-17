@@ -636,6 +636,36 @@ body {
 }
 
 /*
+  The top bar is the spine band (docs/design-system.md, "Top bar (the spine)"): a solid
+  spine background, and inside it the text and rule tokens re-pointed to the on-spine
+  values, so the bar's contents keep using text-ink, text-body, text-muted and border-line.
+  A leaf inside the band (the user menu panel) takes the document values back with
+  .spine-leaf. Those are saved on the root as --doc-*, where var() resolves to the
+  active theme's values before the band re-points them.
+*/
+:root {
+  --doc-ink: var(--ink);
+  --doc-body: var(--body);
+  --doc-muted: var(--muted);
+  --doc-line: var(--line);
+}
+
+.spine {
+  background-color: rgb(var(--spine));
+  --ink: var(--on-spine);
+  --body: var(--on-spine);
+  --muted: var(--on-spine-muted);
+  --line: var(--on-spine-muted);
+}
+
+.spine-leaf {
+  --ink: var(--doc-ink);
+  --body: var(--doc-body);
+  --muted: var(--doc-muted);
+  --line: var(--doc-line);
+}
+
+/*
   Top offset for <main>, kept in step with .safe-area-top on the nav: the bar is
   h-16 (4rem) plus whatever inset it padded itself with, and 1rem of air.
 */

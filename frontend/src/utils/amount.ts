@@ -16,16 +16,41 @@ const CLASSES: Record<AmountKind, string> = {
 /** The semantic class for `kind`; call sites use this instead of choosing a colour. */
 export const amountClass = (kind: AmountKind): string => CLASSES[kind]
 
-/** `amount` as currency text for `kind`: `+` before money in, a minus sign (U+2212) before a negative, nothing before money out. */
+/** True when currency text shows no non-zero digit (the symbols and codes have none), so the amount rounds to zero. */
+export const readsZero = (text: string): boolean => !/[1-9]/.test(text)
+
+/**
+ * Any amount that can fall below zero, as text: the one shared formatter for signed amounts in the web app. A negative
+ * amount leads with a minus sign (U+2212) before the symbol, `−₱1,234.56`, never a hyphen. Zero is never signed: a
+ * computed `-0` and an amount that rounds to zero in the currency's smallest unit (`-0.004` pesos) read `₱0.00`.
+ */
+export function formatSigned(amount: number, currency: CurrencyCode): string {
+  const magnitude = formatCurrency(Math.abs(amount), currency)
+  return amount < 0 && !readsZero(magnitude) ? `−${magnitude}` : magnitude
+}
+
+/**
+ * The sign a figure written as its magnitude leads with: `+` above zero, a minus sign (U+2212) below it, and none when
+ * it reads as zero in `currency`. For figures whose text is built around the magnitude (an estimate, "≈ PHP 80.00").
+ */
+export function amountSign(amount: number, currency: CurrencyCode): '+' | '−' | '' {
+  if (readsZero(formatCurrency(Math.abs(amount), currency))) return ''
+  return amount > 0 ? '+' : '−'
+}
+
+/**
+ * `amount` as currency text for `kind`: `+` before money in, a minus sign (U+2212) before a negative, nothing before
+ * money out (which `formatSigned` writes, so a negative one still reads `−₱`). Zero is never signed.
+ */
 export function formatAmount(kind: AmountKind, amount: number, currency: CurrencyCode): string {
-  if (kind === 'in') return `+${formatCurrency(Math.abs(amount), currency)}`
-  if (kind === 'negative') return `−${formatCurrency(Math.abs(amount), currency)}`
-  return formatCurrency(amount, currency)
+  if (kind === 'out') return formatSigned(amount, currency)
+  const magnitude = formatCurrency(Math.abs(amount), currency)
+  if (readsZero(magnitude)) return magnitude
+  return `${kind === 'in' ? '+' : '−'}${magnitude}`
 }
 
 /** The class for an account balance: ledger ink, or the red pencil when it is below zero. */
 export const balanceClass = (balance: number): string => amountClass(balance < 0 ? 'negative' : 'out')
 
-/** An account balance as text: a negative one leads with a minus sign, any other is plain currency. */
-export const formatBalance = (balance: number, currency: CurrencyCode): string =>
-  formatAmount(balance < 0 ? 'negative' : 'out', balance, currency)
+/** An account balance as text: a negative one leads with a minus sign, any other (zero included) is plain currency. */
+export const formatBalance = (balance: number, currency: CurrencyCode): string => formatSigned(balance, currency)
