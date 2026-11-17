@@ -25,7 +25,6 @@ function LineView({ line, headline }: { line: TileLine; headline: boolean }) {
 
 function Tile({ tile, defaultCurrency, noLimit }: { tile: QuickBalanceTile; defaultCurrency: string; noLimit: boolean }) {
   const lines = tileLines(tile, { noLimit })
-  const isCredit = tile.account_type === 'credit'
   return (
     <Link
       to="/accounts/$accountId"
@@ -33,14 +32,16 @@ function Tile({ tile, defaultCurrency, noLimit }: { tile: QuickBalanceTile; defa
       data-testid="quick-balance-tile"
       data-account-id={tile.account_id}
       data-type={tile.account_type}
-      className={`focus-ring block min-h-11 p-3 bg-sunken hover:bg-line transition-colors duration-200 ${isCredit ? 'col-span-2 lg:col-span-1' : ''}`}
+      className="group focus-ring flex min-h-11 items-start justify-between gap-4 py-3"
     >
-      <p className="text-xs font-semibold uppercase tracking-wide text-muted">
-        {tileGroupLabel(tile)}
-        {tile.currency !== defaultCurrency && <span className="ml-2" data-testid="quick-balance-currency">{tile.currency}</span>}
-      </p>
-      <p className="text-sm font-medium text-ink truncate" data-testid="quick-balance-name">{tile.name}</p>
-      <div className="mt-1 space-y-0.5">
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+          {tileGroupLabel(tile)}
+          {tile.currency !== defaultCurrency && <span className="ml-2" data-testid="quick-balance-currency">{tile.currency}</span>}
+        </p>
+        <p className="text-sm font-medium text-ink truncate group-hover:underline" data-testid="quick-balance-name">{tile.name}</p>
+      </div>
+      <div className="min-w-0 space-y-0.5 text-right" data-testid="quick-balance-figures">
         {lines.map((line, index) => (
           <LineView key={line.id} line={line} headline={index === 0 && line.id === 'balance'} />
         ))}
@@ -248,7 +249,7 @@ export function QuickBalances() {
       <div className="p-4 sm:p-6 border-b border-line flex flex-wrap items-center justify-between gap-2">
         <h2 id="quick-balances-heading" className="text-lg font-semibold text-ink">Quick balances</h2>
         {data !== undefined && !isError && !editing && (
-          <button type="button" data-testid="quick-balances-edit" onClick={() => setEditing(true)} className={`${ACTION} bg-sunken text-ink hover:bg-line`}>
+          <button type="button" data-testid="quick-balances-edit" onClick={() => setEditing(true)} className={`${ACTION} border border-line-strong text-ink hover:border-ink`}>
             Edit
           </button>
         )}
@@ -276,7 +277,7 @@ export function QuickBalances() {
         ) : editing ? (
           <PinEditor tiles={data.tiles} pinned={data.pinned} onDone={() => setEditing(false)} />
         ) : (
-          <div className="grid grid-cols-2 lg:grid-cols-3 grid-flow-row-dense lg:grid-flow-row gap-3">
+          <div className="divide-y divide-line" data-testid="quick-balance-lines">
             {data.tiles.map((tile) => {
               const noLimit = tileHasNoLimit(tile, accountsById.get(tile.account_id))
               return <Tile key={tile.account_id} tile={tile} defaultCurrency={currencyCode} noLimit={noLimit} />

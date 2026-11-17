@@ -31,6 +31,8 @@ import { amountClass, formatAmount } from '../utils/amount'
 import type { AmountKind } from '../utils/amount'
 import { SpendingBreakdownDialog } from '../components/SpendingBreakdownDialog'
 import { TagChips } from '../components/TagChips'
+import { ListSheet } from '../components/ListSheet'
+import { Row } from '../components/Row'
 import { TagFilter } from '../components/TagFilter'
 import { TagPicker } from '../components/TagPicker'
 import type { ScheduleFieldKey } from '../components/RecurringScheduleFields'
@@ -115,8 +117,8 @@ const formatDateWithOrdinal = (date: Date) => {
 const STATUS_LABELS: Record<TransactionStatus, string> = { posted: 'Posted', pending: 'Pending', planned: 'Planned' }
 const STATUS_BADGE_CLASSES: Record<TransactionStatus, string> = {
   posted: 'text-ink',
-  pending: 'bg-sunken text-warn',
-  planned: 'bg-sunken text-body',
+  pending: 'text-warn',
+  planned: 'text-body',
 }
 const STATUS_TEXT_CLASSES: Record<TransactionStatus, string> = { posted: 'text-ok', pending: 'text-warn', planned: 'text-muted' }
 
@@ -2692,7 +2694,8 @@ export function TransactionsPage() {
           : 'Invalid date'
         : null
     const typeLabel = TRANSACTION_TYPE_LABELS[transaction.transaction_type]
-    const cardStateClasses = transaction.is_posted ? '' : 'bg-sunken border border-line'
+    // An unposted row reads on the gutter tone; the sheet's rule stays its only line.
+    const cardStateClasses = transaction.is_posted ? '' : 'bg-sunken'
     const description = transactionDescription(transaction)?.trim() || 'Untitled transaction'
     // A row with a save of its own in the outbox is read-only until it settles (STU-605); rows
     // from another filter or page wait for the fresh ones.
@@ -2701,14 +2704,16 @@ export function TransactionsPage() {
     const open = () => {
       if (actionable) openActionModal(transaction)
     }
+    const hasOriginal = !isLimited(transaction) && transaction.original_amount != null && transaction.original_currency
+    const hasTags = (transaction.tags?.length ?? 0) > 0
 
     return (
-      <article
+      <Row
         key={transaction.id}
         data-transaction-id={transaction.id}
         data-pending={pendingKind}
         data-highlighted={highlightedId === transaction.id ? 'true' : undefined}
-        className={`card p-4 sm:p-5 transition-colors duration-200 ${actionable ? 'hover:bg-sunken cursor-pointer' : 'cursor-default'} ${pendingKind === 'delete' ? 'opacity-50' : ''} ${highlightedId === transaction.id ? 'ring-2 ring-ink' : ''} ${cardStateClasses}`}
+        className={`transition-colors duration-200 ${actionable ? 'hover:bg-sunken cursor-pointer' : 'cursor-default'} ${pendingKind === 'delete' ? 'opacity-50' : ''} ${highlightedId === transaction.id ? 'ring-2 ring-inset ring-ink' : ''} ${cardStateClasses}`}
         onClick={open}
         role="button"
         tabIndex={0}
@@ -2719,98 +2724,48 @@ export function TransactionsPage() {
             open()
           }
         }}
+        title={description}
+        meta={
+          <>
+            <span>{relativeDate}</span>
+            <span>{exactDate}</span>
+            <span>
+              {transaction.transaction_type === 'transfer'
+                ? `${sourceLabel} → ${destinationLabel}`
+                : accountLabel}
+            </span>
+            <span>
+              {transaction.transaction_type === 'transfer'
+                ? categoryName || 'Transfer'
+                : categoryName || 'Uncategorized'}
+            </span>
+            <span className={`font-semibold ${STATUS_BADGE_CLASSES[status]}`}>{STATUS_LABELS[status]}</span>
+            <span className={`font-semibold ${typeBadgeStyles}`}>{typeLabel}</span>
+            {transaction.created_by && <span data-testid="created-by">by {transaction.created_by}</span>}
+            {scheduleLabel && <span className="text-ink">{scheduleLabel}</span>}
+            {transferFeeLabel && <span className="text-warn">Fee {transferFeeLabel}</span>}
+            {projectedLabel && !transaction.is_posted && <span className="text-ink">Projected {projectedLabel}</span>}
+            {hasOriginal && (
+              <span>Original {formatCurrency(transaction.original_amount ?? 0, transaction.original_currency as CurrencyCode)}</span>
+            )}
+            {postedDate && <span>Posted {postedDate}</span>}
+            {!isLimited(transaction) && transaction.is_reconciled && <span className="font-semibold text-ok">Reconciled</span>}
+          </>
+        }
+        amount={<p className={`text-lg font-bold ${amountClass}`}>{amountLabel}</p>}
       >
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted">
-                <span>{relativeDate}</span>
-                <span className="hidden md:inline text-muted">•</span>
-                <span className="text-muted">{exactDate}</span>
-              </div>
-              <p className="text-base font-semibold text-ink">{description}</p>
-              <div className="flex flex-wrap gap-2 text-xs text-body">
-                <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
-                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-                  </svg>
-                  {transaction.transaction_type === 'transfer'
-                    ? `${sourceLabel} → ${destinationLabel}`
-                    : accountLabel}
+        {pendingKind !== undefined || hasTags ? (
+          <div className="flex flex-wrap items-center gap-2 text-xs text-body">
+            {pendingKind !== undefined && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1 text-xs font-semibold text-muted" data-testid="row-saving">
+                <Spinner size="xs" />
+                {pendingKind === 'delete' ? 'Deleting…' : 'Saving…'}
               </span>
-                <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
-                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
-                  </svg>
-                  {transaction.transaction_type === 'transfer'
-                    ? categoryName || 'Transfer'
-                    : categoryName || 'Uncategorized'}
-              </span>
-                {transaction.created_by && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1" data-testid="created-by">
-                    by {transaction.created_by}
-                  </span>
-                )}
-                <TagChips tags={transaction.tags} />
-                {scheduleLabel && (
-                  <span className="inline-flex items-center gap-1 px-2 py-1 text-ink">
-                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                    </svg>
-                    {scheduleLabel}
-                  </span>
-                )}
-                {transferFeeLabel && (
-                  <span className="inline-flex items-center gap-1 px-2 py-1 text-warn">
-                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
-                    </svg>
-                    Fee {transferFeeLabel}
-                  </span>
-                )}
-                {projectedLabel && !transaction.is_posted && (
-                  <span className="inline-flex items-center gap-1 px-2 py-1 text-ink">
-                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3" />
-                    </svg>
-                    Projected {projectedLabel}
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="space-y-2 text-right">
-              <p className={`text-lg font-bold ${amountClass}`}>{amountLabel}</p>
-              {!isLimited(transaction) && transaction.original_amount != null && transaction.original_currency && (
-                <p className="text-xs text-muted">
-                  Original {formatCurrency(transaction.original_amount, transaction.original_currency as CurrencyCode)}
-                </p>
-              )}
-              {postedDate && <p className="text-xs text-muted">Posted {postedDate}</p>}
-              <div className="flex flex-wrap justify-end gap-2">
-                {pendingKind !== undefined && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1 text-xs font-semibold text-muted" data-testid="row-saving">
-                    <Spinner size="xs" />
-                    {pendingKind === 'delete' ? 'Deleting…' : 'Saving…'}
-                  </span>
-                )}
-                <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${typeBadgeStyles}`}>
-                  {typeLabel}
-                </span>
-                <span
-                  className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${STATUS_BADGE_CLASSES[status]}`}
-                >
-                  {STATUS_LABELS[status]}
-                </span>
-                {!isLimited(transaction) && transaction.is_reconciled && (
-                  <span className="inline-flex rounded-full px-2 py-1 text-xs font-semibold text-ok">
-                    Reconciled
-                  </span>
-                )}
-              </div>
-            </div>
+            )}
+            <TagChips tags={transaction.tags} />
           </div>
-        </div>
-      </article>
+        ) : undefined}
+      </Row>
     )
   }
 
@@ -2820,11 +2775,11 @@ export function TransactionsPage() {
       if (row.editClientId !== null) dispatch(outboxActions.editRequested(row.editClientId))
     }
     return (
-      <article
+      <Row
         key={row.key}
         data-testid="pending-row"
         data-state={row.state}
-        className={`card border border-dashed border-line p-4 sm:p-5 ${editable ? 'cursor-pointer hover:bg-sunken' : 'opacity-70'}`}
+        className={editable ? 'cursor-pointer hover:bg-sunken' : 'opacity-70'}
         {...(editable
           ? {
               role: 'button',
@@ -2838,30 +2793,28 @@ export function TransactionsPage() {
               },
             }
           : {})}
+        title={row.description}
+        meta={
+          <>
+            <span>{formatEntryDate(row.date)}</span>
+            <span>{row.account}</span>
+          </>
+        }
+        amount={<p className="text-lg font-bold text-muted">{row.amount}</p>}
       >
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div className="space-y-2">
-            <div className="text-xs font-semibold uppercase tracking-wide text-muted">{formatEntryDate(row.date)}</div>
-            <p className="text-base font-semibold text-ink">{row.description}</p>
-            <p className="text-xs text-body">{row.account}</p>
-          </div>
-          <div className="space-y-2 text-right">
-            <p className="text-lg font-bold text-muted">{row.amount}</p>
-            <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1 text-xs font-semibold text-muted">
-              {row.state === 'saving' ? (
-                <>
-                  <Spinner size="xs" />
-                  Saving…
-                </>
-              ) : editable ? (
-                'Not saved — tap to edit'
-              ) : (
-                'Not saved'
-              )}
-            </span>
-          </div>
-        </div>
-      </article>
+        <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1 text-xs font-semibold text-muted">
+          {row.state === 'saving' ? (
+            <>
+              <Spinner size="xs" />
+              Saving…
+            </>
+          ) : editable ? (
+            'Not saved — tap to edit'
+          ) : (
+            'Not saved'
+          )}
+        </span>
+      </Row>
     )
   }
 
@@ -3305,9 +3258,9 @@ export function TransactionsPage() {
       ) : (
         <div className={`space-y-6 transition-opacity ${isRefreshing || rowsStale ? 'opacity-60' : ''}`} aria-busy={isRefreshing}>
           {listError && !listsCurrent && loadErrorAlert}
-          <div className="grid grid-cols-1 gap-3">
+          <ListSheet>
             {listItems.map((item) => (item.kind === 'row' ? renderTransactionRow(item.row) : renderPendingRow(item.row)))}
-          </div>
+          </ListSheet>
           {totalTransactions > 0 && (
             <nav className="flex flex-col gap-3 px-1 sm:flex-row sm:items-center sm:justify-between" aria-label="Transactions pages" data-testid="transactions-pager">
               <p className="text-xs text-muted">
