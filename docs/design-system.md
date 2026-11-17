@@ -206,7 +206,7 @@ The shared components later tickets add. Each is marked planned until its ticket
 
 | Component | Status | What it is |
 |---|---|---|
-| `Button` | planned | the four variants above, one component for every action |
+| `Button` | built | the four variants above, one component for every action: `frontend/src/components/Button.tsx` (`buttonClass` styles a link as a button) |
 | `SegmentedControl` / `Tabs` | planned | the selection rule, shared by every tab and segment |
 | `ListSheet` and `Row` | planned | one leaf sheet with ruled rows, figures on one right edge |
 | `StatusText` | planned | status as a dot and a word |
