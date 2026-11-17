@@ -51,7 +51,7 @@ function Tile({ tile, defaultCurrency, noLimit }: { tile: QuickBalanceTile; defa
 }
 
 const ACTION = 'min-h-11 px-4 py-2 transition-colors duration-200 focus-ring'
-const ICON_ACTION = 'min-h-11 min-w-11 px-2 bg-sunken text-ink hover:bg-line transition-colors duration-200 focus-ring disabled:opacity-40 disabled:hover:bg-sunken'
+const ICON_ACTION = 'min-h-11 min-w-11 px-2 border border-line-strong text-ink hover:border-ink transition-colors duration-200 focus-ring disabled:opacity-40 disabled:hover:border-line-strong'
 
 const saveError = (error: unknown): string => {
   const detail = (error as { data?: { detail?: unknown } } | undefined)?.data?.detail
@@ -84,7 +84,7 @@ function AddGroups({ groups, onPick }: { groups: readonly PickerGroup[]; onPick:
                   data-testid="quick-balance-add-option"
                   data-account-id={String(o.id)}
                   onClick={() => onPick(Number(o.id))}
-                  className="inline-flex min-h-11 max-w-full items-center px-3 py-1.5 text-left text-sm font-medium break-words bg-sunken text-body hover:bg-line transition-colors duration-200 focus-ring"
+                  className="inline-flex min-h-11 max-w-full items-center px-3 py-1.5 text-left text-sm font-medium break-words border border-line-strong text-body hover:border-ink transition-colors duration-200 focus-ring"
                 >
                   {o.label}
                   {o.hint !== undefined && <span className="ml-2 text-xs font-normal">({o.hint})</span>}
@@ -156,11 +156,11 @@ function PinEditor({ tiles, pinned, onDone }: { tiles: QuickBalanceTile[]; pinne
         <p className="text-sm text-body">Choose up to 6 accounts and put them in order.</p>
         <div className="flex flex-wrap gap-2">
           {pinned && (
-            <button type="button" data-testid="quick-balances-reset" disabled={saving} onClick={() => void submit([])} className={`${ACTION} bg-sunken text-ink hover:bg-line disabled:opacity-40`}>
+            <button type="button" data-testid="quick-balances-reset" disabled={saving} onClick={() => void submit([])} className={`${ACTION} border border-line-strong text-ink hover:border-ink disabled:opacity-40`}>
               Reset to defaults
             </button>
           )}
-          <button type="button" data-testid="quick-balances-cancel" disabled={saving} onClick={onDone} className={`${ACTION} bg-sunken text-ink hover:bg-line disabled:opacity-40`}>
+          <button type="button" data-testid="quick-balances-cancel" disabled={saving} onClick={onDone} className={`${ACTION} border border-line-strong text-ink hover:border-ink disabled:opacity-40`}>
             Cancel
           </button>
           <button type="button" data-testid="quick-balances-save" disabled={saving} onClick={() => void submit(draft)} className={`${ACTION} bg-ink text-paper disabled:opacity-40`}>
@@ -204,7 +204,7 @@ function PinEditor({ tiles, pinned, onDone }: { tiles: QuickBalanceTile[]; pinne
           disabled={!canAdd}
           aria-expanded={adding && canAdd}
           onClick={() => setAdding((open) => !open)}
-          className={`${ACTION} border border-line text-ink hover:bg-sunken disabled:opacity-40`}
+          className={`${ACTION} border border-line text-ink hover:border-ink disabled:opacity-40`}
         >
           + Add account
         </button>
@@ -214,7 +214,7 @@ function PinEditor({ tiles, pinned, onDone }: { tiles: QuickBalanceTile[]; pinne
       </div>
 
       {adding && canAdd && (
-        <div className="mt-3 p-3 bg-sunken space-y-3" data-testid="quick-balances-add-panel">
+        <div className="mt-3 border-t border-line pt-3 space-y-3" data-testid="quick-balances-add-panel">
           {groupOptionCount(groups) === 0 ? (
             <p className="text-sm text-muted">No other accounts to add.</p>
           ) : (

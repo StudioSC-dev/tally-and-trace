@@ -231,13 +231,16 @@ test('recurring entries are one sheet', async ({ page }) => {
 
 // ─── AC5 ────────────────────────────────────────────────────────────────────────────────────────
 
-test('dashboard has no box inside a box', async ({ page }) => {
-  await open(page, '/')
-  await expect(page.getByTestId('quick-balance-tile').first()).toBeVisible()
-  await expect(page.getByTestId('payables')).toBeVisible()
-  await page.waitForLoadState('networkidle')
-  const found = await page.evaluate(
-    ({ fills }) => {
+interface BoxCheck {
+  boxes: number
+  nested: string[]
+  sunken: string[]
+}
+
+/** Bordered surface or sunken boxes in `main`, those inside another, and anything sunken in Quick balances. */
+const boxCheck = (page: Page): Promise<BoxCheck> =>
+  page.evaluate(
+    ({ fills, sunkenFill }) => {
       const boxed = (e: Element): boolean => {
         if (e.getClientRects().length === 0) return false
         const s = getComputedStyle(e)
@@ -246,21 +249,33 @@ test('dashboard has no box inside a box', async ({ page }) => {
         )
         return bordered && fills.includes(s.backgroundColor)
       }
-      const all = [...document.querySelectorAll('main *')]
-      const boxes = all.filter(boxed)
+      const name = (e: Element): string => `${e.tagName.toLowerCase()}.${e.getAttribute('class') ?? ''}`
+      const boxes = [...document.querySelectorAll('main *')].filter(boxed)
       const nested = boxes.filter((e) => {
         for (let p = e.parentElement; p; p = p.parentElement) if (boxed(p)) return true
         return false
       })
-      return { boxes: boxes.length, nested: nested.map((e) => `${e.tagName.toLowerCase()}.${e.getAttribute('class') ?? ''}`) }
+      const quick = document.querySelector('[data-testid="quick-balances"]')
+      const sunken = quick ? [...quick.querySelectorAll('*')].filter((e) => getComputedStyle(e).backgroundColor === sunkenFill) : []
+      return { boxes: boxes.length, nested: nested.map(name), sunken: sunken.map(name) }
     },
-    { fills: [SURFACE, SUNKEN] },
+    { fills: [SURFACE, SUNKEN], sunkenFill: SUNKEN },
   )
+
+async function openDashboard(page: Page): Promise<void> {
+  await open(page, '/')
+  await expect(page.getByTestId('quick-balance-tile').first()).toBeVisible()
+  await expect(page.getByTestId('payables')).toBeVisible()
+  await page.waitForLoadState('networkidle')
+}
+
+test('dashboard has no box inside a box', async ({ page }) => {
+  await openDashboard(page)
+  const found = await boxCheck(page)
   expect(found.boxes, 'the dashboard has bordered panels to check').toBeGreaterThan(2)
   expect(found.nested, 'bordered surface or sunken boxes inside another such box').toEqual([])
+  expect(found.sunken, 'elements in Quick balances with a sunken background').toEqual([])
   const quick = page.getByTestId('quick-balances')
-  const sunken = await quick.locator('*').evaluateAll((all, fill) => all.filter((e) => getComputedStyle(e).backgroundColor === fill).map((e) => `${e.tagName.toLowerCase()}.${e.getAttribute('class') ?? ''}`), SUNKEN)
-  expect(sunken, 'elements in Quick balances with a sunken background').toEqual([])
   const lines = quick.getByTestId('quick-balance-tile')
   const ruled = await lines.evaluateAll((all) =>
     all.map((e) => {
@@ -276,6 +291,25 @@ test('dashboard has no box inside a box', async ({ page }) => {
   expect(ruled.slice(1).filter((r) => r.top !== RULE && r.bottom !== RULE).length, 'account lines after the first without a rule').toBe(0)
   await shot(page, 'dashboard-no-box-in-box')
 })
+
+for (const state of ['editing', 'adding an account'] as const) {
+  test(`dashboard has no box inside a box: ${state}`, async ({ page }) => {
+    await openDashboard(page)
+    await page.getByTestId('quick-balances-edit').click()
+    const editor = page.getByTestId('quick-balances-editor')
+    await expect(editor).toBeVisible()
+    expect(await editor.getByTestId('quick-balance-edit-row').count(), 'the editor lists the shown accounts').toBe(household.quickBalances.tiles.length)
+    if (state === 'adding an account') {
+      await page.getByTestId('quick-balances-add').click()
+      await expect(page.getByTestId('quick-balances-add-panel')).toBeVisible()
+      expect(await page.getByTestId('quick-balance-add-option').count(), 'the add panel offers accounts').toBeGreaterThan(0)
+    }
+    const found = await boxCheck(page)
+    expect(found.nested, `${state}: bordered surface or sunken boxes inside another such box`).toEqual([])
+    expect(found.sunken, `${state}: elements in Quick balances with a sunken background`).toEqual([])
+    await shot(page, `dashboard-${state.replace(/\s+/g, '-')}`)
+  })
+}
 
 // ─── AC6 ────────────────────────────────────────────────────────────────────────────────────────
 
