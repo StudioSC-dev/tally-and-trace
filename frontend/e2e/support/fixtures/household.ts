@@ -18,6 +18,8 @@
  * on load; `mockHousehold(page, data)` signs in, freezes the clock on `HOUSEHOLD_TODAY` and
  * installs those routes.
  *
+ * `wishlistRoutes(data)` answers the Allocations Wishlist tab's calls with an empty wishlist.
+ *
  * `with*` helpers derive a variant for one state (a main account, one account's balance, zero-amount rows,
  * a zero forecast event, dollars, a long account history, long Due card lists); `cardStatements` answers the card's
  * statements; the create factories (`createdAccount`, `createAccountRoute`,
@@ -71,6 +73,8 @@ import type {
   UpcomingOccurrence,
   UpcomingOccurrences,
   User,
+  WishlistItem,
+  WishlistPlan,
 } from '@tally-trace/shared'
 import { apiRoute, mockApi, queryRoute, sequenceRoute } from '../mockApi'
 import type { ApiMock, ApiRoute } from '../mockApi'
@@ -1110,6 +1114,12 @@ export const householdRoutes = (data: HouseholdData = household): ApiRoute[] => 
   apiRoute<ReceivedShare[]>('GET', '/shares/received', []),
   apiRoute<ReceivedHouseholdShare[]>('GET', '/shares/received/household', []),
   apiRoute<HouseholdShares>('GET', '/tags/household/shares', { tag_id: householdTag.id, shares: [] }),
+]
+
+/** The Allocations Wishlist tab's calls, for a household with nothing on its wishlist yet. */
+export const wishlistRoutes = (data: HouseholdData = household): ApiRoute[] => [
+  apiRoute<WishlistItem[]>('GET', '/wishlist/', []),
+  apiRoute<WishlistPlan>('GET', '/wishlist/plan', { monthly_disposable: data.snapshot.monthly_summary.monthly_disposable, savings_rate: 0, items: [] }),
 ]
 
 /** A variant whose user has pinned the payroll account as their main account (the Forecast's "Main" scope). */
