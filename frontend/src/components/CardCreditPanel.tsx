@@ -20,6 +20,7 @@ import {
 import { useManilaDay } from '../hooks/useManilaDay'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 import { formatCurrency } from '../utils/currency'
+import { formatSigned } from '../utils/amount'
 import type { CurrencyCode } from '../utils/currency'
 import { CardPayDialog } from './CardPayDialog'
 import { CreditSummary } from './CreditSummary'
@@ -149,8 +150,8 @@ export function CardCreditPanel({ account }: { account: Account }) {
         <div className="space-y-1">
           <CreditSummary credit={detail.credit} />
           <p className="text-xs text-muted" data-testid="card-credit-opening">
-            {(detail.credit.shared_with?.length ?? 0) > 0 && 'Across both cards: '}Owed {formatCurrency(detail.credit.opening.balance_owed, currency)} · pending counted now{' '}
-            {formatCurrency(detail.credit.opening.pending_total, currency)} · held for installments{' '}
+            {(detail.credit.shared_with?.length ?? 0) > 0 && 'Across both cards: '}Owed {formatSigned(detail.credit.opening.balance_owed, currency)} · pending counted now{' '}
+            {formatSigned(detail.credit.opening.pending_total, currency)} · held for installments{' '}
             {formatCurrency(detail.credit.opening.installment_hold, currency)} · missed months{' '}
             {formatCurrency(detail.credit.opening.missed_total, currency)}
           </p>
@@ -261,7 +262,7 @@ function StatementRow({ cardId, statement, currency }: { cardId: number; stateme
             data-testid="card-statement-owed"
             title={statement.incomplete ? 'may be low: some foreign charges have no exchange rate' : undefined}
           >
-            {formatCurrency(statement.owed, currency)}
+            {formatSigned(statement.owed, currency)}
           </span>
           <span className={`text-xs font-semibold capitalize ${STATUS_STYLES[statement.status]}`} data-testid="card-statement-status">
             {statement.status}

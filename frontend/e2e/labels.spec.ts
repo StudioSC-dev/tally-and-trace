@@ -500,7 +500,7 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
       ['the BPI Payroll quick balance', tile('BPI Payroll'), ['Debit', 'BPI Payroll', '₱84,250.40']],
       ['the HSBC quick balance', tile('HSBC Red Mastercard'), ['Credit', 'HSBC Red Mastercard', 'Owed', '₱18,742.30']],
       ['the GCash quick balance', tile('GCash'), ['E-wallet', 'GCash', '₱3,415.75']],
-      ['the period totals', snapshot, ['month to date', 'Actual totals (Month to date)', 'Total income (MTD)', '₱33,500.00', 'Total expenses (MTD)', '₱51,821.20', 'Net flow (MTD)', '₱-18,321.20']],
+      ['the period totals', snapshot, ['month to date', 'Actual totals (Month to date)', 'Total income (MTD)', '₱33,500.00', 'Total expenses (MTD)', '₱51,821.20', 'Net flow (MTD)', '−₱18,321.20']],
       ['the snapshot today and projection', snapshot, ['Today', 'Net worth', '₱329,764.35', 'Projected', 'Available cash', '₱343,230.90']],
       ['the Emergency fund top-up payable', payable('Emergency fund top-up'), ['Mar 8th, 2026', '₱10,000.00', 'Scheduled', 'Manual', 'from BPI Payroll', 'Overdue']],
       ['the HMO dependent add-on payable', payable('HMO dependent add-on'), ['Mar 20th, 2026', '₱1,450.00', 'Scheduled', 'Manual', 'from BPI Payroll', '8 days remaining']],

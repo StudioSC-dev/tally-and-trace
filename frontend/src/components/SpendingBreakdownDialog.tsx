@@ -9,7 +9,7 @@ import type { SpendingDrill } from '@tally-trace/shared'
 import { useGetCategoriesQuery, useGetTransactionSummaryQuery } from '../store/api'
 import { useSelectedCurrency } from '../hooks/useSelectedCurrency'
 import { apiErrorMessage } from '../utils/apiError'
-import { formatCurrency } from '../utils/currency'
+import { formatSigned } from '../utils/amount'
 import type { CurrencyCode } from '../utils/currency'
 import { CurrencyControl } from './CurrencyControl'
 import { chartColor, tokenColor } from '../utils/palette'
@@ -119,7 +119,7 @@ export function SpendingBreakdownDialog({
     }
   }, [])
 
-  const format = (amount: number) => formatCurrency(amount, currency)
+  const format = (amount: number) => formatSigned(amount, currency)
   // Drillable slices and rows cycle through the chart tokens; a saved category colour is not used here.
   const colorFor = (index: number, drillable: boolean) =>
     !drillable ? NEUTRAL_COLOR : chartColor(index)

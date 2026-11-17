@@ -129,6 +129,17 @@ describe('tileLines', () => {
   it('shows Owed, the outstanding principal, for a loan', () => {
     expect(texts(tile({ account_type: 'loan', balance: -250000, slot: null }))).toEqual([['owed', 'Owed', '₱250,000.00']])
   })
+
+  it('writes every amount with the money formatter it is given', () => {
+    const seen: [number, string][] = []
+    const money = (amount: number, currency: string) => {
+      seen.push([amount, currency])
+      return `<${amount} ${currency}>`
+    }
+    expect(tileLines(creditTile({ balance: 500, currency: 'USD' }), { money }).map((l) => l.text)).toEqual(['<-500 USD>'])
+    expect(tileLines(creditTile({ card: card({ unbilled: 10 }), credit: credit() }), { money }).map((l) => l.text)).toEqual(['<12340 PHP> · Nov 25', '<10 PHP>', '<330000 PHP>'])
+    expect(seen.map(([amount]) => amount)).toEqual([-500, 12340, 10, 330000])
+  })
 })
 
 describe('shortDate', () => {

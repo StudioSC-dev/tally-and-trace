@@ -1,5 +1,6 @@
 import { useAuth } from '../contexts/AuthContext'
-import { formatCurrency, getCurrencySymbol, CurrencyCode } from '../utils/currency'
+import { getCurrencySymbol, CurrencyCode } from '../utils/currency'
+import { formatSigned } from '../utils/amount'
 
 /**
  * Custom hook to get currency formatting functions based on user's default currency
@@ -10,8 +11,8 @@ export function useCurrency() {
   
   return {
     currencyCode,
-    format: (amount: number) => formatCurrency(amount, currencyCode),
+    format: (amount: number) => formatSigned(amount, currencyCode),
     symbol: getCurrencySymbol(currencyCode),
-    formatWithSymbol: (amount: number) => formatCurrency(amount, currencyCode)
+    formatWithSymbol: (amount: number) => formatSigned(amount, currencyCode)
   }
 }
