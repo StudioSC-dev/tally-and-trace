@@ -32,8 +32,9 @@ export function swatchOf(color: string | null | undefined): number | null {
   return SWATCHES.find((s) => s.stored === wanted)?.n ?? null
 }
 
-/** A colour for a token, as CSS: `rgb(var(--name))`. */
-export const tokenColor = (name: string): string => `rgb(var(--${name}))`
+/** A colour for a token, as CSS: `rgb(var(--name))`, or with an alpha: `rgb(var(--name) / 0.55)`. */
+export const tokenColor = (name: string, alpha?: number): string =>
+  alpha === undefined ? `rgb(var(--${name}))` : `rgb(var(--${name}) / ${alpha})`
 
 /** The colour to draw a saved tag or category colour with: its swatch token, else the saved value, else `fallback`. */
 export function displayColor(color: string | null | undefined, fallback: string): string {
