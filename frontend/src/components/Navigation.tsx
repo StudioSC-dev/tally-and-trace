@@ -31,32 +31,32 @@ export function Navigation() {
   const [showUserMenu, setShowUserMenu] = useState(false)
   const symbol = getCurrencyLogoSymbol(user?.default_currency)
 
-  // Active tab is an ink underline rather than a tinted pill — a saturated fill
-  // in the chrome competes with the figures, which are what should carry colour
-  // on a ledger screen.
+  // The bar is the spine band (the `spine` class, index.css): inside it ink, body,
+  // muted and line resolve to the on-spine values. Every page link is on-spine
+  // text, and the active page is a 2px on-spine underline, never a fill.
   //
   // The router joins className, activeProps.className and inactiveProps.className,
   // so the base holds only layout; the state classes live in the active/inactive
   // props so an active link never carries the inactive colours as well.
   const navLinkBase = "inline-flex items-center border-b-2 px-3 py-2 text-sm transition-colors duration-200"
-  const navLinkInactive = "border-transparent text-muted hover:text-ink"
+  const navLinkInactive = "border-transparent text-body"
   const navLinkActive = "border-ink text-ink"
 
   return (
     // safe-area-top: index.html asks for a translucent status bar, so when the
     // app is installed to the Home Screen the page owns the full height and a
     // `top-0` bar would render under the clock. Resolves to 0 in a browser tab.
-    <nav className="safe-area-top fixed left-0 right-0 top-0 z-50 border-b border-line bg-paper/85 backdrop-blur-sm">
+    <nav className="safe-area-top spine fixed left-0 right-0 top-0 z-50">
       <div className="w-full px-3 sm:px-4 lg:px-6">
         <div className="flex justify-between h-16 gap-2">
           {/* Logo + Desktop Nav Links */}
           <div className="flex items-center min-w-0">
             <div className="flex-shrink-0 flex items-center">
               <Link to="/" className="flex items-center gap-2.5 text-ink transition-colors hover:text-body">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center border border-line-strong font-mono text-xs">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center border border-line font-mono text-xs">
                   {symbol}
                 </span>
-                <span className="hidden font-serif text-lg md:inline">Tally &amp; Trace</span>
+                <span className="hidden text-lg font-semibold md:inline">Tally &amp; Trace</span>
               </Link>
             </div>
             <div className="hidden sm:ml-6 sm:flex sm:space-x-0.5 min-w-0 overflow-x-auto">
@@ -120,7 +120,7 @@ export function Navigation() {
                 onClick={() => setShowUserMenu(!showUserMenu)}
                 className="flex items-center space-x-2 px-3 py-2 text-sm text-body transition-colors duration-200 hover:text-ink focus:outline-none"
               >
-                <div className="flex h-8 w-8 items-center justify-center border border-line-strong">
+                <div className="flex h-8 w-8 items-center justify-center border border-line">
                   <span className="font-mono text-xs text-body">
                     {user?.first_name?.[0]}{user?.last_name?.[0]}
                   </span>
@@ -132,7 +132,8 @@ export function Navigation() {
               </button>
 
               {showUserMenu && (
-                <div className="absolute right-0 z-50 mt-2 w-52 border border-line bg-surface py-1">
+                // spine-leaf: the panel is a leaf inside the band, so it takes the document colours back.
+                <div className="spine-leaf absolute right-0 z-50 mt-2 w-52 border border-line bg-surface py-1">
                   <div className="border-b border-line px-4 py-3 text-sm">
                     <div className="font-medium text-ink">{user?.first_name} {user?.last_name}</div>
                     <div className="mt-0.5 text-xs text-muted">{user?.email}</div>

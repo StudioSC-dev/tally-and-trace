@@ -178,7 +178,8 @@ test.describe('One face: IBM Plex Sans (STU-676)', () => {
     const wordmark = page.getByText('Tally & Trace', { exact: true })
     await expect(wordmark).toBeVisible()
     await expect.soft(wordmark).toHaveCSS('font-size', '18px')
-    await expect.soft(wordmark).toHaveCSS('font-weight', '400')
+    // STU-684: the wordmark is Plex 600, in the text face (nav.spec.ts, AC6).
+    await expect.soft(wordmark).toHaveCSS('font-weight', '600')
     await expect.soft(wordmark).toHaveCSS('font-family', /^"IBM Plex Sans"/)
     // The wordmark sits in the fixed nav bar, so a viewport screenshot, saved under shot()'s naming.
     const info = test.info()
@@ -196,7 +197,8 @@ test.describe('One face: IBM Plex Sans (STU-676)', () => {
     await shot(page, 'label')
   })
 
-  for (const text of ['Home', 'Accounts', 'Transactions', 'Goals']) {
+  // STU-684: the tab bar uses the page titles' names (nav.spec.ts, AC4).
+  for (const text of ['Dashboard', 'Accounts', 'Transactions', 'Allocations']) {
     test(`wordmark and label styling stays unchanged (tab bar ${text})`, async ({ page }, testInfo) => {
       test.skip(testInfo.project.name !== 'phone', 'the tab bar is phone only')
       await open(page, PAGES[0])

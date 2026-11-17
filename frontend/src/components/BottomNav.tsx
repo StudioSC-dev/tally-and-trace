@@ -45,11 +45,12 @@ interface TabItem {
   Icon: React.FC<{ active?: boolean }>
 }
 
+// Each label is the destination page's title, the same name the top bar uses.
 const TABS: TabItem[] = [
-  { to: '/',            label: 'Home',         onboarding: 'nav-home',         Icon: HomeIcon },
+  { to: '/',            label: 'Dashboard',    onboarding: 'nav-home',         Icon: HomeIcon },
   { to: '/accounts',   label: 'Accounts',     onboarding: 'nav-accounts',     Icon: AccountsIcon },
   { to: '/transactions', label: 'Transactions', onboarding: 'nav-transactions', Icon: TransactionsIcon },
-  { to: '/allocations', label: 'Goals',        onboarding: 'nav-allocations',  Icon: AllocationsIcon },
+  { to: '/allocations', label: 'Allocations',  onboarding: 'nav-allocations',  Icon: AllocationsIcon },
 ]
 
 const tabBase =
