@@ -49,8 +49,8 @@ const ENGINES = ['chromium', 'webkit']
 const VIEWPORT = { width: 390, height: 844 }
 const BASELINE_DIR = path.join(__dirname, 'bottom-nav-font.baseline')
 const FRONTEND = path.resolve(__dirname, '..')
-// STU-684 renamed Home and Goals to the page titles. The (b) baselines were taken with the old labels, so retake
-// them (BASELINE=write) on the first main that carries the new ones.
+// STU-684 renamed Home and Goals to the page titles. The Chromium (b) baseline was retaken with the new labels on the
+// STU-684 branch; the WebKit one still has the old labels, so retake it (BASELINE=write ENGINES=webkit ... b).
 const LABELS = ['Dashboard', 'Accounts', 'Transactions', 'Allocations']
 const TOL = 0.5
 let stack
