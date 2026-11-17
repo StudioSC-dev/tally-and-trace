@@ -1372,7 +1372,7 @@ export function AllocationsPage() {
         tags={entry.tags}
         meta={
           <>
-            <span>{entry.entry_type === 'income' ? 'Recurring Income' : 'Recurring Expense'}</span>
+            <span>{entry.entry_type === 'income' ? 'Recurring income' : 'Recurring expense'}</span>
             <span>{formatCadenceLabel(entry.cadence)}</span>
             <span className="text-ink">Next {formatFullDate(entry.next_occurrence)}</span>
           </>
@@ -1471,7 +1471,7 @@ export function AllocationsPage() {
         tags={entry.tags}
         meta={
           <>
-            <span>{entry.entry_type === 'income' ? 'Recurring Income' : 'Recurring Expense'}</span>
+            <span>{entry.entry_type === 'income' ? 'Recurring income' : 'Recurring expense'}</span>
             <span>{cadenceLabel}</span>
             <span>{settlementLabel(entry.settlement)}</span>
             {!entry.is_active && <span>Paused</span>}
@@ -2128,7 +2128,7 @@ export function AllocationsPage() {
 
                   {allocationForm.allocation_type === 'budget' && (
                     <div>
-                      <label className="block text-sm font-medium text-body" id="allocation-categories-label">Tracked Categories</label>
+                      <label className="block text-sm font-medium text-body" id="allocation-categories-label">Tracked categories</label>
                       <div ref={bindField('category_ids')}>
                         <CategoryPicker
                           mode="multi"
@@ -2213,7 +2213,7 @@ export function AllocationsPage() {
                   {allocationForm.allocation_type === 'savings' && (
                     <div className="space-y-3">
               <div>
-                        <label className="block text-sm font-medium text-body">Tracking Mode</label>
+                        <label className="block text-sm font-medium text-body">Tracking mode</label>
                         <div className="mt-1 flex flex-wrap gap-2">
                           {[
                             {
@@ -2291,7 +2291,7 @@ export function AllocationsPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-body">
-                        {allocationForm.allocation_type === 'budget' ? 'Amount already spent' : 'Current Amount'}
+                        {allocationForm.allocation_type === 'budget' ? 'Amount already spent' : 'Current amount'}
                       </label>
                 <input
                   type="number"
@@ -2321,7 +2321,7 @@ export function AllocationsPage() {
                       <label className="block text-sm font-medium text-body">
                         {allocationForm.allocation_type === 'budget'
                           ? 'Spending limit'
-                          : 'Target Amount (Optional)'}
+                          : 'Target amount (optional)'}
                       </label>
                 <input
                   type="number"
@@ -2357,7 +2357,7 @@ export function AllocationsPage() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                         <label className="block text-sm font-medium text-body">
-                          Monthly Target
+                          Monthly target
                         </label>
                 <input
                   type="number"
@@ -2379,7 +2379,7 @@ export function AllocationsPage() {
               </div>
               <div>
                         <label className="block text-sm font-medium text-body">
-                          Target Date
+                          Target date
                         </label>
                 <input
                   type="date"

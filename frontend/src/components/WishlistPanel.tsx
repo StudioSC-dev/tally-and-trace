@@ -155,7 +155,7 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
         <div>
           <h2 className="text-lg font-semibold text-ink">Wishlist</h2>
           <p className="text-sm text-muted mt-1">
-            Prioritised things you're saving up for — turn any of them into a budget envelope or savings target.
+            Prioritised things you're saving up for. Turn any of them into a budget envelope or savings target.
           </p>
         </div>
         <Button variant="primary" onClick={openCreate} className="w-full sm:w-auto justify-center">Add item</Button>
@@ -167,7 +167,7 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
           <div className="p-4 sm:p-6 border-b border-line">
             <h3 className="text-base font-semibold text-ink">Purchase plan</h3>
             <p className="text-sm text-muted">
-              Assuming {format(plan.savings_rate)}/mo toward the wishlist ({format(plan.monthly_disposable)} disposable) — items saved for in priority order.
+              Assuming {format(plan.savings_rate)}/mo toward the wishlist ({format(plan.monthly_disposable)} disposable). Items are saved for in priority order.
             </p>
           </div>
           <ol className="divide-y divide-line/50">

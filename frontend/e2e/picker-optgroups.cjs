@@ -7,7 +7,7 @@
 //     option is listed once, and the option values and saved payload are unchanged;
 // (b) the allocation form's Account (S1); (c) the card Pay dialog's Pay from (S6), only
 //     eligible payers; (d) the loan page's payment account (S7); (e) the account form's Paid
-//     From and Overflow To on a card (S8, S9, the stored placeholder first) and Paid From on a
+//     From and Overflow to on a card (S8, S9, the stored placeholder first) and Paid from on a
 //     loan (S10, loan currency only); (f) Settings' Main account (S11, "name (currency)" text,
 //     "None" first) and saving still works; (g) a card whose saved payer is no longer offered
 //     keeps its "Current account" option after the placeholder, selected.
@@ -198,7 +198,7 @@ async function scenarioD(browser) {
 
 // (e) The account form.
 async function scenarioE(browser) {
-  console.log('\n=== (e) account form: Paid From and Overflow To (card), Paid From (loan) are grouped')
+  console.log('\n=== (e) account form: Paid from and Overflow to (card), Paid from (loan) are grouped')
   const { ctx, page } = await newPage(browser)
   try {
     await page.goto(`${stack.webUrl}/accounts`)
@@ -207,8 +207,8 @@ async function scenarioE(browser) {
     await page.getByPlaceholder('Enter account name').fill('Form card')
     await page.locator('select').filter({ has: page.locator('option[value="credit"]') }).first().selectOption('credit')
     await page.getByRole('button', { name: 'Show details' }).click()
-    const paid = after('Paid From')
-    const over = after('Overflow To')
+    const paid = after('Paid from')
+    const over = after('Overflow to')
     await paid.waitFor()
     const p = await shape(paid)
     await h.check('e.card-paid-from.groups', 'B', async () => same(labelsOf(p), ['Debit', 'Cash']))
@@ -221,7 +221,7 @@ async function scenarioE(browser) {
     await h.check('e.card-overflow.placeholder-first-and-outside', 'B', async () => same(o.loose, [['', 'Not set']]))
 
     await page.locator('select').filter({ has: page.locator('option[value="credit"]') }).first().selectOption('loan')
-    const lp = after('Paid From')
+    const lp = after('Paid from')
     await lp.waitFor()
     const l = await shape(lp)
     await h.check('e.loan-paid-from.groups', 'B', async () => same(labelsOf(l), ['Debit', 'Cash']))
@@ -264,7 +264,7 @@ async function scenarioF(browser) {
 
 // (g) A card whose saved payer is no longer offered keeps its "Current account" option, selected.
 async function scenarioG(browser) {
-  console.log('\n=== (g) card Paid From: a saved payer that is not offered shows "Current account", selected')
+  console.log('\n=== (g) card Paid from: a saved payer that is not offered shows "Current account", selected')
   const { ctx, page } = await newPage(browser)
   try {
     await page.goto(`${stack.webUrl}/accounts`)
@@ -273,7 +273,7 @@ async function scenarioG(browser) {
     await page.locator('article').filter({ has: page.getByText('Orphan Card', { exact: true }) }).locator('[role="button"]').first().click()
     await page.getByRole('button', { name: 'Edit account' }).click()
     await page.getByRole('button', { name: 'Show details' }).click()
-    const paid = page.locator('label', { hasText: 'Paid From' }).locator('xpath=following-sibling::select').first()
+    const paid = page.locator('label', { hasText: 'Paid from' }).locator('xpath=following-sibling::select').first()
     await paid.waitFor()
     const s = await shape(paid)
     await h.check('g.setup-payer-not-offered', 'S', async () => !idsOf(s).includes(A.gone.id) || 'the inactive payer is offered')

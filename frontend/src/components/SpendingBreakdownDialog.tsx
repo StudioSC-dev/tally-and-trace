@@ -29,7 +29,7 @@ interface Props {
   startDate: string
   endDate: string
   tag: number | undefined
-  /** Shown under the title, e.g. "October 1st → October 31st"; an open side reads "Any date". */
+  /** Shown under the title, e.g. "October 1st to October 31st"; an open side reads "Any date". */
   rangeLabel: string
   defaultCurrency: CurrencyCode
   /** Called with the list filters the picked row sets: category names and the uncategorized flag. */
@@ -179,7 +179,7 @@ export function SpendingBreakdownDialog({
               })}
             </svg>
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 px-6 text-center">
-              <span className="text-xs uppercase tracking-wide text-muted">Total of the categories shown</span>
+              <span className="text-xs text-muted">Total of the categories shown</span>
               <span className="text-base font-semibold text-ink">{format(breakdown.total)}</span>
             </div>
           </div>

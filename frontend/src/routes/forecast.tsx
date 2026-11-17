@@ -112,7 +112,7 @@ function ForecastPage() {
         <div>
           <h1 className="text-2xl font-bold text-ink">Cash-Flow Timeline</h1>
           <p className="text-sm text-muted mt-1">
-            Running balance walked in date order — surfaces the trough before payday, not just the month-end total.
+            Running balance walked in date order. It surfaces the trough before payday, not just the month-end total.
           </p>
         </div>
         <TagFilter value={selectedTag} onChange={setSelectedTag} />
@@ -181,7 +181,7 @@ function ForecastPage() {
                 { label: 'Net change', value: row.closing_balance - row.opening_balance, color: row.closing_balance - row.opening_balance >= 0 ? 'text-ok' : 'text-danger' },
               ].map(({ label, value, color }) => (
                 <div key={label} className="bg-sunken/50 py-3 px-3">
-                  <dt className="text-xs uppercase tracking-wide text-muted">{label}</dt>
+                  <dt className="text-xs text-muted">{label}</dt>
                   <dd className={`text-base font-semibold ${color}`}>{format(value)}</dd>
                 </div>
               ))}
@@ -194,7 +194,7 @@ function ForecastPage() {
               <div className="p-4 sm:p-6 border-b border-line">
                 <h2 className="text-lg font-semibold text-ink">Funding shortfalls</h2>
                 <p className="text-sm text-muted">
-                  Bills where the account you pay from can't cover them (even after overflow) — you'd need to move money in first.
+                  Bills where the account you pay from can't cover them (even after overflow). You'd need to move money in first.
                 </p>
               </div>
               <ul className="divide-y divide-line/50">
@@ -241,7 +241,7 @@ function ForecastPage() {
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-line text-sm">
                   <thead>
-                    <tr className="text-left text-xs font-semibold uppercase tracking-wide text-muted">
+                    <tr className="text-left text-xs font-semibold text-muted">
                       <th className="py-3 px-4 sm:px-6">Date</th>
                       <th className="py-3 px-4">Item</th>
                       <th className="py-3 px-4">Account</th>

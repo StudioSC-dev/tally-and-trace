@@ -477,7 +477,7 @@ async function addAccount(browser) {
   const expected = listed.filter((a) => a.my_role !== 'tag_viewer' && !u.defaults.includes(a.id)).map((a) => a.id).sort((a, b) => a - b)
   check('(i) the list is every pinnable account not already shown', await optionIds(), expected)
   check('(i) the tag viewer\'s account is not offered, the viewer-shared one is', [(await optionIds()).includes(tagged.id), (await optionIds()).includes(theirs.id)], [false, true])
-  const headings = await page.locator(`${tidSel('quick-balances-add-panel')} p.uppercase`).allTextContents()
+  const headings = await page.locator(`${tidSel('quick-balance-add-group')} > p`).allTextContents()
   check('(i) grouped under Debit, Credit, Cash, then Shared with its own groups', headings, ['Debit', 'Credit', 'Cash', 'Shared', 'Debit'])
   check('(i) the count reads 3 of 6', await text(page.locator(tidSel('quick-balances-count'))), '3 of 6')
   await page.locator(`${tidSel('quick-balance-add-option')}[data-account-id="${u.cash.id}"]`).click()

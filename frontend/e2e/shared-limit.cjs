@@ -8,7 +8,7 @@
 // hard-coded, apart from the owner's own setup amounts.
 //
 // Scenarios:
-//   (a) creating a card with "Shares credit limit with: BDO Amex" hides Credit Limit, sends
+//   (a) creating a card with "Shares credit limit with: BDO Amex" hides Credit limit, sends
 //       the link and no limit, and the Accounts row then reads "Shares limit with BDO Amex"
 //   (b) both Accounts rows show the same "Available" figure, equal to the API's and to the
 //       limit less what both cards owe (needs the shared calculation: the API's PR 2)
@@ -17,7 +17,7 @@
 //       disabled
 //   (e) the secondary's edit form leaves the link out of an edit that doesn't change it, then
 //       unlinks: None sends null, the link and the line go, and
-//       Credit Limit comes back
+//       Credit limit comes back
 //   (f) a charge on the Platinum drops the Amex row's figure by the same amount
 //   (g) Allocations shows "Available credit on BDO Platinum Mastercard" for a subscription
 //       on the secondary card
@@ -113,7 +113,7 @@ const openAccounts = async (page) => {
 }
 const typeSelect = (page) => page.locator('select').filter({ has: page.locator('option[value="credit"]') })
 const linkSelect = (page) => page.locator('#account-shares-limit-with')
-const limitLabel = (page) => page.locator('label.label').filter({ hasText: /^Credit Limit$/ })
+const limitLabel = (page) => page.locator('label.label').filter({ hasText: /^Credit limit$/ })
 const optionNames = async (select) => select.locator('option').evaluateAll((os) => os.map((o) => o.textContent?.trim()))
 const noDialog = (scenario, native) => check(`${scenario} no native dialog fired`, native.count, 0)
 
@@ -146,14 +146,14 @@ async function fillNewCard(page, name) {
 
 // (a) Create a card linked to the Amex's limit.
 async function createLinked(browser) {
-  console.log('\n=== (a) creating a card with "Shares credit limit with" hides Credit Limit and links it')
+  console.log('\n=== (a) creating a card with "Shares credit limit with" hides Credit limit and links it')
   const { ctx, page, native } = await newPage(browser)
   await uiLogin(page, owner)
   await openAccounts(page)
   await fillNewCard(page, 'BDO Platinum Mastercard')
-  check('(a) Credit Limit shows while no card is chosen', await limitLabel(page).count(), 1)
+  check('(a) Credit limit shows while no card is chosen', await limitLabel(page).count(), 1)
   await linkSelect(page).selectOption(String(amex.id))
-  check('(a) choosing the Amex hides Credit Limit', await limitLabel(page).count(), 0)
+  check('(a) choosing the Amex hides Credit limit', await limitLabel(page).count(), 0)
   check('(a) and says whose limit is used',
     (await page.locator('[data-testid="account-form-uses-limit"]').textContent())?.trim(), `Uses BDO Amex's limit of ${peso(AMEX_LIMIT)}`)
   const sent = page.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname.endsWith('/accounts/'))
@@ -244,7 +244,7 @@ async function primaryForm(browser) {
   check('(d) the select is disabled', await linkSelect(page).isDisabled(), true)
   check('(d) it names the Platinum and says where to change it',
     (await page.locator('[data-testid="account-form-shared-with"]').textContent())?.trim(), 'Shared with BDO Platinum Mastercard. Change it on that card.')
-  check('(d) the Amex keeps its own Credit Limit field', await limitLabel(page).count(), 1)
+  check('(d) the Amex keeps its own Credit limit field', await limitLabel(page).count(), 1)
   noDialog('(d)', native)
   await ctx.close()
 }
@@ -259,7 +259,7 @@ async function unlink(browser) {
   await page.getByRole('button', { name: 'Edit account' }).click()
   await page.getByRole('button', { name: 'Show details' }).click()
   await linkSelect(page).waitFor()
-  check('(e) Credit Limit is hidden while linked', await limitLabel(page).count(), 0)
+  check('(e) Credit limit is hidden while linked', await limitLabel(page).count(), 0)
   // An edit that leaves the link alone (only the description changes) does not send it.
   await page.locator('textarea').fill('Edited while linked')
   const kept = page.waitForRequest((r) => r.method() === 'PUT' && new URL(r.url()).pathname.endsWith(`/accounts/${platinum.id}`))
@@ -274,7 +274,7 @@ async function unlink(browser) {
   await page.getByRole('button', { name: 'Show details' }).click()
   await linkSelect(page).waitFor()
   await linkSelect(page).selectOption('')
-  check('(e) None brings Credit Limit back', await limitLabel(page).count(), 1)
+  check('(e) None brings Credit limit back', await limitLabel(page).count(), 1)
   const sent = page.waitForRequest((r) => r.method() === 'PUT' && new URL(r.url()).pathname.endsWith(`/accounts/${platinum.id}`))
   await page.getByRole('button', { name: 'Update Account', exact: true }).click()
   const body = (await sent).postDataJSON()

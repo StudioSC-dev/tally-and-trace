@@ -538,7 +538,7 @@ export function RecurringEntryFormModal({
                 </div>
                 
               <div>
-                <label className="block text-sm font-medium text-body">Entry Type</label>
+                <label className="block text-sm font-medium text-body">Entry type</label>
                 <SegmentedControl
                   className="mt-1 inline-flex bg-sunken p-1"
                   aria-label="Entry type"
@@ -757,7 +757,7 @@ export function RecurringEntryFormModal({
                 endDateBounds={boundsFor('end_date')}
                 dateField={
                 <div>
-                  <label className="block text-sm font-medium text-body">Next Occurrence</label>
+                  <label className="block text-sm font-medium text-body">Next occurrence</label>
                   <input
                     type="datetime-local"
                     value={subscriptionForm.next_occurrence}
@@ -794,7 +794,7 @@ export function RecurringEntryFormModal({
                 beforeEnds={
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-body">Lead Time (days)</label>
+                  <label className="block text-sm font-medium text-body">Lead time (days)</label>
                   <input
                     type="number"
                     min="0"
@@ -814,7 +814,7 @@ export function RecurringEntryFormModal({
               </div>
                 {!(editingBudgetEntry && isSharedFull(editingBudgetEntry)) && (
                 <div>
-                  <label className="block text-sm font-medium text-body">Link to Budget (optional)</label>
+                  <label className="block text-sm font-medium text-body">Link to budget (optional)</label>
                   <select
                     value={subscriptionForm.allocation_id ?? 0}
                     onChange={(e) =>
