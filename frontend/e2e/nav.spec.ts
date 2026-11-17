@@ -9,7 +9,6 @@ import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
 import { household, mockHousehold } from './support/fixtures/household'
-import { shot } from './support/shot'
 
 // This spec lives in <repo>/frontend/e2e.
 const FRONTEND = fileURLToPath(new URL('..', import.meta.url))
@@ -282,5 +281,6 @@ test('spine is a component class, not a selector shim', async ({ page }) => {
   const source = read('src/components/Navigation.tsx')
   expect(source.match(/<nav className="[^"]*"/)?.[0] ?? '', 'Navigation.tsx puts the spine class on the nav').toMatch(/\bspine\b/)
   expect(source, 'Navigation.tsx has no raw colour').not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(/)
-  await shot(page, 'spine-class')
+  // The top bar is position: fixed, so a viewport screenshot.
+  await viewportShot(page, 'spine-class')
 })
