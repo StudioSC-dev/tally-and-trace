@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 /*
-  StudioSC design tokens.
+  Tally & Trace design tokens: Direction B, "Columnar pad" (docs/design-system.md).
 
   Two themes. Components only ever reference the semantic names (--paper, --ink,
   --line …), never a palette step, so light and dark cannot drift apart.
@@ -12,9 +12,9 @@
   index.html sets before first paint. Light is the default; the media query at
   the bottom only covers the no-JS case, where no attribute is ever set.
 
-  Contrast is deliberately kept off the ceiling in dark: body text lands around
-  8:1 rather than the 15:1 of pure white on near-black, which is fatiguing to
-  read — and this is an app you stare at while reconciling numbers.
+  Hierarchy is carried by tone and rules, not shadow: rows are ruled (radius 0),
+  panels are a lighter leaf on the pad (radius-md, no shadow), and dialogs alone
+  get elevation (radius-lg, --elev-dialog).
 */
 
 :root {
@@ -22,18 +22,23 @@
     Dark palette held as constants, so switching themes below is pure aliasing
     and no colour value is ever written twice.
   */
-  --dark-paper: 28 25 23;
-  --dark-surface: 35 31 29;
-  --dark-sunken: 23 20 18;
-  --dark-line: 51 46 43;
-  --dark-line-strong: 68 61 57;
-  --dark-ink: 245 245 244;
-  --dark-body: 214 211 209;
-  --dark-muted: 168 162 158;
-  --dark-ok: 163 177 138;
-  --dark-warn: 217 160 91;
-  --dark-info: 168 162 158;
-  --dark-danger: 224 145 138;
+  --dark-paper: 17 25 21; /* #111915 */
+  --dark-surface: 23 33 27; /* #17211B */
+  --dark-sunken: 12 19 15; /* #0C130F */
+  --dark-line: 41 56 47; /* #29382F */
+  --dark-line-strong: 92 117 99; /* #5C7563 */
+  --dark-ink: 229 238 231; /* #E5EEE7 */
+  --dark-body: 196 209 199; /* #C4D1C7 */
+  --dark-muted: 147 165 152; /* #93A598 */
+  --dark-accent: 147 205 169; /* #93CDA9 */
+  --dark-on-accent: 17 25 21; /* #111915, the dark paper */
+  --dark-spine: 28 52 40; /* #1C3428 */
+  --dark-on-spine: 229 238 231; /* #E5EEE7, 11.3:1 on the dark spine */
+  --dark-on-spine-muted: 165 188 174; /* #A5BCAE */
+  --dark-ok: 140 198 160; /* #8CC6A0 */
+  --dark-warn: 228 176 98; /* #E4B062 */
+  --dark-info: 147 165 152; /* #93A598, as muted */
+  --dark-danger: 240 150 140; /* #F0968C */
 
   /*
     Colour tokens are space-separated RGB channels, not colours, so Tailwind can
@@ -41,46 +46,54 @@
     `rgb(var(--paper) / <alpha-value>)`, and any direct use here or in a
     component must wrap them too: `rgb(var(--paper))`.
 
-    Light theme (default).
-
-    The page is a soft grey, not white: it sits at ~70% of pure white's
-    luminance, because a full-white field at screen brightness is glaring over a
-    long read. Cards sit *lighter* than the page, so they separate without a
-    shadow and without being a near-white glare panel. Ink is pulled back off
-    true black for the same reason.
-
-    Greys are very slightly warm so light and dark read as one family (dark is a
-    warm stone), but the saturation is low enough that they present as neutral.
-
-    Dimming the page compresses contrast against dark text, so the whole ramp is
-    tuned to this specific page tone — every pairing that actually occurs still
-    clears 4.5:1 (worst is muted 11px label text on --sunken, at 4.68:1). If you
-    re-dim the page, re-darken --muted, --ok, --warn and --danger with it.
+    Light theme (default): the accountant's green ledger pad. The page is a pale
+    ledger green-grey, panels are a lighter leaf on it, and the bottle-green
+    spine is the one bold colour. Red pencil means in the red only (overdue,
+    negative, failed). Contrast figures are on the colour the text sits on.
   */
 
   /* Surfaces — surface is lighter than paper, sunken is darker */
-  --paper: 222 218 212;
-  --surface: 233 230 224;
-  --sunken: 210 205 198;
+  --paper: 228 234 226; /* pad #E4EAE2 */
+  --surface: 242 245 240; /* leaf #F2F5F0 */
+  --sunken: 214 222 211; /* gutter #D6DED3 */
 
-  /* Hairlines */
-  --line: 194 188 180;
-  --line-strong: 169 162 154;
+  /* Rules */
+  --line: 188 201 184; /* rule #BCC9B8, row rules */
+  --line-strong: 116 136 112; /* rule strong #748870, control borders, 3.5:1 on leaf */
 
   /* Text */
-  --ink: 32 29 26; /* headings */
-  --body: 67 64 60; /* paragraphs */
-  --muted: 89 85 79; /* metadata, labels — 4.68:1 on --sunken at 11px */
+  --ink: 22 36 28; /* ledger ink #16241C, 14.7:1 on leaf */
+  --body: 45 59 51; /* #2D3B33, 10.7:1 */
+  --muted: 74 89 80; /* graphite #4A5950, 5.4:1 on gutter */
 
-  /* Status — desaturated, used as small dots and text, never as glowing fills */
-  --ok: 60 97 11;
-  --warn: 127 64 33;
-  --info: 89 85 79;
-  --danger: 140 34 29;
+  /* Actions and the band: the spine green */
+  --accent: 34 72 58; /* spine #22483A: primary button, selection rule */
+  --on-accent: 242 245 240; /* leaf #F2F5F0, 9.3:1 on spine */
+  --spine: 34 72 58; /* #22483A: the top band */
+  --on-spine: 228 234 226; /* #E4EAE2, 8.4:1 */
+  --on-spine-muted: 181 203 190; /* #B5CBBE, 6.0:1 */
 
-  /* Paper texture strength — see the body::before/::after rules below. */
-  --grain-opacity: 0.085;
-  --mottle-opacity: 0.075;
+  /* Status — used as small dots and text, never as glowing fills */
+  --ok: 42 100 64; /* ledger green #2A6440, 5.1:1 on gutter */
+  --warn: 135 80 0; /* amber pencil #875000, 4.8:1 on gutter */
+  --info: 74 89 80; /* graphite #4A5950 */
+  --danger: 174 42 32; /* red pencil #AE2A20, 6.1:1 on leaf */
+
+  /* The dialog backdrop and shadow colour (#0C130F); the same in both themes. */
+  --scrim: 12 19 15;
+
+  /* Shape: radius encodes level. Rows and the selection rule stay square (0). */
+  --radius-sm: 4px; /* buttons, chips */
+  --radius-md: 6px; /* panels, list sheets */
+  --radius-lg: 12px; /* dialogs */
+
+  /* Elevation: dialogs only. Panels separate by tone and one rule. */
+  --elev-dialog: 0 20px 40px -18px rgb(12 19 15 / .45);
+
+  /* Motion: short, and only in answer to an action. */
+  --dur-fast: 100ms; /* colour */
+  --dur-base: 160ms; /* dialog fade */
+  --ease: cubic-bezier(.3,0,.2,1);
 
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
   --font-serif: 'Instrument Serif', ui-serif, Georgia, serif;
@@ -98,14 +111,15 @@
   --ink: var(--dark-ink);
   --body: var(--dark-body);
   --muted: var(--dark-muted);
+  --accent: var(--dark-accent);
+  --on-accent: var(--dark-on-accent);
+  --spine: var(--dark-spine);
+  --on-spine: var(--dark-on-spine);
+  --on-spine-muted: var(--dark-on-spine-muted);
   --ok: var(--dark-ok);
   --warn: var(--dark-warn);
   --info: var(--dark-info);
   --danger: var(--dark-danger);
-
-  /* On a dark page the same texture reads as sensor noise, so dial it back. */
-  --grain-opacity: 0.028;
-  --mottle-opacity: 0.022;
 
   color-scheme: dark;
 }
@@ -121,13 +135,15 @@
     --ink: var(--dark-ink);
     --body: var(--dark-body);
     --muted: var(--dark-muted);
+    --accent: var(--dark-accent);
+    --on-accent: var(--dark-on-accent);
+    --spine: var(--dark-spine);
+    --on-spine: var(--dark-on-spine);
+    --on-spine-muted: var(--dark-on-spine-muted);
     --ok: var(--dark-ok);
     --warn: var(--dark-warn);
     --info: var(--dark-info);
     --danger: var(--dark-danger);
-
-    --grain-opacity: 0.028;
-    --mottle-opacity: 0.022;
 
     color-scheme: dark;
   }
@@ -137,11 +153,7 @@
   box-sizing: border-box;
 }
 
-/*
-  The page colour lives on <html>, not <body>, so the paper texture (a
-  z-index:-1 pseudo-element) is not painted over — body's own background would
-  render after negative-z-index children.
-*/
+/* The page colour is on <html> too, so overscroll past <body> shows the pad. */
 html {
   background-color: rgb(var(--paper));
   scroll-behavior: smooth;
@@ -159,8 +171,11 @@ body {
   min-height: 100vh;
   min-height: 100dvh;
   color: rgb(var(--body));
+  background-color: rgb(var(--paper));
   font-family: var(--font-sans);
-  line-height: 1.5;
+  /* text-base: 15 / 24. Unitless, so unsized children keep the 4px grid ratio. */
+  font-size: 0.9375rem;
+  line-height: 1.6;
   font-weight: 400;
   /*
     Tabular figures app-wide. Nearly every number here is money or a date in a
@@ -180,51 +195,6 @@ body {
 #root {
   min-height: 100vh;
   min-height: 100dvh;
-}
-
-/*
-  Paper texture.
-
-  Real paper is not a flat tone: it has fine grain from the fibre, plus a
-  broader unevenness where the pulp settled thicker or thinner. Two overlays
-  reproduce that — a high-frequency grain and a low-frequency mottle — both
-  generated by SVG feTurbulence inlined as data URIs, so there are no image
-  files, no extra requests, and nothing to go stale.
-
-  Both are painted on fixed, pointer-events-none pseudo-elements at z-index -1:
-  above the page colour (which lives on <html>) but behind all content, so text
-  is never overlaid and hit-testing is untouched. `stitchTiles="stitch"` makes
-  the tiles seamless, which avoids the visible grid you get from naive noise.
-
-  Card surfaces are opaque and sit on top, so they read as a separate sheet laid
-  on the page — which is the intended effect.
-*/
-body::before,
-body::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-}
-
-/* Fine fibre grain. */
-body::before {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23g)'/%3E%3C/svg%3E");
-  opacity: var(--grain-opacity);
-}
-
-/* Broad pulp mottling — the "traces of wood" unevenness. */
-body::after {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='700' height='700'%3E%3Cfilter id='m'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.012' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='700' height='700' filter='url(%23m)'/%3E%3C/svg%3E");
-  opacity: var(--mottle-opacity);
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  body::before,
-  body::after {
-    display: none;
-  }
 }
 
 /* ── Component Layer ──────────────────────────────────────────────────────── */
@@ -270,33 +240,32 @@ body::after {
   }
 
   /*
-    Buttons are square-edged and either ink-filled or outlined. The
-    rounded-lg + coloured-fill + shadow combination was the loudest
-    "generated UI" signature in this app. Primary inverts on hover — the fill
-    drops out, the outline stays put, so the footprint never shifts.
+    Buttons take radius-sm and are either spine-filled or outlined. Primary is
+    the spine green with leaf text, and inverts on hover — the fill drops out,
+    the outline stays put, so the footprint never shifts.
   */
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 border border-ink bg-ink px-4 py-2 text-sm text-paper transition-colors duration-200 hover:bg-transparent hover:text-ink;
+    @apply inline-flex items-center justify-center gap-2 rounded-sm border border-accent bg-accent px-4 py-2 text-sm text-on-accent transition-colors duration-200 hover:bg-transparent hover:text-accent;
   }
 
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 border border-line-strong px-4 py-2 text-sm text-ink transition-colors duration-200 hover:border-ink hover:bg-sunken;
+    @apply inline-flex items-center justify-center gap-2 rounded-sm border border-line-strong px-4 py-2 text-sm text-ink transition-colors duration-200 hover:border-ink hover:bg-sunken;
   }
 
   .btn-danger {
-    @apply inline-flex items-center justify-center gap-2 border border-danger px-4 py-2 text-sm text-danger transition-colors duration-200 hover:bg-danger hover:text-paper;
+    @apply inline-flex items-center justify-center gap-2 rounded-sm border border-danger px-4 py-2 text-sm text-danger transition-colors duration-200 hover:bg-danger hover:text-paper;
   }
 
   /*
-    Cards separate by tone and hairline, not by shadow: --surface is lighter
-    than --paper, so a border is enough. No radius, no hover-glow tinted border.
+    Panels separate by tone and hairline, not by shadow: --surface is lighter
+    than --paper, so a border is enough. radius-md and no shadow.
   */
   .card {
-    @apply border border-line bg-surface transition-colors duration-200 hover:border-line-strong;
+    @apply rounded-md border border-line bg-surface transition-colors duration-200 hover:border-line-strong;
   }
 
   .stat-card {
-    @apply border border-line bg-surface p-4 transition-colors duration-200 hover:border-line-strong sm:p-6;
+    @apply rounded-md border border-line bg-surface p-4 transition-colors duration-200 hover:border-line-strong sm:p-6;
   }
 
   .stat-value {
@@ -556,4 +525,14 @@ body::after {
   z-index: 60;
   margin: 0;
   padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 0px), var(--toast-room, 0px));
+}
+
+/*
+  Dialog panels: the one raised layer. Every dialog is the shared overlay, then a
+  `min-h-full` centring box, then the panel, so the panel takes radius-lg and
+  --elev-dialog here (the confirm dialog included).
+*/
+.fixed.inset-0.overflow-y-auto.bg-black\/60 > .min-h-full > * {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-dialog);
 }

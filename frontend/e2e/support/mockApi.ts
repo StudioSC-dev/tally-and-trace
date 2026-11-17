@@ -15,6 +15,12 @@ export interface ApiRoute {
    * precedence over `status` and `body`, which `sequenceRoute` keeps in step with the last reply.
    */
   replies?: ApiReply[]
+  /**
+   * Optional: answers each call from the request's query string. Used in place of `body` (not of `replies`), still
+   * keyed on method and path, so the call is counted and an unregistered method still fails. A query it throws on
+   * fails the test. `queryRoute` keeps `body` as the answer to a call with no query.
+   */
+  respond?: (query: URLSearchParams) => unknown
 }
 
 /** One reply in a `replies` list. */
@@ -29,6 +35,15 @@ export const apiRoute = <T>(method: HttpMethod, path: string, body: T, status = 
   path,
   status,
   body,
+})
+
+/** Builds a route that answers from the request's query string, checked against the type `T` at compile time. */
+export const queryRoute = <T>(method: HttpMethod, path: string, respond: (query: URLSearchParams) => T, status = 200): ApiRoute => ({
+  method,
+  path,
+  status,
+  body: respond(new URLSearchParams()),
+  respond,
 })
 
 /** Builds a route that answers each call with the next reply, so a save can be followed by a refreshed GET. */
@@ -116,10 +131,21 @@ async function answer(state: MockState, route: Route): Promise<void> {
     return
   }
   state.counts.set(key, (state.counts.get(key) ?? 0) + 1)
+  let body = hit.body
+  if (hit.respond) {
+    try {
+      body = hit.respond(new URL(request.url()).searchParams)
+    } catch (error) {
+      // A query the fake does not handle fails the test, like an unmocked call.
+      expect.soft(String(error), `unhandled query: ${request.url()}`).toBe('a handled query')
+      await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ detail: String(error) }) })
+      return
+    }
+  }
   await route.fulfill({
     status: hit.status ?? 200,
     contentType: 'application/json',
-    body: JSON.stringify(hit.body),
+    body: JSON.stringify(body),
   })
 }
 

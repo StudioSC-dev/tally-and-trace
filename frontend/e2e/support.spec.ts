@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { expect, test } from '@playwright/test'
 import type { User } from '@tally-trace/shared'
-import { apiRoute, mockApi } from './support/mockApi'
+import { apiRoute, mockApi, queryRoute } from './support/mockApi'
 import { landingStubs } from './support/landing'
 import { signedIn } from './support/signedIn'
 
@@ -44,6 +44,39 @@ test.describe('support', () => {
     expect(api.count('GET', '/a/b')).toBe(1)
     expect(api.count('GET', '/c')).toBe(1)
     expect(api.requests()).toEqual(['GET /a/b', 'GET /c'])
+  })
+
+  test('a query route answers from the query and is counted', async ({ page }) => {
+    const api = await mockApi(page, [queryRoute('GET', '/q', (query) => ({ kind: query.get('kind') }))])
+    await page.goto('/login')
+    const bodies = await page.evaluate(async () => {
+      const get = (url: string) => fetch(url).then((r) => r.json() as Promise<{ kind: string | null }>)
+      return [await get('/api/v1/q?kind=income'), await get('/api/v1/q?kind=expense'), await get('/api/v1/q')]
+    })
+    expect(bodies).toEqual([{ kind: 'income' }, { kind: 'expense' }, { kind: null }])
+    expect(api.count('GET', '/q')).toBe(3)
+    expect(api.requests()).toEqual(['GET /q', 'GET /q', 'GET /q'])
+  })
+
+  test('a query route does not answer another method', async ({ page }) => {
+    // Red on purpose: a POST to a path with only a GET query route must reach the failing catch-all.
+    test.fail()
+    await mockApi(page, [queryRoute('GET', '/q', () => ({ ok: true }))])
+    await page.goto('/login')
+    await page.evaluate(() => fetch('/api/v1/q?kind=income', { method: 'POST', body: '{}' }).then((r) => r.status))
+  })
+
+  test('a query route fails on a query it throws on', async ({ page }) => {
+    // Red on purpose: a fake that throws on an unknown parameter must fail the test, not answer quietly.
+    test.fail()
+    await mockApi(page, [
+      queryRoute('GET', '/q', (query) => {
+        if (query.has('surprise')) throw new Error('unhandled query parameter(s): surprise')
+        return { ok: true }
+      }),
+    ])
+    await page.goto('/login')
+    await page.evaluate(() => fetch('/api/v1/q?surprise=1').then((r) => r.status))
   })
 
   test('signedIn seeds the session and mocks the current user', async ({ page }) => {
