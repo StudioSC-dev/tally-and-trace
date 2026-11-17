@@ -31,7 +31,14 @@ const DESTINATIONS = [
   { path: '/allocations', marker: 'nav-allocations', title: 'Allocations' },
 ] as const
 
+/**
+ * The tab bar's height on the PR base (main b307b3d): `/`, light, Chromium, 390x844, the household fixture, after
+ * fonts load (h-16 and its 1px top rule). Recorded with this spec's own measurement before the change.
+ */
+const BASE_TAB_BAR_HEIGHT = 65
+
 const topBar = (page: Page): Locator => page.locator('nav.safe-area-top')
+const tabBar = (page: Page): Locator => page.locator('nav.safe-area-bottom')
 
 /** A viewport screenshot (a full-page one draws a fixed layer at the scroll offset), saved like `shot()`. */
 async function viewportShot(page: Page, name: string): Promise<void> {
@@ -170,6 +177,55 @@ for (const theme of ['light', 'dark'] as const satisfies readonly Theme[]) {
     await viewportShot(page, `user-menu-${theme}`)
   })
 }
+
+// ─── AC4 ────────────────────────────────────────────────────────────────────────────────────────
+
+for (const d of DESTINATIONS) {
+  test(`nav label equals page title: ${d.title}`, async ({ page }, testInfo) => {
+    await open(page, d.path)
+    const desktop = testInfo.project.name === 'desktop'
+    // The top bar's page links show on desktop; the tab bar shows on a phone.
+    const link = (desktop ? topBar(page) : tabBar(page)).locator(`a[data-onboarding="${d.marker}"]`)
+    await expect(link).toBeVisible()
+    await expect(link).toHaveAttribute('href', d.path)
+    const label = ((await link.textContent()) ?? '').trim()
+    const h1 = page.locator('main h1')
+    expect(await h1.count(), 'one page title').toBe(1)
+    const title = ((await h1.textContent()) ?? '').trim()
+    expect(title, `the ${d.path} page title`).toBe(d.title)
+    expect(label, `the ${desktop ? 'top bar' : 'tab bar'} label for ${d.path} is the page title`).toBe(title)
+    await viewportShot(page, `label-${d.marker}`)
+  })
+}
+
+// ─── AC5 ────────────────────────────────────────────────────────────────────────────────────────
+
+test('tab bar labels fit on one line', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'phone', 'the tab bar is phone only')
+  await open(page, '/')
+  const bar = tabBar(page)
+  await expect(bar).toBeVisible()
+  const labels = bar.locator('a[data-onboarding^="nav-"] > span:not([aria-hidden])')
+  const measured = await labels.evaluateAll((all) =>
+    all.map((e) => {
+      const range = document.createRange()
+      range.selectNodeContents(e)
+      return {
+        text: (e.textContent ?? '').trim(),
+        y: e.getBoundingClientRect().y,
+        lines: range.getClientRects().length,
+        overflow: e.scrollWidth > e.clientWidth || (e.parentElement !== null && e.parentElement.scrollWidth > e.parentElement.clientWidth),
+      }
+    }),
+  )
+  expect.soft(measured.map((m) => m.text), 'the four labels').toEqual(DESTINATIONS.map((d) => d.title))
+  expect(measured.map((m) => `${m.text}: ${m.y}`), 'the labels share one y').toEqual(measured.map((m) => `${m.text}: ${measured[0].y}`))
+  expect(measured.filter((m) => m.overflow).map((m) => m.text), 'labels (or their tabs) wider than their box').toEqual([])
+  expect(measured.map((m) => `${m.text}: ${m.lines}`), 'each label is one line of text').toEqual(measured.map((m) => `${m.text}: 1`))
+  const height = (await bar.boundingBox())?.height ?? 0
+  expect(Math.abs(height - BASE_TAB_BAR_HEIGHT), `the bar is ${height}px, the base was ${BASE_TAB_BAR_HEIGHT}px`).toBeLessThanOrEqual(2)
+  await viewportShot(page, 'tab-bar')
+})
 
 // ─── AC6 ────────────────────────────────────────────────────────────────────────────────────────
 

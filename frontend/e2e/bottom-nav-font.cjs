@@ -5,7 +5,7 @@
 //     and document.documentElement.scrollWidth <= 390 (Chromium and WebKit);
 // (b) default-same: at the default root font size the nav's tab positions and its pixels match the
 //     baseline taken from main 06a95a9 (before the change), in the same engine;
-// (c) tour-tab: with the tour running at 200%, the Goals step highlights the Goals tab;
+// (c) tour-tab: with the tour running at 200%, the Goals step highlights the Allocations tab;
 // (d) quality-gates: tsc, vite build and lint each exit 0.
 //
 // STU-637 adds scenario (e): the Dashboard period buttons and the Transactions due tabs at 200%.
@@ -49,7 +49,9 @@ const ENGINES = ['chromium', 'webkit']
 const VIEWPORT = { width: 390, height: 844 }
 const BASELINE_DIR = path.join(__dirname, 'bottom-nav-font.baseline')
 const FRONTEND = path.resolve(__dirname, '..')
-const LABELS = ['Home', 'Accounts', 'Transactions', 'Goals']
+// STU-684 renamed Home and Goals to the page titles. The (b) baselines were taken with the old labels, so retake
+// them (BASELINE=write) on the first main that carries the new ones.
+const LABELS = ['Dashboard', 'Accounts', 'Transactions', 'Allocations']
 const TOL = 0.5
 let stack
 
@@ -279,7 +281,7 @@ async function scenarioE(browser, engine) {
 }
 
 async function scenarioC(browser, engine) {
-  console.log(`\n=== (c) ${engine}: the tour highlights the Goals tab at 200%`)
+  console.log(`\n=== (c) ${engine}: the tour highlights the Allocations tab at 200%`)
   const user = await h.makeUser(stack, `c${engine.slice(0, 2)}`)
   stack.psql(`UPDATE users SET onboarding_completed = false WHERE email = '${user.email}'`)
   const { ctx, page } = await h.newPage(browser, { viewport: VIEWPORT })
@@ -305,11 +307,11 @@ async function scenarioC(browser, engine) {
       if (!tab || !box) return 'tab or highlight not found'
       const inside = box.x <= tab.x + 0.5 && box.y <= tab.y + 0.5 && box.x + box.width >= tab.x + tab.width - 0.5 && box.y + box.height >= tab.y + tab.height - 0.5
       const centred = Math.abs(box.x + box.width / 2 - (tab.x + tab.width / 2)) <= 1 && Math.abs(box.y + box.height / 2 - (tab.y + tab.height / 2)) <= 1
-      return (inside && centred) || `highlight ${JSON.stringify(box)} vs Goals tab ${JSON.stringify(tab)}`
+      return (inside && centred) || `highlight ${JSON.stringify(box)} vs Allocations tab ${JSON.stringify(tab)}`
     })
     await h.check(`c.${engine}.tour-tab-inside-viewport`, 'B', async () => {
       const tab = await page.locator('nav.fixed.bottom-0 [data-onboarding="nav-allocations"]').boundingBox()
-      return (tab && tab.x >= -TOL && tab.x + tab.width <= VIEWPORT.width + TOL) || `Goals tab ${JSON.stringify(tab)}`
+      return (tab && tab.x >= -TOL && tab.x + tab.width <= VIEWPORT.width + TOL) || `Allocations tab ${JSON.stringify(tab)}`
     })
   } finally {
     await ctx.close()

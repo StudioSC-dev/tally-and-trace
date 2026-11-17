@@ -196,7 +196,8 @@ test.describe('One face: IBM Plex Sans (STU-676)', () => {
     await shot(page, 'label')
   })
 
-  for (const text of ['Home', 'Accounts', 'Transactions', 'Goals']) {
+  // STU-684: the tab bar uses the page titles' names (nav.spec.ts, AC4).
+  for (const text of ['Dashboard', 'Accounts', 'Transactions', 'Allocations']) {
     test(`wordmark and label styling stays unchanged (tab bar ${text})`, async ({ page }, testInfo) => {
       test.skip(testInfo.project.name !== 'phone', 'the tab bar is phone only')
       await open(page, PAGES[0])
