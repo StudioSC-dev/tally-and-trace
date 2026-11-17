@@ -13,9 +13,8 @@ interface SpotlightOverlayProps {
   borderRadius?: number
 }
 
-// A fixed translucent black rather than a token: --ink flips light in dark
-// mode, and the paper tokens carry no alpha channel.
-const SCRIM = 'rgb(0 0 0 / 0.55)'
+// The scrim token at 0.55: --ink flips light in dark mode, and the scrim is the same dark in both.
+const SCRIM = 'rgb(var(--scrim) / 0.55)'
 
 export function SpotlightOverlay({
   rect,

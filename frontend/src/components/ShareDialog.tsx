@@ -142,7 +142,7 @@ export function ShareDialog({ account, onClose }: { account: Account; onClose: (
 
   return (
     <div
-      className="fixed inset-0 z-[60] overflow-y-auto bg-black/60 px-4 py-6"
+      className="fixed inset-0 z-[60] overflow-y-auto bg-scrim/60 px-4 py-6"
       onClick={onClose}
       data-testid="share-dialog"
     >

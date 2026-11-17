@@ -869,7 +869,7 @@ export function AccountsPage() {
 
       {isActionModalOpen && actionAccount && (
         <div
-          className="modal-backdrop fixed inset-0 z-50 overflow-y-auto bg-black/60"
+          className="modal-backdrop fixed inset-0 z-50 overflow-y-auto bg-scrim/60"
           onClick={closeActionModal}
         >
           <div className="min-h-full flex items-center justify-center">
@@ -1041,7 +1041,7 @@ export function AccountsPage() {
 
       {/* Create/Edit Modal */}
       {isCreateModalOpen && (
-        <div className="modal-backdrop fixed inset-0 z-50 overflow-y-auto bg-black/60">
+        <div className="modal-backdrop fixed inset-0 z-50 overflow-y-auto bg-scrim/60">
           <div className="min-h-full flex items-center justify-center">
           <div className="bg-surface p-6 w-full max-w-md border border-line">
             <div className="flex items-center justify-between mb-6">

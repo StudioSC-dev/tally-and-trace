@@ -267,7 +267,7 @@ export function ForceDateDialog({ target, onClose, onChanged }: Props) {
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] overflow-y-auto bg-black/60 px-4 py-6" onClick={onClose} data-testid="force-date-overlay">
+    <div className="fixed inset-0 z-[60] overflow-y-auto bg-scrim/60 px-4 py-6" onClick={onClose} data-testid="force-date-overlay">
       <div className="flex min-h-full items-center justify-center">
         <div
           ref={dialogRef}
