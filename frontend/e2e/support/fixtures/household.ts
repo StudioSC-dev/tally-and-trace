@@ -16,8 +16,8 @@
  * on load; `mockHousehold(page, data)` signs in, freezes the clock on `HOUSEHOLD_TODAY` and
  * installs those routes.
  *
- * `with*` helpers derive a variant for one state (a main account, dollars, a long account
- * history, long Due card lists); the create factories (`createdAccount`, `createAccountRoute`,
+ * `with*` helpers derive a variant for one state (a main account, one account's balance, dollars,
+ * a long account history, long Due card lists); the create factories (`createdAccount`, `createAccountRoute`,
  * `householdCreateRoutes`) answer the dialogs' saves.
  */
 import type { Page } from '@playwright/test'
@@ -1079,6 +1079,24 @@ export const householdRoutes = (data: HouseholdData = household): ApiRoute[] => 
 
 /** A variant whose user has pinned the payroll account as their main account (the Forecast's "Main" scope). */
 export const withMainAccount = (data: HouseholdData): HouseholdData => ({ ...data, user: { ...data.user, main_account_id: payroll.id } })
+
+/** A variant where account `accountId` holds `balance`, in the accounts list and its quick-balance tile. */
+export const withBalance = (data: HouseholdData, accountId: number, balance: number): HouseholdData => {
+  const accounts = data.accounts.map((a) => (a.id === accountId ? { ...a, balance } : a))
+  return { ...data, accounts, quickBalances: quickBalancesFor(accounts) }
+}
+
+/**
+ * Quick-balance figures that must read as an unsigned zero. A debit tile prints its balance and a card tile prints Owed,
+ * the negated balance, so `input` is the number the amount formatter is given: a card at 0 owes a computed `-0`, which
+ * JSON cannot carry from the API.
+ */
+export const ZERO_FIGURE_CASES: readonly { name: string; accountId: number; line: 'balance' | 'owed'; balance: number; input: string }[] = [
+  { name: 'zero', accountId: payroll.id, line: 'balance', balance: 0, input: '0' },
+  { name: 'computed negative zero', accountId: card.id, line: 'owed', balance: 0, input: '-0' },
+  { name: 'under half a centavo', accountId: card.id, line: 'owed', balance: -0.004, input: '0.004' },
+  { name: 'under half a centavo below zero', accountId: card.id, line: 'owed', balance: 0.004, input: '-0.004' },
+]
 
 /**
  * A variant whose cash-flow timeline also holds dollars: a USD row with an opening balance and no events, so the
