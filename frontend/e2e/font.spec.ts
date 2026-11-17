@@ -17,13 +17,16 @@ interface PageCase {
   path: string
   /** The page's first content row, once the mocked data has rendered (used by the fallback scenario). */
   row: (page: Page) => Locator
+  /** The row's name (account, description or entry name) and its amount, located inside the row. */
+  label: (row: Locator) => Locator
+  amount: (row: Locator) => Locator
 }
 
 /** The three pages. `row` is the fixed locator for the first content row of each. */
 const PAGES: PageCase[] = [
-  { name: 'dashboard', path: '/', row: (page) => page.getByTestId('quick-balance-tile').first() },
-  { name: 'transactions', path: '/transactions', row: (page) => page.locator('article[data-transaction-id]').first() },
-  { name: 'allocations', path: '/allocations', row: (page) => page.locator('[data-testid^="kind-section-"] article').first() },
+  { name: 'dashboard', path: '/', row: (page) => page.getByTestId('quick-balance-tile').first(), label: (row) => row.getByTestId('quick-balance-name'), amount: (row) => row.getByTestId('quick-balance-balance') },
+  { name: 'transactions', path: '/transactions', row: (page) => page.locator('article[data-transaction-id]').first(), label: (row) => row.locator('p.text-base'), amount: (row) => row.locator('p.text-lg') },
+  { name: 'allocations', path: '/allocations', row: (page) => page.locator('[data-testid^="kind-section-"] article').first(), label: (row) => row.locator('p.text-base'), amount: (row) => row.locator('p.text-lg') },
 ]
 
 async function open(page: Page, c: PageCase): Promise<void> {
@@ -145,8 +148,12 @@ test.describe('One face: IBM Plex Sans (STU-676)', () => {
       const after = (await row.boundingBox())?.y ?? NaN
       expect.soft(aborted, 'font files were requested and aborted').toBeGreaterThan(0)
       expect(Math.abs(after - before), `first row y moved from ${before} to ${after}`).toBeLessThanOrEqual(2)
-      await expect(row.getByText(/\d/).first(), 'the row still shows its figures').toBeVisible()
-      await expect(page.getByRole('heading', { level: 1 }), 'the page heading is visible').toBeVisible()
+      for (const [what, part] of [['label', c.label(row)], ['amount', c.amount(row)]] as const) {
+        await expect(part, `the row's ${what} is visible`).toBeVisible()
+        expect(((await part.boundingBox())?.width ?? 0) > 0, `the row's ${what} has a width`).toBe(true)
+        await expect(part, `the row's ${what} has text`).toHaveText(/\S/)
+      }
+      await expect(c.amount(row), 'the amount shows a peso figure').toHaveText(/₱\s?[\d,]+\.\d{2}/)
       await shot(page, `fallback-${c.name}`)
     })
   }
@@ -160,7 +167,9 @@ test.describe('One face: IBM Plex Sans (STU-676)', () => {
     await expect.soft(wordmark).toHaveCSS('font-size', '18px')
     await expect.soft(wordmark).toHaveCSS('font-weight', '400')
     await expect.soft(wordmark).toHaveCSS('font-family', /^"IBM Plex Sans"/)
-    await shot(page, 'wordmark')
+    // The wordmark sits in the fixed nav bar, so a viewport screenshot, saved under shot()'s naming.
+    const info = test.info()
+    await page.screenshot({ path: path.join(info.project.outputDir, 'screens', `font-wordmark-${info.project.name}.png`), animations: 'disabled' })
   })
 
   test('wordmark and label styling stays unchanged (search label)', async ({ page }) => {
