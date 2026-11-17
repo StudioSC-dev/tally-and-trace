@@ -160,10 +160,22 @@ test.describe('dialog backdrop (STU-644)', () => {
     for (const c of OTHERS) {
       await test.step(c.name, async () => {
         const overlay = await openDialog(page, c)
-        const m = await measure(page, overlay)
-        expect.soft(Math.abs(m.rect.y), `${c.name}: overlay y`).toBeLessThanOrEqual(TOL)
-        expect.soft(Math.abs(m.rect.w - m.viewport.w), `${c.name}: overlay width`).toBeLessThanOrEqual(TOL)
-        expect.soft(Math.abs(m.rect.h - m.viewport.h), `${c.name}: overlay height`).toBeLessThanOrEqual(TOL)
+        // The page content fades in under a transform for 0.3s, and a transformed ancestor makes the fixed
+        // overlay sit inside it, so the first measure can be mid-animation. Wait for the settled geometry.
+        const soft = expect.configure({ soft: true })
+        await soft.poll(async () => Math.abs((await measure(page, overlay)).rect.y), { message: `${c.name}: overlay y` }).toBeLessThanOrEqual(TOL)
+        await soft
+          .poll(async () => {
+            const m = await measure(page, overlay)
+            return Math.abs(m.rect.w - m.viewport.w)
+          }, { message: `${c.name}: overlay width` })
+          .toBeLessThanOrEqual(TOL)
+        await soft
+          .poll(async () => {
+            const m = await measure(page, overlay)
+            return Math.abs(m.rect.h - m.viewport.h)
+          }, { message: `${c.name}: overlay height` })
+          .toBeLessThanOrEqual(TOL)
         await shot(page, `${c.name}-backdrop`)
       })
     }
@@ -171,11 +183,17 @@ test.describe('dialog backdrop (STU-644)', () => {
 
   test('top nav is covered by the backdrop', async ({ page }) => {
     const overlay = await openDialog(page, ACCOUNT)
-    const covered = await overlay.evaluate((el) => {
-      const top = document.elementFromPoint(Math.round(window.innerWidth / 2), 0)
-      return !!top && el.contains(top)
-    })
-    expect(covered, 'element at the top-centre point is the overlay or inside it').toBe(true)
+    // Poll: during the page's 0.3s fade-in the overlay can still sit below the top edge.
+    await expect
+      .poll(
+        () =>
+          overlay.evaluate((el) => {
+            const top = document.elementFromPoint(Math.round(window.innerWidth / 2), 0)
+            return !!top && el.contains(top)
+          }),
+        { message: 'element at the top-centre point is the overlay or inside it' },
+      )
+      .toBe(true)
     expect(fs.existsSync(await shot(page, 'top-nav-covered'))).toBe(true)
   })
 })
