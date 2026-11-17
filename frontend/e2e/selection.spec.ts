@@ -101,6 +101,8 @@ async function settle(page: Page): Promise<void> {
   await page.waitForLoadState('networkidle')
   // A pointer left on a control would show its hover colour; park it in the corner.
   await page.mouse.move(0, 0)
+  // Read colours at rest: a fill sampled mid-transition is neither the old nor the new one.
+  await page.evaluate(() => Promise.allSettled(document.getAnimations().filter((a) => a instanceof CSSTransition).map((a) => a.finished)))
 }
 
 async function openPage(page: Page, route: string, heading: Name, data: HouseholdData = household, extra: Parameters<typeof mockApi>[1] = []): Promise<ApiMock> {
