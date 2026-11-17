@@ -37,6 +37,7 @@ import type {
   InstallmentPlans,
   PaginatedResponse,
   Payable,
+  RecurrenceFrequency,
   QuickBalances,
   ReceivedHouseholdShare,
   ReceivedShare,
@@ -50,7 +51,7 @@ import type {
   UpcomingOccurrences,
   User,
 } from '@tally-trace/shared'
-import { apiRoute, mockApi } from '../mockApi'
+import { apiRoute, mockApi, queryRoute } from '../mockApi'
 import type { ApiMock, ApiRoute } from '../mockApi'
 import { signedIn } from '../signedIn'
 
@@ -379,10 +380,16 @@ const overduePayable = payable({
   can_mark_paid: true,
   kind: 'cash',
 })
+/** The closed 20 February statement's amount, due 13 March (`cardStatement` below). */
+const CLOSED_STATEMENT = 12480.55
+/**
+ * The 20 March cycle, due 9 April: the card's balance less the closed statement it already includes, so the two
+ * payments never count the same charge twice.
+ */
 const statementPayable = payable({
   due_date: '2026-04-09',
   name: 'HSBC Red Mastercard statement',
-  amount: 18742.3,
+  amount: Math.round((-card.balance - CLOSED_STATEMENT) * 100) / 100,
   source: 'statement',
   source_id: card.id,
   statement_close: '2026-03-20',
@@ -403,7 +410,7 @@ const cardStatement: CardStatementDue = {
   currency: 'PHP',
   close_date: '2026-02-20',
   due_date: '2026-03-13',
-  clear_through: 12480.55,
+  clear_through: CLOSED_STATEMENT,
   statement_count: 1,
   oldest_due: '2026-03-13',
   overdue: false,
@@ -472,6 +479,112 @@ const quickBalancesFor = (accounts: Account[]): QuickBalances => {
 const round2 = (n: number): number => Math.round(n * 100) / 100
 const fx = { rates: [], unconverted_count: 0 }
 
+/** `_monthly_equivalent` in the API's forecast service: any cadence as a monthly amount. */
+const PER_MONTH: Partial<Record<RecurrenceFrequency, number>> = {
+  weekly: 52 / 12,
+  biweekly: 26 / 12,
+  semi_monthly: 2,
+  monthly: 1,
+  quarterly: 1 / 3,
+  semi_annual: 1 / 6,
+  annual: 1 / 12,
+}
+const monthlyOf = (amount: number, cadence: RecurrenceFrequency): number => amount * (PER_MONTH[cadence] ?? 1)
+
+/**
+ * The snapshot's monthly figures, as the API's `_disposable_buckets` derives them from recurring entries: every
+ * active entry the user can read counts, the joint account included (Mara holds a direct role on it). Income is
+ * income; an expense counts unless it is paid from a spending wallet (that money was counted when the wallet was
+ * topped up); income into a wallet is a top-up, so it is an expense as well. A transfer into a wallet from a
+ * non-wallet is an expense, and one back out of a wallet is a negative one. Every account here is in PHP.
+ */
+function monthlyFigures(entries: BudgetEntry[], accounts: Account[]): { monthlyIncome: number; monthlyExpenses: number } {
+  const wallets = new Set(accounts.filter((a) => a.is_spending_wallet).map((a) => a.id))
+  const isWallet = (id: number | null | undefined): boolean => id != null && wallets.has(id)
+  let income = 0
+  let expenses = 0
+  for (const e of entries) {
+    if (e.view === 'limited' || !e.is_active || (e.end_mode === 'on_date' && e.end_date && e.end_date.slice(0, 10) < HOUSEHOLD_TODAY)) continue
+    const amount = monthlyOf(e.amount, e.cadence)
+    if (e.transfer_to_account_id != null) {
+      if (isWallet(e.transfer_to_account_id) && !isWallet(e.account_id)) expenses += amount
+      else if (isWallet(e.account_id) && !isWallet(e.transfer_to_account_id)) expenses -= amount
+    } else if (e.entry_type === 'income') {
+      income += amount
+      if (isWallet(e.account_id)) expenses += amount
+    } else if (!isWallet(e.account_id)) {
+      expenses += amount
+    }
+  }
+  return { monthlyIncome: round2(income), monthlyExpenses: round2(expenses) }
+}
+
+/**
+ * The payroll account's forecast events from `HOUSEHOLD_TODAY` to 11 April, in date order, with running balances:
+ * - each occurrence of an entry paid from or into the payroll account;
+ * - each card statement payment, as cash leaving the card's funding account on its due day: the closed statement
+ *   (`cardStatements`) and the next cycle's statement payable (`payables` with source `statement`).
+ *
+ * Card spending reaches cash only through a statement (`is_projection_cash`), so the card's own occurrences (the
+ * subscriptions) are never cash events: the statements carry them. Nothing is counted twice.
+ */
+function timelineEvents(parts: Parts, accounts: Account[], opening: number): CashflowTimelineEvent[] {
+  const nameOf = (id: number): string => accounts.find((a) => a.id === id)?.name ?? ''
+  const leg = (accountId: number, amount: number): CashflowTimelineEvent['accounts'] => [
+    { account_id: accountId, account_name: nameOf(accountId), amount, currency: 'PHP' },
+  ]
+  const fundedFrom = (cardId: number): number | null => accounts.find((a) => a.id === cardId)?.payment_account_id ?? null
+  type Event = Omit<CashflowTimelineEvent, 'running_balance'>
+  const entryEvents: Event[] = parts.occurrences
+    .filter((o) => o.account_name === payroll.name)
+    .map((o) => {
+      const amount = o.entry_type === 'income' ? o.amount : -o.amount
+      return {
+        date: o.occurrence_date,
+        name: o.name,
+        amount,
+        type: o.entry_type,
+        source: 'budget_entry',
+        source_id: o.entry_id,
+        event_id: `be-${o.entry_id}-${o.occurrence_date}`,
+        currency: 'PHP',
+        accounts: leg(payroll.id, amount),
+      }
+    })
+  const statements = [
+    ...parts.cardStatements.map((st) => ({ cardId: st.account_id, date: st.due_date, name: `${st.name} statement`, amount: st.clear_through })),
+    ...parts.payables
+      .filter((p) => p.source === 'statement' && p.source_id != null)
+      .map((p) => ({ cardId: p.source_id ?? 0, date: p.due_date, name: p.name, amount: p.amount })),
+  ]
+  const statementEvents: Event[] = statements.flatMap((st) => {
+    const from = fundedFrom(st.cardId)
+    if (from !== payroll.id) return []
+    return [
+      {
+        date: st.date,
+        name: st.name,
+        amount: -st.amount,
+        type: 'expense',
+        source: 'statement',
+        source_id: st.cardId,
+        event_id: `st-${st.cardId}-${st.date}`,
+        currency: 'PHP',
+        accounts: leg(from, -st.amount),
+      },
+    ]
+  })
+  const unsorted = [...entryEvents, ...statementEvents]
+  let running = opening
+  return unsorted
+    .filter((e) => e.date > HOUSEHOLD_TODAY && e.date <= '2026-04-11')
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((e) => {
+      running = round2(running + e.amount)
+      return { ...e, running_balance: running }
+    })
+}
+
 interface Parts {
   accounts: Account[]
   transactions: Transaction[]
@@ -520,29 +633,10 @@ function build(parts: Parts): HouseholdData {
     household_private: [],
   }
 
-  const monthlyIncome = 82500
-  const monthlyExpenses = round2(
-    parts.entries.reduce((sum, e) => (e.view !== 'limited' && e.entry_type === 'expense' && e.account_id !== joint.id ? sum + e.amount : sum), 0),
-  )
+  const { monthlyIncome, monthlyExpenses } = monthlyFigures(parts.entries, accounts)
   const opening = accounts.find((a) => a.id === payroll.id)?.balance ?? 0
-  let running = opening
-  const events: CashflowTimelineEvent[] = parts.occurrences
-    .filter((o) => o.account_name === payroll.name)
-    .map((o) => {
-      const amount = o.entry_type === 'income' ? o.amount : -o.amount
-      running = round2(running + amount)
-      return {
-        date: o.occurrence_date,
-        name: o.name,
-        amount,
-        type: o.entry_type,
-        source: 'budget_entry',
-        source_id: o.entry_id,
-        event_id: `be-${o.entry_id}-${o.occurrence_date}`,
-        running_balance: running,
-        currency: 'PHP',
-      }
-    })
+  const events = timelineEvents(parts, accounts, opening)
+  const running = events.length ? events[events.length - 1].running_balance : opening
   const lowest = Math.min(opening, ...events.map((e) => e.running_balance))
   const trough = events.find((e) => e.running_balance === lowest)?.date ?? HOUSEHOLD_TODAY
   const byAccount: CashflowTimeline['by_account'] = [
@@ -711,6 +805,45 @@ export const emptyHousehold: HouseholdData = build({
 
 const pageOf = <T>(items: T[]): PaginatedResponse<T> => ({ items, total: items.length, has_more: false })
 
+/** Throws on a query parameter outside `known`, so the fake never ignores a filter a page sends. */
+function only(query: URLSearchParams, known: string[]): void {
+  const unknown = [...query.keys()].filter((k) => !known.includes(k))
+  if (unknown.length) throw new Error(`unhandled query parameter(s): ${unknown.join(', ')}`)
+}
+
+/** One page of `items` for `limit` and `offset`; `total` counts every match, so the page's pagination agrees. */
+function pageFor<T>(items: T[], query: URLSearchParams): PaginatedResponse<T> {
+  const offset = Number(query.get('offset') ?? 0)
+  const limit = Number(query.get('limit') ?? items.length)
+  const slice = items.slice(offset, offset + limit)
+  return { items: slice, total: items.length, has_more: offset + slice.length < items.length }
+}
+
+/**
+ * `GET /transactions/` as the pages ask it: `start_date` and `end_date` (inclusive, by Manila day), `order`
+ * (newest first unless `asc`), `limit` and `offset`.
+ */
+export function transactionsFor(data: HouseholdData, query: URLSearchParams): PaginatedResponse<Transaction> {
+  only(query, ['start_date', 'end_date', 'order', 'limit', 'offset'])
+  const dayOf = (t: Transaction): string => (t.view === 'limited' ? t.date : t.transaction_date).slice(0, 10)
+  const start = query.get('start_date')?.slice(0, 10)
+  const end = query.get('end_date')?.slice(0, 10)
+  const matches = data.transactions.filter((t) => (!start || dayOf(t) >= start) && (!end || dayOf(t) <= end))
+  const ordered = query.get('order') === 'asc' ? [...matches].reverse() : matches
+  return pageFor(ordered, query)
+}
+
+/** `GET /budget-entries/` as the pages ask it: `entry_type`, `is_active`, `limit` and `offset`. */
+export function budgetEntriesFor(data: HouseholdData, query: URLSearchParams): PaginatedResponse<BudgetEntry> {
+  only(query, ['entry_type', 'is_active', 'limit', 'offset'])
+  const kind = query.get('entry_type')
+  const active = query.get('is_active')
+  const matches = data.entries.filter(
+    (e) => (!kind || e.entry_type === kind) && (active === null || (e.view === 'limited' ? true : String(e.is_active) === active)),
+  )
+  return pageFor(matches, query)
+}
+
 /** Every call the dashboard, Transactions and Allocations make on load, answered from `data`. */
 export const householdRoutes = (data: HouseholdData = household): ApiRoute[] => [
   apiRoute<PaginatedResponse<Account>>('GET', '/accounts/', pageOf(data.accounts)),
@@ -721,14 +854,14 @@ export const householdRoutes = (data: HouseholdData = household): ApiRoute[] => 
   apiRoute<Tag[]>('GET', '/tags/', data.tags),
   apiRoute<TransactionSummary>('GET', '/transactions/summary/period', data.summary),
   apiRoute<Category[]>('GET', '/categories/', data.categories),
-  apiRoute<PaginatedResponse<BudgetEntry>>('GET', '/budget-entries/', pageOf(data.entries)),
+  queryRoute<PaginatedResponse<BudgetEntry>>('GET', '/budget-entries/', (q) => budgetEntriesFor(data, q)),
   apiRoute<InstallmentPlans>('GET', '/budget-entries/installment-plans', { items: [], auto_post_scheduled: true, today: data.today }),
   apiRoute<UpcomingOccurrences>('GET', '/budget-entries/upcoming-occurrences', {
     items: data.occurrences,
     total: data.occurrences.length,
     auto_post_scheduled: true,
   }),
-  apiRoute<PaginatedResponse<Transaction>>('GET', '/transactions/', pageOf(data.transactions)),
+  queryRoute<PaginatedResponse<Transaction>>('GET', '/transactions/', (q) => transactionsFor(data, q)),
   apiRoute<{ items: DescriptionSuggestion[] }>('GET', '/transactions/description-suggestions', { items: [] }),
   apiRoute<DashboardDue>('GET', '/dashboard/due', data.due),
   apiRoute<{ items: CardCredit[] }>('GET', '/cards/credit', { items: [] }),
@@ -740,17 +873,10 @@ export const householdRoutes = (data: HouseholdData = household): ApiRoute[] => 
 
 /**
  * Signs in as the household's user, freezes the clock on `HOUSEHOLD_NOW` and fakes the API
- * with `householdRoutes(data)`. Allocations asks `GET /budget-entries/` once per entry type,
- * so that one path answers with the entries of the asked type.
+ * with `householdRoutes(data)`.
  */
 export async function mockHousehold(page: Page, data: HouseholdData = household): Promise<ApiMock> {
   await page.clock.setFixedTime(HOUSEHOLD_NOW)
   await signedIn(page, data.user)
-  const api = await mockApi(page, householdRoutes(data))
-  await page.route(/\/api\/v1\/budget-entries\/(\?.*)?$/, async (route) => {
-    const kind = new URL(route.request().url()).searchParams.get('entry_type')
-    const items = kind ? data.entries.filter((e) => e.entry_type === kind) : data.entries
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(pageOf(items)) })
-  })
-  return api
+  return mockApi(page, householdRoutes(data))
 }
