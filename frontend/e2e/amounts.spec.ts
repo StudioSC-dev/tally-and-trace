@@ -27,6 +27,8 @@ const THEMES = [
 const CARD_ID = 15
 /** The card's balance in the fixture, as the page prints its magnitude. */
 const CARD_OWED = '18,742.30'
+/** The two places an amount is read. */
+const LISTS = ['transactions', 'recurring'] as const
 
 const colourOf = (el: Locator): Promise<string> => el.evaluate((e) => getComputedStyle(e).color)
 const coloursOf = (els: Locator): Promise<string[]> => els.evaluateAll((all) => all.map((e) => getComputedStyle(e).color))
@@ -69,56 +71,48 @@ async function viewportShot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: path.join(info.project.outputDir, 'screens', `${spec}-${name}-${info.project.name}.png`), animations: 'disabled' })
 }
 
-/** Every visible element inside `main` that is painted in the red pencil. */
+/**
+ * Every visible element inside `main` or a modal that is painted in the red pencil. A Delete button is the design
+ * system's red-pencil outline variant (a destructive action, not an amount), so it is not counted.
+ */
 const redCount = (page: Page): Promise<number> =>
   page.evaluate(
     (red) =>
-      [...document.querySelectorAll('main *')].filter((e) => {
+      [...document.querySelectorAll('main *, .modal-backdrop *')].filter((e) => {
         const box = e.getBoundingClientRect()
-        return getComputedStyle(e).color === red && box.width > 0 && box.height > 0
+        const inDelete = (e.closest('button')?.textContent ?? '').trim().startsWith('Delete')
+        return getComputedStyle(e).color === red && box.width > 0 && box.height > 0 && !inDelete
       }).length,
     LIGHT.danger,
   )
 
 test.describe('amount colours (STU-680)', () => {
-  test('expenses are ink', async ({ page }) => {
-    const list = await openTransactions(page)
-    const spent = amountOf(expenseRows(list))
-    const spentCount = await spent.count()
-    expect(spentCount, 'Transactions lists expense rows').toBeGreaterThan(5)
-    expect(await coloursOf(spent), 'every Transactions expense amount is ink').toEqual(new Array<string>(spentCount).fill(LIGHT.ink))
-    await shot(page, 'expenses-transactions')
+  for (const surface of LISTS) {
+    test(`expenses are ink: ${surface}`, async ({ page }) => {
+      const scope = surface === 'transactions' ? await openTransactions(page) : await openRecurring(page)
+      const spent = amountOf(expenseRows(scope))
+      const count = await spent.count()
+      expect(count, `${surface} lists expense rows`).toBeGreaterThan(3)
+      expect(await coloursOf(spent), `every ${surface} expense amount is ink`).toEqual(new Array<string>(count).fill(LIGHT.ink))
+      await shot(page, `expenses-${surface}`)
+    })
 
-    const recurring = await openRecurring(page)
-    const entries = amountOf(expenseRows(recurring))
-    const entryCount = await entries.count()
-    expect(entryCount, 'Allocations lists recurring expense entries').toBeGreaterThan(3)
-    expect(await coloursOf(entries), 'every recurring expense amount is ink').toEqual(new Array<string>(entryCount).fill(LIGHT.ink))
-    await shot(page, 'expenses-recurring')
-  })
-
-  test('income is green with a sign', async ({ page }) => {
-    const list = await openTransactions(page)
-    const earned = amountOf(incomeRows(list))
-    const earnedCount = await earned.count()
-    expect(earnedCount, 'Transactions lists income rows').toBeGreaterThan(1)
-    expect(await coloursOf(earned), 'every Transactions income amount is green').toEqual(new Array<string>(earnedCount).fill(LIGHT.ok))
-    expect((await textsOf(earned)).filter((t) => !t.startsWith('+')), 'every Transactions income amount starts with +').toEqual([])
-    await shot(page, 'income-transactions')
-
-    const recurring = await openRecurring(page)
-    const entries = amountOf(incomeRows(recurring))
-    const entryCount = await entries.count()
-    expect(entryCount, 'Allocations lists recurring income entries').toBeGreaterThan(0)
-    expect(await coloursOf(entries), 'every recurring income amount is green').toEqual(new Array<string>(entryCount).fill(LIGHT.ok))
-    expect((await textsOf(entries)).filter((t) => !t.startsWith('+')), 'every recurring income amount starts with +').toEqual([])
-    await shot(page, 'income-recurring')
-  })
+    test(`income is green with a sign: ${surface}`, async ({ page }) => {
+      const scope = surface === 'transactions' ? await openTransactions(page) : await openRecurring(page)
+      const earned = amountOf(incomeRows(scope))
+      const count = await earned.count()
+      expect(count, `${surface} lists income rows`).toBeGreaterThan(0)
+      expect(await coloursOf(earned), `every ${surface} income amount is green`).toEqual(new Array<string>(count).fill(LIGHT.ok))
+      expect((await textsOf(earned)).filter((t) => !t.startsWith('+')), `every ${surface} income amount starts with +`).toEqual([])
+      await shot(page, `income-${surface}`)
+    })
+  }
 
   for (const [name, url] of [
     ['dashboard', '/'],
     ['Transactions', '/transactions'],
     ['Allocations', '/allocations'],
+    ['Budgets', '/allocations?tab=budgets'],
   ] as const) {
     test(`red means overdue, negative or failed only: nothing red on a calm ${name}`, async ({ page }) => {
       await open(page, url, calmHousehold)
@@ -129,14 +123,39 @@ test.describe('amount colours (STU-680)', () => {
     })
   }
 
+  test('red means overdue, negative or failed only: nothing red in a calm budget modal', async ({ page }) => {
+    await open(page, '/allocations?tab=budgets', calmHousehold)
+    const budget = page.locator('article').filter({ hasText: 'Groceries' }).first()
+    await expect(budget).toBeVisible()
+    await expect(budget.getByText('Spent this period')).toBeVisible()
+    expect(await colourOf(budget.getByText('Spent this period').locator('xpath=following-sibling::span')), 'Spent this period on the card').toBe(LIGHT.ink)
+    await budget.click()
+    const dialog = page.locator('.modal-backdrop')
+    await expect(dialog.getByText(/^Spent/)).toBeVisible()
+    expect(await redCount(page), 'elements painted in the red pencil in a calm budget modal').toBe(0)
+    await viewportShot(page, 'calm-budget-modal')
+  })
+
+  test('red means overdue, negative or failed only: nothing red in a calm transfer with a fee', async ({ page }) => {
+    const list = await openTransactions(page, calmHousehold)
+    await list.locator('article[data-transaction-id]').filter({ hasText: 'Move to emergency fund' }).click()
+    const fee = page.locator('.modal-backdrop').getByText('Transfer Fee')
+    await expect(fee).toBeVisible()
+    expect(await colourOf(fee.locator('xpath=following-sibling::dd')), 'the transfer fee amount').toBe(LIGHT.ink)
+    expect(await redCount(page), 'elements painted in the red pencil in a calm transfer').toBe(0)
+    await viewportShot(page, 'calm-transfer')
+  })
+
   test('red means overdue, negative or failed only: the overdue payable is red', async ({ page }) => {
     await open(page, '/')
     const overdue = page.locator('[data-testid="payable-status"][aria-label="Overdue"]').first()
     await expect(overdue).toBeVisible()
     expect(await colourOf(overdue), 'the dashboard overdue payable badge').toBe(LIGHT.danger)
     await shot(page, 'overdue-dashboard')
+  })
 
-    await page.goto('/transactions')
+  test('red means overdue, negative or failed only: the overdue label on Transactions is red', async ({ page }) => {
+    await open(page, '/transactions')
     const due = page.getByTestId('due-overdue').first()
     await expect(due).toBeVisible()
     expect(await colourOf(due), 'the Transactions overdue label').toBe(LIGHT.danger)
@@ -170,8 +189,11 @@ interface RowBox {
   id: number
   top: number
   height: number
-  amountRight: number
-  amountTop: number
+  /** Right edge of the amount's rendered text (a DOM Range), not of its box. */
+  textRight: number
+  /** Top of the amount's rendered text inside its row. */
+  textTop: number
+  align: string
 }
 
 async function rowBoxes(page: Page, list: Locator): Promise<RowBox[]> {
@@ -182,13 +204,17 @@ async function rowBoxes(page: Page, list: Locator): Promise<RowBox[]> {
     const left = main.getBoundingClientRect().left
     return rows.map((row) => {
       const r = row.getBoundingClientRect()
-      const a = row.querySelector<HTMLElement>('p.text-lg.font-bold')?.getBoundingClientRect()
+      const el = row.querySelector<HTMLElement>('p.text-lg.font-bold')
+      const range = document.createRange()
+      if (el) range.selectNodeContents(el)
+      const t = range.getBoundingClientRect()
       return {
         id: Number(row.dataset.transactionId),
         top: Math.round(r.top - first.top),
         height: Math.round(r.height),
-        amountRight: Math.round((a?.right ?? 0) - left),
-        amountTop: Math.round((a?.top ?? 0) - r.top),
+        textRight: Math.round(t.right - left),
+        textTop: Math.round(t.top - r.top),
+        align: el ? getComputedStyle(el).textAlign : '',
       }
     })
   })
@@ -209,28 +235,35 @@ test('amount styling preserves transaction layout', async ({ page }, testInfo) =
   const base = (JSON.parse(fs.readFileSync(BASELINE, 'utf8')) as Record<string, RowBox[]>)[project]
   expect(base?.length, 'the baseline has rows for this project').toBeGreaterThan(5)
   expect(boxes.map((b) => b.id), 'row order').toEqual(base.map((b) => b.id))
-  const near = (key: keyof RowBox): number[] => boxes.map((b, i) => b[key] - base[i][key])
+  expect(boxes.map((b) => b.align), 'the amount keeps its text-align').toEqual(base.map((b) => b.align))
+  const near = (key: 'top' | 'height' | 'textRight' | 'textTop'): number[] => boxes.map((b, i) => b[key] - base[i][key])
   expect(Math.max(...near('top').map(Math.abs)), 'row spacing: largest shift of a row from its base position').toBeLessThanOrEqual(1)
   expect(Math.max(...near('height').map(Math.abs)), 'row height: largest change from base').toBeLessThanOrEqual(1)
-  expect(Math.max(...near('amountRight').map(Math.abs)), 'amount column alignment: largest shift of the right edge').toBeLessThanOrEqual(1)
-  expect(Math.max(...near('amountTop').map(Math.abs)), 'amount position inside its row: largest shift').toBeLessThanOrEqual(1)
+  expect(Math.max(...near('textRight').map(Math.abs)), 'amount column alignment: largest shift of the text right edge').toBeLessThanOrEqual(1)
+  expect(Math.max(...near('textTop').map(Math.abs)), 'amount text position inside its row: largest shift').toBeLessThanOrEqual(1)
 })
 
-test('amount colours hold in dark', async ({ page }) => {
-  const list = await openTransactions(page)
-  await toggleDark(page)
-  expect(await colourOf(amountOf(expenseRows(list)).first()), 'an expense amount in dark').toBe(DARK.ink)
-  expect(await colourOf(amountOf(incomeRows(list)).first()), 'an income amount in dark').toBe(DARK.ok)
-  await shot(page, 'dark-transactions')
-  await page.goto('/accounts')
-  const owed = page.locator('.amount-negative').filter({ hasText: CARD_OWED })
-  await expect(owed).toBeVisible()
-  expect(await colourOf(owed), 'a negative balance in dark').toBe(DARK.danger)
-  await shot(page, 'dark-accounts')
-})
+for (const surface of ['transactions', 'accounts'] as const) {
+  test(`amount colours hold in dark: ${surface}`, async ({ page }) => {
+    if (surface === 'transactions') {
+      const list = await openTransactions(page)
+      await toggleDark(page)
+      expect(await colourOf(amountOf(expenseRows(list)).first()), 'an expense amount in dark').toBe(DARK.ink)
+      expect(await colourOf(amountOf(incomeRows(list)).first()), 'an income amount in dark').toBe(DARK.ok)
+    } else {
+      await open(page, '/accounts')
+      await toggleDark(page)
+      const owed = page.locator('.amount-negative').filter({ hasText: CARD_OWED })
+      await expect(owed).toBeVisible()
+      expect(await colourOf(owed), 'a negative balance in dark').toBe(DARK.danger)
+    }
+    await shot(page, `dark-${surface}`)
+  })
+}
 
 test.describe('amount classes', () => {
-  test('amount colour is a class, not a selector shim', async ({ page }) => {
+  test('amount colour is a class, not a selector shim: source', async ({ page }) => {
+    await page.goto('about:blank')
     const css = readFrontend('src/assets/index.css')
     expect(css.includes('article .text-lg.font-bold.text-danger'), 'the stylesheet has no render-shim selector').toBe(false)
     for (const cls of ['amount-out', 'amount-in', 'amount-negative']) {
@@ -238,8 +271,7 @@ test.describe('amount classes', () => {
     }
     const transactions = readFrontend('src/routes/transactions.tsx')
     expect(/amountClass\s*=[^;]{0,400}text-danger/.test(transactions), 'transactions.tsx has no amountClass choosing text-danger').toBe(false)
-    expect(/(debit|expense)[^\n]{0,40}text-danger/.test(transactions), 'transactions.tsx colours no debit text-danger').toBe(false)
-    // Every call site in the ticket's Scope renders through the shared helper.
+    // Every call site in the ticket's Scope renders through the shared helper, and none picks text-ok or text-danger for an amount itself.
     const sites = [
       'src/routes/transactions.tsx',
       'src/routes/allocations.tsx',
@@ -247,15 +279,26 @@ test.describe('amount classes', () => {
       'src/routes/accounts.tsx',
       'src/routes/accounts_.$accountId.tsx',
       'src/components/AccountTransactionList.tsx',
+      'src/components/transactions/UpcomingOccurrenceRow.tsx',
     ]
+    const lines = (source: string, pattern: RegExp): string[] => source.split('\n').filter((l) => pattern.test(l))
     for (const site of sites) {
       const source = readFrontend(site)
       expect(source, `${site} imports the shared amount helper`).toMatch(/from '(\.\.\/)+utils\/amount'/)
-      expect(source, `${site} picks its amount colour with amountClass(`).toMatch(/amountClass\(/)
+      expect(source, `${site} picks its amount colour through the helper`).toMatch(/(amountClass|balanceClass)\(/)
+      expect(lines(source, /text-danger/).filter((l) => /usedAmount|current_amount|transferFeeLabel|amountLabel|amountClass|expenses|entry_type|transaction_type|direction|formatAmount|formatBalance/.test(l)), `${site}: no amount is coloured text-danger directly`).toEqual([])
+      expect(lines(source, /text-ok/).filter((l) => /amountLabel|entry_type|transaction_type|direction|formatAmount|formatBalance/.test(l) || (site !== 'src/routes/index.tsx' && /balance/i.test(l))), `${site}: no amount or balance is coloured text-ok directly`).toEqual([])
+    }
+    for (const site of ['src/routes/accounts.tsx', 'src/routes/accounts_.$accountId.tsx']) {
+      const balances = lines(readFrontend(site), /\bbalance\b[^\n]*(text-ok|text-danger)|(text-ok|text-danger)[^\n]*\bbalance\b/)
+      expect(balances, `${site}: balances are classed through balanceClass`).toEqual([])
     }
     const helper = readFrontend('src/utils/amount.ts')
     expect(helper, 'the helper maps out, in and negative to the three classes').toMatch(/'amount-out'[\s\S]*'amount-in'[\s\S]*'amount-negative'/)
+    await shot(page, 'classes-source')
+  })
 
+  test('amount colour is a class, not a selector shim: rendered', async ({ page }) => {
     const list = await openTransactions(page)
     const classes = await amountOf(list.locator('article')).evaluateAll((all) => all.map((e) => [...e.classList].filter((c) => c.startsWith('amount-')).join(' ')))
     expect(classes.filter((c) => c === ''), 'every Transactions amount carries a semantic class').toEqual([])
@@ -264,47 +307,62 @@ test.describe('amount classes', () => {
   })
 
   for (const [theme, want] of THEMES) {
-    test(`dashboard and card expenses are ink: ${theme}`, async ({ page }) => {
-      await mockHousehold(page)
-      await addRoutes(page, accountDetailRoutes(household, CARD_ID))
-      await page.goto('/')
+    test(`dashboard and card expenses are ink: dashboard, ${theme}`, async ({ page }) => {
+      await open(page, '/')
       if (theme === 'dark') await toggleDark(page)
       const total = page.getByTestId('period-expenses')
       await expect(total).toBeVisible()
       await expect(total).toHaveClass(/amount-out/)
       expect(await colourOf(total), `Total expenses in ${theme}`).toBe(want.ink)
       await shot(page, `expenses-dashboard-${theme}`)
+    })
 
+    test(`dashboard and card expenses are ink: card, ${theme}`, async ({ page }) => {
+      await mockHousehold(page)
+      await addRoutes(page, accountDetailRoutes(household, CARD_ID))
       await page.goto(`/accounts/${CARD_ID}`)
+      if (theme === 'dark') await toggleDark(page)
       const debits = page.locator('[data-testid="account-transaction"][data-direction="out"]').getByTestId('account-transaction-amount')
       await expect(debits.first()).toBeVisible()
       const count = await debits.count()
       expect(count, 'the card lists debits').toBeGreaterThan(3)
       expect(await coloursOf(debits), `every card debit in ${theme}`).toEqual(new Array<string>(count).fill(want.ink))
-      expect((await debits.evaluateAll((all) => all.filter((e) => !e.classList.contains('amount-out')).length)), 'every card debit uses amount-out').toBe(0)
+      expect(await debits.evaluateAll((all) => all.filter((e) => !e.classList.contains('amount-out')).length), 'every card debit uses amount-out').toBe(0)
       await shot(page, `expenses-card-${theme}`)
     })
-  }
 
-  for (const [theme, want] of THEMES) {
-    test(`negative balances are signed danger amounts: ${theme}`, async ({ page }) => {
-      await mockHousehold(page)
-      await addRoutes(page, accountDetailRoutes(household, CARD_ID))
-      await page.goto('/accounts')
+    test(`negative balances are signed danger amounts: accounts, ${theme}`, async ({ page }) => {
+      await open(page, '/accounts')
       if (theme === 'dark') await toggleDark(page)
       const owed = page.locator('.amount-negative').filter({ hasText: CARD_OWED })
       await expect(owed).toBeVisible()
       expect((await owed.textContent())?.trim(), 'the card balance on Accounts has a leading minus').toMatch(/^−/)
       expect(await colourOf(owed), `the card balance on Accounts in ${theme}`).toBe(want.danger)
       await shot(page, `negative-accounts-${theme}`)
+    })
 
+    test(`negative balances are signed danger amounts: card, ${theme}`, async ({ page }) => {
+      await mockHousehold(page)
+      await addRoutes(page, accountDetailRoutes(household, CARD_ID))
       await page.goto(`/accounts/${CARD_ID}`)
+      if (theme === 'dark') await toggleDark(page)
       const detail = page.getByTestId('account-detail-balance')
       await expect(detail).toBeVisible()
       await expect(detail).toHaveClass(/amount-negative/)
       expect((await detail.textContent())?.trim(), 'the card panel balance has a leading minus').toMatch(/^−/)
       expect(await colourOf(detail), `the card panel balance in ${theme}`).toBe(want.danger)
       await shot(page, `negative-card-${theme}`)
+    })
+
+    test(`non-negative balances are ink: accounts, ${theme}`, async ({ page }) => {
+      await open(page, '/accounts')
+      if (theme === 'dark') await toggleDark(page)
+      const balances = page.locator('p.text-lg.font-bold.amount-out')
+      await expect(balances.first()).toBeVisible()
+      const count = await balances.count()
+      expect(count, 'Accounts lists non-negative balances').toBeGreaterThan(3)
+      expect(await coloursOf(balances), `every non-negative balance in ${theme}`).toEqual(new Array<string>(count).fill(want.ink))
+      await shot(page, `balances-ink-${theme}`)
     })
   }
 })
