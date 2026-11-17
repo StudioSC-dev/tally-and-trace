@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
 import { formatCurrency } from '../utils/currency'
+import { formatSigned } from '../utils/amount'
 import { estimateText, estimateTitle } from '../utils/fx'
 import { CurrencyControl } from '../components/CurrencyControl'
 import { useSelectedCurrency } from '../hooks/useSelectedCurrency'
@@ -79,7 +80,7 @@ function ForecastPage() {
   }, [scopeName])
 
   const [currency, setCurrency] = useSelectedCurrency(data?.currencies, defaultCurrency)
-  const format = (amount: number) => formatCurrency(amount, currency)
+  const format = (amount: number) => formatSigned(amount, currency)
   const row = data?.by_currency.find((r) => r.currency === currency)
   // Funding shortfalls in every currency, whichever one is selected.
   const fundingShortfalls = data?.by_currency.flatMap((r) => r.account_shortfalls.map((sf) => ({ ...sf, currency: r.currency }))) ?? []

@@ -1,6 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import { useGetForecastTimelineQuery } from '../store/api'
-import { formatCurrency } from '../utils/currency'
+import { formatSigned } from '../utils/amount'
 import type { CurrencyCode } from '../utils/currency'
 import { ShortfallBanner } from './ShortfallBanner'
 import { RunningBalanceChart } from './RunningBalanceChart'
@@ -9,7 +9,7 @@ import { Skeleton } from './Loading'
 /** `currency` is null until the caller knows which currency to read the timeline in. */
 export function CashflowTimelineCard({ tag, currency }: { tag?: number; currency: CurrencyCode | null }) {
   // Only called where `currency` is known; the pending branch renders no figure.
-  const format = (amount: number) => formatCurrency(amount, currency ?? 'PHP')
+  const format = (amount: number) => formatSigned(amount, currency ?? 'PHP')
   const { data, isLoading, error } = useGetForecastTimelineQuery({ days: 60, ...(tag !== undefined ? { tag } : {}) })
 
   const row = currency === null ? undefined : data?.by_currency.find((r) => r.currency === currency)

@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
 import { formatCurrency } from '../utils/currency'
-import { amountClass } from '../utils/amount'
+import { amountClass, formatSigned } from '../utils/amount'
 import type { CurrencyCode } from '../utils/currency'
 import { estimateText, estimateTitle } from '../utils/fx'
 import type { EstimateLabels } from '../utils/fx'
@@ -169,9 +169,9 @@ export function Dashboard() {
 
   // The currency every total below is read in: the default one, or the first the user holds.
   const [currency, setCurrency] = useSelectedCurrency(snapshot?.currencies, defaultCurrency)
-  const format = (amount: number) => formatCurrency(amount, currency)
+  const format = (amount: number) => formatSigned(amount, currency)
   // Budget envelopes are always in the default currency.
-  const formatDefault = (amount: number) => formatCurrency(amount, defaultCurrency)
+  const formatDefault = (amount: number) => formatSigned(amount, defaultCurrency)
 
   const allocations = useMemo(() => allocationsData?.items ?? [], [allocationsData])
   const budgetAllocations = useMemo(
