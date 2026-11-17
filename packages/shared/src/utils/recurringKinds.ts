@@ -69,7 +69,7 @@ export function billingKindChoices(capped: boolean): BillingKindChoice[] {
     ]
   }
   return [
-    { id: 'automatic', label: 'Automatic (Utilities → Bill)', billingKind: undefined },
+    { id: 'automatic', label: 'Automatic (Utilities to bill)', billingKind: undefined },
     { id: 'subscription', label: 'Subscription', billingKind: 'subscription' },
     { id: 'bill', label: 'Bill', billingKind: 'bill' },
   ]

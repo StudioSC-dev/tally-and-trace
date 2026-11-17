@@ -237,6 +237,17 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
     { name: 'allocations', anchor: 'Recurring expense', text: async (p) => (await open(p, '/allocations?tab=recurring'), p.locator('main').innerText()) },
     { name: 'add transaction dialog', anchor: 'Transaction type', text: async (p) => (await openAddTransaction(p)).innerText() },
     { name: 'recurring entry dialog', anchor: 'Add Recurring Entry', text: async (p) => (await openRecurringEntry(p)).innerText() },
+    {
+      // A credit-card account adds the Kind select, whose choices read "Automatic (Utilities to bill)".
+      name: 'recurring entry dialog with a credit card selected',
+      anchor: 'Automatic (Utilities to bill)',
+      text: async (p) => {
+        const dialog = await openRecurringEntry(p)
+        await dialog.locator('select[data-field="account_id"]').selectOption({ label: 'HSBC Red Mastercard' })
+        await expect(dialog.getByTestId('recurring-kind')).toBeVisible()
+        return dialog.innerText()
+      },
+    },
   ]
   for (const surface of chromeSurfaces) {
     test(`no bullet, arrow or em-dash chrome: ${surface.name}`, async ({ page }) => {
