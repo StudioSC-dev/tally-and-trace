@@ -451,7 +451,7 @@ async function whoSees(browser) {
     await page.waitForTimeout(800) // the held request keeps the network from idling
     await checkVisible(`(e) ${who}: the Subscriptions section renders`, section(page, 'subscription'))
     if (who !== 'editor') {
-      const bigSub = (key) => section(page, key).locator('[data-testid="limited-entry"]').filter({ has: page.getByText('Big Sub', { exact: true }) })
+      const bigSub = (key) => section(page, key).locator('[data-row-kind="limited-entry"]').filter({ has: page.getByText('Big Sub', { exact: true }) })
       check(`(e) ${who}: exactly one Big Sub renders under Shared with you`, await bigSub('shared').count(), 1)
       check(`(e) ${who}: and none under Subscriptions`, await bigSub('subscription').count(), 0)
     }

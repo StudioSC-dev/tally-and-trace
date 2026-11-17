@@ -302,6 +302,12 @@ test.describe('tokens-only sweep (STU-691)', () => {
     })
   }
 
+  /** A list row shows the tags that fit and a "+N" for the rest (STU-681); opening each "+N" shows every chip. */
+  async function showAllTags(page: Page): Promise<void> {
+    await expect(page.locator('[data-testid="tag-chip"]').first()).toBeVisible()
+    for (const more of await page.getByTestId('row-tags-more').all()) await more.click()
+  }
+
   // ─── AC5 ────────────────────────────────────────────────────────────────────────────────────
 
   const PALETTE_TAGS: Tag[] = [...legacyTags, upperBlueTag]
@@ -309,6 +315,7 @@ test.describe('tokens-only sweep (STU-691)', () => {
     test(`tag chips stay readable: ${theme}`, async ({ page }) => {
       await open(page, '/transactions', colouredHousehold)
       await setTheme(page, theme)
+      await showAllTags(page)
       const chips = page.locator('[data-testid="tag-chip"]')
       await expect(chips.first()).toBeVisible()
       // The palette itself: every swatch token against the chip's text colour.
@@ -337,6 +344,7 @@ test.describe('tokens-only sweep (STU-691)', () => {
         if (!tag) throw new Error(`no fixture tag for swatch ${l.swatch}`)
         await open(page, '/transactions', colouredHousehold)
         await setTheme(page, theme)
+        await showAllTags(page)
         const chip = page.locator('[data-testid="tag-chip"]', { hasText: tag.name }).first()
         await expect(chip).toBeVisible()
         const background = await swatchRgb(page, l.swatch)

@@ -37,7 +37,7 @@ export function CashflowTimelineCard({ tag, currency }: { tag?: number; currency
             <Skeleton className="h-36 w-full" />
             <div className="grid grid-cols-3 gap-2">
               {[0, 1, 2].map((index) => (
-                <div key={index} className="bg-sunken/50 py-2 flex justify-center">
+                <div key={index} className="py-2 flex justify-center">
                   <Skeleton tone="strong" className="h-8 w-16" />
                 </div>
               ))}
@@ -69,7 +69,7 @@ export function CashflowTimelineCard({ tag, currency }: { tag?: number; currency
                 { label: 'Trough', value: row.lowest_balance, color: row.lowest_balance < 0 ? 'text-danger' : 'text-ink' },
                 { label: 'Close (60d)', value: row.closing_balance, color: row.closing_balance < 0 ? 'text-danger' : 'text-ok' },
               ].map(({ label, value, color }) => (
-                <div key={label} className="bg-sunken/50 py-2">
+                <div key={label} className="py-2">
                   <dt className="text-xs text-muted">{label}</dt>
                   <dd className={`text-sm font-semibold ${color}`}>{format(value)}</dd>
                 </div>

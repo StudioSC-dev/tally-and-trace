@@ -66,7 +66,7 @@ const text = async (locator) => ((await locator.textContent({ timeout: 3000 }).c
 const toasts = (page) => page.locator(tid('save-toast'))
 const toastFor = (page, description) => toasts(page).filter({ hasText: description })
 const rowFor = (page, description) => page.locator('article[data-transaction-id]').filter({ hasText: description })
-const pendingRowFor = (page, description) => page.locator(tid('pending-row')).filter({ hasText: description })
+const pendingRowFor = (page, description) => page.locator('[data-row-kind="pending-row"]').filter({ hasText: description })
 const formOf = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: /^(Create|Update) Transaction$/ }) })
 
 async function shot(page, name) {
