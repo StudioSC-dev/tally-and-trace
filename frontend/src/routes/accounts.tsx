@@ -9,6 +9,7 @@ import { PickerOptGroups } from '../components/PickerOptGroups'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { useAuth } from '../contexts/AuthContext'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
+import { balanceClass, formatBalance } from '../utils/amount'
 import { LoanActions, LoanDueDates, LoanSettlement, LoanSummary } from '../components/LoanPanel'
 import { TagChips } from '../components/TagChips'
 import { TagFilter } from '../components/TagFilter'
@@ -138,8 +139,8 @@ function AccountCard({ account, credit, creditPhase, sharedWith, onOpen }: {
           </div>
 
           <div className="text-right space-y-2">
-            <p className={`text-lg font-bold ${account.balance >= 0 ? 'text-ok' : 'text-danger'}`}>
-              {formatCurrency(account.balance, account.currency as CurrencyCode)}
+            <p className={`text-lg font-bold ${balanceClass(account.balance)}`}>
+              {formatBalance(account.balance, account.currency as CurrencyCode)}
             </p>
             {account.account_type === 'credit' && account.due_date && (
               <p className="text-xs text-muted">Statement due every {account.due_date}th</p>
@@ -902,8 +903,8 @@ export function AccountsPage() {
             <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="border border-line bg-surface/50 p-4">
                 <h3 className="text-sm font-semibold text-body">Balance</h3>
-                <p className={`mt-2 text-lg font-bold ${actionAccount.balance >= 0 ? 'text-ok' : 'text-danger'}`}>
-                  {formatCurrency(actionAccount.balance, actionAccount.currency as CurrencyCode)}
+                <p className={`mt-2 text-lg font-bold ${balanceClass(actionAccount.balance)}`}>
+                  {formatBalance(actionAccount.balance, actionAccount.currency as CurrencyCode)}
                 </p>
                 <p className="mt-2 text-sm text-muted">Currency: {actionAccount.currency}</p>
                 {actionAccount.account_type === 'credit' && actionAccount.credit_limit != null && (

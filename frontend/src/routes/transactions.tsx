@@ -27,6 +27,8 @@ import type { AppDispatch, RootState } from '../store'
 import { newOutboxId, outboxActions } from '../store/outbox'
 import { TRANSACTION_TAGS, transactionDelete } from '../store/outboxForms'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
+import { amountClass, formatAmount } from '../utils/amount'
+import type { AmountKind } from '../utils/amount'
 import { SpendingBreakdownDialog } from '../components/SpendingBreakdownDialog'
 import { TagChips } from '../components/TagChips'
 import { TagFilter } from '../components/TagFilter'
@@ -2459,23 +2461,14 @@ export function TransactionsPage() {
   const getTransactionMeta = useCallback(
     (transaction: Transaction) => {
       const currencyCode = (transaction.currency as CurrencyCode) || fallbackCurrency
-      const amountLabel = formatCurrency(transaction.amount, currencyCode)
+      const amountKind: AmountKind = transaction.transaction_type === 'credit' ? 'in' : 'out'
+      const amountLabel = formatAmount(amountKind, transaction.amount, currencyCode)
       const transferFeeLabel =
         transaction.transfer_fee && transaction.transfer_fee > 0
           ? formatCurrency(transaction.transfer_fee, currencyCode)
           : null
-      const typeBadgeStyles =
-        transaction.transaction_type === 'credit'
-          ? 'text-ok'
-          : transaction.transaction_type === 'debit'
-          ? 'text-danger'
-          : 'text-ink'
-      const amountClass =
-        transaction.transaction_type === 'credit'
-          ? 'text-ok'
-          : transaction.transaction_type === 'debit'
-          ? 'text-danger'
-          : 'text-ink'
+      const typeBadgeStyles = amountClass(amountKind)
+      const amountClassName = amountClass(amountKind)
 
       // A Limited row names its accounts through references (a hidden one is a neutral
       // name with no id); every other row looks them up in the caller's account list.
@@ -2489,7 +2482,7 @@ export function TransactionsPage() {
           projectedLabel: null,
           transferFeeLabel,
           typeBadgeStyles,
-          amountClass,
+          amountClass: amountClassName,
           budgetEntry: undefined,
           scheduleLabel: null,
         }
@@ -2528,11 +2521,11 @@ export function TransactionsPage() {
         sourceLabel: fromAccount?.name || primaryAccount?.name || 'Source',
         destinationLabel: toAccount?.name || 'Destination',
         categoryName,
-        amountLabel: formatCurrency(shown.amount, shown.currency),
+        amountLabel: formatAmount(amountKind, shown.amount, shown.currency),
         projectedLabel,
         transferFeeLabel,
         typeBadgeStyles,
-        amountClass,
+        amountClass: amountClassName,
         budgetEntry,
         scheduleLabel,
       }
@@ -3449,13 +3442,7 @@ export function TransactionsPage() {
                 <dl className="mt-3 space-y-2 text-sm text-body">
                   <div className="flex justify-between">
                     <dt>Amount</dt>
-                    <dd className={
-                      actionTransaction.transaction_type === 'credit'
-                        ? 'text-ok font-medium'
-                        : actionTransaction.transaction_type === 'debit'
-                        ? 'text-danger font-medium'
-                        : 'text-ink font-medium'
-                    }>
+                    <dd className={`${actionMeta?.amountClass ?? ''} font-medium`}>
                       {actionMeta?.amountLabel}
                     </dd>
                   </div>
@@ -3492,7 +3479,7 @@ export function TransactionsPage() {
                       {actionTransferMeta?.transferFeeLabel && (
                         <div className="flex justify-between gap-3">
                           <dt>Transfer Fee</dt>
-                          <dd className="text-right text-danger">{actionTransferMeta.transferFeeLabel}</dd>
+                          <dd className={`text-right ${amountClass('out')}`}>{actionTransferMeta.transferFeeLabel}</dd>
                         </div>
                       )}
                     </>

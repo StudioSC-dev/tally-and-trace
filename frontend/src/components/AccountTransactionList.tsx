@@ -12,6 +12,7 @@ import type { TransactionStatus } from '@tally-trace/shared'
 import { useId } from 'react'
 import type { CurrencyCode, Transaction } from '../store/api'
 import { formatCurrency } from '../utils/currency'
+import { amountClass } from '../utils/amount'
 import { TagChips } from './TagChips'
 
 // Copied from the Transactions page; a follow-up extracts the row and removes the copy.
@@ -65,8 +66,7 @@ export function AccountTransactionRow({ row, accountId, accountCurrency, account
       : row.view === 'limited'
         ? `Estimated from the amount recorded in ${leg.currency}; the effect on this account isn't known until it is posted.`
         : `Face amount in ${leg.currency}; the effect on this account isn't known until it is posted.`
-  const amountClass =
-    !leg.effectKnown || leg.direction === null ? 'text-ink' : leg.direction === 'in' ? 'text-ok' : 'text-danger'
+  const amountClassName = amountClass(leg.effectKnown && leg.direction === 'in' ? 'in' : 'out')
 
   return (
     <li
@@ -102,7 +102,7 @@ export function AccountTransactionRow({ row, accountId, accountCurrency, account
         </div>
         <div className="space-y-2 md:text-right">
           <p
-            className={`text-lg font-bold ${amountClass}`}
+            className={`text-lg font-bold ${amountClassName}`}
             data-testid="account-transaction-amount"
             aria-describedby={effectNote ? effectNoteId : undefined}
           >
