@@ -1,4 +1,4 @@
-// STU-679: selection is not an action. Every selectable control (segments, toggle chips, tabs, the pager's current
+// STU-679: selection is not an action. Every selectable control (segments, toggle chips, tabs, the pagers' current
 // page and the Add Account Active switch) carries the selection rule from docs/design-system.md: a leaf background,
 // ink 600 text and a 2px spine rule underneath, square, never the primary button's fill. The API is faked in the
 // browser with the shared household fixture; there is no backend.
@@ -8,15 +8,23 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { expect, test } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
-import type { Account } from '@tally-trace/shared'
-import { apiRoute, mockApi } from './support/mockApi'
+import type { Account, AccountInput, BudgetEntryInput, TransactionInput } from '@tally-trace/shared'
+import { mockApi } from './support/mockApi'
 import type { ApiMock } from './support/mockApi'
 import { shot } from './support/shot'
 import {
+  accountDetailRoutes,
+  createAccountRoute,
+  createdAccount,
   household,
+  householdCreateRoutes,
   householdViewRoutes,
   mockHousehold,
+  newAccountInput,
+  withAccountHistory,
   withDollarTimeline,
+  withDollars,
+  withLongDueLists,
   withMainAccount,
 } from './support/fixtures/household'
 import type { HouseholdData } from './support/fixtures/household'
@@ -36,7 +44,7 @@ const DARK_PRIMARY = 'rgb(147, 205, 169)'
 const DARK_INK = 'rgb(229, 238, 231)'
 
 type Name = string | RegExp
-/** How a group marks its choice: `aria-pressed`, a tab's `aria-selected`, the pager's `aria-current`, a switch. */
+/** How a group marks its choice: `aria-pressed`, a tab's `aria-selected`, a pager's `aria-current`, a switch. */
 type Kind = 'pressed' | 'tab' | 'current' | 'switch'
 
 /** One inventoried group: where it lives, how to show it, the choice the tests make and what that choice does. */
@@ -46,7 +54,10 @@ interface Group {
   /** What the group is, for the inventory. */
   what: string
   kind: Kind
-  /** `toggle`: a multi-select group with no "all" chip, so a second pick adds to the first. */
+  /**
+   * `toggle`: a multi-select group with no "all" option. A click adds or removes one option and leaves the others as
+   * they were, so the one-selected rule does not apply (the ticket's Tags exception, used for every such picker).
+   */
   multi?: 'toggle'
   /** The group is inside a dialog: screenshots are of the viewport. */
   dialog?: boolean
@@ -65,8 +76,10 @@ interface Group {
   effect: string
   /** Checks the state before the pick. */
   before: (page: Page, seen: URL[]) => Promise<void>
-  /** Checks the existing effect after the pick. */
+  /** Checks the existing effect after the pick, before anything is saved. */
   after: (page: Page, seen: URL[]) => Promise<void>
+  /** Saves the form and checks what reaches the API, after the unrelated selections are checked. */
+  submit?: (page: Page, api: ApiMock) => Promise<void>
 }
 
 const roleOf = (kind: Kind): 'button' | 'tab' | 'switch' => (kind === 'tab' ? 'tab' : kind === 'switch' ? 'switch' : 'button')
@@ -94,20 +107,23 @@ async function openPage(page: Page, route: string, heading: Name, data: Househol
   const api = await mockHousehold(page, data)
   if (extra.length) await mockApi(page, extra)
   await page.goto(route)
-  await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
+  // The dev server compiles a route's chunk on its first visit; under a full parallel run that can pass 5s.
+  await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible({ timeout: 15_000 })
   await page.waitForLoadState('networkidle')
   return api
 }
 
-async function openFilters(page: Page): Promise<void> {
+async function openFilters(page: Page, data: HouseholdData = household): Promise<ApiMock> {
+  const api = await openPage(page, '/transactions', 'Transactions', data)
   await page.getByRole('button', { name: 'Show filters' }).click()
   await expect(page.getByRole('group', { name: 'Entered by' })).toBeVisible()
+  return api
 }
 
 const dialogOf = (page: Page): Locator => page.locator('.fixed.inset-0.overflow-y-auto').last()
 
 async function openTransactionDialog(page: Page): Promise<ApiMock> {
-  const api = await openPage(page, '/transactions', 'Transactions')
+  const api = await openPage(page, '/transactions', 'Transactions', household, householdCreateRoutes(household))
   await page.getByRole('button', { name: 'Add Transaction', exact: true }).first().click()
   await expect(page.getByRole('heading', { name: 'Create Transaction' })).toBeVisible()
   return api
@@ -115,40 +131,139 @@ async function openTransactionDialog(page: Page): Promise<ApiMock> {
 
 /** Picks an account in the transaction dialog's compact account field, which then folds to one line. */
 async function pickAccount(page: Page, name: string): Promise<void> {
-  await dialogOf(page).getByRole('group', { name: 'Account' }).getByRole('button', { name: new RegExp(`^${name}`) }).click()
-  await expect(dialogOf(page).getByRole('button', { name: /^Change Account/ })).toBeVisible()
+  await dialogOf(page).getByRole('group', { name: /^(From )?Account$/ }).getByRole('button', { name: new RegExp(`^${name}`) }).click()
+  await expect(dialogOf(page).locator('[data-field="account_id"] [data-picker-value]')).toContainText(name)
 }
+
+/** The compact field's "Change" button, which opens its rows again. */
+const changeOf = (page: Page, field: string): Locator => dialogOf(page).locator(`[data-field="${field}"] [data-picker-change]`)
+/** The compact field's folded line: the chosen option's text. */
+const lineOf = (page: Page, field: string): Locator => dialogOf(page).locator(`[data-field="${field}"] [data-picker-value]`)
 
 async function openAllocations(page: Page): Promise<ApiMock> {
-  return openPage(page, '/allocations', 'Allocations')
+  return openPage(page, '/allocations', 'Allocations', household, householdCreateRoutes(household))
 }
 
-const createdAccount: Account = {
-  id: 90,
-  name: 'Maya savings',
-  account_type: 'checking',
-  balance: 0,
-  currency: 'PHP',
-  is_active: true,
-  tags: [],
-  my_role: 'owner',
-  is_shared: false,
-  owner_id: 1,
-  owner_name: 'Mara S.',
-  permissions: { can_edit_settings: true, can_manage_shares: true, can_add_transactions: true, can_delete: true, can_view_details: true },
-  created_at: '2026-03-12T02:00:00',
+async function openRecurringDialog(page: Page): Promise<ApiMock> {
+  const api = await openAllocations(page)
+  await page.getByRole('button', { name: 'Add Recurring Entry', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Add Recurring Entry' })).toBeVisible()
+  return api
 }
 
-async function openAccountDialog(page: Page): Promise<ApiMock> {
-  const api = await openPage(page, '/accounts', 'Accounts', household, [apiRoute<Account>('POST', '/accounts/', createdAccount, 201)])
+async function openBudgetDialog(page: Page): Promise<ApiMock> {
+  const api = await openAllocations(page)
+  await page.getByRole('button', { name: 'Budgets', exact: true }).click()
+  await page.getByRole('button', { name: 'Add Allocation', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Create Budget Envelope' })).toBeVisible()
+  return api
+}
+
+/** The household's two creates on Add Account: the first saved inactive, the second active (the default). */
+const createdAccounts: Account[] = [
+  createdAccount(household, 90, { ...newAccountInput, tag_ids: [...newAccountInput.tag_ids], is_active: false }),
+  createdAccount(household, 91, { ...newAccountInput, tag_ids: [...newAccountInput.tag_ids], is_active: true }),
+]
+
+async function openAccountDialog(page: Page, created: Account[] = createdAccounts): Promise<ApiMock> {
+  const api = await openPage(page, '/accounts', 'Accounts', household, [createAccountRoute(created)])
   await page.getByRole('button', { name: 'Add Account', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Create Account' })).toBeVisible()
   return api
 }
 
-const visibleText = (page: Page, text: string): Locator => page.getByText(text, { exact: true }).first()
+const accountTypeOf = (page: Page): Locator => dialogOf(page).locator('select').filter({ has: page.locator('option[value="e_wallet"]') })
+const accountCurrencyOf = (page: Page): Locator => dialogOf(page).locator('select').filter({ has: page.locator('option[value="USD"]') })
+const tagOf = (page: Page, name: string): Locator => dialogOf(page).getByRole('group', { name: 'Tags' }).getByRole('button', { name, exact: true })
 
-/** The conversion inventory: every group Scope converts, one entry per group, with its existing effect. */
+/** Moves every Add Account field off its default, from the fixture's `newAccountInput`. */
+async function seedAccount(page: Page): Promise<void> {
+  const d = dialogOf(page)
+  await d.getByPlaceholder('Enter account name').fill(newAccountInput.name)
+  await accountTypeOf(page).selectOption(newAccountInput.account_type)
+  await d.getByRole('checkbox', { name: 'Spending wallet' }).check()
+  await accountCurrencyOf(page).selectOption(newAccountInput.currency)
+  await d.getByPlaceholder('0.00').fill(String(newAccountInput.balance))
+  await tagOf(page, 'Japan trip').click()
+  await d.getByPlaceholder('Add a description for this account').fill(newAccountInput.description)
+}
+
+/** Every seeded Add Account value, read back from its control. */
+async function expectAccountSeeded(page: Page): Promise<void> {
+  await expect(dialogOf(page).getByPlaceholder('Enter account name')).toHaveValue(newAccountInput.name)
+  await expect(accountTypeOf(page)).toHaveValue(newAccountInput.account_type)
+  await expect(dialogOf(page).getByRole('checkbox', { name: 'Spending wallet' })).toBeChecked()
+  await expect(accountCurrencyOf(page)).toHaveValue(newAccountInput.currency)
+  await expect(dialogOf(page).getByPlaceholder('0.00')).toHaveValue(String(newAccountInput.balance))
+  await expect(tagOf(page, 'Japan trip')).toHaveAttribute('aria-pressed', 'true')
+  await expect(tagOf(page, 'Household')).toHaveAttribute('aria-pressed', 'false')
+  await expect(dialogOf(page).getByPlaceholder('Add a description for this account')).toHaveValue(newAccountInput.description)
+}
+
+/** Fills the rest of Add Transaction and saves it. */
+async function saveTransaction(page: Page, api: ApiMock): Promise<TransactionInput> {
+  await dialogOf(page).getByPlaceholder('Add notes about this transaction').fill('Selection check')
+  await pickAccount(page, 'BPI Payroll')
+  await dialogOf(page).locator('input[type="number"][placeholder="0.00"]').first().fill('120')
+  await dialogOf(page).getByRole('button', { name: 'Create Transaction', exact: true }).click()
+  await expect.poll(() => api.bodies('POST', '/transactions/').length).toBe(1)
+  return api.bodies('POST', '/transactions/')[0] as TransactionInput
+}
+
+/** Fills the rest of Add Recurring Entry and saves it. */
+async function saveRecurringEntry(page: Page, api: ApiMock): Promise<BudgetEntryInput> {
+  await dialogOf(page).locator('input[type="text"]').first().fill('Water delivery')
+  await dialogOf(page).locator('select').first().selectOption('11')
+  await dialogOf(page).locator('input[type="number"]').first().fill('350')
+  await dialogOf(page).getByRole('button', { name: 'Save Recurring Entry', exact: true }).click()
+  await expect.poll(() => api.bodies('POST', '/budget-entries/').length).toBe(1)
+  return api.bodies('POST', '/budget-entries/')[0] as BudgetEntryInput
+}
+
+/** Fills the rest of the allocation dialog and saves it; returns the `configuration` sent. */
+async function saveAllocation(page: Page, api: ApiMock, name: string): Promise<unknown> {
+  await dialogOf(page).locator('input[type="text"]').first().fill(name)
+  await dialogOf(page).locator('select').first().selectOption('11')
+  // The empty amounts: a budget's spending limit, a savings tracker's target.
+  for (const amount of await dialogOf(page).locator('input[type="number"]').all()) {
+    if ((await amount.inputValue()) === '') await amount.fill('3000')
+  }
+  await dialogOf(page).locator('button[type="submit"]').click()
+  await expect.poll(() => api.bodies('POST', '/allocations/').length).toBe(1)
+  return (api.bodies('POST', '/allocations/')[0] as { configuration?: unknown }).configuration
+}
+
+const visibleText = (page: Page, text: string): Locator => page.getByText(text, { exact: true }).first()
+const visiblePager = (page: Page): Locator => page.getByTestId('due-pager').filter({ visible: true })
+const duePanel = (page: Page, slug: string): Locator => page.getByTestId(`due-panel-${slug}`)
+
+/** A Due card tab's pager, in the variant where every tab holds more than one page of three. */
+const duePager = (slug: string, tab: string, range: string, firstOnPage2: string): Group => ({
+  key: `due-${slug}-pager`,
+  route: '/transactions',
+  what: `Due card ${tab} pager's current page (Pager.tsx, aria-current)`,
+  kind: 'current',
+  open: async (page) => {
+    const api = await openPage(page, '/transactions', 'Transactions', withLongDueLists(household))
+    await page.getByTestId(`due-tab-${slug}`).click()
+    await expect(visiblePager(page)).toBeVisible()
+    return api
+  },
+  group: visiblePager,
+  items: (page) => visiblePager(page).getByRole('button', { name: /^\d+$/ }),
+  selected: '1',
+  other: '2',
+  effect: `Page 2 lists ${range}, starting with ${firstOnPage2}`,
+  before: async (page) => {
+    await expect(duePanel(page, slug).getByText(firstOnPage2, { exact: true })).toHaveCount(0)
+  },
+  after: async (page) => {
+    await expect(duePanel(page, slug).getByText(firstOnPage2, { exact: true })).toBeVisible()
+    await expect(visiblePager(page)).toContainText(range)
+  },
+})
+
+/** The conversion inventory: every converted group, one entry per place it is used, with its existing effect. */
 const INVENTORY: Group[] = [
   {
     key: 'transactions-list-view',
@@ -175,11 +290,7 @@ const INVENTORY: Group[] = [
     route: '/transactions',
     what: 'Filters: Entered by, Everyone / Only mine (SegmentedControl)',
     kind: 'pressed',
-    open: async (page) => {
-      const api = await openPage(page, '/transactions', 'Transactions')
-      await openFilters(page)
-      return api
-    },
+    open: (page) => openFilters(page),
     group: (page) => page.getByRole('group', { name: 'Entered by' }),
     selected: 'Everyone',
     other: 'Only mine',
@@ -198,11 +309,7 @@ const INVENTORY: Group[] = [
     route: '/transactions',
     what: 'Filters: Transaction types, All types / Income / Expense / Transfer (Segment toggles)',
     kind: 'pressed',
-    open: async (page) => {
-      const api = await openPage(page, '/transactions', 'Transactions')
-      await openFilters(page)
-      return api
-    },
+    open: (page) => openFilters(page),
     group: (page) => page.getByRole('group', { name: 'Transaction types' }),
     selected: 'All types',
     other: 'Income',
@@ -220,13 +327,9 @@ const INVENTORY: Group[] = [
   {
     key: 'transactions-accounts',
     route: '/transactions',
-    what: 'Filters: Accounts chips, All accounts / each account (GroupedPicker chips, Segment)',
+    what: 'Filters: Accounts, All accounts / each account (AccountPicker chips, Segment)',
     kind: 'pressed',
-    open: async (page) => {
-      const api = await openPage(page, '/transactions', 'Transactions')
-      await openFilters(page)
-      return api
-    },
+    open: (page) => openFilters(page),
     group: (page) => page.locator('[data-field="filter_accounts"]'),
     selected: 'All accounts',
     other: /^GCash/,
@@ -242,13 +345,34 @@ const INVENTORY: Group[] = [
     },
   },
   {
+    key: 'transactions-categories',
+    route: '/transactions',
+    what: 'Filters: Categories, All categories / No category / each category (CategoryPicker chips, Segment)',
+    kind: 'pressed',
+    open: (page) => openFilters(page),
+    group: (page) => page.locator('[data-field="filter_categories"]'),
+    items: (page) => page.locator('[data-field="filter_categories"] [aria-pressed]'),
+    selected: 'All categories',
+    other: 'Groceries',
+    disabled: 'All categories',
+    effect: "Groceries asks for category_names=Groceries: the grocery rows stay (Mara's and Jun's), the rest leave; All categories is disabled while chosen",
+    before: async (page) => {
+      await expect(visibleText(page, 'Grab to Makati')).toBeVisible()
+    },
+    after: async (page, seen) => {
+      await expect.poll(() => lastCall(seen, '/transactions/')?.searchParams.getAll('category_names')).toEqual(['Groceries'])
+      await expect(visibleText(page, 'Puregold weekly groceries')).toBeVisible()
+      await expect(visibleText(page, 'Palengke, Marikina market')).toBeVisible()
+      await expect(page.getByText('Grab to Makati', { exact: true })).toHaveCount(0)
+    },
+  },
+  {
     key: 'transactions-list-pager',
     route: '/transactions',
     what: "Month list pager's current page (aria-current, selection class)",
     kind: 'current',
     open: async (page) => {
-      const api = await openPage(page, '/transactions', 'Transactions')
-      await openFilters(page)
+      const api = await openFilters(page)
       // From 1 February the list holds 28 rows: two pages of 25.
       await page.locator('input[type="date"]').first().fill('2026-02-01')
       await expect(page.getByTestId('transactions-pager').getByRole('button', { name: '2', exact: true })).toBeVisible()
@@ -287,6 +411,8 @@ const INVENTORY: Group[] = [
       await expect(page.getByTestId('due-upcoming-count')).toHaveText('16')
     },
   },
+  duePager('due', 'Due and overdue', '4–5 of 5', 'Emergency fund top-up'),
+  duePager('not-posted', 'Not posted yet', '4–4 of 4', 'Shopee order, pending'),
   {
     key: 'due-pager',
     route: '/transactions',
@@ -295,11 +421,11 @@ const INVENTORY: Group[] = [
     open: async (page) => {
       const api = await openPage(page, '/transactions', 'Transactions')
       await page.getByTestId('due-tab-upcoming').click()
-      await expect(page.getByTestId('due-pager').filter({ visible: true })).toBeVisible()
+      await expect(visiblePager(page)).toBeVisible()
       return api
     },
-    group: (page) => page.getByTestId('due-pager').filter({ visible: true }),
-    items: (page) => page.getByTestId('due-pager').filter({ visible: true }).getByRole('button', { name: /^\d+$/ }),
+    group: visiblePager,
+    items: (page) => visiblePager(page).getByRole('button', { name: /^\d+$/ }),
     selected: '1',
     other: '2',
     effect: 'Page 2 lists the 4th to 6th upcoming occurrences (Globe Postpaid, 18 March, first)',
@@ -308,9 +434,11 @@ const INVENTORY: Group[] = [
     },
     after: async (page) => {
       await expect(page.getByTestId('due-panel-upcoming').getByText('Globe Postpaid').first()).toBeVisible()
-      await expect(page.getByTestId('due-pager').filter({ visible: true })).toContainText('4–6 of 16')
+      await expect(visiblePager(page)).toContainText('4–6 of 16')
     },
   },
+  duePager('subscriptions', 'Subscriptions', '4–4 of 4', 'Netflix Standard'),
+  duePager('installments', 'Installments', '4–4 of 4', 'Sofa, 12 months'),
   {
     key: 'transaction-dialog-type',
     route: '/transactions (Add Transaction)',
@@ -332,13 +460,13 @@ const INVENTORY: Group[] = [
   {
     key: 'transaction-dialog-account',
     route: '/transactions (Add Transaction)',
-    what: 'Add Transaction: Account rows (GroupedPicker compact rows, Segment)',
+    what: 'Add Transaction: Account rows (AccountPicker compact rows, Segment)',
     kind: 'pressed',
     dialog: true,
     open: async (page) => {
       const api = await openTransactionDialog(page)
       await pickAccount(page, 'BPI Payroll')
-      await dialogOf(page).getByRole('button', { name: /^Change Account/ }).click()
+      await changeOf(page, 'account_id').click()
       return api
     },
     group: (page) => dialogOf(page).getByRole('group', { name: 'Account' }),
@@ -346,7 +474,7 @@ const INVENTORY: Group[] = [
     selected: /^BPI Payroll/,
     other: /^HSBC Red Mastercard/,
     reopen: async (page) => {
-      await dialogOf(page).getByRole('button', { name: /^Change Account/ }).click()
+      await changeOf(page, 'account_id').click()
     },
     effect: 'An expense on the HSBC card offers the Installment section; on BPI Payroll it does not',
     before: async (page) => {
@@ -354,6 +482,67 @@ const INVENTORY: Group[] = [
     },
     after: async (page) => {
       await expect(page.getByTestId('installment-section')).toBeVisible()
+    },
+  },
+  {
+    key: 'transaction-dialog-destination',
+    route: '/transactions (Add Transaction, Transfer)',
+    what: 'Add Transaction: Destination Account rows (AccountPicker compact rows, Segment)',
+    kind: 'pressed',
+    dialog: true,
+    open: async (page) => {
+      const api = await openTransactionDialog(page)
+      await dialogOf(page).getByRole('group', { name: 'Transaction type' }).getByRole('button', { name: 'Transfer' }).click()
+      await pickAccount(page, 'BPI Payroll')
+      await dialogOf(page).getByRole('group', { name: 'Destination Account', exact: true }).getByRole('button', { name: /^Metrobank Savings/ }).click()
+      await changeOf(page, 'transfer_to_account_id').click()
+      return api
+    },
+    group: (page) => dialogOf(page).getByRole('group', { name: 'Destination Account', exact: true }),
+    items: (page) => dialogOf(page).locator('[data-field="transfer_to_account_id"] [data-picker-option]'),
+    selected: /^Metrobank Savings/,
+    other: /^GCash/,
+    reopen: async (page) => {
+      await changeOf(page, 'transfer_to_account_id').click()
+    },
+    effect: 'GCash becomes the destination: the field reads GCash (PHP); the source, BPI Payroll, is never offered',
+    before: async (page) => {
+      await expect(lineOf(page, 'transfer_to_account_id')).toHaveText('Metrobank Savings (PHP)')
+      await expect(dialogOf(page).locator('[data-field="transfer_to_account_id"] [data-picker-option]').filter({ hasText: 'BPI Payroll' })).toHaveCount(0)
+    },
+    after: async (page) => {
+      await expect(lineOf(page, 'transfer_to_account_id')).toHaveText('GCash (PHP)')
+      await expect(dialogOf(page).locator('[data-field="transfer_to_account_id"] [data-picker-option]').filter({ hasText: 'BPI Payroll' })).toHaveCount(0)
+    },
+  },
+  {
+    key: 'transaction-dialog-category',
+    route: '/transactions (Add Transaction)',
+    what: 'Add Transaction: Category rows, Uncategorized / each category (CategoryPicker compact rows, Segment)',
+    kind: 'pressed',
+    dialog: true,
+    open: async (page) => {
+      const api = await openTransactionDialog(page)
+      await changeOf(page, 'category_id').click()
+      return api
+    },
+    group: (page) => dialogOf(page).getByRole('group', { name: 'Category', exact: true }),
+    items: (page) => dialogOf(page).locator('[data-field="category_id"] [data-picker-option]'),
+    selected: 'Uncategorized',
+    other: 'Groceries',
+    reopen: async (page) => {
+      await changeOf(page, 'category_id').click()
+    },
+    effect: 'Groceries becomes the category: the field reads Groceries; an expense offers expense categories only (no Salary)',
+    before: async (page) => {
+      await expect(lineOf(page, 'category_id')).toHaveText('Uncategorized')
+      await expect(dialogOf(page).locator('[data-field="category_id"] [data-picker-option]').filter({ hasText: 'Salary' })).toHaveCount(0)
+    },
+    after: async (page) => {
+      await expect(lineOf(page, 'category_id')).toHaveText('Groceries')
+    },
+    submit: async (page, api) => {
+      expect((await saveTransaction(page, api)).category_id).toBe(22)
     },
   },
   {
@@ -385,6 +574,56 @@ const INVENTORY: Group[] = [
     },
   },
   {
+    key: 'transaction-dialog-repeat-ends',
+    route: '/transactions (Add Transaction, Repeat)',
+    what: 'Add Transaction: Repeat, Ends, Keep running / On date / After runs (RecurringScheduleFields, SegmentedControl)',
+    kind: 'pressed',
+    dialog: true,
+    open: async (page) => {
+      const api = await openTransactionDialog(page)
+      await page.getByTestId('repeat-toggle').check()
+      await expect(page.getByTestId('repeat-fields')).toBeVisible()
+      return api
+    },
+    group: (page) => page.getByTestId('repeat-fields').getByRole('group', { name: 'Ends' }),
+    selected: 'Keep running',
+    other: 'After runs',
+    effect: 'After runs adds the number-of-runs field to the Repeat schedule, filled with 6',
+    before: async (page) => {
+      await expect(page.getByTestId('repeat-fields').locator('input[type="number"]')).toHaveCount(0)
+    },
+    after: async (page) => {
+      await expect(page.getByTestId('repeat-fields').locator('input[type="number"]')).toHaveValue('6')
+    },
+  },
+  {
+    key: 'transaction-dialog-tags',
+    route: '/transactions (Add Transaction)',
+    what: 'Add Transaction: Tags (TagPicker, Segment toggles, multi-select)',
+    kind: 'pressed',
+    multi: 'toggle',
+    dialog: true,
+    open: async (page) => {
+      const api = await openTransactionDialog(page)
+      await tagOf(page, 'Household').click()
+      return api
+    },
+    group: (page) => dialogOf(page).getByRole('group', { name: 'Tags' }),
+    selected: 'Household',
+    other: 'Japan trip',
+    effect: 'Japan trip joins Household: the transaction is created with tag_ids [41, 42]',
+    before: async (page) => {
+      await expect(tagOf(page, 'Household')).toHaveAttribute('aria-pressed', 'true')
+    },
+    after: async (page) => {
+      await expect(tagOf(page, 'Household')).toHaveAttribute('aria-pressed', 'true')
+      await expect(tagOf(page, 'Japan trip')).toHaveAttribute('aria-pressed', 'true')
+    },
+    submit: async (page, api) => {
+      expect([...((await saveTransaction(page, api)).tag_ids ?? [])].sort()).toEqual([41, 42])
+    },
+  },
+  {
     key: 'dashboard-period',
     route: '/',
     what: 'Dashboard: Period for actual totals, week / month / year (SegmentedControl)',
@@ -400,6 +639,47 @@ const INVENTORY: Group[] = [
     after: async (page, seen) => {
       await expect(page.getByText('Actual Totals (Week to Date)')).toBeVisible()
       await expect.poll(() => lastCall(seen, '/transactions/summary/period')?.searchParams.get('start_date')?.slice(0, 10)).toBe('2026-03-06')
+    },
+  },
+  {
+    key: 'dashboard-currency',
+    route: '/',
+    what: 'Dashboard: Currency (CurrencyControl, SegmentedControl)',
+    kind: 'pressed',
+    open: (page) => openPage(page, '/', 'Dashboard', withDollars(household)),
+    group: (page) => page.getByRole('group', { name: 'Currency' }),
+    selected: 'PHP',
+    other: 'USD',
+    effect: "USD reads the snapshot's dollar row: its $1,250.00 balance shows",
+    before: async (page) => {
+      await expect(page.getByText('$1,250.00')).toHaveCount(0)
+    },
+    after: async (page) => {
+      await expect(page.getByText('$1,250.00').first()).toBeVisible()
+    },
+  },
+  {
+    key: 'breakdown-currency',
+    route: '/transactions (Spending breakdown)',
+    what: 'Spending breakdown: Currency (CurrencyControl, SegmentedControl)',
+    kind: 'pressed',
+    dialog: true,
+    open: async (page) => {
+      const api = await openPage(page, '/transactions', 'Transactions', withDollars(household))
+      await page.getByRole('button', { name: /Spending breakdown/ }).click()
+      await expect(page.getByRole('dialog').getByRole('group', { name: 'Currency' })).toBeVisible()
+      return api
+    },
+    group: (page) => page.getByRole('dialog').getByRole('group', { name: 'Currency' }),
+    selected: 'PHP',
+    other: 'USD',
+    effect: "USD reads the summary's dollar row: Dining out, $86.40, is the only category",
+    before: async (page) => {
+      await expect(page.getByRole('dialog').getByText('$86.40')).toHaveCount(0)
+    },
+    after: async (page) => {
+      await expect(page.getByRole('dialog').getByText('$86.40').filter({ visible: true }).first()).toBeVisible()
+      await expect(page.getByRole('dialog')).toContainText('Posted spending in USD only.')
     },
   },
   {
@@ -426,13 +706,7 @@ const INVENTORY: Group[] = [
     what: 'Create Budget Envelope: Budget cadence (Segment)',
     kind: 'pressed',
     dialog: true,
-    open: async (page) => {
-      const api = await openAllocations(page)
-      await page.getByRole('button', { name: 'Budgets', exact: true }).click()
-      await page.getByRole('button', { name: 'Add Allocation', exact: true }).click()
-      await expect(page.getByRole('heading', { name: 'Create Budget Envelope' })).toBeVisible()
-      return api
-    },
+    open: openBudgetDialog,
     group: (page) => page.getByRole('group', { name: 'Budget cadence' }),
     selected: 'Monthly',
     other: 'Weekly',
@@ -446,17 +720,69 @@ const INVENTORY: Group[] = [
     },
   },
   {
+    key: 'allocations-tracked-categories',
+    route: '/allocations (Budgets, Add Allocation)',
+    what: 'Create Budget Envelope: Tracked Categories (CategoryPicker chips, Segment, multi-select)',
+    kind: 'pressed',
+    multi: 'toggle',
+    dialog: true,
+    open: async (page) => {
+      const api = await openBudgetDialog(page)
+      await dialogOf(page).locator('[data-field="category_ids"]').getByRole('button', { name: 'Groceries', exact: true }).click()
+      return api
+    },
+    group: (page) => dialogOf(page).locator('[data-field="category_ids"]'),
+    items: (page) => dialogOf(page).locator('[data-field="category_ids"] [aria-pressed]'),
+    selected: 'Groceries',
+    other: 'Dining out',
+    effect: 'Dining out joins Groceries: the envelope is created tracking category_ids [22, 23]',
+    before: async (page) => {
+      await expect(dialogOf(page).locator('[data-field="category_ids"]').getByRole('button', { name: 'Groceries', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    },
+    after: async (page) => {
+      await expect(dialogOf(page).locator('[data-field="category_ids"]').getByRole('button', { name: 'Dining out', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    },
+    submit: async (page, api) => {
+      expect(await saveAllocation(page, api, 'Snacks')).toEqual({ category_ids: [22, 23] })
+    },
+  },
+  {
+    key: 'allocations-savings-accounts',
+    route: '/allocations (Savings, Add Allocation)',
+    what: 'Savings tracker: Accounts to aggregate (AccountPicker chips, Segment, multi-select)',
+    kind: 'pressed',
+    multi: 'toggle',
+    dialog: true,
+    open: async (page) => {
+      const api = await openAllocations(page)
+      await page.getByRole('button', { name: 'Savings', exact: true }).click()
+      await page.getByRole('button', { name: 'Add Allocation', exact: true }).click()
+      await dialogOf(page).getByRole('button', { name: /Combined account total/ }).click()
+      await dialogOf(page).locator('[data-field="savings_account_ids"]').getByRole('button', { name: /^BPI Payroll/ }).click()
+      return api
+    },
+    group: (page) => dialogOf(page).locator('[data-field="savings_account_ids"]'),
+    items: (page) => dialogOf(page).locator('[data-field="savings_account_ids"] [aria-pressed]'),
+    selected: /^BPI Payroll/,
+    other: /^GCash/,
+    effect: 'GCash joins BPI Payroll: the tracker is created aggregating account_ids [11, 13]',
+    before: async (page) => {
+      await expect(dialogOf(page).locator('[data-field="savings_account_ids"] [aria-pressed="true"]')).toHaveCount(1)
+    },
+    after: async (page) => {
+      await expect(dialogOf(page).locator('[data-field="savings_account_ids"] [aria-pressed="true"]')).toHaveCount(2)
+    },
+    submit: async (page, api) => {
+      expect(await saveAllocation(page, api, 'House fund')).toEqual({ goal_mode: 'multi_account', account_ids: [11, 13] })
+    },
+  },
+  {
     key: 'recurring-entry-type',
     route: '/allocations (Add Recurring Entry)',
     what: 'Add Recurring Entry: Entry type, Expense / Income (SegmentedControl)',
     kind: 'pressed',
     dialog: true,
-    open: async (page) => {
-      const api = await openAllocations(page)
-      await page.getByRole('button', { name: 'Add Recurring Entry', exact: true }).click()
-      await expect(page.getByRole('heading', { name: 'Add Recurring Entry' })).toBeVisible()
-      return api
-    },
+    open: openRecurringDialog,
     group: (page) => page.getByRole('group', { name: 'Entry type' }),
     selected: 'Expense',
     other: 'Income',
@@ -471,15 +797,10 @@ const INVENTORY: Group[] = [
   {
     key: 'recurring-entry-ends',
     route: '/allocations (Add Recurring Entry)',
-    what: 'Add Recurring Entry: Ends, Keep running / On date / After runs (SegmentedControl; the same component is Repeat on Add Transaction)',
+    what: 'Add Recurring Entry: Ends, Keep running / On date / After runs (RecurringScheduleFields, SegmentedControl)',
     kind: 'pressed',
     dialog: true,
-    open: async (page) => {
-      const api = await openAllocations(page)
-      await page.getByRole('button', { name: 'Add Recurring Entry', exact: true }).click()
-      await expect(page.getByRole('heading', { name: 'Add Recurring Entry' })).toBeVisible()
-      return api
-    },
+    open: openRecurringDialog,
     group: (page) => page.getByRole('group', { name: 'Ends' }),
     selected: 'Keep running',
     other: 'After runs',
@@ -492,26 +813,59 @@ const INVENTORY: Group[] = [
     },
   },
   {
-    key: 'tag-picker',
-    route: '/accounts (Add Account)',
-    what: 'Tags (TagPicker, Segment toggles; the same component is on Add Transaction and Add Recurring Entry)',
+    key: 'recurring-entry-tags',
+    route: '/allocations (Add Recurring Entry)',
+    what: 'Add Recurring Entry: Tags (TagPicker, Segment toggles, multi-select)',
     kind: 'pressed',
     multi: 'toggle',
     dialog: true,
     open: async (page) => {
-      const api = await openAccountDialog(page)
-      await page.getByRole('group', { name: 'Tags' }).getByRole('button', { name: 'Household' }).click()
+      const api = await openRecurringDialog(page)
+      await tagOf(page, 'Household').click()
       return api
     },
-    group: (page) => page.getByRole('group', { name: 'Tags' }),
+    group: (page) => dialogOf(page).getByRole('group', { name: 'Tags' }),
     selected: 'Household',
     other: 'Japan trip',
-    effect: 'Household on an account shows the Household notice; with Japan trip alone the notice goes',
+    effect: 'Japan trip joins Household: the entry is created with tag_ids [41, 42]',
+    before: async (page) => {
+      await expect(tagOf(page, 'Household')).toHaveAttribute('aria-pressed', 'true')
+    },
+    after: async (page) => {
+      await expect(tagOf(page, 'Household')).toHaveAttribute('aria-pressed', 'true')
+      await expect(tagOf(page, 'Japan trip')).toHaveAttribute('aria-pressed', 'true')
+    },
+    submit: async (page, api) => {
+      expect([...((await saveRecurringEntry(page, api)).tag_ids ?? [])].sort()).toEqual([41, 42])
+    },
+  },
+  {
+    key: 'account-tags',
+    route: '/accounts (Add Account)',
+    what: 'Add Account: Tags (TagPicker, Segment toggles, multi-select)',
+    kind: 'pressed',
+    multi: 'toggle',
+    dialog: true,
+    open: async (page) => {
+      const api = await openAccountDialog(page, [createdAccount(household, 92, { name: newAccountInput.name, tag_ids: [41, 42] })])
+      await tagOf(page, 'Household').click()
+      return api
+    },
+    group: (page) => dialogOf(page).getByRole('group', { name: 'Tags' }),
+    selected: 'Household',
+    other: 'Japan trip',
+    effect: 'Japan trip joins Household: the Household notice stays and the account is created with tag_ids [41, 42]',
     before: async (page) => {
       await expect(page.getByTestId('household-account-notice')).toBeVisible()
     },
     after: async (page) => {
-      await expect(page.getByTestId('household-account-notice')).toHaveCount(0)
+      await expect(page.getByTestId('household-account-notice')).toBeVisible()
+    },
+    submit: async (page, api) => {
+      await dialogOf(page).getByPlaceholder('Enter account name').fill(newAccountInput.name)
+      await page.getByRole('button', { name: 'Create Account', exact: true }).click()
+      await expect.poll(() => api.bodies('POST', '/accounts/').length).toBe(1)
+      expect([...((api.bodies('POST', '/accounts/')[0] as AccountInput).tag_ids ?? [])].sort()).toEqual([41, 42])
     },
   },
   {
@@ -520,16 +874,43 @@ const INVENTORY: Group[] = [
     what: 'Add Account: Active (role=switch, aria-checked; selected treatment when on)',
     kind: 'switch',
     dialog: true,
-    open: openAccountDialog,
+    open: (page) => openAccountDialog(page),
     group: (page) => page.getByRole('switch', { name: 'Active' }),
+    items: (page) => page.getByRole('switch', { name: 'Active' }),
     selected: 'Active',
     other: 'Active',
-    effect: 'Off reads "Inactive" and the new account is created with is_active false; on creates it with is_active true',
+    effect:
+      'Off reads "Inactive" and the account is created with is_active false (answered inactive); on creates it with is_active true (answered active); every other field keeps its value',
     before: async (page) => {
       await expect(dialogOf(page).getByText('Active', { exact: true })).toBeVisible()
     },
     after: async (page) => {
       await expect(dialogOf(page).getByText('Inactive', { exact: true })).toBeVisible()
+    },
+  },
+  {
+    key: 'account-transactions-pager',
+    route: '/accounts/13',
+    what: "Account page: transactions pager's current page (Pager.tsx, aria-current)",
+    kind: 'current',
+    open: async (page) => {
+      const data = withAccountHistory(household)
+      const api = await openPage(page, '/accounts/13', 'GCash', data, accountDetailRoutes(data))
+      await expect(page.getByTestId('account-transactions-pager').getByRole('button', { name: '2', exact: true })).toBeVisible()
+      return api
+    },
+    group: (page) => page.getByTestId('account-transactions-pager'),
+    items: (page) => page.getByTestId('account-transactions-pager').getByRole('button', { name: /^\d+$/ }),
+    selected: '1',
+    other: '2',
+    effect: 'Page 2 asks for offset=25 and lists the five oldest GCash rows, down to "GCash top-up, 2 January"',
+    before: async (page) => {
+      await expect(page.getByText('GCash top-up, 2 January', { exact: true })).toHaveCount(0)
+    },
+    after: async (page, seen) => {
+      await expect.poll(() => lastCall(seen, '/transactions/')?.searchParams.get('offset')).toBe('25')
+      await expect(visibleText(page, 'GCash top-up, 2 January')).toBeVisible()
+      await expect(page.getByTestId('account-transactions-pager')).toContainText('26–30 of 30')
     },
   },
   {
@@ -569,7 +950,7 @@ const INVENTORY: Group[] = [
   {
     key: 'forecast-currency',
     route: '/forecast',
-    what: 'Currency (CurrencyControl, SegmentedControl; the same component is on the dashboard and the spending breakdown)',
+    what: 'Forecast: Currency (CurrencyControl, SegmentedControl)',
     kind: 'pressed',
     open: (page) => openPage(page, '/forecast', 'Cash-Flow Timeline', withDollarTimeline(household)),
     group: (page) => page.getByRole('group', { name: 'Currency' }),
@@ -603,7 +984,7 @@ const INVENTORY: Group[] = [
   },
 ]
 
-/** Light-theme computed styles a selected control must have. */
+/** Light-theme computed styles a selected control must have (supplementary to the direct checks in AC1). */
 async function expectSelected(el: Locator): Promise<void> {
   await expect(el).toHaveCSS('background-color', LEAF)
   await expect(el).toHaveCSS('color', INK)
@@ -614,7 +995,7 @@ async function expectSelected(el: Locator): Promise<void> {
   }
 }
 
-/** Light-theme computed styles an unselected control must have. */
+/** Light-theme computed styles an unselected control must have (supplementary to the direct checks in AC3). */
 async function expectQuiet(el: Locator): Promise<void> {
   await expect(el).toHaveCSS('background-color', TRANSPARENT)
   await expect(el).toHaveCSS('color', BODY)
@@ -635,9 +1016,14 @@ const ariaStates = (items: Locator, kind: Kind): Promise<(string | null)[]> =>
     kind,
   )
 
+/** Each control's text and `aria-pressed`, sorted (a collapsed picker lists its chosen chips first), for a multi-select group. */
+const pressedStates = (items: Locator): Promise<string[]> =>
+  items.evaluateAll((els) => els.map((e) => `${e.textContent?.trim()}=${e.getAttribute('aria-pressed')}`).sort())
+
 /** Asserts the group's ARIA marks exactly `name` as chosen. */
 async function expectAriaChoice(page: Page, g: Group, name: Name): Promise<void> {
   const items = itemsOf(page, g)
+  await expect(optionOf(page, g, name)).toBeVisible()
   const states = await ariaStates(items, g.kind)
   expect(states.length, `${g.key} has controls`).toBeGreaterThan(1)
   expect(states.filter((s) => s === 'true'), `${g.key}: exactly one control is marked chosen`).toEqual(['true'])
@@ -682,6 +1068,9 @@ const changedUnrelated = (page: Page): Promise<string[]> =>
       .map((e) => `${e.textContent?.trim()}: ${e.getAttribute('data-e2e-was')}`),
   )
 
+/** Waits for the next `POST /accounts/` answer. */
+const accountCreated = (page: Page) => page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname === '/api/v1/accounts/')
+
 test.describe('Selection is not an action (STU-679)', () => {
   for (const g of INVENTORY) {
     test(`selected controls use the spine rule: ${g.key}`, async ({ page }) => {
@@ -690,7 +1079,14 @@ test.describe('Selection is not an action (STU-679)', () => {
       const selected = optionOf(page, g, g.selected)
       await expect(selected).toBeVisible()
       if (g.kind === 'switch') await expect(selected).toHaveAttribute('aria-checked', 'true')
-      await expectSelected(selected)
+      await expect(selected).toHaveCSS('background-color', LEAF)
+      await expect(selected).toHaveCSS('color', INK)
+      await expect(selected).toHaveCSS('font-weight', '600')
+      await expect(selected).toHaveCSS('box-shadow', SPINE_RULE)
+      await expect(selected).toHaveCSS('border-top-left-radius', '0px')
+      await expect(selected).toHaveCSS('border-top-right-radius', '0px')
+      await expect(selected).toHaveCSS('border-bottom-right-radius', '0px')
+      await expect(selected).toHaveCSS('border-bottom-left-radius', '0px')
       await evidence(page, g, `spine-${g.key}`, selected)
     })
 
@@ -702,7 +1098,10 @@ test.describe('Selection is not an action (STU-679)', () => {
       await expect(quiet).toBeVisible()
       if (g.kind === 'switch') await expect(quiet).toHaveAttribute('aria-checked', 'false')
       else await expect(quiet).not.toHaveClass(/\bis-selected\b/)
-      await expectQuiet(quiet)
+      await expect(quiet).toHaveCSS('background-color', TRANSPARENT)
+      await expect(quiet).toHaveCSS('color', BODY)
+      await expect(quiet).toHaveCSS('font-weight', /^(400|500)$/)
+      await expect(quiet).toHaveCSS('box-shadow', 'none')
       await evidence(page, g, `quiet-${g.key}`, quiet)
     })
 
@@ -726,22 +1125,52 @@ test.describe('Selection is not an action (STU-679)', () => {
         await evidence(page, g, `follows-${g.key}`, sw)
         return
       }
+      const first = optionOf(page, g, g.selected)
+      const second = optionOf(page, g, g.other)
+      if (g.multi === 'toggle') {
+        // Multi-select: every click is checked on its own, and the one-selected rule does not apply.
+        const initial = await pressedStates(itemsOf(page, g))
+        expect(initial.length, `${g.key} has controls`).toBeGreaterThan(1)
+        expect(initial.every((s) => s.endsWith('=true') || s.endsWith('=false')), `every control carries aria-pressed (${JSON.stringify(initial)})`).toBe(true)
+        await expect(first).toHaveAttribute('aria-pressed', 'true')
+        await expect(second).toHaveAttribute('aria-pressed', 'false')
+        const firstText = (await first.textContent())?.trim()
+        const secondText = (await second.textContent())?.trim()
+        // Clicking an unselected option selects it; the option already selected stays selected.
+        await choose(page, g, g.other)
+        await expect(second).toHaveAttribute('aria-pressed', 'true')
+        await expectSelected(second)
+        await expect(first).toHaveAttribute('aria-pressed', 'true')
+        await expectSelected(first)
+        expect(await pressedStates(itemsOf(page, g))).toEqual(initial.map((s) => (s === `${secondText}=false` ? `${secondText}=true` : s)).sort())
+        await evidence(page, g, `follows-add-${g.key}`, second)
+        // Clicking a selected option unselects it; the others keep their state.
+        await choose(page, g, g.selected)
+        await expect(first).toHaveAttribute('aria-pressed', 'false')
+        await expectQuiet(first)
+        await expect(second).toHaveAttribute('aria-pressed', 'true')
+        await expectSelected(second)
+        expect(await pressedStates(itemsOf(page, g))).toEqual(
+          initial.map((s) => (s === `${secondText}=false` ? `${secondText}=true` : s === `${firstText}=true` ? `${firstText}=false` : s)).sort(),
+        )
+        await evidence(page, g, `follows-${g.key}`, second)
+        return
+      }
       await expectAriaChoice(page, g, g.selected)
       await expect(itemsOf(page, g).and(page.locator('.is-selected'))).toHaveCount(1)
       await choose(page, g, g.other)
-      // A multi-select toggle group keeps the first pick until it is pressed again.
-      if (g.multi === 'toggle') await choose(page, g, g.selected)
       await expectAriaChoice(page, g, g.other)
       await expect(itemsOf(page, g).and(page.locator('.is-selected'))).toHaveCount(1)
-      await expectSelected(optionOf(page, g, g.other))
-      await expectQuiet(optionOf(page, g, g.selected))
-      await evidence(page, g, `follows-${g.key}`, optionOf(page, g, g.other))
+      await expectSelected(second)
+      await expectQuiet(first)
+      await evidence(page, g, `follows-${g.key}`, second)
     })
 
     test(`selection preserves existing application behaviour: ${g.key}`, async ({ page }) => {
       const seen = recordRequests(page)
       const api = await g.open(page)
       await settle(page)
+      if (g.kind === 'switch') await seedAccount(page)
       await g.before(page, seen)
       const watched = await watchUnrelated(itemsOf(page, g))
       if (g.disabled) {
@@ -757,28 +1186,46 @@ test.describe('Selection is not an action (STU-679)', () => {
         await g.before(page, seen)
       }
       if (g.kind === 'switch') {
-        await g.group(page).click()
+        const sw = g.group(page)
+        await expectAccountSeeded(page)
+        // Off: the label reads Inactive and every other field keeps its value.
+        await sw.click()
         await settle(page)
+        await expect(sw).toHaveAttribute('aria-checked', 'false')
         await g.after(page, seen)
-        // Off, then created: the account is saved inactive.
-        await dialogOf(page).getByPlaceholder('Enter account name').fill('Maya savings')
+        await expectAccountSeeded(page)
+        // On again: the same.
+        await sw.click()
+        await settle(page)
+        await expect(sw).toHaveAttribute('aria-checked', 'true')
+        await expectAccountSeeded(page)
+        // Off, then created: saved inactive with every seeded field, and answered inactive.
+        await sw.click()
+        await settle(page)
+        await expect(sw).toHaveAttribute('aria-checked', 'false')
+        await expectAccountSeeded(page)
+        expect(await changedUnrelated(page), `other selections keep their values (${watched} watched)`).toEqual([])
+        const inactive = accountCreated(page)
         await page.getByRole('button', { name: 'Create Account', exact: true }).click()
-        await expect.poll(() => api.bodies('POST', '/accounts/').length).toBe(1)
-        expect((api.bodies('POST', '/accounts/')[0] as { is_active?: boolean }).is_active).toBe(false)
-        // On (the dialog's default), then created: saved active.
+        expect(((await (await inactive).json()) as Account).is_active).toBe(false)
+        expect(api.bodies('POST', '/accounts/')[0]).toMatchObject({ ...newAccountInput, is_active: false })
+        // On (the dialog's default), then created: saved active and answered active.
         await page.getByRole('button', { name: 'Add Account', exact: true }).click()
         await expect(page.getByRole('switch', { name: 'Active' })).toHaveAttribute('aria-checked', 'true')
-        await dialogOf(page).getByPlaceholder('Enter account name').fill('Maya savings')
+        await seedAccount(page)
+        await expectAccountSeeded(page)
+        const active = accountCreated(page)
         await page.getByRole('button', { name: 'Create Account', exact: true }).click()
-        await expect.poll(() => api.bodies('POST', '/accounts/').length).toBe(2)
-        expect((api.bodies('POST', '/accounts/')[1] as { is_active?: boolean }).is_active).toBe(true)
-      } else {
-        await choose(page, g, g.other)
-        if (g.multi === 'toggle') await choose(page, g, g.selected)
-        await g.after(page, seen)
+        expect(((await (await active).json()) as Account).is_active).toBe(true)
+        expect(api.bodies('POST', '/accounts/')[1]).toMatchObject({ ...newAccountInput, is_active: true })
+        await evidence(page, g, `behaviour-${g.key}`)
+        return
       }
+      await choose(page, g, g.other)
+      await g.after(page, seen)
       expect(await changedUnrelated(page), `other selections on the page keep their values (${watched} watched)`).toEqual([])
       await evidence(page, g, `behaviour-${g.key}`)
+      if (g.submit) await g.submit(page, api)
     })
   }
 
@@ -808,8 +1255,9 @@ test.describe('Selection is not an action (STU-679)', () => {
         await g.open(page)
         await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
         await settle(page)
-        const chosen = page.locator('[aria-pressed="true"], [role="tab"][aria-selected="true"], [role="switch"][aria-checked="true"]')
-        await expect(chosen.first()).toBeAttached()
+        // Every chosen control on the page, and the group's own (a pager's current page is marked by aria-current).
+        const chosen = page.locator('[aria-pressed="true"], [role="tab"][aria-selected="true"], [role="switch"][aria-checked="true"]').or(optionOf(page, g, g.selected))
+        await expect(optionOf(page, g, g.selected)).toBeVisible()
         const fills = await chosen.evaluateAll((els) => els.map((e) => `${e.textContent?.trim().slice(0, 30)}: ${getComputedStyle(e).backgroundColor}`))
         expect(fills.length, 'chosen controls on the page').toBeGreaterThan(0)
         expect(fills.filter((f) => f.endsWith(`: ${primary}`) || f.endsWith(`: ${ink}`)), `no chosen control is filled with the primary (${primary}) or ink (${ink})`).toEqual([])
