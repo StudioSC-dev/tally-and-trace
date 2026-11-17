@@ -11,6 +11,7 @@ import resolveConfig from 'tailwindcss/resolveConfig.js'
 import { shot } from './support/shot'
 import { calmHousehold, emptyHousehold, household, mockHousehold, SHARED_ACCOUNT_IDS } from './support/fixtures/household'
 import type { HouseholdData } from './support/fixtures/household'
+import type { BudgetEntry, CashflowTimelineEvent, PaginatedResponse, Transaction } from '@tally-trace/shared'
 
 // This spec lives in <repo>/frontend/e2e.
 const FRONTEND = fileURLToPath(new URL('..', import.meta.url))
@@ -390,7 +391,7 @@ test.describe('Columnar pad design tokens (STU-675)', () => {
     await shot(page, 'no-shims')
   })
 
-  test('no render shims and deferred changes untouched: deferred files match the PR base', () => {
+  test('no render shims and deferred changes untouched: deferred files match the PR base', async ({ page }) => {
     const git = (args: string[]) => spawnSync('git', args, { cwd: REPO, encoding: 'utf8' })
     const branch = process.env.GITHUB_BASE_REF || 'main'
     const ref = `origin/${branch}`
@@ -419,11 +420,16 @@ test.describe('Columnar pad design tokens (STU-675)', () => {
     expect(changed.status, changed.stderr).toBe(0)
     const touched = [...changed.stdout.split('\n'), ...added.stdout.split('\n')].filter((f) => f && f !== 'frontend/src/assets/index.css')
     expect.soft(touched, 'component, route and top bar files are unchanged').toEqual([])
+    // The evidence page: every comparison below, as checked.
+    const evidence: string[] = [`base ${base} (${ref})`, `frontend/src changed besides index.css: ${JSON.stringify(touched)}`]
 
     // Fonts (STU-676): every font-family declaration and font source, in all four places they live.
     const fontLine = /font-family|--font-(sans|serif|mono)|fontFamily|(sans|serif|mono): \[|fonts\.g|@fontsource/
     for (const file of ['frontend/src/assets/index.css', 'frontend/tailwind.config.js', 'frontend/index.html', 'frontend/package.json']) {
-      expect.soft(lines(readRepo(file), fontLine), `font declarations in ${file}`).toEqual(lines(atBase(file), fontLine))
+      const now = lines(readRepo(file), fontLine)
+      const before = lines(atBase(file), fontLine)
+      expect.soft(now, `font declarations in ${file}`).toEqual(before)
+      evidence.push(`${file}: ${now.length} font lines, ${JSON.stringify(now) === JSON.stringify(before) ? 'same as base' : 'CHANGED'}`)
     }
 
     // The top bar (STU-684): no rule for the nav or its safe-area band changes.
@@ -431,6 +437,7 @@ test.describe('Columnar pad design tokens (STU-675)', () => {
     const css = readRepo('frontend/src/assets/index.css')
     const baseCss = atBase('frontend/src/assets/index.css')
     expect.soft(lines(css, navLine), 'top bar rules in index.css').toEqual(lines(baseCss, navLine))
+    evidence.push(`top bar lines in index.css: ${JSON.stringify(lines(css, navLine))}`)
 
     // The .card hover (STU-692): the hover and transition utilities on .card and .stat-card stay as they were.
     const hoverOf = (text: string, cls: string): string[] => {
@@ -441,7 +448,11 @@ test.describe('Columnar pad design tokens (STU-675)', () => {
       const before = hoverOf(baseCss, cls)
       expect.soft(before.length, `.${cls} had hover rules at the base`).toBeGreaterThan(0)
       expect.soft(hoverOf(css, cls), `.${cls} hover rules`).toEqual(before)
+      evidence.push(`.${cls} hover at base ${JSON.stringify(before)}, now ${JSON.stringify(hoverOf(css, cls))}`)
     }
+    await page.setContent(`<pre style="font: 13px/1.4 monospace; padding: 16px; white-space: pre-wrap"></pre>`)
+    await page.locator('pre').evaluate((el, text) => (el.textContent = text), evidence.join('\n'))
+    await shot(page, 'deferred-files')
   })
 
   const pages = [
@@ -462,10 +473,39 @@ test.describe('Columnar pad design tokens (STU-675)', () => {
           if (m.type() === 'error') errors.push(m.text())
         })
         page.on('pageerror', (e) => errors.push(e.message))
+        const answers: Promise<{ url: URL; body: unknown }>[] = []
+        page.on('response', (r) => {
+          if (r.url().includes('/api/v1/')) answers.push(r.json().then((body: unknown) => ({ url: new URL(r.url()), body })))
+        })
         const api = await mockHousehold(page, data)
         await page.goto(p.path)
         await expect(page.getByRole('heading', { level: 1, name: p.heading })).toBeVisible()
         await page.waitForLoadState('networkidle')
+        const answered = await Promise.all(answers)
+        const answer = <T>(apiPath: string, param: string, value: string): T | undefined =>
+          answered.find((a) => a.url.pathname === `/api/v1${apiPath}` && a.url.searchParams.get(param) === value)?.body as T | undefined
+        if (p.name === 'transactions') {
+          // The list asks for this month so far: the answer holds those days only, and its total agrees.
+          const month = answer<PaginatedResponse<Transaction>>('/transactions/', 'start_date', '2026-03-01T00:00:00Z')
+          const inMonth = data.transactions.filter((t) => t.view !== 'limited' && t.transaction_date.slice(0, 10) >= '2026-03-01')
+          const days = (month?.items ?? []).map((t) => (t.view === 'limited' ? t.date : t.transaction_date).slice(0, 10))
+          expect.soft(days.filter((d) => d < '2026-03-01' || d > '2026-03-12'), 'no row outside 1–12 March').toEqual([])
+          expect.soft(month?.total, 'the total counts March rows only').toBe(inMonth.length)
+          expect.soft(month?.items.length, 'one page of them').toBe(Math.min(25, inMonth.length))
+          await expect.soft(page.getByText('Payroll, February 1–15'), 'no February row on the March view').toHaveCount(0)
+          if (inMonth.length) await expect.soft(page.getByText('Puregold weekly groceries').first(), 'a March row is shown').toBeVisible()
+        }
+        if (p.name === 'allocations') {
+          // Allocations asks once per entry type: each list holds that type only, and the two never share an entry.
+          const idsOf = (list?: PaginatedResponse<BudgetEntry>): number[] => (list?.items ?? []).map((e) => e.id)
+          const income = answer<PaginatedResponse<BudgetEntry>>('/budget-entries/', 'entry_type', 'income')
+          const expense = answer<PaginatedResponse<BudgetEntry>>('/budget-entries/', 'entry_type', 'expense')
+          const wanted = (kind: string): number[] => data.entries.filter((e) => e.entry_type === kind).map((e) => e.id)
+          expect.soft(idsOf(income), 'the income list').toEqual(wanted('income'))
+          expect.soft(idsOf(expense), 'the expense list').toEqual(wanted('expense'))
+          expect.soft(idsOf(income).filter((id) => idsOf(expense).includes(id)), 'the lists are disjoint').toEqual([])
+          expect.soft(api.count('GET', '/budget-entries/'), 'both lists went through the counted mock').toBe(2)
+        }
         expect(api.requests().length, 'the page called the faked API').toBeGreaterThan(0)
         // mockApi soft-fails any unmocked call; this names the calls in the report as well.
         expect(api.requests().filter((r) => !r.startsWith('GET ')), 'only reads on load').toEqual([])
@@ -475,7 +515,34 @@ test.describe('Columnar pad design tokens (STU-675)', () => {
     }
   }
 
-  test('household fixtures render and satisfy their data contracts: household data', () => {
+  /** Opens the variant's dashboard so each data case has a page to show; returns once the page has settled. */
+  async function dashboardFor(page: Page, data: HouseholdData): Promise<void> {
+    await mockHousehold(page, data)
+    await page.goto('/')
+    await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible()
+    await page.waitForLoadState('networkidle')
+  }
+
+  /** The timeline's events with every field: the fixture has no limited ones. */
+  const eventsOf = (data: HouseholdData): CashflowTimelineEvent[] =>
+    data.timeline.events.filter((e): e is CashflowTimelineEvent => e.view !== 'limited')
+
+  /** The timeline's running balances, lowest and closing figures follow from its opening balance and events. */
+  function expectTimelineAddsUp(data: HouseholdData): void {
+    const t = data.timeline
+    expect.soft(eventsOf(data).length, 'every event is a full one').toBe(t.events.length)
+    let running = t.opening_balance
+    for (const e of eventsOf(data)) {
+      running = Math.round((running + e.amount) * 100) / 100
+      expect.soft(e.running_balance, `running balance after ${e.name} on ${e.date}`).toBe(running)
+    }
+    expect.soft(t.closing_balance, 'closing balance').toBe(running)
+    expect.soft(t.lowest_balance, 'lowest balance').toBe(Math.min(t.opening_balance, ...t.events.map((e) => e.running_balance)))
+    expect.soft([...t.events].sort((a, b) => a.date.localeCompare(b.date)), 'events in date order').toEqual(t.events)
+  }
+
+  test('household fixtures render and satisfy their data contracts: household data', async ({ page }) => {
+    await dashboardFor(page, household)
     const shared = household.transactions.filter((t) => t.view !== 'limited' && SHARED_ACCOUNT_IDS.includes(t.account_id))
     expect.soft(shared.length, 'shared-account transactions').toBeGreaterThanOrEqual(3)
     expect.soft(shared.some((t) => t.view === 'shared_full'), 'someone else entered a shared row').toBe(true)
@@ -492,9 +559,44 @@ test.describe('Columnar pad design tokens (STU-675)', () => {
     const listed = household.due.upcoming_occurrences.items.length + household.due.subscription_occurrences.items.length
     expect.soft(listed, 'the Due card lists all 18').toBe(18)
     expect.soft(household.quickBalances.tiles.length, 'quick balances').toBeGreaterThan(0)
+
+    // Monthly figures, worked by hand from the recurring entries (joint account included, weekly × 52/12,
+    // semi-monthly × 2): income is payroll twice; expenses are the nine monthly bills on payroll and the card
+    // (42,756), the weekly palengke run (1,300 × 52/12) and the yaya twice (9,000).
+    const monthly = household.snapshot.monthly_summary
+    expect.soft(monthly.monthly_income, 'monthly income').toBe(82500)
+    expect.soft(monthly.monthly_expenses, 'monthly expenses').toBe(57389.33)
+    expect.soft(monthly.monthly_disposable, 'monthly disposable').toBe(25110.67)
+    expect.soft(monthly.by_currency, 'the PHP row matches').toEqual([
+      { currency: 'PHP', monthly_income: 82500, monthly_expenses: 57389.33, moved_in: 0, moved_out: 0, monthly_disposable: 25110.67 },
+    ])
+
+    // Both statement payments leave the card's funding account (payroll, 11) on their due days.
+    const card = household.accounts.find((a) => a.account_type === 'credit')
+    const fundedBy = card?.payment_account_id
+    expect.soft(fundedBy, 'the card is paid from payroll').toBe(11)
+    const statementEvents = eventsOf(household)
+      .filter((e) => e.source === 'statement')
+      .map((e) => ({ date: e.date, amount: e.amount, source_id: e.source_id, account_id: e.accounts?.[0]?.account_id }))
+    expect.soft(statementEvents, 'the closed statement and the next statement are cash events').toEqual([
+      { date: '2026-03-13', amount: -12480.55, source_id: card?.id, account_id: fundedBy },
+      { date: '2026-04-09', amount: -6261.75, source_id: card?.id, account_id: fundedBy },
+    ])
+    const [closed] = household.cardStatements
+    expect.soft(closed.due_date, 'the closed statement is due on the 13th').toBe('2026-03-13')
+    expect.soft(closed.clear_through, 'the closed statement amount').toBe(12480.55)
+    const nextStatement = household.payables.find((p) => p.source === 'statement')
+    expect.soft(nextStatement?.amount, 'the next statement does not repeat the closed one').toBe(Math.round((-(card?.balance ?? 0) - closed.clear_through) * 100) / 100)
+    // Card spending reaches cash through the statements only: no card occurrence is a cash event of its own.
+    const cardEntryIds = household.occurrences.filter((o) => o.account_name === card?.name).map((o) => o.entry_id)
+    expect.soft(cardEntryIds.length, 'the card has occurrences').toBe(2)
+    expect.soft(eventsOf(household).filter((e) => e.source === 'budget_entry' && cardEntryIds.includes(e.source_id ?? -1)), 'no card occurrence in the cash timeline').toEqual([])
+    expectTimelineAddsUp(household)
+    await shot(page, 'data-household')
   })
 
-  test('household fixtures render and satisfy their data contracts: calmHousehold data', () => {
+  test('household fixtures render and satisfy their data contracts: calmHousehold data', async ({ page }) => {
+    await dashboardFor(page, calmHousehold)
     const calm = calmHousehold
     expect.soft(calm.payables.filter((p) => p.overdue), 'no overdue payable').toEqual([])
     expect.soft(calm.snapshot.payables.filter((p) => p.overdue), 'no overdue payable on the dashboard').toEqual([])
@@ -508,12 +610,22 @@ test.describe('Columnar pad design tokens (STU-675)', () => {
     expect.soft(calm.timeline.lowest_balance, 'lowest projected balance').toBeGreaterThanOrEqual(0)
     expect.soft(calm.occurrences.filter((o) => o.auto_post === 'blocked'), 'nothing failed to auto-post').toEqual([])
     expect.soft(calm.snapshot.installment_auto_post, 'no auto-post problems').toEqual([])
+    // The same recurring entries as the busy month, so the same monthly figures; the paid-off card owes nothing.
+    expect.soft(calm.snapshot.monthly_summary, 'monthly figures reconcile with the busy month').toEqual(household.snapshot.monthly_summary)
+    expect.soft(eventsOf(calm).filter((e) => e.source === 'statement'), 'no statement to pay').toEqual([])
+    expectTimelineAddsUp(calm)
+    await shot(page, 'data-calmHousehold')
   })
 
-  test('household fixtures render and satisfy their data contracts: emptyHousehold data', () => {
+  test('household fixtures render and satisfy their data contracts: emptyHousehold data', async ({ page }) => {
+    await dashboardFor(page, emptyHousehold)
     expect.soft(emptyHousehold.transactions, 'no transactions').toEqual([])
     expect.soft(emptyHousehold.entries, 'no recurring entries').toEqual([])
     expect.soft(emptyHousehold.occurrences, 'no occurrences').toEqual([])
     expect.soft(emptyHousehold.accounts.length, 'the accounts are still there').toBeGreaterThan(0)
+    const monthly = emptyHousehold.snapshot.monthly_summary
+    expect.soft([monthly.monthly_income, monthly.monthly_expenses, monthly.monthly_disposable], 'no recurring totals').toEqual([0, 0, 0])
+    expect.soft(emptyHousehold.timeline.events, 'nothing on the timeline').toEqual([])
+    await shot(page, 'data-emptyHousehold')
   })
 })
