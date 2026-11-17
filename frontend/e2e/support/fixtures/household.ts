@@ -7,7 +7,7 @@
  * needs a state this file lacks, extend this file rather than copying data into the spec.
  *
  * Three variants:
- * - `household`: the busy month. Shared-account rows, recurring entries, an overdue payable,
+ * - `household`: the busy month. Shared-account rows, recurring entries (two of them paused), an overdue payable,
  *   a card with a closed statement, 18 upcoming occurrences and quick balances.
  * - `calmHousehold`: the same household with nothing overdue, negative, failed or over a budget limit.
  * - `emptyHousehold`: the accounts only, with no transactions or recurring entries.
@@ -37,6 +37,7 @@ import type {
   DashboardDue,
   DashboardSnapshot,
   DescriptionSuggestion,
+  EntryOccurrences,
   FullBudgetEntry,
   FullTransaction,
   HouseholdDashboard,
@@ -360,6 +361,12 @@ const yayaEntry = entry('Yaya salary', 'expense', 4500, '2026-03-15', joint, {
   kind: 'cash',
   settlement: 'manual',
 })
+/**
+ * Two paused entries: a paused entry offers no Mark paid, Charged or Posted, so each lists as a row with one meta line
+ * and nothing under it. Paused entries are left out of the monthly figures, the upcoming list and the occurrences.
+ */
+const gymEntry = entry('Gym membership', 'expense', 2500, '2026-04-05', payroll, { anchor_day: 5, kind: 'cash', settlement: 'manual', is_active: false })
+const disneyEntry = entry('Disney+ Premium', 'expense', 369, '2026-04-02', card, { anchor_day: 2, kind: 'subscription', is_active: false })
 const entries: BudgetEntry[] = [
   payrollEntry,
   rentEntry,
@@ -373,6 +380,8 @@ const entries: BudgetEntry[] = [
   mayniladEntry,
   palengkeEntry,
   yayaEntry,
+  gymEntry,
+  disneyEntry,
 ]
 
 const upcoming: UpcomingItem[] = [
@@ -842,9 +851,9 @@ export const limitedRecurring: LimitedBudgetEntry[] = [
     entry_type: 'expense',
     cadence: 'monthly',
     next_occurrence: '2026-03-20',
-    end_date: null,
+    end_date: '2026-12-20',
     category_name: 'Utilities',
-    account: null,
+    account: { id: null, name: 'Other account' },
     counterpart: null,
     tags: [],
   },
@@ -1327,6 +1336,27 @@ export const accountDetailRoutes = (data: HouseholdData, accountId: number): Api
     apiRoute<Account>('GET', `/accounts/${accountId}`, account),
     apiRoute<CardCreditDetail>('GET', `/cards/${accountId}/credit`, credit),
   ]
+}
+
+/**
+ * What the Mark paid dialog asks for when it opens on a recurring entry (`GET /budget-entries/{id}/occurrences`):
+ * the entry's unrecorded occurrences from `data.occurrences`, none of them due yet.
+ */
+export const entryOccurrencesRoute = (data: HouseholdData, entryId: number): ApiRoute => {
+  const entry = data.entries.find((e) => e.id === entryId)
+  if (!entry || entry.view === 'limited') throw new Error(`no full recurring entry ${entryId} in the fixture`)
+  const listed: EntryOccurrences = {
+    entry_id: entryId,
+    today: data.today,
+    capped: false,
+    kind: entry.kind ?? null,
+    due_unposted: 0,
+    omitted: 0,
+    occurrences: data.occurrences
+      .filter((o) => o.entry_id === entryId)
+      .map((o) => ({ occurrence_date: o.occurrence_date, effective_date: o.effective_date, due: false, linked: null, skipped_before: 0 })),
+  }
+  return apiRoute<EntryOccurrences>('GET', `/budget-entries/${entryId}/occurrences`, listed)
 }
 
 /**
