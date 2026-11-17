@@ -8,6 +8,7 @@ declare module 'node:path' {
     join(...parts: string[]): string
     resolve(...parts: string[]): string
     dirname(p: string): string
+    relative(from: string, to: string): string
   }
   export default path
 }
@@ -16,6 +17,7 @@ declare module 'node:fs' {
   const fs: {
     existsSync(p: string): boolean
     readFileSync(p: string, encoding: 'utf8'): string
+    readdirSync(p: string, options: { withFileTypes: true }): { name: string; isDirectory(): boolean }[]
     writeFileSync(p: string, data: string): void
   }
   export default fs

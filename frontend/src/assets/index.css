@@ -40,6 +40,21 @@
   --dark-info: 147 165 152; /* #93A598, as muted */
   --dark-danger: 240 150 140; /* #F0968C */
 
+  /* Tag swatches and chart colours, dark set (see the light set below). */
+  --dark-swatch-1: 61 98 174; /* #3D62AE */
+  --dark-swatch-2: 106 75 174; /* #6A4BAE */
+  --dark-swatch-3: 37 105 61; /* #25693D */
+  --dark-swatch-4: 151 80 31; /* #97501F */
+  --dark-swatch-5: 168 64 122; /* #A8407A */
+  --dark-swatch-6: 33 104 121; /* #216879 */
+  --dark-swatch-7: 116 98 10; /* #74620A */
+  --dark-swatch-8: 168 58 54; /* #A83A36 */
+  --dark-chart-1: 111 181 150; /* #6FB596 */
+  --dark-chart-2: 224 146 90; /* #E0925A */
+  --dark-chart-3: 143 174 224; /* #8FAEE0 */
+  --dark-chart-4: 201 155 207; /* #C99BCF */
+  --dark-chart-5: 217 184 74; /* #D9B84A */
+
   /*
     Colour tokens are space-separated RGB channels, not colours, so Tailwind can
     add an alpha (a `/NN` suffix on a utility): tailwind.config.js wraps them as
@@ -82,6 +97,27 @@
   /* The dialog backdrop and shadow colour (#0C130F); the same in both themes. */
   --scrim: 12 19 15;
 
+  /*
+    Tag and category swatches, then chart colours. Components use these instead of a raw
+    hex. Each swatch carries `ink` text at 4.5:1 or more in its own theme (the tag chip),
+    so a swatch is a tint, light on the pad and deep in the dark. Swatches 1..8 are the old
+    picker's eight colours in the same order (src/utils/palette.ts maps a saved colour to
+    its swatch); charts 1..5 are the spending breakdown's slices.
+  */
+  --swatch-1: 123 159 232; /* #7B9FE8 */
+  --swatch-2: 169 140 230; /* #A98CE6 */
+  --swatch-3: 95 187 126; /* #5FBB7E */
+  --swatch-4: 232 145 79; /* #E8914F */
+  --swatch-5: 232 127 176; /* #E87FB0 */
+  --swatch-6: 79 185 207; /* #4FB9CF */
+  --swatch-7: 201 168 30; /* #C9A81E */
+  --swatch-8: 236 122 114; /* #EC7A72 */
+  --chart-1: 47 111 90; /* #2F6F5A */
+  --chart-2: 176 100 42; /* #B0642A */
+  --chart-3: 79 111 168; /* #4F6FA8 */
+  --chart-4: 138 90 143; /* #8A5A8F */
+  --chart-5: 154 123 18; /* #9A7B12 */
+
   /* Shape: radius encodes level. Rows and the selection rule stay square (0). */
   --radius-sm: 4px; /* buttons, chips */
   --radius-md: 6px; /* panels, list sheets */
@@ -121,6 +157,19 @@
   --warn: var(--dark-warn);
   --info: var(--dark-info);
   --danger: var(--dark-danger);
+  --swatch-1: var(--dark-swatch-1);
+  --swatch-2: var(--dark-swatch-2);
+  --swatch-3: var(--dark-swatch-3);
+  --swatch-4: var(--dark-swatch-4);
+  --swatch-5: var(--dark-swatch-5);
+  --swatch-6: var(--dark-swatch-6);
+  --swatch-7: var(--dark-swatch-7);
+  --swatch-8: var(--dark-swatch-8);
+  --chart-1: var(--dark-chart-1);
+  --chart-2: var(--dark-chart-2);
+  --chart-3: var(--dark-chart-3);
+  --chart-4: var(--dark-chart-4);
+  --chart-5: var(--dark-chart-5);
 
   color-scheme: dark;
 }
@@ -145,6 +194,19 @@
     --warn: var(--dark-warn);
     --info: var(--dark-info);
     --danger: var(--dark-danger);
+    --swatch-1: var(--dark-swatch-1);
+    --swatch-2: var(--dark-swatch-2);
+    --swatch-3: var(--dark-swatch-3);
+    --swatch-4: var(--dark-swatch-4);
+    --swatch-5: var(--dark-swatch-5);
+    --swatch-6: var(--dark-swatch-6);
+    --swatch-7: var(--dark-swatch-7);
+    --swatch-8: var(--dark-swatch-8);
+    --chart-1: var(--dark-chart-1);
+    --chart-2: var(--dark-chart-2);
+    --chart-3: var(--dark-chart-3);
+    --chart-4: var(--dark-chart-4);
+    --chart-5: var(--dark-chart-5);
 
     color-scheme: dark;
   }
@@ -547,7 +609,7 @@ body {
   Room for the toast stack under a dialog (STU-629). The stack (Toast.tsx) sits above the dialogs so
   a failed save can be acted on at once; `--toast-room` is the height it takes from the bottom of
   the viewport (unset when there are no toasts). Every dialog overlay is `fixed inset-0
-  overflow-y-auto bg-black/60 py-6`: padding its bottom by that room lets the dialog scroll, and
+  overflow-y-auto bg-scrim/60 py-6`: padding its bottom by that room lets the dialog scroll, and
   centre, above the stack, so its buttons are never under a toast. The confirm dialog (z-100) sits
   above the stack, so it needs no room. Outside @layer so it wins over the py-6 utility.
 
@@ -560,7 +622,7 @@ body {
   Accounts page) the utility gave this fixed box a 24px margin-top, so the backdrop started 24px
   down and the top nav stayed uncovered.
 */
-.fixed.inset-0.overflow-y-auto.bg-black\/60:not(.z-\[100\]) {
+.fixed.inset-0.overflow-y-auto.bg-scrim\/60:not(.z-\[100\]) {
   z-index: 60;
   margin: 0;
   padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 0px), var(--toast-room, 0px));
@@ -571,7 +633,7 @@ body {
   `min-h-full` centring box, then the panel, so the panel takes radius-lg and
   --elev-dialog here (the confirm dialog included).
 */
-.fixed.inset-0.overflow-y-auto.bg-black\/60 > .min-h-full > * {
+.fixed.inset-0.overflow-y-auto.bg-scrim\/60 > .min-h-full > * {
   border-radius: var(--radius-lg);
   box-shadow: var(--elev-dialog);
 }

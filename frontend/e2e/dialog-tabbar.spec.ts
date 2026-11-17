@@ -264,7 +264,7 @@ const otherDialogs: DialogCase[] = [
   },
 ]
 
-const OVERLAY = '.fixed.inset-0.overflow-y-auto.bg-black\\/60'
+const OVERLAY = '.fixed.inset-0.overflow-y-auto.bg-scrim\\/60'
 
 async function start(page: Page): Promise<ApiMock> {
   await signedIn(page, user)

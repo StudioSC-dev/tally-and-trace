@@ -87,7 +87,9 @@ function parseColour(text) {
   let a = m[4] === undefined ? 1 : m[4].endsWith('%') ? parseFloat(m[4]) / 100 : parseFloat(m[4])
   return [Number(m[1]), Number(m[2]), Number(m[3]), a]
 }
-const tokenRgb = (token, theme) => hexToRgb(manifest.tokens[token][THEMES.indexOf(theme)])
+// `scrim` joined the tokens after the manifest was recorded (STU-675); it is the same colour in both themes.
+const EXTRA_TOKENS = { scrim: ['#0c130f', '#0c130f'] }
+const tokenRgb = (token, theme) => hexToRgb((manifest.tokens[token] || EXTRA_TOKENS[token])[THEMES.indexOf(theme)])
 const sameRgb = (c, rgb) => c && c[0] === rgb[0] && c[1] === rgb[1] && c[2] === rgb[2]
 
 // ─── Setup ──────────────────────────────────────────────────────────────────
@@ -465,7 +467,7 @@ async function scenarioB() {
   console.log('b. alpha-usages')
   await h.check('b.inventory-complete', 'S', async () => {
     const found = []
-    const re = /\b((?:[a-z-]+:)*)(bg|text|border|divide|ring|fill|stroke|from|to|via|outline|shadow|placeholder|decoration|accent|caret)-(paper|surface|sunken|line|line-strong|ink|body|muted|ok|warn|info|danger)\/(\d+|\[)/g
+    const re = /\b((?:[a-z-]+:)*)(bg|text|border|divide|ring|fill|stroke|from|to|via|outline|shadow|placeholder|decoration|accent|caret)-(paper|surface|sunken|line|line-strong|ink|body|muted|ok|warn|info|danger|scrim)\/(\d+|\[)/g
     const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walk(pathMod.join(dir, d.name)) : [pathMod.join(dir, d.name)]))
     for (const file of walk(SRC).filter((f) => /\.(tsx?|css)$/.test(f))) {
       fs.readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
@@ -479,7 +481,8 @@ async function scenarioB() {
     if (missing.length || stale.length) return `in src, not in inventory: ${JSON.stringify(missing)}; in inventory, not in src: ${JSON.stringify(stale)}`
   })
   const byState = {}
-  for (const entry of inventory.entries) (byState[entry.state] ||= []).push(entry)
+  // `unreached` entries are sites no scripted state opens (the inventory scan above still covers them).
+  for (const entry of inventory.entries.filter((e) => e.state !== 'unreached')) (byState[entry.state] ||= []).push(entry)
   const bad = []
   for (const theme of THEMES) {
     for (const [stateName, entries] of Object.entries(byState)) {

@@ -618,12 +618,17 @@ interface Parts {
   payables: Payable[]
   cardStatements: CardStatementDue[]
   occurrences: UpcomingOccurrence[]
+  /** Replaces the shared categories and tags, for the variant that tests saved colours. */
+  categories?: Category[]
+  tags?: Tag[]
   allocations: Allocation[]
 }
 
 /** Builds a variant's API answers from its parts, so every variant stays self-consistent. */
 function build(parts: Parts): HouseholdData {
   const { accounts } = parts
+  const categoryList = parts.categories ?? categories
+  const tagList = parts.tags ?? tags
   const total = round2(accounts.reduce((sum, a) => sum + a.balance, 0))
   const availableCash = round2(accounts.filter((a) => a.account_type !== 'credit' && !a.is_spending_wallet).reduce((sum, a) => sum + a.balance, 0))
 
@@ -634,7 +639,7 @@ function build(parts: Parts): HouseholdData {
   const breakdown: TransactionSummary['category_breakdown'] = {}
   for (const t of march) {
     if (t.view === 'limited' || t.transaction_type === 'transfer') continue
-    const name = t.view === 'shared_full' ? (t.category_name ?? 'Uncategorized') : (categories.find((c) => c.id === t.category_id)?.name ?? 'Uncategorized')
+    const name = t.view === 'shared_full' ? (t.category_name ?? 'Uncategorized') : (categoryList.find((c) => c.id === t.category_id)?.name ?? 'Uncategorized')
     const row = breakdown[name] ?? { income: 0, expenses: 0 }
     if (t.transaction_type === 'credit') row.income = round2(row.income + t.amount)
     else row.expenses = round2(row.expenses + t.amount)
@@ -774,8 +779,8 @@ function build(parts: Parts): HouseholdData {
     today: HOUSEHOLD_TODAY,
     user: householdUser,
     accounts,
-    categories,
-    tags,
+    categories: categoryList,
+    tags: tagList,
     transactions: parts.transactions,
     allocations: parts.allocations,
     entries: parts.entries,
@@ -873,6 +878,79 @@ export const emptyHousehold: HouseholdData = build({
   occurrences: [],
   allocations,
 })
+
+/**
+ * The eight colours the tag and category picker used to offer, and the palette swatch (`--swatch-N`) each one is now
+ * drawn with. Saved records keep these strings; the app only resolves them to a swatch for display.
+ */
+export const LEGACY_SWATCHES: readonly { color: string; swatch: number }[] = [
+  { color: '#2563eb', swatch: 1 },
+  { color: '#7c3aed', swatch: 2 },
+  { color: '#16a34a', swatch: 3 },
+  { color: '#f97316', swatch: 4 },
+  { color: '#db2777', swatch: 5 },
+  { color: '#0891b2', swatch: 6 },
+  { color: '#ca8a04', swatch: 7 },
+  { color: '#dc2626', swatch: 8 },
+]
+
+const legacyNames = ['Blue', 'Violet', 'Green', 'Orange', 'Pink', 'Cyan', 'Gold', 'Red']
+/** One tag per old swatch, saved with that swatch's colour string. */
+export const legacyTags: Tag[] = LEGACY_SWATCHES.map((l, i) => ({
+  id: 51 + i,
+  name: `${legacyNames[i]} swatch`,
+  color: l.color,
+  is_system: false,
+  created_at: '2025-06-01T00:00:00',
+}))
+/** The same blue as swatch 1, saved in capitals: still a legacy swatch, and it must stay as saved. */
+export const upperBlueTag: Tag = { id: 59, name: 'Capital blue', color: '#2563EB', is_system: false, created_at: '2025-06-01T00:00:00' }
+/** Tags saved with a colour outside the palette (not a legacy swatch): they keep their colour as saved. */
+export const customTags: Tag[] = tags.filter((t) => !LEGACY_SWATCHES.some((l) => l.color === t.color))
+/** Categories saved with a legacy swatch colour (`Groceries`) and with a colour outside the palette (`Dining out`). */
+export const colouredCategories: Category[] = categories.map((c) =>
+  c.id === 22 ? { ...c, color: '#16a34a' } : c.id === 23 ? { ...c, color: '#E599F7' } : c,
+)
+
+/**
+ * The busy month with saved colours: every old swatch on a tag, plus tags and categories with colours outside the
+ * palette. One transaction, on the newest day, carries every tag so the chips can be read together.
+ */
+export const colouredHousehold: HouseholdData = build({
+  accounts,
+  transactions: [tx('2026-03-12', 'Tag colour check', 100, cash, 22, 'debit', { tags: [...legacyTags, upperBlueTag, ...tags] }), ...transactions],
+  entries,
+  upcoming,
+  payables,
+  cardStatements: [cardStatement],
+  occurrences,
+  allocations,
+  categories: colouredCategories,
+  tags: [...tags, ...legacyTags, upperBlueTag],
+})
+
+/**
+ * The summary with a computed "Transfer fees" row: money spent that belongs to no category, so the spending
+ * breakdown cannot filter the list by it. The fee is added to the totals, so the summary stays consistent.
+ */
+export function withTransferFees(data: HouseholdData, fee: number): TransactionSummary {
+  const { summary } = data
+  const net = (income: number, expenses: number): number => round2(income - expenses)
+  return {
+    ...summary,
+    summary: {
+      ...summary.summary,
+      total_expenses: round2(summary.summary.total_expenses + fee),
+      net_flow: net(summary.summary.total_income, summary.summary.total_expenses + fee),
+    },
+    by_currency: summary.by_currency.map((row) => ({
+      ...row,
+      total_expenses: round2(row.total_expenses + fee),
+      net_flow: net(row.total_income, row.total_expenses + fee),
+      category_breakdown: { ...row.category_breakdown, 'Transfer fees': { income: 0, expenses: fee } },
+    })),
+  }
+}
 
 const pageOf = <T>(items: T[]): PaginatedResponse<T> => ({ items, total: items.length, has_more: false })
 

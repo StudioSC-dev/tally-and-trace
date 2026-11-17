@@ -86,7 +86,7 @@ export function PayableDetailDialog({ payable, display, onClose }: Props) {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[60] overflow-y-auto bg-black/60 px-4 py-6"
+      className="fixed inset-0 z-[60] overflow-y-auto bg-scrim/60 px-4 py-6"
       onClick={onClose}
       data-testid="payable-dialog-overlay"
     >
