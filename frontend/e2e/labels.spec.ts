@@ -35,6 +35,9 @@ async function viewportShot(page: Page, name: string): Promise<void> {
 
 /** The overlay of the open dialog (the shared `fixed inset-0` scrim around it). */
 const overlay = (page: Page): Locator => page.locator('.fixed.inset-0.overflow-y-auto').last()
+/** The first meta line of the list row titled `name` (the `Row` hooks from STU-681). */
+const metaOf = (page: Page, name: string): Locator =>
+  page.getByTestId('row').filter({ has: page.locator('[data-row-title]', { hasText: new RegExp(`^${name}$`) }) }).first().getByTestId('row-meta').first()
 
 async function openAddTransaction(page: Page): Promise<Locator> {
   await open(page, '/transactions')
@@ -406,12 +409,13 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
   test('meta strings use layout', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'phone', 'the 390px layout')
     await open(page, '/allocations?tab=recurring')
-    const meta = page.locator('p', { hasText: /^Netflix Standard$/ }).first().locator('xpath=following-sibling::div[1]')
+    const meta = metaOf(page, 'Netflix Standard')
     await expect.soft(meta, 'the line under the name').toBeVisible()
     expect.soft(await meta.locator(':scope > *').count(), 'the meta line is separate elements').toBeGreaterThan(1)
     expect.soft(await meta.innerText(), 'the meta line has no bullet').not.toContain('•')
     const boxes = await meta.locator(':scope > *').evaluateAll((els) => els.map((e) => e.getBoundingClientRect()).map((r) => ({ x: r.x, y: r.y, right: r.right, bottom: r.bottom })))
-    expect.soft(boxes.length, 'three facts: kind, cadence, settlement').toBe(3)
+    expect.soft(boxes.length, 'at least three facts: kind, cadence, settlement').toBeGreaterThanOrEqual(3)
+    expect.soft(await meta.locator(':scope > *').evaluateAll((els) => els.slice(0, 3).map((e) => (e as HTMLElement).innerText)), 'kind, cadence and settlement lead the line').toEqual(['Recurring expense', 'Monthly · day 9', 'Scheduled'])
     // Each fact sits on its own box: a gap of 8px or more beside the one before it, or on the line below it.
     boxes.slice(1).forEach((b, i) => {
       const before = boxes[i]
@@ -430,7 +434,7 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
       ['PLDT Fibr', ['Recurring expense', 'Monthly · day 6', 'Auto-pay']],
     ]
     for (const [name, facts] of entries) {
-      const meta = await page.locator('p', { hasText: new RegExp(`^${name}$`) }).first().locator('xpath=following-sibling::div[1]').innerText()
+      const meta = await metaOf(page, name).innerText()
       for (const fact of facts) expect.soft(meta, `${name} keeps "${fact}"`).toContain(fact)
     }
     await expect.soft(page.getByText('Recurring income').first(), 'an income entry keeps its kind').toBeVisible()
