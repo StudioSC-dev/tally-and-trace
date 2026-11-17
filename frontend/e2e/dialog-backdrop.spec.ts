@@ -142,12 +142,31 @@ async function measure(page: Page, overlay: Locator): Promise<Measure> {
   return { rect: { x: box?.x ?? NaN, y: box?.y ?? NaN, w: box?.width ?? NaN, h: box?.height ?? NaN }, viewport }
 }
 
+/** How far the overlay's top edge, width and height are from the viewport's, read fresh on every call. */
+const offsets = (page: Page, overlay: Locator) => ({
+  y: async () => Math.abs((await measure(page, overlay)).rect.y),
+  w: async () => {
+    const m = await measure(page, overlay)
+    return Math.abs(m.rect.w - m.viewport.w)
+  },
+  h: async () => {
+    const m = await measure(page, overlay)
+    return Math.abs(m.rect.h - m.viewport.h)
+  },
+})
+
+/** Whether the element at the viewport's top-centre point is the overlay or inside it. */
+const topCentreCovered = (overlay: Locator) => () =>
+  overlay.evaluate((el) => {
+    const top = document.elementFromPoint(Math.round(window.innerWidth / 2), 0)
+    return !!top && el.contains(top)
+  })
+
 test.describe('dialog backdrop (STU-644)', () => {
   test('accounts backdrop covers the full viewport', async ({ page }) => {
     const overlay = await openDialog(page, ACCOUNT)
-    await expect
-      .poll(async () => Math.abs((await measure(page, overlay)).rect.y), { message: 'overlay top edge (y)' })
-      .toBeLessThanOrEqual(TOL)
+    const off = offsets(page, overlay)
+    await expect.poll(off.y, { message: 'overlay top edge (y)' }).toBeLessThanOrEqual(TOL)
     const m = await measure(page, overlay)
     expect(Math.abs(m.rect.y), 'overlay starts at y=0').toBeLessThanOrEqual(TOL)
     expect(Math.abs(m.rect.x)).toBeLessThanOrEqual(TOL)
@@ -160,22 +179,16 @@ test.describe('dialog backdrop (STU-644)', () => {
     for (const c of OTHERS) {
       await test.step(c.name, async () => {
         const overlay = await openDialog(page, c)
+        const off = offsets(page, overlay)
         // The page content fades in under a transform for 0.3s, and a transformed ancestor makes the fixed
         // overlay sit inside it, so the first measure can be mid-animation. Wait for the settled geometry.
-        const soft = expect.configure({ soft: true })
-        await soft.poll(async () => Math.abs((await measure(page, overlay)).rect.y), { message: `${c.name}: overlay y` }).toBeLessThanOrEqual(TOL)
-        await soft
-          .poll(async () => {
-            const m = await measure(page, overlay)
-            return Math.abs(m.rect.w - m.viewport.w)
-          }, { message: `${c.name}: overlay width` })
-          .toBeLessThanOrEqual(TOL)
-        await soft
-          .poll(async () => {
-            const m = await measure(page, overlay)
-            return Math.abs(m.rect.h - m.viewport.h)
-          }, { message: `${c.name}: overlay height` })
-          .toBeLessThanOrEqual(TOL)
+        await expect.poll(off.y, { message: `${c.name}: overlay y` }).toBeLessThanOrEqual(TOL)
+        await expect.poll(off.w, { message: `${c.name}: overlay width` }).toBeLessThanOrEqual(TOL)
+        await expect.poll(off.h, { message: `${c.name}: overlay height` }).toBeLessThanOrEqual(TOL)
+        const m = await measure(page, overlay)
+        expect.soft(Math.abs(m.rect.y), `${c.name}: overlay y`).toBeLessThanOrEqual(TOL)
+        expect.soft(Math.abs(m.rect.w - m.viewport.w), `${c.name}: overlay width`).toBeLessThanOrEqual(TOL)
+        expect.soft(Math.abs(m.rect.h - m.viewport.h), `${c.name}: overlay height`).toBeLessThanOrEqual(TOL)
         await shot(page, `${c.name}-backdrop`)
       })
     }
@@ -184,16 +197,7 @@ test.describe('dialog backdrop (STU-644)', () => {
   test('top nav is covered by the backdrop', async ({ page }) => {
     const overlay = await openDialog(page, ACCOUNT)
     // Poll: during the page's 0.3s fade-in the overlay can still sit below the top edge.
-    await expect
-      .poll(
-        () =>
-          overlay.evaluate((el) => {
-            const top = document.elementFromPoint(Math.round(window.innerWidth / 2), 0)
-            return !!top && el.contains(top)
-          }),
-        { message: 'element at the top-centre point is the overlay or inside it' },
-      )
-      .toBe(true)
+    await expect.poll(topCentreCovered(overlay), { message: 'top-centre point is the overlay or inside it' }).toBe(true)
     expect(fs.existsSync(await shot(page, 'top-nav-covered'))).toBe(true)
   })
 })
