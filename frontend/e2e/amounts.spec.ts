@@ -359,7 +359,7 @@ test.describe('amount classes', () => {
     const main = await openRecurring(page)
     const full = main.locator('article:not([data-testid="limited-entry"])')
     for (const [kind, cls] of [['Income', 'amount-in'], ['Expense', 'amount-out']] as const) {
-      const amounts = amountOf(full.filter({ hasText: new RegExp(`Recurring ${kind}`) }))
+      const amounts = amountOf(full.filter({ hasText: new RegExp(`Recurring ${kind.toLowerCase()}`) }))
       const count = await amounts.count()
       expect(count, `the full renderer lists recurring ${kind} entries`).toBeGreaterThan(0)
       expect(await semanticOf(amounts), `every full recurring ${kind} amount`).toEqual(same(count, cls))
@@ -376,7 +376,7 @@ test.describe('amount classes', () => {
     await expect(limited.first()).toBeVisible()
     expect(await limited.count(), 'the limited renderer lists both entries').toBe(2)
     for (const [kind, cls] of [['Income', 'amount-in'], ['Expense', 'amount-out']] as const) {
-      const amounts = amountOf(limited.filter({ hasText: new RegExp(`Recurring ${kind}`) }))
+      const amounts = amountOf(limited.filter({ hasText: new RegExp(`Recurring ${kind.toLowerCase()}`) }))
       expect(await semanticOf(amounts), `the limited recurring ${kind} amount`).toEqual([cls])
     }
     expect(await textsOf(amountOf(limited.filter({ hasText: /Recurring income/ }))), 'the limited income amount starts with +').toEqual(['+₱3,500.00'])
