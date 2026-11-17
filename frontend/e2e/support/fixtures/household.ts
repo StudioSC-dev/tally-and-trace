@@ -25,6 +25,7 @@ import type {
   Account,
   AccountInput,
   AccountPermissions,
+  AccountShares,
   Allocation,
   BudgetEntry,
   BudgetEntryInput,
@@ -37,6 +38,8 @@ import type {
   DashboardDue,
   DashboardSnapshot,
   DescriptionSuggestion,
+  EntryOccurrences,
+  ForcedDateResult,
   FullBudgetEntry,
   FullTransaction,
   HouseholdDashboard,
@@ -1328,6 +1331,66 @@ export const accountDetailRoutes = (data: HouseholdData, accountId: number): Api
     apiRoute<CardCreditDetail>('GET', `/cards/${accountId}/credit`, credit),
   ]
 }
+
+/**
+ * The lookups the Due card's and Recurring tab's dialogs make when they open, answered from `data`: each full
+ * recurring entry (`GET /budget-entries/{id}`, for Mark paid) with the occurrence it was opened for listed as due and
+ * unrecorded (`.../occurrences?include=`), and each credit card's detail for Pay (no limit, no closed statements).
+ */
+export const householdDialogRoutes = (data: HouseholdData): ApiRoute[] => [
+  ...data.entries
+    .filter((e) => e.view !== 'limited')
+    .flatMap((e) => [
+      apiRoute<BudgetEntry>('GET', `/budget-entries/${e.id}`, e),
+      queryRoute<EntryOccurrences>('GET', `/budget-entries/${e.id}/occurrences`, (q) => {
+        only(q, ['include'])
+        const day = q.get('include') ?? data.today
+        return {
+          entry_id: e.id,
+          today: data.today,
+          capped: false,
+          kind: e.kind ?? null,
+          due_unposted: 0,
+          oldest_due: null,
+          latest_due: null,
+          oldest_unrecorded: day,
+          omitted: 0,
+          occurrences: [{ occurrence_date: day, effective_date: day, due: day <= data.today, linked: null, skipped_before: 0, omitted_before: 0 }],
+        }
+      }),
+    ]),
+  ...data.accounts.filter((a) => a.account_type === 'credit').flatMap((a) => accountDetailRoutes(data, a.id).filter((r) => r.path.endsWith('/credit'))),
+]
+
+/**
+ * The saves the action dialogs send, each answered as the API would (200) from `data`: a transaction or account
+ * update returns the record, a Mark paid or Charged (`.../materialize`) returns the recorded transaction, a forced
+ * date on a payable's occurrence returns that date, and an account's shares list only its owner. Opening an account
+ * (`GET /accounts/{id}`) returns it.
+ */
+export const householdSaveRoutes = (data: HouseholdData): ApiRoute[] => [
+  ...data.transactions.filter((t) => t.view !== 'limited').map((t) => apiRoute<Transaction>('PUT', `/transactions/${t.id}`, t)),
+  ...data.accounts.flatMap((a) => [
+    apiRoute<Account>('GET', `/accounts/${a.id}`, a),
+    apiRoute<Account>('PUT', `/accounts/${a.id}`, a),
+    apiRoute<AccountShares>('GET', `/accounts/${a.id}/shares`, {
+      account_id: a.id,
+      owner: { user_id: data.user.id, display_name: `${data.user.first_name} ${data.user.last_name}`, role: 'owner' },
+      shares: [],
+    }),
+  ]),
+  ...data.entries.flatMap((e) => {
+    if (e.view === 'limited') return []
+    const account = data.accounts.find((a) => a.id === e.account_id)
+    if (!account) return []
+    return [apiRoute<Transaction>('POST', `/budget-entries/${e.id}/materialize`, tx(data.today, e.name, e.amount, account, 0), 201)]
+  }),
+  ...data.payables.flatMap((p) =>
+    p.source === 'budget_entry' && p.occurrence_date
+      ? [apiRoute<ForcedDateResult>('PUT', `/budget-entries/${p.source_id}/occurrences/${p.occurrence_date}/date`, { occurrence_date: p.occurrence_date, effective_date: p.due_date })]
+      : [],
+  ),
+]
 
 /**
  * Signs in as the household's user, freezes the clock on `HOUSEHOLD_NOW` and fakes the API
