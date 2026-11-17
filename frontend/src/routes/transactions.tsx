@@ -2955,7 +2955,7 @@ export function TransactionsPage() {
                 onClick={() => showView(value)}
                 aria-pressed={pressed}
                 data-testid={`view-${value === 'scheduled' ? 'scheduled' : 'to-date'}`}
-                className={`min-h-[44px] px-4 py-2 text-sm font-semibold transition focus-ring ${
+                className={`min-h-11 px-4 py-2 text-sm font-semibold transition focus-ring ${
                   pressed ? 'bg-ink text-paper' : 'border border-line bg-surface text-body hover:bg-sunken'
                 }`}
               >

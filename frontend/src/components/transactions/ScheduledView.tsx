@@ -12,7 +12,7 @@ import { UpcomingOccurrenceRow } from './UpcomingOccurrenceRow'
 import { UpcomingTransactionRow } from './UpcomingTransactionRow'
 import { useOccurrenceDialogs } from './useOccurrenceDialogs'
 
-const TOUCH = 'min-h-[44px]'
+const TOUCH = 'min-h-11'
 
 interface Props {
   /** The page's search and filters, as the transaction list's own parameter names. */

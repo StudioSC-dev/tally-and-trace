@@ -77,7 +77,7 @@ function ChoiceCard({ id, choice, action, busy, onChoose }: {
           type="button"
           onClick={onChoose}
           disabled={busy}
-          className="btn-secondary focus-ring min-h-[44px] w-full sm:w-auto"
+          className="btn-secondary focus-ring min-h-11 w-full sm:w-auto"
           data-testid={`date-choice-${id}-button`}
         >
           {action}
@@ -303,12 +303,12 @@ export function ForceDateDialog({ target, onClose, onChanged }: Props) {
                   type="button"
                   onClick={() => void undo()}
                   disabled={busy}
-                  className="flex-1 btn-secondary focus-ring min-h-[44px]"
+                  className="flex-1 btn-secondary focus-ring min-h-11"
                   data-testid="force-date-undo"
                 >
                   {undoing ? 'Undoing…' : 'Undo'}
                 </button>
-                <button type="button" onClick={onClose} className="flex-1 btn-primary focus-ring min-h-[44px]" data-testid="force-date-done">
+                <button type="button" onClick={onClose} className="flex-1 btn-primary focus-ring min-h-11" data-testid="force-date-done">
                   Done
                 </button>
               </div>

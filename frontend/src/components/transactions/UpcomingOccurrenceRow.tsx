@@ -41,7 +41,7 @@ interface Props {
  * The buttons come from `upcomingOccurrenceRow` alone: the server decides what can be recorded.
  */
 export function UpcomingOccurrenceRow({ occurrence, scheduled, credit, onRecord, onReview, onChangeDate, touch = false, disabled = false }: Props) {
-  const size = touch ? ' min-h-[44px] min-w-[44px]' : ''
+  const size = touch ? ' min-h-11 min-w-11' : ''
   const view = upcomingOccurrenceRow(occurrence, scheduled)
   const amountClass = occurrence.is_transfer ? 'text-ink' : occurrence.entry_type === 'income' ? 'text-ok' : 'text-danger'
   const sign = occurrence.is_transfer ? '' : occurrence.entry_type === 'income' ? '+' : '-'

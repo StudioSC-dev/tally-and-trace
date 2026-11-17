@@ -209,7 +209,7 @@ export function SpendingBreakdownDialog({
                 ) : (
                   <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-4 py-2">
                     {cells}
-                    <span className="col-span-3 -mt-1 pl-[18px] text-xs text-muted">Can't filter the list by this.</span>
+                    <span className="col-span-3 -mt-1 pl-5 text-xs text-muted">Can't filter the list by this.</span>
                   </div>
                 )}
               </li>
