@@ -5,6 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
+import { mockApi } from './support/mockApi'
 import { shot } from './support/shot'
 import { allUpcomingHousehold, household, mockHousehold } from './support/fixtures/household'
 import type { HouseholdData } from './support/fixtures/household'
@@ -136,6 +137,26 @@ const TRANSACTIONS: Surface = {
 }
 const ALLOCATIONS: Surface = { name: 'allocations', route: '/allocations?tab=recurring', labels: [], captions: [] }
 
+const RECURRING_LABELS = [
+  'Name',
+  'Entry type',
+  'Account',
+  'Category',
+  'Overflow account (optional)',
+  'Transfer to (optional)',
+  'Currency',
+  'Amount (PHP)',
+  'Cadence',
+  'Next occurrence',
+  'Day',
+  'Lead time (days)',
+  'Link to budget (optional)',
+  'Ends',
+  'Tags (optional)',
+  'Notes',
+]
+const SIGN_UP_LABELS = ['First name', 'Last name', 'Email address', 'Default currency', 'Password', 'Confirm password']
+
 const ADD_TRANSACTION_LABELS = [
   'Description',
   'Account',
@@ -210,6 +231,52 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
       await viewportShot(page, `labels-allocations-${form.name.replace(/[ ,]+/g, '-')}`)
     })
   }
+
+  // Forms outside the four AC1 surfaces: every visible `<label>` reads in sentence case, as held here.
+  const visibleLabels = (scope: Locator): Promise<string[]> =>
+    scope.locator('label').evaluateAll((els) => els.filter((e) => e.getBoundingClientRect().width > 0).map((e) => (e as HTMLElement).innerText.trim()))
+
+  test('labels are sentence case: sign-up form', async ({ page }) => {
+    await mockApi(page, [])
+    await page.goto('/register')
+    await expect(page.getByLabel('First name')).toBeVisible()
+    expect.soft(await visibleLabels(page.locator('main, form').first()), 'the sign-up label texts').toEqual(SIGN_UP_LABELS)
+    await shot(page, 'labels-sign-up')
+  })
+
+  test('labels are sentence case: sign-in form', async ({ page }) => {
+    await mockApi(page, [])
+    await page.goto('/login')
+    await expect(page.getByLabel('Email address')).toBeVisible()
+    expect.soft(await visibleLabels(page.locator('form').first()), 'the sign-in label texts').toEqual(['Email address', 'Password', 'Remember me'])
+    await shot(page, 'labels-sign-in')
+  })
+
+  const ACCOUNT_FORMS: { name: string; type: string | null; labels: string[] }[] = [
+    { name: 'default', type: null, labels: ['Account name', 'Account type', 'Spending wallet', 'Account currency', 'Initial balance', 'Tags (optional)', 'Description (optional)'] },
+    { name: 'credit card', type: 'credit', labels: ['Account name', 'Account type', 'Account currency', 'Initial balance', 'Tags (optional)', 'Description (optional)', 'Credit limit', 'Shares credit limit with', 'Due date (day of month)', 'Statement closes (day of month)', 'Days until due date', 'Paid from', 'Overflow to', 'Minimum due rule'] },
+    { name: 'loan', type: 'loan', labels: ['Account name', 'Account type', 'Account currency', 'Initial balance', 'Tags (optional)', 'Description (optional)', 'Kind', 'Annual rate (%)', 'Term (months)', 'Payment amount', 'First payment date', 'Amortization', 'Payments already made', 'Paid from'] },
+  ]
+  for (const form of ACCOUNT_FORMS) {
+    test(`labels are sentence case: add account form (${form.name})`, async ({ page }) => {
+      await open(page, '/accounts')
+      await page.getByRole('button', { name: 'Add Account', exact: true }).click()
+      const dialog = overlay(page)
+      await expect(dialog.getByText('Account name')).toBeVisible()
+      if (form.type) await dialog.locator('select').first().selectOption(form.type)
+      if (form.type === 'credit') await dialog.getByRole('button', { name: 'Show details' }).click()
+      expect.soft(await visibleLabels(dialog), `the ${form.name} account form label texts`).toEqual(form.labels)
+      const caps = await uppercaseIn(dialog)
+      expect.soft(caps.found, 'nothing in the form is uppercase').toEqual([])
+      await viewportShot(page, `labels-account-${form.name.replace(/ /g, '-')}`)
+    })
+  }
+
+  test('labels are sentence case: recurring entry form', async ({ page }) => {
+    const dialog = await openRecurringEntry(page)
+    expect.soft(await visibleLabels(dialog), 'the recurring entry label texts').toEqual(RECURRING_LABELS)
+    await viewportShot(page, 'labels-recurring-entry')
+  })
 
   test('counts read as numbers', async ({ page }) => {
     await open(page, '/transactions', allUpcomingHousehold)

@@ -37,6 +37,7 @@ import type {
   HouseholdShares,
   HouseholdView,
   InstallmentPlans,
+  MinimumDuePreset,
   PaginatedResponse,
   Payable,
   RecurrenceFrequency,
@@ -859,7 +860,26 @@ export function budgetEntriesFor(data: HouseholdData, query: URLSearchParams): P
   return pageFor(matches, query)
 }
 
-/** Every call the dashboard, Transactions and Allocations make on load, answered from `data`. */
+/** The one bank preset the account form's minimum due rule offers (a card is being added or edited). */
+const minimumDuePreset: MinimumDuePreset = {
+  key: 'hsbc',
+  label: 'HSBC',
+  effective_from: '2026-01-01',
+  rule: {
+    version: 1,
+    preset: 'hsbc',
+    base_percent: '3',
+    base_excludes: [],
+    installment_percent: null,
+    floor: { PHP: '500' },
+    floored_terms: [],
+    added_terms: [],
+    annual_fee: null,
+    rounding: 'half_up',
+  },
+}
+
+/** Every call the dashboard, Transactions, Allocations and the account form make on load, answered from `data`. */
 export const householdRoutes = (data: HouseholdData = household): ApiRoute[] => [
   apiRoute<PaginatedResponse<Account>>('GET', '/accounts/', pageOf(data.accounts)),
   apiRoute<PaginatedResponse<Allocation>>('GET', '/allocations/', pageOf(data.allocations)),
@@ -880,6 +900,7 @@ export const householdRoutes = (data: HouseholdData = household): ApiRoute[] => 
   apiRoute<{ items: DescriptionSuggestion[] }>('GET', '/transactions/description-suggestions', { items: [] }),
   apiRoute<DashboardDue>('GET', '/dashboard/due', data.due),
   apiRoute<{ items: CardCredit[] }>('GET', '/cards/credit', { items: [] }),
+  apiRoute<MinimumDuePreset[]>('GET', '/accounts/minimum-due-presets', [minimumDuePreset]),
   apiRoute<HouseholdView[]>('GET', '/household/', []),
   apiRoute<ReceivedShare[]>('GET', '/shares/received', []),
   apiRoute<ReceivedHouseholdShare[]>('GET', '/shares/received/household', []),
