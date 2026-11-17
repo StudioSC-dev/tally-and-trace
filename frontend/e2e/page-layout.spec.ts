@@ -8,7 +8,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
-import { household, householdViewRoutes, mockHousehold, wishlistRoutes, withDollars } from './support/fixtures/household'
+import { household, householdViewRoutes, mockHousehold, wishlistRoutes, withDollars, withFiveCurrencies } from './support/fixtures/household'
 import type { HouseholdData } from './support/fixtures/household'
 import { addRoutes } from './support/mockApi'
 import { shot } from './support/shot'
@@ -156,7 +156,8 @@ function dashboardControls(page: Page): { title: Locator; tag: Locator; currency
   return {
     title: page.locator('main h1'),
     tag: page.locator('main label').filter({ has: page.getByTestId('tag-filter') }),
-    currency: page.getByTestId('currency-control'),
+    // The segments, or on a phone with more than two currencies the select that replaces them: whichever shows.
+    currency: page.locator('[data-testid="currency-control"]:visible, [data-testid="currency-select"]:visible'),
     period: page.getByRole('group', { name: 'Period for actual totals' }),
   }
 }
@@ -245,44 +246,55 @@ test('dashboard header is one grouped row', async ({ page }, testInfo) => {
 
 // ─── AC5 ────────────────────────────────────────────────────────────────────────────────────────
 
-test('dashboard header stacks cleanly on phone', async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== 'phone', 'the stacked header is the phone layout')
-  await open(page, ROUTES[0], withDollars(household))
-  const c = dashboardControls(page)
-  await expect(c.currency).toBeVisible()
-  const title = await boxOf(c.title)
-  // The page's first block, the one holding the title.
-  const header = pageRoot(page).locator(':scope > *', { has: page.locator('h1') })
-  // Nothing else in the header shares the title's row.
-  const onTitleRow = await header.evaluate((h, titleBottom) => {
-    const h1 = h.querySelector('h1')
-    return [...h.querySelectorAll('*')]
-      .filter((e) => e !== h1 && !e.contains(h1) && !h1?.contains(e))
-      .filter((e) => {
-        const b = e.getBoundingClientRect()
-        return b.height > 0 && b.width > 0 && b.top < titleBottom
-      })
-      .map((e) => `${e.tagName.toLowerCase()} ${(e.textContent ?? '').trim().slice(0, 20)}`)
-  }, bottom(title))
-  expect(onTitleRow, 'the title is alone on the first header row').toEqual([])
-  const controls = [
-    { name: 'tag filter', box: await boxOf(c.tag) },
-    { name: 'currency control', box: await boxOf(c.currency) },
-    { name: 'period group', box: await boxOf(c.period) },
-  ]
-  for (const k of controls) expect(top(k.box), `the ${k.name} sits below the title`).toBeGreaterThanOrEqual(bottom(title))
-  const centres = controls.map((k) => centreY(k.box))
-  expect(Math.max(...centres) - Math.min(...centres), 'the three controls share the next row (centre y within 2px)').toBeLessThanOrEqual(2)
-  const segmentTops = await c.period.locator('button').evaluateAll((all) => all.map((e) => e.getBoundingClientRect().top))
-  expect(segmentTops.length, 'three period segments').toBe(3)
-  expect(new Set(segmentTops).size, `the period segments share one y (${segmentTops.join(', ')})`).toBe(1)
-  const period = await c.period.evaluate((e) => ({ scroll: e.scrollWidth, client: e.clientWidth }))
-  expect(period.scroll, 'the period group does not scroll inside').toBeLessThanOrEqual(period.client)
-  const headerWidths = await header.evaluate((e) => ({ scroll: e.scrollWidth, client: e.clientWidth }))
-  expect(headerWidths.scroll, 'the header does not overflow sideways').toBeLessThanOrEqual(headerWidths.client)
-  expect(await page.evaluate(() => document.documentElement.scrollWidth), 'the document does not overflow sideways').toBeLessThanOrEqual(390)
-  await shot(page, 'dashboard-header-phone')
-})
+/** The currency variants the phone header must fit: two currencies keep the segments, five turn them into a select. */
+const PHONE_CURRENCY_CASES = [
+  { name: 'two currencies', data: withDollars(household), control: 'currency-control', choices: ['PHP', 'USD'] },
+  { name: 'five currencies', data: withFiveCurrencies(household), control: 'currency-select', choices: ['PHP', 'USD', 'EUR', 'GBP', 'JPY'] },
+] as const
+
+for (const v of PHONE_CURRENCY_CASES) {
+  test(`dashboard header stacks cleanly on phone: ${v.name}`, async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'phone', 'the stacked header is the phone layout')
+    await open(page, ROUTES[0], v.data)
+    const c = dashboardControls(page)
+    await expect(c.currency).toHaveCount(1)
+    await expect(c.currency).toHaveAttribute('data-testid', v.control)
+    const choices = (await c.currency.locator('button, option').allInnerTexts()).map((t) => t.trim())
+    expect(choices, `the currency control offers all ${v.choices.length} currencies`).toEqual([...v.choices])
+    const title = await boxOf(c.title)
+    // The page's first block, the one holding the title.
+    const header = pageRoot(page).locator(':scope > *', { has: page.locator('h1') })
+    // Nothing else in the header shares the title's row.
+    const onTitleRow = await header.evaluate((h, titleBottom) => {
+      const h1 = h.querySelector('h1')
+      return [...h.querySelectorAll('*')]
+        .filter((e) => e !== h1 && !e.contains(h1) && !h1?.contains(e))
+        .filter((e) => {
+          const b = e.getBoundingClientRect()
+          return b.height > 0 && b.width > 0 && b.top < titleBottom
+        })
+        .map((e) => `${e.tagName.toLowerCase()} ${(e.textContent ?? '').trim().slice(0, 20)}`)
+    }, bottom(title))
+    expect(onTitleRow, 'the title is alone on the first header row').toEqual([])
+    const controls = [
+      { name: 'tag filter', box: await boxOf(c.tag) },
+      { name: 'currency control', box: await boxOf(c.currency) },
+      { name: 'period group', box: await boxOf(c.period) },
+    ]
+    for (const k of controls) expect(top(k.box), `the ${k.name} sits below the title`).toBeGreaterThanOrEqual(bottom(title))
+    const centres = controls.map((k) => centreY(k.box))
+    expect(Math.max(...centres) - Math.min(...centres), 'the three controls share the next row (centre y within 2px)').toBeLessThanOrEqual(2)
+    const segmentTops = await c.period.locator('button').evaluateAll((all) => all.map((e) => e.getBoundingClientRect().top))
+    expect(segmentTops.length, 'three period segments').toBe(3)
+    expect(new Set(segmentTops).size, `the period segments share one y (${segmentTops.join(', ')})`).toBe(1)
+    const period = await c.period.evaluate((e) => ({ scroll: e.scrollWidth, client: e.clientWidth }))
+    expect(period.scroll, 'the period group does not scroll inside').toBeLessThanOrEqual(period.client)
+    const headerWidths = await header.evaluate((e) => ({ scroll: e.scrollWidth, client: e.clientWidth }))
+    expect(headerWidths.scroll, 'the header does not overflow sideways').toBeLessThanOrEqual(headerWidths.client)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth), 'the document does not overflow sideways').toBeLessThanOrEqual(390)
+    await shot(page, `dashboard-header-phone-${v.name.replace(' ', '-')}`)
+  })
+}
 
 // ─── AC6 ────────────────────────────────────────────────────────────────────────────────────────
 

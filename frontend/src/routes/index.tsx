@@ -359,7 +359,7 @@ export function Dashboard() {
       {/* The title, then its filters grouped on the right; on a phone the filters take the next row. */}
       <PageHeader title="Dashboard" stackOnPhone>
         <TagFilter value={selectedTag} onChange={setSelectedTag} className="min-w-0 flex-1 sm:flex-none" compact />
-        <CurrencyControl currencies={snapshot?.currencies} value={currency} onChange={setCurrency} segmentClassName="px-1.5 py-1.5 text-sm sm:px-4" />
+        <CurrencyControl currencies={snapshot?.currencies} value={currency} onChange={setCurrency} segmentClassName="px-1.5 py-1.5 text-sm sm:px-4" compactOnPhone />
         <SegmentedControl
           className="flex shrink-0 bg-sunken p-1 sm:space-x-1"
           aria-label="Period for actual totals"
