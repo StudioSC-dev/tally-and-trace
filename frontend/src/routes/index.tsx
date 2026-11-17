@@ -5,6 +5,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
 import { formatCurrency } from '../utils/currency'
+import { amountClass } from '../utils/amount'
 import type { CurrencyCode } from '../utils/currency'
 import { estimateText, estimateTitle } from '../utils/fx'
 import type { EstimateLabels } from '../utils/fx'
@@ -407,7 +408,7 @@ export function Dashboard() {
               <dl className="space-y-3" data-testid="actual-totals">
                 {[
                   { id: 'income', label: `Total income (${periodTag})`, value: format(periodIncome), color: 'text-ok' },
-                  { id: 'expenses', label: `Total expenses (${periodTag})`, value: format(periodExpenses), color: 'text-danger' },
+                  { id: 'expenses', label: `Total expenses (${periodTag})`, value: format(periodExpenses), color: amountClass('out') },
                   { id: 'net-flow', label: `Net flow (${periodTag})`, value: format(periodNet), color: periodNet >= 0 ? 'text-ok' : 'text-danger' },
                 ].map(({ id, label, value, color }) => (
                   <div key={id} className="flex items-center justify-between">

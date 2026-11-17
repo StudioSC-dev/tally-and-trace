@@ -50,7 +50,8 @@ import { useRecentPicks } from '../hooks/useRecentPicks'
 import { useDeleteRecurringEntry } from '../hooks/useDeleteRecurringEntry'
 import { useManilaDay } from '../hooks/useManilaDay'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
-import { formatCurrency, CurrencyCode } from '../utils/currency'
+import { amountClass, formatAmount } from '../utils/amount'
+import type { AmountKind } from '../utils/amount'
 import { formatCadenceLabel, formatScheduleLabel } from '../utils/recurringEntry'
 import { WishlistPanel } from '../components/WishlistPanel'
 import { RecurringEntryFormModal } from '../components/RecurringEntryFormModal'
@@ -99,8 +100,6 @@ const formatRelativeDate = (isoString: string) => {
   if (days > 0) return `In ${days} day${days === 1 ? '' : 's'}`
   return `${Math.abs(days)} day${days === -1 ? '' : 's'} ago`
 }
-
-const formatAmount = (amount: number, currency: CurrencyCode) => formatCurrency(amount, currency)
 
 // The allocation form's inline field errors (STU-410): one message under the field in place
 // of a browser popup. A key is a control's `data-field`.
@@ -1355,8 +1354,8 @@ export function AllocationsPage() {
             </div>
           </div>
           <div className="text-right">
-            <p className={`text-lg font-bold ${entry.entry_type === 'income' ? 'text-ok' : 'text-danger'}`}>
-              {formatAmount(entry.amount, entry.currency)}
+            <p className={`text-lg font-bold ${amountClass(entry.entry_type === 'income' ? 'in' : 'out')}`}>
+              {formatAmount(entry.entry_type === 'income' ? 'in' : 'out', entry.amount, entry.currency)}
             </p>
           </div>
         </div>
@@ -1424,7 +1423,8 @@ export function AllocationsPage() {
       entry.is_active && (entry.kind === 'subscription' || entry.kind === 'bill') && entry.account_id !== undefined
         ? entryCreditWarning(creditByCard.get(entry.account_id)?.checks ?? [], entry.id)
         : null
-    const amountLabel = formatAmount(entry.amount, entry.currency)
+    const amountKind: AmountKind = entry.entry_type === 'income' ? 'in' : 'out'
+    const amountLabel = formatAmount(amountKind, entry.amount, entry.currency)
     const endDate = entry.end_date ? new Date(entry.end_date) : undefined
     // Installment "n of m". The backend decrements max_occurrences on each payment
     // (it means occurrences REMAINING), and occurrences_paid is the count materialised
@@ -1494,7 +1494,7 @@ export function AllocationsPage() {
             </div>
             <div className="text-right">
               <p
-                className={`text-lg font-bold ${ entry.entry_type === 'income' ? 'text-ok' : 'text-danger' }`}
+                className={`text-lg font-bold ${amountClass(amountKind)}`}
               >
                 {amountLabel}
               </p>

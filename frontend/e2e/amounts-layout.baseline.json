@@ -1,0 +1,272 @@
+{
+  "phone": [
+    {
+      "id": 501,
+      "top": 0,
+      "height": 216,
+      "amountRight": 361,
+      "amountTop": 141
+    },
+    {
+      "id": 503,
+      "top": 228,
+      "height": 184,
+      "amountRight": 361,
+      "amountTop": 109
+    },
+    {
+      "id": 502,
+      "top": 424,
+      "height": 184,
+      "amountRight": 361,
+      "amountTop": 109
+    },
+    {
+      "id": 506,
+      "top": 620,
+      "height": 184,
+      "amountRight": 361,
+      "amountTop": 109
+    },
+    {
+      "id": 505,
+      "top": 816,
+      "height": 212,
+      "amountRight": 361,
+      "amountTop": 137
+    },
+    {
+      "id": 504,
+      "top": 1040,
+      "height": 212,
+      "amountRight": 361,
+      "amountTop": 137
+    },
+    {
+      "id": 507,
+      "top": 1264,
+      "height": 216,
+      "amountRight": 361,
+      "amountTop": 141
+    },
+    {
+      "id": 508,
+      "top": 1492,
+      "height": 216,
+      "amountRight": 361,
+      "amountTop": 141
+    },
+    {
+      "id": 510,
+      "top": 1720,
+      "height": 216,
+      "amountRight": 361,
+      "amountTop": 141
+    },
+    {
+      "id": 509,
+      "top": 1948,
+      "height": 184,
+      "amountRight": 361,
+      "amountTop": 109
+    },
+    {
+      "id": 511,
+      "top": 2144,
+      "height": 212,
+      "amountRight": 361,
+      "amountTop": 137
+    },
+    {
+      "id": 513,
+      "top": 2368,
+      "height": 216,
+      "amountRight": 361,
+      "amountTop": 141
+    },
+    {
+      "id": 512,
+      "top": 2596,
+      "height": 216,
+      "amountRight": 361,
+      "amountTop": 141
+    },
+    {
+      "id": 515,
+      "top": 2824,
+      "height": 216,
+      "amountRight": 361,
+      "amountTop": 141
+    },
+    {
+      "id": 514,
+      "top": 3052,
+      "height": 212,
+      "amountRight": 361,
+      "amountTop": 137
+    },
+    {
+      "id": 516,
+      "top": 3276,
+      "height": 184,
+      "amountRight": 361,
+      "amountTop": 109
+    },
+    {
+      "id": 519,
+      "top": 3472,
+      "height": 216,
+      "amountRight": 361,
+      "amountTop": 141
+    },
+    {
+      "id": 518,
+      "top": 3700,
+      "height": 212,
+      "amountRight": 361,
+      "amountTop": 137
+    },
+    {
+      "id": 517,
+      "top": 3924,
+      "height": 212,
+      "amountRight": 361,
+      "amountTop": 137
+    }
+  ],
+  "desktop": [
+    {
+      "id": 501,
+      "top": 0,
+      "height": 122,
+      "amountRight": 1315,
+      "amountTop": 21
+    },
+    {
+      "id": 503,
+      "top": 134,
+      "height": 122,
+      "amountRight": 1315,
+      "amountTop": 21
+    },
+    {
+      "id": 502,
+      "top": 268,
+      "height": 122,
+      "amountRight": 1315,
+      "amountTop": 21
+    },
+    {
+      "id": 506,
+      "top": 402,
+      "height": 122,
+      "amountRight": 1315,
+      "amountTop": 21
+    },
+    {
+      "id": 505,
+      "top": 536,
+      "height": 122,
+      "amountRight": 1315,
+      "amountTop": 21
+    },
+    {
+      "id": 504,
+      "top": 670,
+      "height": 122,
+      "amountRight": 1315,
+      "amountTop": 21
+    },
+    {
+      "id": 507,
+      "top": 804,
+      "height": 122,
+      "amountRight": 1315,
+      "amountTop": 21
+    },
+    {
+      "id": 508,
+      "top": 938,
+      "height": 122,
+      "amountRight": 1315,
+      "amountTop": 21
+    },
+    {
+      "id": 510,
+      "top": 1072,
+      "height": 122,
+      "amountRight": 1315,
+      "amountTop": 21
+    },
+    {
+      "id": 509,
+      "top": 1206,
+      "height": 122,
+      "amountRight": 1315,
+      "amountTop": 21
+    },
+    {
+      "id": 511,
+      "top": 1340,
+      "height": 122,
+      "amountRight": 1315,
+      "amountTop": 21
+    },
+    {
+      "id": 513,
+      "top": 1474,
+      "height": 122,
+      "amountRight": 1315,
+      "amountTop": 21
+    },
+    {
+      "id": 512,
+      "top": 1608,
+      "height": 122,
+      "amountRight": 1315,
+      "amountTop": 21
+    },
+    {
+      "id": 515,
+      "top": 1742,
+      "height": 122,
+      "amountRight": 1315,
+      "amountTop": 21
+    },
+    {
+      "id": 514,
+      "top": 1876,
+      "height": 122,
+      "amountRight": 1315,
+      "amountTop": 21
+    },
+    {
+      "id": 516,
+      "top": 2010,
+      "height": 122,
+      "amountRight": 1315,
+      "amountTop": 21
+    },
+    {
+      "id": 519,
+      "top": 2144,
+      "height": 122,
+      "amountRight": 1315,
+      "amountTop": 21
+    },
+    {
+      "id": 518,
+      "top": 2278,
+      "height": 122,
+      "amountRight": 1315,
+      "amountTop": 21
+    },
+    {
+      "id": 517,
+      "top": 2412,
+      "height": 122,
+      "amountRight": 1315,
+      "amountTop": 21
+    }
+  ]
+}
