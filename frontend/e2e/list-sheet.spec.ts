@@ -65,7 +65,8 @@ async function openRecurring(page: Page): Promise<ApiMock> {
   await addRoutes(page, [queryRoute<PaginatedResponse<BudgetEntry>>('GET', '/budget-entries/', (q) => budgetEntriesFor(recurring, q))])
   await page.goto('/allocations?tab=recurring')
   await expect(page.locator('[data-testid^="kind-section-"] article').first()).toBeVisible()
-  await expect(page.locator('[data-row-kind="limited-entry"]')).toHaveCount(limitedRecurring.length)
+  // By name, so the opener works on the PR base too (AC6 must hold there).
+  for (const e of limitedRecurring) await expect(page.getByText(e.display_name ?? '', { exact: true })).toBeVisible()
   await page.waitForLoadState('networkidle')
   return api
 }
@@ -213,7 +214,7 @@ for (const c of PITCH_CASES) {
   })
 }
 
-/** Adds an expense from the Add Transaction dialog; the API refuses it, so it stays on the list as a pending row. */
+/** Adds an expense from the Add Transaction dialog; the API refuses it, so it stays on the list as a pending row, which is returned. */
 async function addRefusedTransaction(page: Page, description: string): Promise<Locator> {
   await addRoutes(page, [errorRoute('POST', '/transactions/', 422, 'The amount is over this account’s limit')])
   await page.getByRole('button', { name: 'Add Transaction' }).first().click()
@@ -230,7 +231,8 @@ async function addRefusedTransaction(page: Page, description: string): Promise<L
   await form.locator('input[type="number"][placeholder="0.00"]').first().fill('777')
   await form.getByRole('button', { name: 'Create Transaction', exact: true }).click()
   await expect(form).toBeHidden()
-  const row = page.locator('[data-row-kind="pending-row"]').filter({ hasText: description })
+  // By its save state, so the AC6 cases run on the PR base too; the pitch case checks the row kind itself.
+  const row = page.locator('article[data-state]').filter({ hasText: description })
   await expect(row).toHaveAttribute('data-state', 'failed')
   return row
 }
@@ -241,6 +243,7 @@ test('rows keep an even pitch: pending row', async ({ page }, testInfo) => {
   const sheet = page.locator('main').getByTestId('list-sheet')
   expect(await sheet.count(), 'Transactions still lists one sheet').toBe(1)
   await expect(pending, 'the pending row keeps the row hook').toHaveAttribute('data-testid', 'row')
+  await expect(pending, 'the pending row names its kind').toHaveAttribute('data-row-kind', 'pending-row')
   expect(await sheet.locator('[data-row-kind="pending-row"]').count(), 'the pending row sits on the sheet').toBe(1)
   expect(await sheet.getByTestId('row').count(), 'the sheet lists the month and the pending row').toBe(monthRows.length + 1)
   const rules = await rowRules(sheet.getByTestId('row'))
@@ -297,7 +300,7 @@ test('recurring entries are one sheet', async ({ page }) => {
 test('recurring entries are one sheet: limited entries keep their facts readable', async ({ page }) => {
   await openRecurring(page)
   for (const e of limitedRecurring) {
-    const row = page.locator('[data-row-kind="limited-entry"]').filter({ has: page.getByText(e.display_name ?? '', { exact: true }) })
+    const row = page.locator('[data-testid^="kind-section-"] article').filter({ has: page.getByText(e.display_name ?? '', { exact: true }) })
     await expect(row).toHaveCount(1)
     // Every fact a limited entry carries, from the fixture. The row has no opener, so each must be readable on the row.
     const facts = [
@@ -310,8 +313,8 @@ test('recurring entries are one sheet: limited entries keep their facts readable
     ]
     const shown = await row.evaluate((r, want) => {
       const box = r.getBoundingClientRect()
-      const spans = [...r.querySelectorAll<HTMLElement>('[data-testid="row-meta"] span')]
-      const clipped = [...r.querySelectorAll<HTMLElement>('[data-testid="row-meta"], [data-testid="row-meta"] *')]
+      const spans = [...r.querySelectorAll<HTMLElement>('span')]
+      const clipped = [...r.querySelectorAll<HTMLElement>('*')]
         .filter((m) => m.scrollWidth > m.clientWidth + 1 && getComputedStyle(m).overflowX !== 'visible')
         .map((m) => m.textContent ?? '')
       return {
@@ -324,7 +327,7 @@ test('recurring entries are one sheet: limited entries keep their facts readable
         }),
       }
     }, facts)
-    expect(shown.clipped, `${e.display_name}: meta lines cut off`).toEqual([])
+    expect(shown.clipped, `${e.display_name}: text cut off`).toEqual([])
     for (const f of shown.facts) {
       expect.soft(f.found, `${e.display_name}: "${f.text}" is on the row`).toBe(true)
       expect.soft(f.inside, `${e.display_name}: "${f.text}" is drawn inside the row`).toBe(true)
@@ -332,7 +335,7 @@ test('recurring entries are one sheet: limited entries keep their facts readable
     expect(shown.facts.filter((f) => !f.found || !f.inside).map((f) => f.text), `${e.display_name}: facts not readable`).toEqual([])
   }
   expect(limitedRecurring.some((e) => e.account && e.end_date && e.category_name && e.created_by), 'one fixture entry carries every optional fact').toBe(true)
-  await page.locator('[data-row-kind="limited-entry"]').first().scrollIntoViewIfNeeded()
+  await page.getByText(limitedRecurring[0].display_name ?? '', { exact: true }).scrollIntoViewIfNeeded()
   await viewportShot(page, 'limited-facts')
 })
 
