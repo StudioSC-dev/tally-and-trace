@@ -18,6 +18,7 @@ declare module 'node:fs' {
     existsSync(p: string): boolean
     readFileSync(p: string, encoding: 'utf8'): string
     readdirSync(p: string, options: { withFileTypes: true }): { name: string; isDirectory(): boolean }[]
+    writeFileSync(p: string, data: string): void
   }
   export default fs
 }

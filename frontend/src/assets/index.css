@@ -357,6 +357,17 @@ body {
     @apply bg-danger;
   }
 
+  /* What an amount means decides its colour; call sites pick one through utils/amount.ts. */
+  .amount-out {
+    @apply text-ink;
+  }
+  .amount-in {
+    @apply text-ok;
+  }
+  .amount-negative {
+    @apply text-danger;
+  }
+
   /* Kept as class names so the sweep can migrate call sites incrementally. */
   .badge-success {
     @apply badge text-ok;
