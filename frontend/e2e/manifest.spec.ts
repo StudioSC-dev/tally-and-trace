@@ -2,6 +2,7 @@
 // fetched from the running dev server; the API is not used, so nothing is mocked.
 import { expect, test } from '@playwright/test'
 import type { APIResponse } from '@playwright/test'
+import { mockApi } from './support/mockApi'
 import { shot } from './support/shot'
 
 const PAPER = '#e4eae2'
@@ -22,6 +23,7 @@ async function fetchManifest(response: APIResponse): Promise<Manifest> {
 }
 
 test('manifest uses the paper colour', async ({ page }) => {
+  await mockApi(page, [])
   const response = await page.request.get('/manifest.webmanifest')
   expect(response.status(), 'GET /manifest.webmanifest status').toBe(200)
   const manifest = await fetchManifest(response)
@@ -32,6 +34,7 @@ test('manifest uses the paper colour', async ({ page }) => {
 })
 
 test('manifest matches the page and keeps its fields', async ({ page }) => {
+  await mockApi(page, [])
   const manifest = await fetchManifest(await page.request.get('/manifest.webmanifest'))
   const html = await (await page.request.get('/')).text()
   const light = /<meta\s+name="theme-color"\s+content="([^"]+)"\s+media="\(prefers-color-scheme:\s*light\)"/i.exec(html)
