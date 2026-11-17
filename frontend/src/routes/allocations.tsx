@@ -1351,46 +1351,50 @@ export function AllocationsPage() {
   // delete is offered.
   const renderLimitedEntryCard = (entry: LimitedBudgetEntry) => {
     const hasTags = (entry.tags?.length ?? 0) > 0
+    // A limited entry has no opener, so its facts wrap onto a second line instead of being cut.
+    const facts = [
+      entry.account && <span key="account">Account: {entry.account.name}</span>,
+      entry.counterpart && <span key="counterpart">Transfer to: {entry.counterpart.name}</span>,
+      entry.category_name && <span key="category">Category: {entry.category_name}</span>,
+      entry.end_date && <span key="ends">Ends {formatFullDate(entry.end_date)}</span>,
+      entry.created_by && (
+        <span key="by" data-testid="created-by">
+          by {entry.created_by}
+        </span>
+      ),
+    ].filter(Boolean)
     return (
       <Row
         key={entry.id}
         kind="limited-entry"
+        wrap
         title={entry.display_name ?? 'Recurring entry'}
+        badges={hasTags ? <TagChips tags={entry.tags} /> : undefined}
         meta={
           <>
             <span>{entry.entry_type === 'income' ? 'Recurring Income' : 'Recurring Expense'}</span>
             <span>{formatCadenceLabel(entry.cadence)}</span>
             <span className="text-ink">Next {formatFullDate(entry.next_occurrence)}</span>
-            {entry.account && <span>Account: {entry.account.name}</span>}
-            {entry.counterpart && <span>Transfer to: {entry.counterpart.name}</span>}
-            {entry.category_name && <span>Category: {entry.category_name}</span>}
-            {entry.end_date && <span>Ends {formatFullDate(entry.end_date)}</span>}
-            {entry.created_by && <span data-testid="created-by">by {entry.created_by}</span>}
           </>
         }
+        details={[
+          facts.length > 0 && <p className="space-x-3 text-muted">{facts}</p>,
+          entry.permissions.can_delete && (
+            <button
+              type="button"
+              onClick={() => handleDeleteBudgetEntry(entry)}
+              className="text-sm text-danger hover:underline"
+            >
+              Delete recurring entry
+            </button>
+          ),
+        ]}
         amount={
           <p className={`text-lg font-bold ${amountClass(entry.entry_type === 'income' ? 'in' : 'out')}`}>
             {formatAmount(entry.entry_type === 'income' ? 'in' : 'out', entry.amount, entry.currency)}
           </p>
         }
-      >
-        {hasTags || entry.permissions.can_delete ? (
-          <>
-            {hasTags && <TagChips tags={entry.tags} />}
-            {entry.permissions.can_delete && (
-              <div>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteBudgetEntry(entry)}
-                  className="text-sm text-danger hover:underline"
-                >
-                  Delete recurring entry
-                </button>
-              </div>
-            )}
-          </>
-        ) : undefined}
-      </Row>
+      />
     )
   }
 
@@ -1445,8 +1449,7 @@ export function AllocationsPage() {
       entry.is_active && remaining !== 0 ? recurringActionsFor({ ...entry, can_mark_paid: entry.permissions.can_post }) : []
 
     const hasTags = (entry.tags?.length ?? 0) > 0
-    const hasExtra =
-      Boolean(entry.description) || hasTags || Boolean(creditWarning) || showAutoPost || actions.length > 0 || (!canEdit && entry.permissions.can_delete)
+    const canDeleteOnly = !canEdit && entry.permissions.can_delete
 
     return (
       <Row
@@ -1466,6 +1469,7 @@ export function AllocationsPage() {
             : undefined
         }
         title={entry.name}
+        badges={hasTags ? <TagChips tags={entry.tags} /> : undefined}
         meta={
           <>
             <span>{entry.entry_type === 'income' ? 'Recurring Income' : 'Recurring Expense'}</span>
@@ -1489,22 +1493,12 @@ export function AllocationsPage() {
             {remaining === 0 && <span className="text-ok">Fully paid</span>}
           </>
         }
-        amount={
-          <p
-            className={`text-lg font-bold ${amountClass(amountKind)}`}
-          >
-            {amountLabel}
-          </p>
-        }
-      >
-        {hasExtra ? (
-          <>
-          {entry.description && <p className="text-sm text-body">{entry.description}</p>}
-          {hasTags && <TagChips tags={entry.tags} />}
-          {creditWarning && <EntryCreditWarningRow warning={creditWarning} />}
-          {showAutoPost && (
+        details={[
+          entry.description && <p>{entry.description}</p>,
+          creditWarning && <EntryCreditWarningRow warning={creditWarning} />,
+          showAutoPost && (
             <div className="flex flex-wrap items-center gap-2 text-xs text-body" data-testid="installment-auto-post" data-source={`budget_entry:${entry.id}`}>
-              <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1" data-testid="installment-auto-post-state" data-state={autoPostState}>
+              <span className="font-semibold text-ink" data-testid="installment-auto-post-state" data-state={autoPostState}>
                 {AUTO_POST_STATE_LABELS[autoPostState]}
               </span>
               {canEdit && autoPostState !== 'on' && (
@@ -1537,9 +1531,11 @@ export function AllocationsPage() {
                 </button>
               )}
             </div>
-          )}
-          {actions.length > 0 && (
-            <div className="flex flex-wrap gap-2">
+          ),
+        ]}
+        actions={
+          actions.length > 0 || canDeleteOnly ? (
+            <>
               {actions.map((action) => (
                 <button
                   key={action}
@@ -1555,25 +1551,29 @@ export function AllocationsPage() {
                   {RECURRING_ACTION_LABELS[action]}
                 </button>
               ))}
-            </div>
-          )}
-          {!canEdit && entry.permissions.can_delete && (
-            <div>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  void handleDeleteBudgetEntry(entry)
-                }}
-                className="text-sm text-danger hover:underline"
-              >
-                Delete recurring entry
-              </button>
-            </div>
-          )}
-          </>
-        ) : undefined}
-      </Row>
+              {canDeleteOnly && (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    void handleDeleteBudgetEntry(entry)
+                  }}
+                  className="text-sm text-danger hover:underline"
+                >
+                  Delete recurring entry
+                </button>
+              )}
+            </>
+          ) : undefined
+        }
+        amount={
+          <p
+            className={`text-lg font-bold ${amountClass(amountKind)}`}
+          >
+            {amountLabel}
+          </p>
+        }
+      />
     )
   }
 

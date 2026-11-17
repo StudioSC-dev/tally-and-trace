@@ -2752,20 +2752,21 @@ export function TransactionsPage() {
             {!isLimited(transaction) && transaction.is_reconciled && <span className="font-semibold text-ok">Reconciled</span>}
           </>
         }
+        badges={
+          pendingKind !== undefined || hasTags ? (
+            <>
+              {pendingKind !== undefined && (
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-muted" data-testid="row-saving">
+                  <Spinner size="xs" />
+                  {pendingKind === 'delete' ? 'Deleting…' : 'Saving…'}
+                </span>
+              )}
+              <TagChips tags={transaction.tags} />
+            </>
+          ) : undefined
+        }
         amount={<p className={`text-lg font-bold ${amountClass}`}>{amountLabel}</p>}
-      >
-        {pendingKind !== undefined || hasTags ? (
-          <div className="flex flex-wrap items-center gap-2 text-xs text-body">
-            {pendingKind !== undefined && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1 text-xs font-semibold text-muted" data-testid="row-saving">
-                <Spinner size="xs" />
-                {pendingKind === 'delete' ? 'Deleting…' : 'Saving…'}
-              </span>
-            )}
-            <TagChips tags={transaction.tags} />
-          </div>
-        ) : undefined}
-      </Row>
+      />
     )
   }
 
@@ -2800,21 +2801,22 @@ export function TransactionsPage() {
             <span>{row.account}</span>
           </>
         }
+        badges={
+          <span className="inline-flex items-center gap-1 text-xs font-semibold text-muted">
+            {row.state === 'saving' ? (
+              <>
+                <Spinner size="xs" />
+                Saving…
+              </>
+            ) : editable ? (
+              'Not saved — tap to edit'
+            ) : (
+              'Not saved'
+            )}
+          </span>
+        }
         amount={<p className="text-lg font-bold text-muted">{row.amount}</p>}
-      >
-        <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1 text-xs font-semibold text-muted">
-          {row.state === 'saving' ? (
-            <>
-              <Spinner size="xs" />
-              Saving…
-            </>
-          ) : editable ? (
-            'Not saved — tap to edit'
-          ) : (
-            'Not saved'
-          )}
-        </span>
-      </Row>
+      />
     )
   }
 

@@ -7,8 +7,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
-import { entryOccurrencesRoute, household, mockHousehold } from './support/fixtures/household'
-import { addRoutes } from './support/mockApi'
+import type { BudgetEntry, PaginatedResponse } from '@tally-trace/shared'
+import { budgetEntriesFor, entryOccurrencesRoute, household, limitedRecurring, mockHousehold } from './support/fixtures/household'
+import { addRoutes, errorRoute, queryRoute } from './support/mockApi'
 import type { ApiMock } from './support/mockApi'
 import { shot } from './support/shot'
 
@@ -27,6 +28,15 @@ const PITCH: Record<string, number> = { desktop: 56, phone: 64 }
 /** The month Transactions opens on (the frozen clock's month), as the fixture dates its rows. */
 const MONTH = household.today.slice(0, 7)
 const monthRows = household.transactions.filter((t) => t.view !== 'limited' && t.transaction_date.slice(0, 7) === MONTH)
+/** A calendar day as the app writes it on a row ("Mar 20th, 2026"), worked out here so the test does not borrow the app's formatter. */
+function entryDay(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1]
+  const suffix = d % 10 === 1 && d !== 11 ? 'st' : d % 10 === 2 && d !== 12 ? 'nd' : d % 10 === 3 && d !== 13 ? 'rd' : 'th'
+  return `${month} ${d}${suffix}, ${y}`
+}
+/** The Recurring tab's entries: the household's own, plus another member's two that Mara sees as limited. */
+const recurring = { ...household, entries: [...household.entries, ...limitedRecurring] }
 
 /** A viewport screenshot (a full-page one draws a fixed layer at the scroll offset), saved like `shot()`. */
 async function viewportShot(page: Page, name: string): Promise<void> {
@@ -49,10 +59,13 @@ async function openTransactions(page: Page): Promise<ApiMock> {
   return api
 }
 
-/** Allocations on its Recurring tab, once its entries are listed. */
+/** Allocations on its Recurring tab, with the limited entries listed too, once its entries are listed. */
 async function openRecurring(page: Page): Promise<ApiMock> {
-  const api = await open(page, '/allocations?tab=recurring')
+  const api = await mockHousehold(page)
+  await addRoutes(page, [queryRoute<PaginatedResponse<BudgetEntry>>('GET', '/budget-entries/', (q) => budgetEntriesFor(recurring, q))])
+  await page.goto('/allocations?tab=recurring')
   await expect(page.locator('[data-testid^="kind-section-"] article').first()).toBeVisible()
+  await expect(page.locator('[data-row-kind="limited-entry"]')).toHaveCount(limitedRecurring.length)
   await page.waitForLoadState('networkidle')
   return api
 }
@@ -138,42 +151,39 @@ test('rows are ruled', async ({ page }) => {
 
 interface Measured {
   name: string
+  kind: string | null
   height: number
   metaLines: number
-  metaHeight: number
-  extra: number
+  actions: number
+  badges: number
 }
 
-/** Every row's height, its meta lines (count and rendered height) and whether anything sits under them. */
+/** Every row's height, its meta lines, and whether it carries its own controls or badges. */
 const measure = (rows: Locator): Promise<Measured[]> =>
   rows.evaluateAll((all) =>
-    all.map((e) => {
-      const metas = [...e.querySelectorAll<HTMLElement>('[data-testid="row-meta"]')]
-      return {
-        name: (e.querySelector('p')?.textContent ?? '').trim(),
-        height: e.getBoundingClientRect().height,
-        metaLines: metas.length,
-        metaHeight: metas[0]?.getBoundingClientRect().height ?? 0,
-        extra: e.querySelectorAll('[data-testid="row-extra"]').length,
-      }
-    }),
+    all.map((e) => ({
+      name: (e.querySelector('p')?.textContent ?? '').trim(),
+      kind: e.getAttribute('data-row-kind'),
+      height: e.getBoundingClientRect().height,
+      metaLines: e.querySelectorAll('[data-testid="row-meta"]').length,
+      actions: e.querySelectorAll('[data-testid="row-actions"] button').length,
+      badges: e.querySelectorAll('[data-testid="row-badges"] [data-testid="tag-chip"]').length,
+    })),
   )
 
-/** Rows that carry exactly one meta line, rendered as one 16px line, and nothing under it. */
-const qualifying = (rows: Measured[]): Measured[] => rows.filter((r) => r.metaLines === 1 && r.metaHeight <= 17 && r.extra === 0)
+const offPitch = (rows: Measured[], want: number): string[] => rows.filter((r) => Math.abs(r.height - want) > 1).map((r) => `${r.name}: ${r.height}px`)
 
 const PITCH_CASES = [
   {
     surface: 'transactions',
-    // From the fixture: the month's rows with no tags carry one meta line and nothing under it.
-    expected: monthRows.filter((t) => (t.tags?.length ?? 0) === 0).map((t) => (t.view === 'limited' ? '' : t.description)),
+    // From the fixture: every transaction row carries one meta line; its tags sit on the title line.
+    expected: monthRows.map((t) => (t.view === 'limited' ? '' : t.description)),
   },
   {
     surface: 'recurring',
-    // From the fixture: a paused entry with no description or tags offers no action, so it is one meta line only.
-    expected: household.entries
-      .filter((e) => e.view !== 'limited' && !e.is_active && !e.description && (e.tags?.length ?? 0) === 0)
-      .map((e) => (e.view === 'limited' ? '' : e.name)),
+    // From the fixture: every full entry with no description carries one meta line; its tags sit on the title line and
+    // its Mark paid, Mark received, Charged or Posted in the trailing area. A limited entry carries two (its facts wrap).
+    expected: recurring.entries.filter((e) => e.view !== 'limited' && !e.description).map((e) => (e.view === 'limited' ? '' : e.name)),
   },
 ] as const
 
@@ -184,16 +194,66 @@ for (const c of PITCH_CASES) {
     await page.evaluate(() => document.fonts.ready)
     const want = PITCH[testInfo.project.name]
     const rows = await measure(page.locator('main').getByTestId('list-sheet').getByTestId('row'))
-    const one = qualifying(rows)
+    const one = rows.filter((r) => r.metaLines === 1)
     expect(c.expected.length, `the fixture has at least two ${c.surface} rows with one meta line`).toBeGreaterThanOrEqual(2)
     expect(one.map((r) => r.name).sort(), `the ${c.surface} rows with one meta line are the fixture's`).toEqual([...c.expected].sort())
+    // The rows with one meta line include rows with tags and, on Recurring, rows with their own controls.
+    expect(one.filter((r) => r.badges > 0).length, `${c.surface} rows with tags among them`).toBeGreaterThanOrEqual(2)
+    if (c.surface === 'recurring') {
+      expect(one.filter((r) => r.actions > 0).length, 'active recurring rows with their controls among them').toBeGreaterThanOrEqual(2)
+      const limited = rows.filter((r) => r.kind === 'limited-entry')
+      expect(limited.length, 'the limited entries are listed').toBe(limitedRecurring.length)
+      expect(limited.filter((r) => r.metaLines < 2).map((r) => r.name), 'limited entries with fewer than two meta lines').toEqual([])
+    }
     for (const r of one) {
       expect.soft(Math.abs(r.height - want), `${c.surface} row "${r.name}" is ${want}px (measured ${r.height}px)`).toBeLessThanOrEqual(1)
     }
-    expect(one.filter((r) => Math.abs(r.height - want) > 1).map((r) => `${r.name}: ${r.height}px`), `${c.surface} rows with one meta line that are not ${want}px`).toEqual([])
+    expect(offPitch(one, want), `${c.surface} rows with one meta line that are not ${want}px`).toEqual([])
     await shot(page, `pitch-${c.surface}`)
   })
 }
+
+/** Adds an expense from the Add Transaction dialog; the API refuses it, so it stays on the list as a pending row. */
+async function addRefusedTransaction(page: Page, description: string): Promise<Locator> {
+  await addRoutes(page, [errorRoute('POST', '/transactions/', 422, 'The amount is over this account’s limit')])
+  await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+  const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Create Transaction', exact: true }) })
+  await expect(form).toBeVisible()
+  await form.locator('input[placeholder="Add notes about this transaction"]').fill(description)
+  const accountField = form.locator('[data-field="account_id"]')
+  const chip = accountField.getByRole('button', { name: /^Cash on hand/ })
+  const change = accountField.locator('[data-picker-change][aria-expanded="false"]')
+  await chip.or(change).first().waitFor()
+  if ((await chip.count()) === 0) await change.click()
+  await chip.first().click()
+  await form.getByRole('button', { name: 'Expense', exact: true }).click()
+  await form.locator('input[type="number"][placeholder="0.00"]').first().fill('777')
+  await form.getByRole('button', { name: 'Create Transaction', exact: true }).click()
+  await expect(form).toBeHidden()
+  const row = page.locator('[data-row-kind="pending-row"]').filter({ hasText: description })
+  await expect(row).toHaveAttribute('data-state', 'failed')
+  return row
+}
+
+test('rows keep an even pitch: pending row', async ({ page }, testInfo) => {
+  await openTransactions(page)
+  const pending = await addRefusedTransaction(page, 'Refused lunch')
+  const sheet = page.locator('main').getByTestId('list-sheet')
+  expect(await sheet.count(), 'Transactions still lists one sheet').toBe(1)
+  await expect(pending, 'the pending row keeps the row hook').toHaveAttribute('data-testid', 'row')
+  expect(await sheet.locator('[data-row-kind="pending-row"]').count(), 'the pending row sits on the sheet').toBe(1)
+  expect(await sheet.getByTestId('row').count(), 'the sheet lists the month and the pending row').toBe(monthRows.length + 1)
+  const rules = await rowRules(sheet.getByTestId('row'))
+  expect(rules.slice(0, -1).filter((r) => r.bottom !== RULE).map((r) => r.name), 'rows without a rule, last excepted').toEqual([])
+  expect(rules[rules.length - 1]?.bottom, 'the last row has no rule').toMatch(NO_RULE)
+  expect(rules.filter((r) => r.radius.some((v) => v !== '0px')).map((r) => r.name), 'rows with a radius').toEqual([])
+  await page.evaluate(() => document.fonts.ready)
+  const [measured] = await measure(pending)
+  const want = PITCH[testInfo.project.name]
+  expect(measured.metaLines, 'the pending row carries one meta line').toBe(1)
+  expect(Math.abs(measured.height - want), `the pending row is ${want}px (measured ${measured.height}px)`).toBeLessThanOrEqual(1)
+  await shot(page, 'pitch-pending')
+})
 
 // ─── AC4 ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -224,9 +284,56 @@ test('recurring entries are one sheet', async ({ page }) => {
     }
     total += rules.length
   }
-  expect(total, "the sheets' rows match the fixture's recurring entries").toBe(household.entries.length)
-  expect(await main.getByTestId('list-sheet').getByTestId('row').count(), 'rows on Recurring sheets').toBe(household.entries.length)
+  expect(total, "the sheets' rows match the fixture's recurring entries, limited ones included").toBe(recurring.entries.length)
+  expect(await main.getByTestId('list-sheet').getByTestId('row').count(), 'rows on Recurring sheets').toBe(recurring.entries.length)
+  const limited = main.getByTestId('list-sheet').locator('[data-row-kind="limited-entry"]')
+  expect(await limited.count(), 'the limited entries are rows on a sheet').toBe(limitedRecurring.length)
+  expect(await limited.evaluateAll((all) => all.map((e) => e.getAttribute('data-testid'))), 'limited entries keep the row hook').toEqual(
+    new Array<string>(limitedRecurring.length).fill('row'),
+  )
   await shot(page, 'recurring-sheet')
+})
+
+test('recurring entries are one sheet: limited entries keep their facts readable', async ({ page }) => {
+  await openRecurring(page)
+  for (const e of limitedRecurring) {
+    const row = page.locator('[data-row-kind="limited-entry"]').filter({ has: page.getByText(e.display_name ?? '', { exact: true }) })
+    await expect(row).toHaveCount(1)
+    // Every fact a limited entry carries, from the fixture. The row has no opener, so each must be readable on the row.
+    const facts = [
+      `Next ${entryDay(e.next_occurrence)}`,
+      ...(e.account ? [`Account: ${e.account.name}`] : []),
+      ...(e.counterpart ? [`Transfer to: ${e.counterpart.name}`] : []),
+      ...(e.category_name ? [`Category: ${e.category_name}`] : []),
+      ...(e.end_date ? [`Ends ${entryDay(e.end_date)}`] : []),
+      ...(e.created_by ? [`by ${e.created_by}`] : []),
+    ]
+    const shown = await row.evaluate((r, want) => {
+      const box = r.getBoundingClientRect()
+      const spans = [...r.querySelectorAll<HTMLElement>('[data-testid="row-meta"] span')]
+      const clipped = [...r.querySelectorAll<HTMLElement>('[data-testid="row-meta"], [data-testid="row-meta"] *')]
+        .filter((m) => m.scrollWidth > m.clientWidth + 1 && getComputedStyle(m).overflowX !== 'visible')
+        .map((m) => m.textContent ?? '')
+      return {
+        clipped,
+        facts: want.map((text) => {
+          const span = spans.find((s) => (s.textContent ?? '').replace(/\s+/g, ' ').trim() === text)
+          if (!span) return { text, found: false, inside: false }
+          const b = span.getBoundingClientRect()
+          return { text, found: true, inside: b.width > 0 && b.left >= box.left - 0.5 && b.right <= box.right + 0.5 && b.top >= box.top - 0.5 && b.bottom <= box.bottom + 0.5 }
+        }),
+      }
+    }, facts)
+    expect(shown.clipped, `${e.display_name}: meta lines cut off`).toEqual([])
+    for (const f of shown.facts) {
+      expect.soft(f.found, `${e.display_name}: "${f.text}" is on the row`).toBe(true)
+      expect.soft(f.inside, `${e.display_name}: "${f.text}" is drawn inside the row`).toBe(true)
+    }
+    expect(shown.facts.filter((f) => !f.found || !f.inside).map((f) => f.text), `${e.display_name}: facts not readable`).toEqual([])
+  }
+  expect(limitedRecurring.some((e) => e.account && e.end_date && e.category_name && e.created_by), 'one fixture entry carries every optional fact').toBe(true)
+  await page.locator('[data-row-kind="limited-entry"]').first().scrollIntoViewIfNeeded()
+  await viewportShot(page, 'limited-facts')
 })
 
 // ─── AC5 ────────────────────────────────────────────────────────────────────────────────────────
@@ -323,9 +430,13 @@ const recurringForm = (page: Page): Locator => page.locator('form').filter({ has
 type Gesture = 'click' | 'Enter' | 'Space'
 const GESTURES: Gesture[] = ['click', 'Enter', 'Space']
 
-async function trigger(page: Page, target: Locator, gesture: Gesture): Promise<void> {
+/**
+ * Clicks `target`, or focuses it and presses the key. A row is clicked in its own top-left padding, since its centre
+ * can hold one of its controls on a phone; a control is clicked at its centre.
+ */
+async function trigger(page: Page, target: Locator, gesture: Gesture, on: 'row' | 'control' = 'control'): Promise<void> {
   if (gesture === 'click') {
-    await target.click()
+    await target.click(on === 'row' ? { position: { x: 8, y: 8 } } : undefined)
     return
   }
   await target.focus()
@@ -340,7 +451,7 @@ for (const gesture of ['click', 'Enter'] as const) {
     const row = txRow(page, TX)
     const id = Number(await row.getAttribute('data-transaction-id'))
     expect(household.transactions.find((t) => t.id === id && t.view !== 'limited' && t.description === TX), 'the row is the fixture record').toBeTruthy()
-    await trigger(page, row, gesture)
+    await trigger(page, row, gesture, 'row')
     const modal = actionModal(page)
     await expect(modal).toBeVisible()
     expect(await modal.locator('h2 + p').textContent(), 'the details dialog names the row it opened from').toBe(TX)
@@ -358,11 +469,23 @@ test('rows still open their records and keep their actions: transaction Edit', a
   await viewportShot(page, 'edit-transaction')
 })
 
+for (const gesture of ['click', 'Enter'] as const) {
+  test(`rows still open their records and keep their actions: pending row, ${gesture}`, async ({ page }) => {
+    await openTransactions(page)
+    const pending = await addRefusedTransaction(page, 'Refused lunch')
+    await trigger(page, pending, gesture, 'row')
+    const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Create Transaction', exact: true }) })
+    await expect(form).toBeVisible()
+    await expect(form.locator('input[placeholder="Add notes about this transaction"]'), 'the form reopens on the same unsaved entry').toHaveValue('Refused lunch')
+    await viewportShot(page, `open-pending-${gesture.toLowerCase()}`)
+  })
+}
+
 const RECURRING = 'Meralco'
 for (const gesture of GESTURES) {
   test(`rows still open their records and keep their actions: recurring row, ${gesture}`, async ({ page }) => {
     await openRecurring(page)
-    await trigger(page, recurringRow(page, RECURRING), gesture)
+    await trigger(page, recurringRow(page, RECURRING), gesture, 'row')
     const form = recurringForm(page)
     await expect(form).toBeVisible()
     await expect(form.locator('[data-field="name"]')).toHaveValue(RECURRING)
@@ -525,7 +648,7 @@ for (const surface of ['transactions', 'recurring'] as const) {
       const rights = edges.map((e) => e.text)
       expect(Math.max(...rights) - Math.min(...rights), `sheet ${i + 1}: every amount shares one right edge`).toBeLessThanOrEqual(1)
     }
-    expect(rows, `${surface} rows measured`).toBe(surface === 'transactions' ? monthRows.length : household.entries.length)
+    expect(rows, `${surface} rows measured`).toBe(surface === 'transactions' ? monthRows.length : recurring.entries.length)
     await shot(page, `align-${surface}`)
   })
 }

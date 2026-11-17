@@ -190,19 +190,26 @@ Fields have no box. They are written on a ruled line (an underline in `line-stro
   - `ListSheet` is the sheet: leaf (`surface`), `radius-md`, one `line` border, no
     shadow. It clips its rows to its corners. Hook: `data-testid="list-sheet"`.
   - `Row` is one line on it: an `<article>`, radius 0, with a 1px `line` rule under
-    every row but the last. The title (`text-base`, 600) and one meta line
-    (`text-xs`, `muted`, cut to one line) sit on the left; the amount sits in its own
-    right-aligned slot, so the amounts of a sheet share one right edge. Anything more
-    (tags, notes, the row's own controls) goes on lines below.
-  - A row with one meta line and nothing below is 56px between rules on desktop and
-    64px on a phone.
-  - Hooks: `data-testid="row"`, `row-meta`, `row-amount` and `row-extra`. Click,
-    keyboard and ARIA attributes pass through to the `<article>`.
+    every row but the last. The title (`text-base`, 600) with its badges (tags, a
+    saving state) and one meta line (`text-xs`, `muted`, cut to one line) sit on the
+    left; the row's own controls sit in the trailing area; the amount sits last in its
+    own right-aligned slot, so the amounts of a sheet share one right edge.
+  - Content that needs a line of its own (a description, a warning, a decision such
+    as an installment's auto-post review) is another meta line under the first, and
+    wraps. A row with no opener (another member's limited entry) wraps its meta lines
+    instead of cutting them, so every fact it carries stays readable.
+  - A row with one meta line is 56px between rules on desktop and 64px on a phone,
+    whatever badges or controls it carries.
+  - Hooks: `data-testid="row"` (fixed; callers cannot replace it), `row-meta` (one per
+    meta line), `row-badges`, `row-actions` and `row-amount`. What a row lists is
+    `data-row-kind` (`limited-entry`, `pending-row`). Click, keyboard and ARIA
+    attributes pass through to the `<article>`.
   - Used by Transactions and the Allocations Recurring tab (one sheet per kind
     section). Budget and savings allocations stay `.card` panels: each is a goal with
     its own progress, not a list line.
   - The dashboard's quick balances are account lines on their panel, ruled with
-    `line`, figures right-aligned, with no tile fill.
+    `line`, figures right-aligned, with no tile fill; their editor's controls are
+    outlined, and its Add account list sits under a rule, not on a fill.
 - **Status, as a dot and a word:** 13px 500 in the status colour. "Overdue" and
   negative balances are the only red text.
 
