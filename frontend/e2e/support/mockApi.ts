@@ -10,6 +10,17 @@ export interface ApiRoute {
   path: string
   status?: number
   body: unknown
+  /**
+   * Optional replies, one per call in order; once they run out the last one repeats. When present they take
+   * precedence over `status` and `body`, which `sequenceRoute` keeps in step with the last reply.
+   */
+  replies?: ApiReply[]
+}
+
+/** One reply in a `replies` list. */
+export interface ApiReply {
+  status?: number
+  body: unknown
 }
 
 /** Builds a route whose body is checked against the type `T` at compile time. */
@@ -19,6 +30,12 @@ export const apiRoute = <T>(method: HttpMethod, path: string, body: T, status = 
   status,
   body,
 })
+
+/** Builds a route that answers each call with the next reply, so a save can be followed by a refreshed GET. */
+export const sequenceRoute = <T>(method: HttpMethod, path: string, replies: { body: T; status?: number }[]): ApiRoute => {
+  const last = replies[replies.length - 1]
+  return { method, path, status: last?.status ?? 200, body: last?.body, replies }
+}
 
 export const loginRoute = (body: TokenResponse): ApiRoute => apiRoute('POST', '/auth/login', body)
 export const meRoute = (user: User): ApiRoute => apiRoute('GET', '/auth/me', user)
@@ -37,6 +54,8 @@ export interface ApiMock {
   count: (method: HttpMethod, path: string) => number
   /** Every `/api/v1` request seen, as `METHOD /path`. */
   requests: () => string[]
+  /** The JSON request bodies seen for a route, in order. A call with no JSON body adds nothing. */
+  bodies: (method: HttpMethod, path: string) => unknown[]
 }
 
 interface MockState {
@@ -47,6 +66,15 @@ interface MockState {
 
 const API_PREFIX = '/api/v1'
 const states = new WeakMap<Page, MockState>()
+const captured = new WeakMap<MockState, Map<string, unknown[]>>()
+
+const capturedFor = (state: MockState): Map<string, unknown[]> => {
+  const existing = captured.get(state)
+  if (existing) return existing
+  const fresh = new Map<string, unknown[]>()
+  captured.set(state, fresh)
+  return fresh
+}
 
 const keyOf = (method: string, path: string): string => `${method.toUpperCase()} ${path}`
 
@@ -64,6 +92,26 @@ async function answer(state: MockState, route: Route): Promise<void> {
       status: 501,
       contentType: 'application/json',
       body: JSON.stringify({ detail: `unmocked ${key}` }),
+    })
+    return
+  }
+  const call = state.counts.get(key) ?? 0
+  const sent = request.postData()
+  if (sent) {
+    try {
+      const store = capturedFor(state)
+      store.set(key, [...(store.get(key) ?? []), JSON.parse(sent) as unknown])
+    } catch {
+      // A body that is not JSON is not captured.
+    }
+  }
+  if (hit.replies?.length) {
+    const reply = hit.replies[Math.min(call, hit.replies.length - 1)]
+    state.counts.set(key, call + 1)
+    await route.fulfill({
+      status: reply.status ?? 200,
+      contentType: 'application/json',
+      body: JSON.stringify(reply.body),
     })
     return
   }
@@ -87,6 +135,7 @@ async function stateFor(page: Page): Promise<MockState> {
 const handleFor = (state: MockState): ApiMock => ({
   count: (method, path) => state.counts.get(keyOf(method, path)) ?? 0,
   requests: () => [...state.seen],
+  bodies: (method, path) => [...(capturedFor(state).get(keyOf(method, path)) ?? [])],
 })
 
 /** Registers extra routes on a page that already has the catch-all. Used by `signedIn`. */
