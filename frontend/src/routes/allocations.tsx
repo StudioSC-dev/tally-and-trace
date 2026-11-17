@@ -58,7 +58,6 @@ import { WishlistPanel } from '../components/WishlistPanel'
 import { RecurringEntryFormModal } from '../components/RecurringEntryFormModal'
 import { EntryCreditWarningRow, KindCreditLines } from '../components/AllocationsCredit'
 import type { KindCreditState } from '../components/AllocationsCredit'
-import { TagChips } from '../components/TagChips'
 import { ListSheet } from '../components/ListSheet'
 import { Row } from '../components/Row'
 import { TagFilter } from '../components/TagFilter'
@@ -1350,7 +1349,6 @@ export function AllocationsPage() {
   // with no id, so nothing here links into it. It is read-only: its flags decide whether a
   // delete is offered.
   const renderLimitedEntryCard = (entry: LimitedBudgetEntry) => {
-    const hasTags = (entry.tags?.length ?? 0) > 0
     // A limited entry has no opener, so its facts wrap onto a second line instead of being cut.
     const facts = [
       entry.account && <span key="account">Account: {entry.account.name}</span>,
@@ -1369,7 +1367,7 @@ export function AllocationsPage() {
         kind="limited-entry"
         wrap
         title={entry.display_name ?? 'Recurring entry'}
-        badges={hasTags ? <TagChips tags={entry.tags} /> : undefined}
+        tags={entry.tags}
         meta={
           <>
             <span>{entry.entry_type === 'income' ? 'Recurring Income' : 'Recurring Expense'}</span>
@@ -1448,7 +1446,6 @@ export function AllocationsPage() {
     const actions =
       entry.is_active && remaining !== 0 ? recurringActionsFor({ ...entry, can_mark_paid: entry.permissions.can_post }) : []
 
-    const hasTags = (entry.tags?.length ?? 0) > 0
     const canDeleteOnly = !canEdit && entry.permissions.can_delete
 
     return (
@@ -1469,7 +1466,7 @@ export function AllocationsPage() {
             : undefined
         }
         title={entry.name}
-        badges={hasTags ? <TagChips tags={entry.tags} /> : undefined}
+        tags={entry.tags}
         meta={
           <>
             <span>{entry.entry_type === 'income' ? 'Recurring Income' : 'Recurring Expense'}</span>

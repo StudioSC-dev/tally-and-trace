@@ -190,18 +190,24 @@ Fields have no box. They are written on a ruled line (an underline in `line-stro
   - `ListSheet` is the sheet: leaf (`surface`), `radius-md`, one `line` border, no
     shadow. It clips its rows to its corners. Hook: `data-testid="list-sheet"`.
   - `Row` is one line on it: an `<article>`, radius 0, with a 1px `line` rule under
-    every row but the last. The title (`text-base`, 600) with its badges (tags, a
-    saving state) and one meta line (`text-xs`, `muted`, cut to one line) sit on the
+    every row but the last. The title (`text-base`, 600) with its badges (a saving
+    state), its tags and one meta line (`text-xs`, `muted`, cut to one line) sit on the
     left; the row's own controls sit in the trailing area; the amount sits last in its
     own right-aligned slot, so the amounts of a sheet share one right edge.
   - Content that needs a line of its own (a description, a warning, a decision such
     as an installment's auto-post review) is another meta line under the first, and
     wraps. A row with no opener (another member's limited entry) wraps its meta lines
     instead of cutting them, so every fact it carries stays readable.
+  - Tags share the title line but never take it over: the title keeps at least 96px
+    (or all of itself when shorter), and the row shows the tags that fit after it and
+    any badges, then a "+N" chip-button for the rest. "+N" names the hidden tags in
+    its label and opens a line under the row with their chips, without opening the
+    row. The fit is measured before paint and again when the line resizes.
   - A row with one meta line is 56px between rules on desktop and 64px on a phone,
-    whatever badges or controls it carries.
+    whatever badges, tags or controls it carries.
   - Hooks: `data-testid="row"` (fixed; callers cannot replace it), `row-meta` (one per
-    meta line), `row-badges`, `row-actions` and `row-amount`. What a row lists is
+    meta line), `row-badges`, `row-tags`, `row-tags-more`, `row-actions` and
+    `row-amount`. What a row lists is
     `data-row-kind` (`limited-entry`, `pending-row`). Click, keyboard and ARIA
     attributes pass through to the `<article>`.
   - Used by Transactions and the Allocations Recurring tab (one sheet per kind

@@ -30,7 +30,6 @@ import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } fro
 import { amountClass, formatAmount } from '../utils/amount'
 import type { AmountKind } from '../utils/amount'
 import { SpendingBreakdownDialog } from '../components/SpendingBreakdownDialog'
-import { TagChips } from '../components/TagChips'
 import { ListSheet } from '../components/ListSheet'
 import { Row } from '../components/Row'
 import { TagFilter } from '../components/TagFilter'
@@ -2705,7 +2704,6 @@ export function TransactionsPage() {
       if (actionable) openActionModal(transaction)
     }
     const hasOriginal = !isLimited(transaction) && transaction.original_amount != null && transaction.original_currency
-    const hasTags = (transaction.tags?.length ?? 0) > 0
 
     return (
       <Row
@@ -2753,18 +2751,14 @@ export function TransactionsPage() {
           </>
         }
         badges={
-          pendingKind !== undefined || hasTags ? (
-            <>
-              {pendingKind !== undefined && (
-                <span className="inline-flex items-center gap-1 text-xs font-semibold text-muted" data-testid="row-saving">
-                  <Spinner size="xs" />
-                  {pendingKind === 'delete' ? 'Deleting…' : 'Saving…'}
-                </span>
-              )}
-              <TagChips tags={transaction.tags} />
-            </>
+          pendingKind !== undefined ? (
+            <span className="inline-flex items-center gap-1 text-xs font-semibold text-muted" data-testid="row-saving">
+              <Spinner size="xs" />
+              {pendingKind === 'delete' ? 'Deleting…' : 'Saving…'}
+            </span>
           ) : undefined
         }
+        tags={transaction.tags}
         amount={<p className={`text-lg font-bold ${amountClass}`}>{amountLabel}</p>}
       />
     )
