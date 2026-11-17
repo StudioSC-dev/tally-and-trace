@@ -50,6 +50,7 @@ import { useRecentPicks } from '../hooks/useRecentPicks'
 import { useDeleteRecurringEntry } from '../hooks/useDeleteRecurringEntry'
 import { useManilaDay } from '../hooks/useManilaDay'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
+import { BudgetUsageBar } from '../components/BudgetUsageBar'
 import { amountClass, formatAmount } from '../utils/amount'
 import type { AmountKind } from '../utils/amount'
 import { formatCadenceLabel, formatScheduleLabel } from '../utils/recurringEntry'
@@ -1286,7 +1287,12 @@ export function AllocationsPage() {
                   <span className={`font-semibold ${amountClass('out')}`}>{format(usedAmount)}</span>
                 </div>
                 {limitAmount !== null && limitAmount > 0 && (
-                  <BudgetUsageBar usagePercentage={usagePercentage} />
+                  <>
+                    <BudgetUsageBar spent={usedAmount} limit={limitAmount} />
+                    <p className="text-right text-xs font-medium text-muted">
+                      {Math.min(Math.max(usagePercentage, 0), 100).toFixed(1)}% of limit used
+                    </p>
+                  </>
                 )}
                 {limitAmount !== null && (
                   <div className="flex items-center justify-between text-sm text-body">
@@ -1992,7 +1998,12 @@ export function AllocationsPage() {
                       Spent <span className={`font-semibold ${amountClass('out')}`}>{format(actionAllocation.current_amount)}</span>
                     </p>
                     {actionAllocationUsagePct !== null && actionAllocationLimit !== null && actionAllocationLimit > 0 && (
-                      <BudgetUsageBar usagePercentage={actionAllocationUsagePct} />
+                      <>
+                        <BudgetUsageBar spent={actionAllocation.current_amount} limit={actionAllocationLimit} />
+                        <p className="text-right text-xs font-medium text-muted">
+                          {Math.min(Math.max(actionAllocationUsagePct, 0), 100).toFixed(1)}% of limit used
+                        </p>
+                      </>
                     )}
                     {actionAllocationRemaining !== null && (
                       <p
@@ -2541,28 +2552,6 @@ export function AllocationsPage() {
         />
       )}
     </div>
-  )
-}
-
-const BudgetUsageBar: React.FC<{ usagePercentage: number }> = ({ usagePercentage }) => {
-  const clampedUsage = Math.min(Math.max(usagePercentage, 0), 100)
-  const remainingColor = clampedUsage >= 100 ? 'bg-sunken' : clampedUsage >= 80 ? 'bg-warn' : 'bg-ok'
-  const usageColor = clampedUsage >= 100 ? 'bg-danger' : clampedUsage >= 80 ? 'bg-danger' : 'bg-danger'
- 
-  return (
-    <>
-      <div className={`relative w-full overflow-hidden h-2 rounded-full transition-colors duration-300 ${remainingColor}`}>
-        {clampedUsage > 0 && (
-          <div
-            className={`absolute right-0 top-0 h-full transition-all duration-300 ${usageColor}`}
-            style={{ width: `${clampedUsage}%` }}
-          />
-        )}
-      </div>
-      <p className="text-right text-xs font-medium text-muted">
-        {clampedUsage.toFixed(1)}% of limit used
-      </p>
-    </>
   )
 }
 

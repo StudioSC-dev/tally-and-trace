@@ -30,7 +30,17 @@ const CARD_ID = 15
 const CARD_OWED = '18,742.30'
 /** The two places an amount is read. */
 const LISTS = ['transactions', 'recurring'] as const
+/** Budget envelopes in the fixture at 50, 80 (exactly), 85, 100 (exactly) and 120 percent of their limits, with the fill and track colours the design system gives each level. */
+const ENVELOPES = [
+  { name: 'Dining out', level: '50%', fill: ['rgb(74, 89, 80)', 'rgb(147, 165, 152)'] },
+  { name: 'Transport', level: '80%', fill: ['rgb(135, 80, 0)', 'rgb(228, 176, 98)'] },
+  { name: 'Groceries', level: '85%', fill: ['rgb(135, 80, 0)', 'rgb(228, 176, 98)'] },
+  { name: 'Utilities', level: '100%', fill: ['rgb(135, 80, 0)', 'rgb(228, 176, 98)'] },
+  { name: 'Shopping', level: '120%', fill: ['rgb(174, 42, 32)', 'rgb(240, 150, 140)'] },
+] as const
+const TRACK = ['rgb(214, 222, 211)', 'rgb(12, 19, 15)'] as const
 
+const fillOf = (el: Locator): Promise<string> => el.evaluate((e) => getComputedStyle(e).backgroundColor)
 const colourOf = (el: Locator): Promise<string> => el.evaluate((e) => getComputedStyle(e).color)
 const coloursOf = (els: Locator): Promise<string[]> => els.evaluateAll((all) => all.map((e) => getComputedStyle(e).color))
 const textsOf = (els: Locator): Promise<string[]> => els.evaluateAll((all) => all.map((e) => (e.textContent ?? '').trim()))
@@ -73,7 +83,7 @@ async function viewportShot(page: Page, name: string): Promise<void> {
 }
 
 /**
- * Every visible element inside `main` or a modal that is painted in the red pencil. A Delete button is the design
+ * Every visible element inside `main` or a modal whose text or background is painted in the red pencil. A Delete button is the design
  * system's red-pencil outline variant (a destructive action, not an amount), so it is not counted.
  */
 const redCount = (page: Page): Promise<number> =>
@@ -82,7 +92,8 @@ const redCount = (page: Page): Promise<number> =>
       [...document.querySelectorAll('main *, .modal-backdrop *')].filter((e) => {
         const box = e.getBoundingClientRect()
         const inDelete = (e.closest('button')?.textContent ?? '').trim().startsWith('Delete')
-        return getComputedStyle(e).color === red && box.width > 0 && box.height > 0 && !inDelete
+        const style = getComputedStyle(e)
+        return (style.color === red || style.backgroundColor === red) && box.width > 0 && box.height > 0 && !inDelete
       }).length,
     LIGHT.danger,
   )
@@ -261,6 +272,28 @@ for (const surface of ['transactions', 'accounts'] as const) {
     await shot(page, `dark-${surface}`)
   })
 }
+
+test.describe('envelope bars', () => {
+  for (const surface of ['dashboard', 'Allocations'] as const) {
+    for (const [theme] of THEMES) {
+      for (const envelope of ENVELOPES) {
+        test(`envelope bars are red only over budget: ${surface}, ${envelope.name} at ${envelope.level}, ${theme}`, async ({ page }) => {
+          const index = theme === 'light' ? 0 : 1
+          await open(page, surface === 'dashboard' ? '/' : '/allocations?tab=budgets')
+          if (theme === 'dark') await toggleDark(page)
+          const row = surface === 'dashboard'
+            ? page.getByTestId('envelope-row').filter({ hasText: envelope.name })
+            : page.locator('article').filter({ hasText: envelope.name })
+          const fill = row.getByTestId('budget-usage-fill')
+          await expect(fill).toBeVisible()
+          await expect.poll(() => fillOf(fill), { message: `the ${envelope.level} fill on ${surface} in ${theme}` }).toBe(envelope.fill[index])
+          await expect.poll(() => fillOf(row.getByTestId('budget-usage-track')), { message: `the track at ${envelope.level} on ${surface} in ${theme}` }).toBe(TRACK[index])
+          await shot(page, `envelope-${surface.toLowerCase()}-${envelope.level.replace('%', '')}-${theme}`)
+        })
+      }
+    }
+  }
+})
 
 test.describe('amount classes', () => {
   test('amount colour is a class, not a selector shim: source', async ({ page }) => {

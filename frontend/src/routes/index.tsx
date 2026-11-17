@@ -9,6 +9,7 @@ import { amountClass } from '../utils/amount'
 import type { CurrencyCode } from '../utils/currency'
 import { estimateText, estimateTitle } from '../utils/fx'
 import type { EstimateLabels } from '../utils/fx'
+import { BudgetUsageBar } from '../components/BudgetUsageBar'
 import { CurrencyControl } from '../components/CurrencyControl'
 import { useSelectedCurrency } from '../hooks/useSelectedCurrency'
 import { useManilaDay } from '../hooks/useManilaDay'
@@ -532,7 +533,7 @@ export function Dashboard() {
             ) : budgetEnvelopeSummaries.length === 0 ? (
               <p className="text-sm text-muted">No active budget envelopes yet.</p>
             ) : (
-              budgetEnvelopeSummaries.map(({ allocation, limit, spent, remaining, usagePercentage }) => (
+              budgetEnvelopeSummaries.map(({ allocation, limit, spent, remaining }) => (
                 <div key={allocation.id} className="space-y-3" data-testid="envelope-row">
                   <div className="flex items-start justify-between gap-4">
                     <div>
@@ -546,7 +547,7 @@ export function Dashboard() {
                       <p className="text-xs text-muted">Limit {formatDefault(limit)} · Spent {formatDefault(spent)}</p>
                     </div>
                   </div>
-                  <BudgetUsageBar usagePercentage={usagePercentage} />
+                  <BudgetUsageBar spent={spent} limit={limit} />
                 </div>
               ))
             )}
@@ -694,23 +695,6 @@ export function Dashboard() {
         />
       )}
 
-    </div>
-  )
-}
-
-function BudgetUsageBar({ usagePercentage }: { usagePercentage: number }) {
-  const clampedUsage = Math.min(Math.max(usagePercentage, 0), 100)
-  const remainingColor = clampedUsage >= 100 ? 'bg-sunken' : clampedUsage >= 80 ? '' : ' '
-  const usageColor = clampedUsage >= 100 ? 'bg-danger' : clampedUsage >= 80 ? 'bg-danger' : 'bg-danger'
-
-  return (
-    <div className={`relative w-full overflow-hidden h-2 rounded-full transition-colors duration-300 ${remainingColor}`}>
-      {clampedUsage > 0 && (
-        <div
-          className={`absolute right-0 top-0 h-full transition-all duration-300 ${usageColor}`}
-          style={{ width: `${clampedUsage}%` }}
-        />
-      )}
     </div>
   )
 }
