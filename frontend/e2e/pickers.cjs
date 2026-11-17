@@ -708,9 +708,9 @@ async function openAllocationForm(browser, tab, formOf) {
   return { ctx, page, native, creates, form }
 }
 
-// (g1) Tracked Categories: grouped by kind, multi select that stays open, ids in the POST body.
+// (g1) Tracked categories: grouped by kind, multi select that stays open, ids in the POST body.
 async function scenarioG1(browser) {
-  console.log('\n=== (g1) Tracked Categories: Expense, Income and Transfer headings; the picked category_ids are sent')
+  console.log('\n=== (g1) Tracked categories: Expense, Income and Transfer headings; the picked category_ids are sent')
   const { ctx, page, native, creates, form } = await openAllocationForm(browser, 'Budgets', budgetForm)
   try {
     const group = control(form, 'category_ids')

@@ -163,7 +163,7 @@ function AccountCard({ account, credit, creditPhase, sharedWith, onOpen }: {
           className="text-sm font-medium text-ink hover:underline focus-ring"
           data-testid={`account-detail-link-${account.id}`}
         >
-          Transactions <span aria-hidden="true">&rarr;</span>
+          Transactions
         </Link>
       </div>
     </article>
@@ -756,7 +756,7 @@ export function AccountsPage() {
   const renderGroups = (section: NonNullable<typeof individualSection>) =>
     section.groups.map(({ group, label, accounts: inGroup }) => (
       <div key={group} className="space-y-3" data-testid={`accounts-group-${section.section}-${group}`}>
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">
+        <h3 className="text-sm font-semibold text-muted">
           {label} ({inGroup.length})
         </h3>
         <div className="grid grid-cols-1 gap-3">
@@ -821,7 +821,7 @@ export function AccountsPage() {
         </div>
         )
       ) : (
-        <div className="hidden md:grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_160px] items-center gap-3 px-4 text-xs font-semibold uppercase tracking-wide text-muted -mb-4">
+        <div className="hidden md:grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_160px] items-center gap-3 px-4 text-xs font-semibold text-muted -mb-4">
           <span>Account</span>
           <span className="text-right">Balance</span>
           <span className="text-right">Status</span>
@@ -1070,7 +1070,7 @@ export function AccountsPage() {
             
             <form onSubmit={handleSubmit} className="space-y-5">
               <div>
-                <label className="label">Account Name</label>
+                <label className="label">Account name</label>
                 <input
                   type="text"
                   value={formData.name}
@@ -1082,7 +1082,7 @@ export function AccountsPage() {
               </div>
               
               <div>
-                <label className="label">Account Type</label>
+                <label className="label">Account type</label>
                 <select
                   value={formData.account_type}
                   onChange={(e) => {
@@ -1141,7 +1141,7 @@ export function AccountsPage() {
               )}
 
               <div>
-                <label className="label">Account Currency</label>
+                <label className="label">Account currency</label>
                 <select
                   value={formData.currency}
                   onChange={(e) => {
@@ -1166,7 +1166,7 @@ export function AccountsPage() {
               </div>
               
               <div>
-                <label className="label">Initial Balance</label>
+                <label className="label">Initial balance</label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                     <span className="text-muted sm:text-sm">{formCurrencySymbol}</span>
@@ -1200,7 +1200,7 @@ export function AccountsPage() {
               />
 
               <div>
-                <label className="label">Description (Optional)</label>
+                <label className="label">Description (optional)</label>
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
@@ -1239,7 +1239,7 @@ export function AccountsPage() {
                         </p>
                       ) : (
                       <div>
-                        <label className="label">Credit Limit</label>
+                        <label className="label">Credit limit</label>
                         <div className="relative">
                           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                             <span className="text-muted sm:text-sm">{formCurrencySymbol}</span>
@@ -1281,7 +1281,7 @@ export function AccountsPage() {
                       </div>
 
                       <div>
-                        <label className="label">Due Date (Day of Month)</label>
+                        <label className="label">Due date (day of month)</label>
                         <select
                           value={formData.due_date || ''}
                           onChange={(e) => setFormData({ ...formData, due_date: parseInt(e.target.value) || undefined })}
@@ -1295,7 +1295,7 @@ export function AccountsPage() {
                       </div>
 
                       <div>
-                        <label className="label">Statement Closes (Day of Month)</label>
+                        <label className="label">Statement closes (day of month)</label>
                         <select
                           value={formData.billing_cycle_start || ''}
                           onChange={(e) => setFormData({ ...formData, billing_cycle_start: parseInt(e.target.value) || undefined })}
@@ -1312,7 +1312,7 @@ export function AccountsPage() {
                       </div>
 
                       <div>
-                        <label className="label">Days Until Due Date</label>
+                        <label className="label">Days until due date</label>
                         <input
                           type="number"
                           min={1}
@@ -1341,7 +1341,7 @@ export function AccountsPage() {
                       </div>
 
                       <div>
-                        <label className="label">Paid From</label>
+                        <label className="label">Paid from</label>
                         <select
                           value={formData.payment_account_id ?? ''}
                           onChange={(e) => setFormData({ ...formData, payment_account_id: parseInt(e.target.value) || undefined })}
@@ -1354,7 +1354,7 @@ export function AccountsPage() {
                       </div>
 
                       <div>
-                        <label className="label">Overflow To</label>
+                        <label className="label">Overflow to</label>
                         <select
                           value={formData.payment_overflow_account_id ?? ''}
                           onChange={(e) => setFormData({ ...formData, payment_overflow_account_id: parseInt(e.target.value) || undefined })}
@@ -1368,7 +1368,7 @@ export function AccountsPage() {
                           />
                         </select>
                         <p className="mt-1 text-xs text-muted">
-                          Used when "Paid From" can't cover the statement on its own.
+                          Used when "Paid from" can't cover the statement on its own.
                         </p>
                       </div>
 
@@ -1506,7 +1506,7 @@ export function AccountsPage() {
                   </div>
 
                   <div>
-                    <label className="label">Paid From</label>
+                    <label className="label">Paid from</label>
                     <select
                       value={formData.payment_account_id ?? ''}
                       onChange={(e) => setFormData({ ...formData, payment_account_id: parseInt(e.target.value) || undefined })}

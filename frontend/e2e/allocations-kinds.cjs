@@ -257,7 +257,7 @@ async function automaticUtilities(browser) {
   const kind = form.getByTestId('recurring-kind')
   check('(c) the kind select defaults to Automatic', await kind.inputValue(), 'automatic')
   check('(c) open-ended options', await kind.locator('option').allInnerTexts(), [
-    'Automatic (Utilities → Bill)', 'Subscription', 'Bill',
+    'Automatic (Utilities to bill)', 'Subscription', 'Bill',
   ])
   await form.getByRole('button', { name: 'Save Recurring Entry' }).click()
   await editForm(page).waitFor({ state: 'detached' })

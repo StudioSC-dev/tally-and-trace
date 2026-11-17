@@ -12,7 +12,7 @@
 //     /transactions/{id}/repeat with no budget_entry_id and no PUT; the dialog closes, one row
 //     carries the new description, the entry's next date is after the row's and the row is
 //     linked to it;
-// (d) the row then reads "Name • Monthly", the Scheduled view lists the entry's next date,
+// (d) the row then reads "Name (Monthly)", the Scheduled view lists the entry's next date,
 //     and Edit shows the link select on the entry and no toggle, also after picking "None";
 // (e) a refused save (autopay over a past date) comes back as a failed toast whose Edit
 //     reopens the form (STU-605: saves run in the background) with the server's reason on
@@ -337,7 +337,7 @@ async function scenarioC(browser) {
 
     // (d) The linked row.
     await h.check('d.row-reads-schedule', 'B', async () => {
-      await rowFor(page, name).filter({ hasText: `${name} • Monthly` }).waitFor({ timeout: 10000 })
+      await rowFor(page, name).filter({ hasText: `${name} (Monthly)` }).waitFor({ timeout: 10000 })
       return true
     })
     modal = await openEdit(page, name)
