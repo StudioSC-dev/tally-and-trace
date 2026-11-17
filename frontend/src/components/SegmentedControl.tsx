@@ -15,7 +15,7 @@ export function Segment({ selected, className, ...rest }: SegmentProps) {
 
 type SwatchProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'type' | 'aria-pressed' | 'color'> & {
   selected: boolean
-  /** The swatch's fill, as CSS (a token such as `rgb(var(--swatch-1))`). */
+  /** The swatch's fill, as CSS (a swatch token from the palette). */
   color: string
 }
 
