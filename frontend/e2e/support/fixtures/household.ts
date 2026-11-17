@@ -32,7 +32,11 @@ import type {
   DescriptionSuggestion,
   FullBudgetEntry,
   FullTransaction,
+  HouseholdDashboard,
+  HouseholdMonthly,
   HouseholdShares,
+  HouseholdTransactions,
+  HouseholdUpcoming,
   HouseholdView,
   InstallmentPlans,
   PaginatedResponse,
@@ -42,6 +46,7 @@ import type {
   ReceivedHouseholdShare,
   ReceivedShare,
   RecordPermissions,
+  ScheduledList,
   SharedFullTransaction,
   Tag,
   Transaction,
@@ -822,18 +827,56 @@ function pageFor<T>(items: T[], query: URLSearchParams): PaginatedResponse<T> {
 /**
  * `GET /transactions/` as the pages ask it: `start_date` and `end_date` (inclusive, by Manila day), `order`
  * (newest first unless `asc`, by date then id as the API sorts), `limit` and `offset`. Sorted before it is paged.
+ * The list's filters as the API applies them: `account_ids` (any leg on one of them), `transaction_types`, and
+ * `entered_by=me` (the caller's own rows, which the API sends as the `full` view).
  */
 export function transactionsFor(data: HouseholdData, query: URLSearchParams): PaginatedResponse<Transaction> {
-  only(query, ['start_date', 'end_date', 'order', 'limit', 'offset'])
+  only(query, ['start_date', 'end_date', 'order', 'limit', 'offset', 'account_ids', 'transaction_types', 'entered_by'])
   const dayOf = (t: Transaction): string => (t.view === 'limited' ? t.date : t.transaction_date).slice(0, 10)
   const start = query.get('start_date')?.slice(0, 10)
   const end = query.get('end_date')?.slice(0, 10)
-  const matches = data.transactions.filter((t) => (!start || dayOf(t) >= start) && (!end || dayOf(t) <= end))
+  const accountIds = query.getAll('account_ids').map(Number)
+  const types = query.getAll('transaction_types')
+  const enteredBy = query.get('entered_by')
+  if (enteredBy !== null && enteredBy !== 'me') throw new Error(`unhandled entered_by: ${enteredBy}`)
+  const touches = (t: Transaction): boolean =>
+    t.view !== 'limited' && [t.account_id, t.transfer_from_account_id, t.transfer_to_account_id].some((id) => id !== undefined && accountIds.includes(id))
+  const matches = data.transactions.filter(
+    (t) =>
+      (!start || dayOf(t) >= start) &&
+      (!end || dayOf(t) <= end) &&
+      (!accountIds.length || touches(t)) &&
+      (!types.length || types.includes(t.transaction_type)) &&
+      (enteredBy === null || t.view === 'full'),
+  )
   // The API's order: transaction_date, then id, both ascending for `asc` and both descending otherwise.
   const whenOf = (t: Transaction): string => (t.view === 'limited' ? t.date : t.transaction_date)
   const sign = query.get('order') === 'asc' ? 1 : -1
   const ordered = [...matches].sort((a, b) => sign * (whenOf(a).localeCompare(whenOf(b)) || a.id - b.id))
   return pageFor(ordered, query)
+}
+
+/**
+ * `GET /transactions/scheduled` as the Scheduled view asks it: the variant's unrecorded occurrences from
+ * `start_date` to `end_date` (inclusive days), in date order, as one page. The fixture has no future transactions.
+ */
+export function scheduledFor(data: HouseholdData, query: URLSearchParams): ScheduledList {
+  only(query, ['start_date', 'end_date', 'limit', 'cursor'])
+  const start = query.get('start_date')?.slice(0, 10)
+  const end = query.get('end_date')?.slice(0, 10)
+  const dayOf = (o: UpcomingOccurrence): string => o.effective_date ?? o.occurrence_date
+  const items = data.occurrences
+    .filter((o) => (!start || dayOf(o) >= start) && (!end || dayOf(o) <= end))
+    .map((o) => ({ kind: 'occurrence' as const, day: dayOf(o), occurrence: o }))
+  return {
+    items,
+    total: items.length,
+    transactions_total: 0,
+    occurrences_total: items.length,
+    occurrences_through: end ?? '2026-04-11',
+    auto_post_scheduled: true,
+    next_cursor: null,
+  }
 }
 
 /** `GET /budget-entries/` as the pages ask it: `entry_type`, `is_active`, `limit` and `offset`. */
@@ -865,6 +908,7 @@ export const householdRoutes = (data: HouseholdData = household): ApiRoute[] => 
     auto_post_scheduled: true,
   }),
   queryRoute<PaginatedResponse<Transaction>>('GET', '/transactions/', (q) => transactionsFor(data, q)),
+  queryRoute<ScheduledList>('GET', '/transactions/scheduled', (q) => scheduledFor(data, q)),
   apiRoute<{ items: DescriptionSuggestion[] }>('GET', '/transactions/description-suggestions', { items: [] }),
   apiRoute<DashboardDue>('GET', '/dashboard/due', data.due),
   apiRoute<{ items: CardCredit[] }>('GET', '/cards/credit', { items: [] }),
@@ -873,6 +917,82 @@ export const householdRoutes = (data: HouseholdData = household): ApiRoute[] => 
   apiRoute<ReceivedHouseholdShare[]>('GET', '/shares/received/household', []),
   apiRoute<HouseholdShares>('GET', '/tags/household/shares', { tag_id: householdTag.id, shares: [] }),
 ]
+
+/** A variant whose user has pinned the payroll account as their main account (the Forecast's "Main" scope). */
+export const withMainAccount = (data: HouseholdData): HouseholdData => ({ ...data, user: { ...data.user, main_account_id: payroll.id } })
+
+/**
+ * A variant whose cash-flow timeline also holds dollars: a USD row with an opening balance and no events, so the
+ * Forecast offers its currency control. Every other answer is the variant's own.
+ */
+export const withDollarTimeline = (data: HouseholdData): HouseholdData => {
+  const { by_currency, currencies } = data.timeline
+  const peso = by_currency[0]
+  return {
+    ...data,
+    timeline: {
+      ...data.timeline,
+      currencies: [...currencies, 'USD'],
+      by_currency: [
+        ...by_currency,
+        {
+          ...peso,
+          currency: 'USD',
+          opening_balance: 1250,
+          lowest_balance: 1250,
+          trough_date: data.today,
+          closing_balance: 1250,
+          by_account: [],
+          events: [],
+        },
+      ],
+    },
+  }
+}
+
+/**
+ * The caller's own Household view (`GET /household/` and the four tabs' calls) for `data`: the accounts and
+ * transactions tagged Household, this month's recorded totals from those transactions, and the upcoming items of
+ * Household-tagged recurring entries.
+ */
+export const householdViewRoutes = (data: HouseholdData = household): ApiRoute[] => {
+  const sharer = { id: data.user.id, name: 'Mara S.' }
+  const tagged = data.transactions.filter((t) => t.view !== 'limited' && t.tags.some((tag) => tag.id === householdTag.id))
+  const accountIds = new Set(tagged.map((t) => (t.view === 'limited' ? -1 : t.account_id)))
+  const taggedEntries = new Set(data.entries.filter((e) => e.view !== 'limited' && e.tags.some((tag) => tag.id === householdTag.id)).map((e) => e.id))
+  const upcomingItems = data.upcoming.filter((u) => u.source_id !== undefined && u.source_id !== null && taggedEntries.has(u.source_id))
+  const month = data.today.slice(0, 7)
+  const inMonth = tagged.filter((t) => t.view !== 'limited' && t.transaction_date.slice(0, 7) === month)
+  const total = (type: Transaction['transaction_type']): number => round2(inMonth.filter((t) => t.transaction_type === type).reduce((sum, t) => sum + t.amount, 0))
+  const monthRow = {
+    month,
+    kind: 'recorded' as const,
+    currencies: [{ currency: 'PHP' as const, income: total('credit'), expense: total('debit'), fees: 0, moved_in: 0, moved_out: 0, paid_from_other_accounts: 0 }],
+  }
+  const views: HouseholdView[] = [{ sharer_id: sharer.id, sharer_name: sharer.name, is_self: true }]
+  const base = `/household/${sharer.id}`
+  return [
+    apiRoute<HouseholdView[]>('GET', '/household/', views),
+    apiRoute<HouseholdDashboard>('GET', `${base}/dashboard`, {
+      sharer,
+      accounts: data.accounts.filter((a) => accountIds.has(a.id)),
+      month: monthRow,
+      upcoming: upcomingItems,
+    }),
+    queryRoute<HouseholdTransactions>('GET', `${base}/transactions`, (q) => {
+      only(q, ['start_date', 'end_date', 'limit', 'offset'])
+      return pageFor(tagged, q)
+    }),
+    queryRoute<HouseholdUpcoming>('GET', `${base}/upcoming`, (q) => {
+      only(q, ['days'])
+      return { sharer, items: upcomingItems, days: Number(q.get('days') ?? 30) }
+    }),
+    queryRoute<HouseholdMonthly>('GET', `${base}/monthly`, (q) => {
+      only(q, ['from', 'to'])
+      return { sharer, from: q.get('from') ?? month, to: q.get('to') ?? month, months: [monthRow] }
+    }),
+  ]
+}
 
 /**
  * Signs in as the household's user, freezes the clock on `HOUSEHOLD_NOW` and fakes the API
