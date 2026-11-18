@@ -98,8 +98,11 @@ the same apply (``_apply`` with ``ACCOUNT``) over the account's rows; what diffe
   posting or unposting it) is refused (``TRANSFER_CHANGE``), since it would change
   the other account too, and so is a ``create`` whose possible duplicate is a
   transfer (``TRANSFER_DUPLICATE``): the line is most likely that transfer, dated
-  off the period. A row linked to a recurring entry is refused unposting
-  (``LINKED_UNPOST``): the un-record a card's unpost does is not done here.
+  off the period. A transfer out of the account carries its fee (``RowRecord.fee``),
+  so a posted one may be matched to an amount line and a fee line (the fee pairing,
+  ``statement_reconcile``), which writes nothing. A row linked to a recurring entry is
+  refused unposting (``LINKED_UNPOST``): the un-record a card's unpost does is not done
+  here.
 - No header writes.
 - Verify (``verify_account``): after the writes, the posted rows in the period
   must add up to the statement's change (``opening_balance`` plus them is the
@@ -860,11 +863,13 @@ def load_account(db: Session, user: User, account: Account, statement: AccountSt
         kind, amount = side if transfer else (side[0], amount_of(txn))
         own = txn.transaction_date.date()
         posted = bool(txn.is_posted)
+        source = transfer and txn.transfer_from_account_id == account.id
         record = sr.RowRecord(
             id=txn.id, kind=kind, amount=amount, transaction_date=own,
             posting_date=manila_day(txn.posting_date) if txn.posting_date else None,
             is_posted=posted, updated_at=txn.updated_at, budget_entry_id=txn.budget_entry_id,
-            keeps_dates=transfer)
+            keeps_dates=transfer,
+            fee=Decimal(str(txn.transfer_fee or 0)) if source else None)
         if posted:
             if view.window_start < own <= view.close:
                 out.cycle.append(record)

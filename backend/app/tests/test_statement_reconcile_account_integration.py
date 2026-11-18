@@ -341,6 +341,51 @@ def test_a_transfer_is_matched_on_both_statements_and_never_created(w):
         assert {a["kind"] for a in again["actions"]} == {"matched"}
 
 
+def test_a_transfer_and_its_fee_printed_apart_are_matched_to_the_one_row(w):
+    """STU-774: the bank prints the transfer and its fee as two lines; both are matched
+    to the one transfer and nothing is written to it."""
+    transfer = _transfer(w, "2027-02-10", 5000, fee=15)
+    statement = _statement([
+        _line(1, "2027-02-10", "5000.00", description="Transfer to savings"),
+        _line(2, "2027-02-11", "15.00", description="Transfer fee")])
+    dry = _dry(w, statement, account=w["checking"])
+    assert dry["balanced"] is True
+    assert [(a["kind"], a["line_no"], a["row_id"]) for a in dry["actions"]] == [
+        ("matched", 1, transfer), ("matched", 2, transfer)]
+    before = _snapshot(w)
+    row = _txn(w, transfer)
+    body = _apply(w, statement, account=w["checking"])
+    assert _kinds(body) == [("matched", 1), ("matched", 2)]
+    after = _txn(w, transfer)
+    assert after["is_reconciled"] is True
+    marking = ("is_reconciled", "updated_at")  # the reconciled marking, nothing else
+    assert {k: v for k, v in after.items() if k not in marking} == {
+        k: v for k, v in row.items() if k not in marking}
+    assert len(_snapshot(w)["transactions"]) == len(before["transactions"])
+    assert _balance(w, w["checking"]) == Decimal("44985") == _history_at_end(w, w["checking"])
+    assert _reconciliations(w, w["checking"])[0][3:6] == (
+        Decimal("44985.00"), Decimal("-5015.00"), 2)
+
+
+def test_an_ambiguous_fee_line_is_not_paired_and_is_refused_as_before(w):
+    """Two lines could be the fee: the transfer falls to the usual rules, which would
+    change it, so the apply is refused as any change to a transfer is."""
+    transfer = _transfer(w, "2027-02-10", 5000, fee=15)
+    charge = _row(w, "2027-02-10", 15, account=w["checking"], description="Bank charge")
+    statement = _statement([
+        _line(1, "2027-02-10", "5000.00"), _line(2, "2027-02-10", "15.00"),
+        _line(3, "2027-02-11", "15.00")])
+    dry = _dry(w, statement, account=w["checking"])
+    assert [(a["kind"], a["line_no"], a["row_id"]) for a in dry["actions"]] == [
+        ("create", 1, None), ("matched", 2, charge), ("create", 3, None),
+        ("unpost", None, transfer)]
+    before = _snapshot(w)
+    r = _post(w, statement, False, dry["fingerprint"], account=w["checking"])
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["message"].startswith(f"Row {transfer} is a transfer")
+    assert _snapshot(w) == before
+
+
 def test_a_change_to_a_transfer_is_refused(w):
     transfer = _transfer(w, "2027-02-10", 5000)
     statement = _statement([_line(1, "2027-02-10", "4990.00", kind="credit")],

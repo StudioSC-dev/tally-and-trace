@@ -85,6 +85,14 @@ differences:
   the line says (the other account's statement may print another day), so, like a
   recurring candidate, it is paired only where its own date lands, and a ``create``
   that it was left out for names it in ``possible_duplicate_of``.
+- The fee pairing, before rule 1 (STU-774): the source side of a transfer with a fee
+  (its ``RowRecord.fee``, set only on a bank account's statement) is one row whose
+  amount is the transfer's amount plus its fee, while a bank may print the fee as a
+  line of its own. A posted cycle row with a ``fee`` above 0 is ``matched`` to two
+  lines, one action each: the one debit line equal to its amount less the fee and the
+  one debit line equal to the fee, both within one day of it, when there is exactly
+  one of each, they are distinct lines, and neither could be either line of another
+  such row. Otherwise the row falls to rules 1 to 3 unchanged.
 """
 from __future__ import annotations
 
@@ -118,6 +126,9 @@ class RowRecord:
     budget_entry_id: Optional[int] = None
     # One side of a transfer on a bank account's statement: its dates are kept.
     keeps_dates: bool = False
+    # The source side of a transfer on a bank account's statement: the fee inside
+    # ``amount`` (``amount`` is the transfer's amount plus it), for the fee pairing.
+    fee: Optional[Decimal] = None
 
 
 @dataclass(frozen=True)
@@ -206,7 +217,7 @@ def fingerprint(statement: BankStatement, view: AppStatementView,
     lines = [{k: _canon(v) for k, v in line.model_dump().items()}
              for line in sorted(statement.lines, key=lambda line: line.line_no)]
     read = [[r.id, _canon(r.amount), _canon(r.transaction_date), _canon(r.posting_date),
-             r.is_posted, _canon(r.updated_at)]
+             r.is_posted, _canon(r.updated_at)] + ([_canon(r.fee)] if r.fee is not None else [])
             for r in sorted(rows, key=lambda r: r.id)]
     app = {"close": _canon(view.close), "window_start": _canon(view.window_start),
            "due": _canon(view.due), "minimum_due": _canon(view.minimum_due)}
@@ -267,6 +278,33 @@ def _exact_pairs(lines: Sequence[StatementLine], pool: Sequence[Tuple[int, RowRe
         used_lines.add(line.line_no)
         used_rows.add(row.id)
         pairs.append((line, rank, row))
+    return pairs
+
+
+def _fee_pairs(lines: Sequence[StatementLine], pool: Sequence[Tuple[int, RowRecord]]
+               ) -> List[Tuple[StatementLine, StatementLine, RowRecord]]:
+    """The fee pairing: ``(amount line, fee line, row)`` for a posted cycle row with a
+    ``fee`` above 0 and exactly one line of each, distinct, both debits within one day
+    of it: one equal to its amount less the fee, one equal to the fee. A line that
+    could be either line of another such row is never paired."""
+    near: Dict[int, Tuple[List[StatementLine], List[StatementLine]]] = {}
+    for rank, row in pool:
+        if rank != CYCLE or not row.is_posted or row.kind != "debit" or not row.fee:
+            continue
+        close = [line for line in lines
+                 if line.kind == "debit" and _distance(line, row) <= 1]
+        near[row.id] = ([line for line in close if line.amount == row.amount - row.fee],
+                        [line for line in close if line.amount == row.fee])
+    claims: Dict[int, int] = {}
+    for amounts, fees in near.values():
+        for line_no in {line.line_no for line in (*amounts, *fees)}:
+            claims[line_no] = claims.get(line_no, 0) + 1
+    rows = {row.id: row for _, row in pool}
+    pairs = []
+    for row_id, (amounts, fees) in near.items():
+        if len(amounts) == 1 and len(fees) == 1 and amounts[0].line_no != fees[0].line_no \
+                and claims[amounts[0].line_no] == claims[fees[0].line_no] == 1:
+            pairs.append((amounts[0], fees[0], rows[row_id]))
     return pairs
 
 
@@ -383,9 +421,16 @@ def _row_diff(statement, view: AppStatementView, cycle_rows: Sequence[RowRecord]
     items = [line for line in statement.lines if line.kind != "payment"]
     actions: List[Action] = []
 
-    paired = _exact_pairs(items, pool, eligible)
-    taken_lines = {line.line_no for line, _, _ in paired}
-    taken_rows = {row.id for _, _, row in paired}
+    for amount_line, fee_line, row in _fee_pairs(items, pool):
+        actions += [Action("matched", amount_line.line_no, row.id),
+                    Action("matched", fee_line.line_no, row.id)]
+    fee_lines = {a.line_no for a in actions}
+    fee_rows = {a.row_id for a in actions}
+    paired = _exact_pairs([line for line in items if line.line_no not in fee_lines],
+                          [(rank, row) for rank, row in pool if row.id not in fee_rows],
+                          eligible)
+    taken_lines = fee_lines | {line.line_no for line, _, _ in paired}
+    taken_rows = fee_rows | {row.id for _, _, row in paired}
     rest_lines = [line for line in items if line.line_no not in taken_lines]
     rest_pool = [(rank, row) for rank, row in pool if row.id not in taken_rows]
     for line, rank, row in paired + _unambiguous_pairs(rest_lines, rest_pool, eligible):
