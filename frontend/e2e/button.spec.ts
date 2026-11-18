@@ -128,7 +128,7 @@ async function openDialog(
   const api = await openPage(page, route, heading, extra)
   await trigger(page).click()
   await expect(dialogOf(page).getByRole('heading', { name: title }).first()).toBeVisible()
-  await settle(page)
+  await untilStill(page)
   return api
 }
 
@@ -683,6 +683,34 @@ async function screenOf(page: Page, row?: Locator): Promise<Omit<Effect, 'reques
 /** How long the screen and the requests must hold still before a click's effect is read, and the most to wait. */
 const QUIET_MS = 500
 const QUIET_TRIES = 20
+
+/**
+ * Waits until a just-opened dialog has filled in: no request sent or finished and no change on screen for QUIET_MS.
+ * `networkidle` alone returns at once after the first load, so a dialog's own lookups could still be in flight and
+ * move its buttons under the next click.
+ */
+async function untilStill(page: Page): Promise<void> {
+  let events = 0
+  const onEvent = (): void => {
+    events += 1
+  }
+  page.on('request', onEvent)
+  page.on('requestfinished', onEvent)
+  page.on('requestfailed', onEvent)
+  let screen = await screenOf(page)
+  for (let i = 0; i < QUIET_TRIES; i += 1) {
+    const count = events
+    await settle(page)
+    await page.waitForTimeout(QUIET_MS)
+    const next = await screenOf(page)
+    const still = events === count && JSON.stringify(next) === JSON.stringify(screen)
+    screen = next
+    if (still) break
+  }
+  page.off('request', onEvent)
+  page.off('requestfinished', onEvent)
+  page.off('requestfailed', onEvent)
+}
 
 async function effectOf(page: Page, target: Locator, row?: Locator): Promise<Effect> {
   const seen: string[] = []
