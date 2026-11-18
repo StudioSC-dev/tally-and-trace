@@ -47,7 +47,7 @@ export function SharedWithMe({ onLeft }: { onLeft?: () => void }) {
   const handleLeaveHousehold = async (share: ReceivedHouseholdShare) => {
     const sharer = share.sharer_name ?? 'this person'
     const accepted = await askConfirm({
-      title: 'Leave this Household?',
+      title: 'Leave this household?',
       message: `Leave ${sharer}'s Household? You lose sight of their Household accounts and records.`,
       confirmLabel: 'Leave',
     })
@@ -99,7 +99,7 @@ export function SharedWithMe({ onLeft }: { onLeft?: () => void }) {
           >
             <div>
               <p className="text-sm font-semibold text-ink">
-                {share.sharer_name ? `${share.sharer_name}'s Household` : 'Household'}
+                {share.sharer_name ? `${share.sharer_name}'s household` : 'Household'}
               </p>
               <p className="text-xs text-muted">Read-only view of their Household accounts and records</p>
             </div>

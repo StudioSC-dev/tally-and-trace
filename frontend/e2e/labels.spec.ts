@@ -41,15 +41,15 @@ const metaOf = (page: Page, name: string): Locator =>
 
 async function openAddTransaction(page: Page): Promise<Locator> {
   await open(page, '/transactions')
-  await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+  await page.getByRole('button', { name: 'Add transaction' }).first().click()
   await expect(overlay(page).getByText('Transaction type')).toBeVisible()
   return overlay(page)
 }
 
 async function openRecurringEntry(page: Page): Promise<Locator> {
   await open(page, '/allocations?tab=recurring')
-  await page.getByRole('button', { name: 'Add Recurring Entry' }).click()
-  await expect(overlay(page).getByRole('heading', { name: 'Add Recurring Entry' })).toBeVisible()
+  await page.getByRole('button', { name: 'Add recurring entry' }).click()
+  await expect(overlay(page).getByRole('heading', { name: 'Add recurring entry' })).toBeVisible()
   return overlay(page)
 }
 
@@ -224,7 +224,7 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
   for (const form of ALLOCATION_FORMS) {
     test(`labels are sentence case: allocations ${form.name}`, async ({ page }) => {
       await open(page, `/allocations?tab=${form.tab}`)
-      await page.getByRole('button', { name: 'Add Allocation' }).click()
+      await page.getByRole('button', { name: 'Add allocation' }).click()
       const dialog = overlay(page)
       await expect(dialog.getByRole('heading', { name: /^Create / })).toBeVisible()
       if (form.mode) await dialog.getByRole('button', { name: form.mode }).click()
@@ -265,7 +265,7 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
   for (const form of ACCOUNT_FORMS) {
     test(`labels are sentence case: add account form (${form.name})`, async ({ page }) => {
       await open(page, '/accounts')
-      await page.getByRole('button', { name: 'Add Account', exact: true }).click()
+      await page.getByRole('button', { name: 'Add account', exact: true }).click()
       const dialog = overlay(page)
       await expect(dialog.getByText('Account name')).toBeVisible()
       if (form.type) await dialog.locator('select').first().selectOption(form.type)
@@ -324,11 +324,11 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
 
   const chrome = /•|→| — /
   const chromeSurfaces: { name: string; text: (page: Page) => Promise<string>; anchor: string }[] = [
-    { name: 'dashboard', anchor: 'Cash-Flow Timeline', text: async (p) => (await open(p, '/'), p.locator('main').innerText()) },
+    { name: 'dashboard', anchor: 'Cash-flow timeline', text: async (p) => (await open(p, '/'), p.locator('main').innerText()) },
     { name: 'transactions', anchor: 'Date range:', text: async (p) => (await open(p, '/transactions'), p.locator('main').innerText()) },
     { name: 'allocations', anchor: 'Recurring expense', text: async (p) => (await open(p, '/allocations?tab=recurring'), p.locator('main').innerText()) },
     { name: 'add transaction dialog', anchor: 'Transaction type', text: async (p) => (await openAddTransaction(p)).innerText() },
-    { name: 'recurring entry dialog', anchor: 'Add Recurring Entry', text: async (p) => (await openRecurringEntry(p)).innerText() },
+    { name: 'recurring entry dialog', anchor: 'Add recurring entry', text: async (p) => (await openRecurringEntry(p)).innerText() },
     {
       // A credit-card account adds the Kind select, whose choices read "Automatic (Utilities to bill)".
       name: 'recurring entry dialog with a credit card selected',
@@ -454,15 +454,15 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
 
     // The row action still opens the action dialog and then the edit form for the same transaction.
     await page.getByText('Grab to Makati').click()
-    await expect.soft(overlay(page).getByText('Transaction Actions'), 'a row opens its action dialog').toBeVisible()
+    await expect.soft(overlay(page).getByText('Transaction actions'), 'a row opens its action dialog').toBeVisible()
     await expect.soft(overlay(page).getByText('Grab to Makati'), 'the dialog is for that row').toBeVisible()
-    await overlay(page).getByRole('button', { name: 'Edit Transaction' }).click()
-    await expect.soft(overlay(page).getByRole('heading', { name: 'Edit Transaction' }), 'Edit opens the edit form').toBeVisible()
+    await overlay(page).getByRole('button', { name: 'Edit transaction' }).click()
+    await expect.soft(overlay(page).getByRole('heading', { name: 'Edit transaction' }), 'Edit opens the edit form').toBeVisible()
     await expect.soft(overlay(page).getByTestId('transaction-date'), 'the form holds that row date').toHaveValue('2026-03-11')
     expect.soft(await overlay(page).locator('input').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value)), 'the form holds that row description').toContain('Grab to Makati')
     await viewportShot(page, 'facts-row-action')
 
-    // The Add Transaction dialog's recurring-entry choices keep each entry's name, cadence and amount.
+    // The Add transaction dialog's recurring-entry choices keep each entry's name, cadence and amount.
     const dialog = await openAddTransaction(page)
     const options = await dialog.locator('select option').allInnerTexts()
     for (const [name, cadence, amount] of [['Rent', 'Monthly', '₱22,000.00'], ['Palengke run', 'Weekly', '₱1,300.00'], ['Yaya salary', 'Twice a month', '₱4,500.00']]) {
@@ -482,7 +482,7 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
     await open(page, '/')
     await page.getByRole('link', { name: 'Details', exact: true }).click()
     await expect.soft(page, 'Details opens the forecast').toHaveURL(/\/forecast$/)
-    await expect.soft(page.getByRole('heading', { level: 1, name: 'Cash-Flow Timeline' }), 'the forecast page shows').toBeVisible()
+    await expect.soft(page.getByRole('heading', { level: 1, name: 'Cash-flow timeline' }), 'the forecast page shows').toBeVisible()
     await shot(page, 'facts-details')
   })
 

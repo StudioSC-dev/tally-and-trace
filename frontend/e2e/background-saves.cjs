@@ -100,7 +100,7 @@ async function openPage(browser, user) {
   })
   await h.uiLogin(page, stack, user)
   await page.goto(`${stack.webUrl}/transactions`)
-  await page.getByRole('button', { name: 'Add Transaction' }).first().waitFor()
+  await page.getByRole('button', { name: 'Add transaction' }).first().waitFor()
   await h.waitQuiet(page)
   const overlaySeen = () => page.evaluate(() => window.__overlaySeen === true)
   return { ctx, page, overlaySeen }
@@ -108,7 +108,7 @@ async function openPage(browser, user) {
 
 /** Fills the Create dialog with an expense on `accountName`. */
 async function fillCreate(page, { accountName, amount, description }) {
-  await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+  await page.getByRole('button', { name: 'Add transaction' }).first().click()
   const form = formOf(page)
   await form.waitFor()
   await form.locator('input[placeholder="Add notes about this transaction"]').fill(description)
@@ -120,7 +120,7 @@ async function fillCreate(page, { accountName, amount, description }) {
 
 async function createUI(page, opts) {
   const form = await fillCreate(page, opts)
-  await form.getByRole('button', { name: 'Create Transaction', exact: true }).click()
+  await form.getByRole('button', { name: 'Add transaction', exact: true }).click()
   return form
 }
 
@@ -159,7 +159,7 @@ async function scenarioA(browser) {
     })
     await shot(page, 'a-pending')
     await h.check('a.page-takes-input', 'B', async () => {
-      await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+      await page.getByRole('button', { name: 'Add transaction' }).first().click()
       const again = formOf(page)
       await again.waitFor({ timeout: 3000 })
       const input = again.locator('input[placeholder="Add notes about this transaction"]')
@@ -272,7 +272,7 @@ async function scenarioC(browser) {
     // The fixed save goes through: the refusal route is removed first.
     await page.unrouteAll({ behavior: 'ignoreErrors' })
     await reopened.locator('input[type="number"][placeholder="0.00"]').first().fill('77')
-    await reopened.getByRole('button', { name: 'Create Transaction', exact: true }).click()
+    await reopened.getByRole('button', { name: 'Add transaction', exact: true }).click()
     await h.check('c.fixed-saved', 'B', async () => (await waitToast(page, 'BG C Refused', 'saved')) || 'fixed save not saved')
   } finally {
     await ctx.close()
@@ -436,20 +436,20 @@ async function scenarioH(browser) {
   try {
     const row = rowFor(page, 'BG H Existing').first()
     await row.click()
-    await page.getByRole('heading', { name: 'Transaction Actions' }).waitFor()
+    await page.getByRole('heading', { name: 'Transaction actions' }).waitFor()
     await page.getByRole('button', { name: /^Edit/ }).first().click()
     const form = formOf(page)
     await form.waitFor()
     const held = await h.gate(page, (r) => r.method() === 'PUT' && /\/api\/v1\/transactions\/\d+$/.test(pathOf(r.url())))
     await form.locator('input[placeholder="Add notes about this transaction"]').fill('BG H Edited')
-    await form.getByRole('button', { name: 'Update Transaction', exact: true }).click()
+    await form.getByRole('button', { name: 'Save changes', exact: true }).click()
     await held.waitHits(1)
     const pendingRow = page.locator('article[data-transaction-id][data-pending="update"]')
     await h.check('h.row-marked', 'B', async () => { await pendingRow.waitFor({ timeout: 3000 }); return (await text(pendingRow.locator(tid('row-saving')))) === 'Saving…' || 'no Saving… badge' })
     await shot(page, 'h-row-saving')
     await h.check('h.row-read-only', 'B', async () => {
       await pendingRow.click({ force: true })
-      return (await h.expectAbsentFor(page, page.getByRole('heading', { name: 'Transaction Actions' }), 500)) || 'the action modal opened'
+      return (await h.expectAbsentFor(page, page.getByRole('heading', { name: 'Transaction actions' }), 500)) || 'the action modal opened'
     })
     held.release({ disarm: true })
     await h.check('h.edit-saved', 'B', async () => (await waitToast(page, 'BG H Edited', 'saved')) || 'no Saved toast')
@@ -485,9 +485,9 @@ async function scenarioI(browser) {
   try {
     const held = await h.gate(page, (r) => r.method() === 'DELETE')
     await rowFor(page, 'BG I Delete me').first().click()
-    await page.getByRole('heading', { name: 'Transaction Actions' }).waitFor()
+    await page.getByRole('heading', { name: 'Transaction actions' }).waitFor()
     await page.getByRole('button', { name: /^Delete/ }).first().click()
-    await page.getByRole('button', { name: 'Delete transaction', exact: true }).click()
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Delete transaction', exact: true }).click()
     await held.waitHits(1)
     const dimmed = page.locator('article[data-transaction-id][data-pending="delete"]')
     await h.check('i.row-dimmed', 'B', async () => {
@@ -668,12 +668,12 @@ async function scenarioM(browser) {
   const { ctx, page } = await openPage(browser, user)
   const editTo = async (from, to) => {
     await rowFor(page, from).first().click()
-    await page.getByRole('heading', { name: 'Transaction Actions' }).waitFor()
+    await page.getByRole('heading', { name: 'Transaction actions' }).waitFor()
     await page.getByRole('button', { name: /^Edit/ }).first().click()
     const form = formOf(page)
     await form.waitFor()
     await form.locator('input[placeholder="Add notes about this transaction"]').fill(to)
-    await form.getByRole('button', { name: 'Update Transaction', exact: true }).click()
+    await form.getByRole('button', { name: 'Save changes', exact: true }).click()
   }
   try {
     const isPut = (r) => r.method() === 'PUT' && pathOf(r.url()).endsWith(`/api/v1/transactions/${row0.id}`)

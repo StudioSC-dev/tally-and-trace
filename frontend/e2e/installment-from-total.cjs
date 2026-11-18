@@ -1,5 +1,5 @@
 // Browser checks for STU-631 and STU-658: a card purchase recorded as an installment from its
-// total and number of months, in the Add Transaction dialog. The split follows the banks' rule
+// total and number of months, in the Add transaction dialog. The split follows the banks' rule
 // (STU-658): each payment is the total ÷ months rounded half-up to the centavo, and the last
 // absorbs the difference, so it can be higher or lower.
 //
@@ -143,14 +143,14 @@ async function openPage(browser, user, contextOptions = {}) {
   page.on('request', (r) => { if (isApiPost(r)) posts.push({ path: pathOf(r), body: r.postDataJSON() }) })
   await h.uiLogin(page, stack, user)
   await page.goto(`${stack.webUrl}/transactions`)
-  await page.getByRole('button', { name: 'Add Transaction' }).first().waitFor()
+  await page.getByRole('button', { name: 'Add transaction' }).first().waitFor()
   await h.waitQuiet(page)
   return { ctx, page, native, posts }
 }
 
 async function openAdd(page, accountName) {
-  await page.getByRole('button', { name: 'Add Transaction' }).first().click()
-  const modal = formModal(page, 'Create Transaction')
+  await page.getByRole('button', { name: 'Add transaction' }).first().click()
+  const modal = formModal(page, 'Add transaction')
   await modal.waitFor()
   await h.waitQuiet(page)
   if (accountName) await pick(control(modal, 'account_id'), accountName)
@@ -201,11 +201,11 @@ async function readPreview(modal) {
   }
 }
 
-/** Clicks Create Transaction and waits for the POST it sends; returns its response. */
+/** Clicks Add transaction and waits for the POST it sends; returns its response. */
 async function submit(page, modal) {
   const [response] = await Promise.all([
     page.waitForResponse((r) => r.request().method() === 'POST' && r.url().includes('/transactions')),
-    modal.getByRole('button', { name: 'Create Transaction', exact: true }).click(),
+    modal.getByRole('button', { name: 'Add transaction', exact: true }).click(),
   ])
   await modal.waitFor({ state: 'detached' })
   await h.waitQuiet(page)
@@ -292,10 +292,10 @@ async function hiddenElsewhere(browser) {
     await page.reload()
     await h.waitQuiet(page)
     await page.locator('article[role="button"]').filter({ hasText: saved.description }).first().click()
-    const actions = formModal(page, 'Transaction Actions')
+    const actions = formModal(page, 'Transaction actions')
     await actions.waitFor()
-    await actions.getByRole('button', { name: 'Edit Transaction', exact: true }).click()
-    const edit = formModal(page, 'Edit Transaction')
+    await actions.getByRole('button', { name: 'Edit transaction', exact: true }).click()
+    const edit = formModal(page, 'Edit transaction')
     await edit.waitFor()
     await h.waitQuiet(page)
     await h.check('hidden_elsewhere.edit', 'B', async () => (await section(edit).count()) === 0 || 'offered in Edit')
@@ -587,7 +587,7 @@ async function invalidCases(browser, scenario, key, good, cases, ac = 'STU-631 A
       }
       await field().fill(value)
       posts.length = 0
-      await modal.getByRole('button', { name: 'Create Transaction', exact: true }).click()
+      await modal.getByRole('button', { name: 'Add transaction', exact: true }).click()
       await page.waitForTimeout(300)
       const input = field()
       await h.check(`${scenario}.${label}.error`, 'B', async () => {

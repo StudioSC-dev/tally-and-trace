@@ -322,8 +322,8 @@ test('rows keep an even pitch: many tags while saving', async ({ page }, testInf
   // Hold the delete, so the row keeps its "Deleting…" badge on the title line.
   await page.route('**/api/v1/transactions/**', (route) => (route.request().method() === 'DELETE' ? undefined : route.fallback()))
   await row.click({ position: { x: 8, y: 8 } })
-  await actionModal(page).getByRole('button', { name: 'Delete Transaction' }).click()
-  await page.getByRole('button', { name: 'Delete transaction', exact: true }).click()
+  await actionModal(page).getByRole('button', { name: 'Delete transaction' }).click()
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Delete transaction', exact: true }).click()
   await expect(row.getByTestId('row-saving')).toHaveText('Deleting…')
   // The tags refit around the badge in the same frame: no resize of the line is needed.
   await checkTagLine(row, tags, testInfo.project.name, 'while deleting')
@@ -332,11 +332,11 @@ test('rows keep an even pitch: many tags while saving', async ({ page }, testInf
   await page.unrouteAll({ behavior: 'ignoreErrors' })
 })
 
-/** Adds an expense from the Add Transaction dialog; the API refuses it, so it stays on the list as a pending row, which is returned. */
+/** Adds an expense from the Add transaction dialog; the API refuses it, so it stays on the list as a pending row, which is returned. */
 async function addRefusedTransaction(page: Page, description: string): Promise<Locator> {
   await addRoutes(page, [errorRoute('POST', '/transactions/', 422, 'The amount is over this account’s limit')])
-  await page.getByRole('button', { name: 'Add Transaction' }).first().click()
-  const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Create Transaction', exact: true }) })
+  await page.getByRole('button', { name: 'Add transaction' }).first().click()
+  const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Add transaction', exact: true }) })
   await expect(form).toBeVisible()
   await form.locator('input[placeholder="Add notes about this transaction"]').fill(description)
   const accountField = form.locator('[data-field="account_id"]')
@@ -347,7 +347,7 @@ async function addRefusedTransaction(page: Page, description: string): Promise<L
   await chip.first().click()
   await form.getByRole('button', { name: 'Expense', exact: true }).click()
   await form.locator('input[type="number"][placeholder="0.00"]').first().fill('777')
-  await form.getByRole('button', { name: 'Create Transaction', exact: true }).click()
+  await form.getByRole('button', { name: 'Add transaction', exact: true }).click()
   await expect(form).toBeHidden()
   // By its save state, so the AC6 cases run on the PR base too; the pitch case checks the row kind itself.
   const row = page.locator('article[data-state]').filter({ hasText: description })
@@ -545,8 +545,8 @@ const txRow = (page: Page, description: string): Locator =>
   page.locator('article[data-transaction-id]').filter({ has: page.getByText(description, { exact: true }) })
 const recurringRow = (page: Page, name: string): Locator =>
   page.locator('[data-testid^="kind-section-"] article').filter({ has: page.getByText(name, { exact: true }) })
-const actionModal = (page: Page): Locator => page.locator('.modal-backdrop').filter({ hasText: 'Transaction Actions' })
-const recurringForm = (page: Page): Locator => page.locator('form').filter({ has: page.getByRole('button', { name: 'Update Recurring Entry' }) })
+const actionModal = (page: Page): Locator => page.locator('.modal-backdrop').filter({ hasText: 'Transaction actions' })
+const recurringForm = (page: Page): Locator => page.locator('form').filter({ has: page.getByRole('button', { name: 'Update recurring entry' }) })
 
 type Gesture = 'click' | 'Enter' | 'Space'
 const GESTURES: Gesture[] = ['click', 'Enter', 'Space']
@@ -583,8 +583,8 @@ for (const gesture of ['click', 'Enter'] as const) {
 test('rows still open their records and keep their actions: transaction Edit', async ({ page }) => {
   await openTransactions(page)
   await txRow(page, TX).click()
-  await actionModal(page).getByRole('button', { name: 'Edit Transaction' }).click()
-  const form = page.locator('.modal-backdrop').filter({ has: page.getByRole('heading', { name: 'Edit Transaction' }) })
+  await actionModal(page).getByRole('button', { name: 'Edit transaction' }).click()
+  const form = page.locator('.modal-backdrop').filter({ has: page.getByRole('heading', { name: 'Edit transaction' }) })
   await expect(form).toBeVisible()
   expect(await form.locator('input').evaluateAll((all, d) => all.some((e) => (e as HTMLInputElement).value === d), TX), 'the edit form holds the same record').toBe(true)
   await viewportShot(page, 'edit-transaction')
@@ -595,7 +595,7 @@ for (const gesture of ['click', 'Enter'] as const) {
     await openTransactions(page)
     const pending = await addRefusedTransaction(page, 'Refused lunch')
     await trigger(page, pending, gesture, 'row')
-    const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Create Transaction', exact: true }) })
+    const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Add transaction', exact: true }) })
     await expect(form).toBeVisible()
     await expect(form.locator('input[placeholder="Add notes about this transaction"]'), 'the form reopens on the same unsaved entry').toHaveValue('Refused lunch')
     await viewportShot(page, `open-pending-${gesture.toLowerCase()}`)

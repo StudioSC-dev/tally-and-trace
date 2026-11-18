@@ -204,7 +204,8 @@ const DESKTOP_BASE: Record<PageKey, readonly (readonly [string, number, number])
     ['a "Allocations"', 119, 38],
     ['button "Toggle theme"', 36, 36],
     ['button "MS Mara Santos"', 164, 48],
-    ['button "Add Transaction"', 138, 38],
+    // 136 (was 138 at bf2f991): STU-710's sentence-case text is narrower, not a sizing change.
+    ['button "Add transaction"', 136, 38],
     ['button#due-section-toggle', 47, 26],
     ['tab#due-tab-due', 243.39, 32],
     ['tab#due-tab-not-posted', 227.41, 32],
@@ -254,7 +255,8 @@ const DESKTOP_BASE: Record<PageKey, readonly (readonly [string, number, number])
     ['a "Allocations"', 119, 38],
     ['button "Toggle theme"', 36, 36],
     ['button "MS Mara Santos"', 164, 48],
-    ['button "Add Recurring Entry"', 163, 38],
+    // 160 (was 163 at bf2f991): STU-710's sentence-case text is narrower, not a sizing change.
+    ['button "Add recurring entry"', 160, 38],
     ['button "Recurring"', 96, 36],
     ['button "Budgets"', 85, 36],
     ['button "Savings"', 82, 36],

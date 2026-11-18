@@ -40,7 +40,7 @@ const OVERLAY = '.fixed.inset-0.overflow-y-auto.bg-scrim\\/60:not(.z-\\[100\\])'
 const TOL = 1
 
 const emptyPage = <T>(): PaginatedResponse<T> => ({ items: [], total: 0, has_more: false })
-// One writable account: the Transactions page only offers Add Transaction when there is one.
+// One writable account: the Transactions page only offers Add transaction when there is one.
 const checking: Account = {
   id: 1,
   name: 'Checking',
@@ -108,12 +108,12 @@ interface DialogCase {
 const ACCOUNT: DialogCase = {
   name: 'account',
   route: '/accounts',
-  trigger: (p) => p.getByRole('button', { name: 'Add Account', exact: true }),
+  trigger: (p) => p.getByRole('button', { name: 'Add account', exact: true }),
 }
 
 const OTHERS: DialogCase[] = [
-  { name: 'transaction', route: '/transactions', trigger: (p) => p.getByRole('button', { name: 'Add Transaction' }).first() },
-  { name: 'recurring', route: '/allocations', trigger: (p) => p.getByRole('button', { name: 'Add Recurring Entry' }) },
+  { name: 'transaction', route: '/transactions', trigger: (p) => p.getByRole('button', { name: 'Add transaction' }).first() },
+  { name: 'recurring', route: '/allocations', trigger: (p) => p.getByRole('button', { name: 'Add recurring entry' }) },
   { name: 'category', route: '/settings', trigger: (p) => p.getByRole('button', { name: 'Add category', exact: true }) },
   { name: 'tag', route: '/settings', trigger: (p) => p.getByRole('button', { name: 'Add tag', exact: true }) },
 ]

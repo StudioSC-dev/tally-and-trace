@@ -464,7 +464,7 @@ async function retryRun(browser, name, failsAgain) {
     const retry = page.getByRole('button', { name: 'Retry', exact: true })
     await h.check(`${name}.error-screen`, 'B', async () => {
       await retry.waitFor({ timeout: 5000 })
-      return (await page.getByText('Error Loading Data').count()) === 1 || 'no error screen'
+      return (await page.getByText('Error loading data').count()) === 1 || 'no error screen'
     })
     await h.check(`${name}.retry-testid`, 'S', async () => (await page.locator(tid('dashboard-retry')).count()) === 1 || 'no dashboard-retry testid')
     await h.waitQuiet(page)
