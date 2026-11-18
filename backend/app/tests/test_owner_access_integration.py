@@ -193,6 +193,10 @@ def _id_routes(w):
          {"json": {"amount": 100, "from_account_id": sb, "payment_date": "2026-10-05"}}),
         ("post", f"/cards/{w['card']}/closing-day",
          {"json": {"close_day": 15, "dry_run": False}}),
+        ("post", f"/accounts/{w['bank']}/statements/reconcile",
+         {"json": {"dry_run": True, "statement": {
+             "header": {"period_start": "2026-09-01", "period_end": "2026-09-30",
+                        "closing_balance": "0.00"}, "lines": []}}}),
         ("get", f"/accounts/{w['loan']}/loan-schedule", {}),
         ("get", f"/accounts/{w['loan']}/auto-post-preview", {}),
         ("post", f"/accounts/{w['loan']}/auto-post", {"json": {"enabled": False}}),

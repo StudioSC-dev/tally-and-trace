@@ -238,3 +238,38 @@ class ReconcileOut(BaseModel):
     warnings: List[DiffWarningOut]
     notes: List[str] = []
     reconciliation: Optional[ReconciliationOut] = None
+
+
+# --- POST /accounts/{account_id}/statements/reconcile (STU-753) -------------------------
+
+
+class AccountReconcileRequest(ReconcileRequest):
+    """A savings, checking or e-wallet statement's dry run or apply."""
+    statement: AccountStatement
+
+
+class AccountNewRowOut(NewRowOut):
+    kind: AccountLineKind
+
+
+class AccountActionOut(ActionOut):
+    kind: Literal["matched", "update", "move", "create", "unpost"]
+    new_row: Optional[AccountNewRowOut] = None
+
+
+class AccountReconciliationOut(BaseModel):
+    period_start: date
+    period_end: date
+    opening_balance: Optional[Decimal] = None
+    closing_balance: Decimal
+    change: Decimal
+    line_count: int
+    reconciled_at: datetime
+    reconciled_by_actor: Optional[int] = None
+
+
+class AccountReconcileOut(ReconcileOut):
+    """As ``ReconcileOut``; ``header`` is always empty (a bank account's header has
+    nothing the app stores)."""
+    actions: List[AccountActionOut]
+    reconciliation: Optional[AccountReconciliationOut] = None
