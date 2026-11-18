@@ -2164,6 +2164,74 @@ export interface StatementDueInput {
   due_date: string
 }
 
+/**
+ * POST /cards/{id}/closing-day body (owner or admin of the card). `dry_run`
+ * (default true) reports and writes nothing; `accept_history_shift` (default
+ * false) lets an apply go ahead when past statements would hold other rows.
+ */
+export interface CloseDayChangeInput {
+  /** 1 to 31. */
+  close_day: number
+  dry_run?: boolean
+  accept_history_shift?: boolean
+}
+
+/** One linked transaction of a moved installment. Dates are `YYYY-MM-DD`. */
+export interface CloseDayRow {
+  transaction_id: number
+  /** A row billed between the old and the new close keeps its date; only its occurrence moves. */
+  date_kept: boolean
+  old_date: string
+  new_date: string
+  old_occurrence: string | null
+  new_occurrence: string | null
+}
+
+export interface CloseDayEntry {
+  entry_id: number
+  old_next_occurrence: string | null
+  new_next_occurrence: string | null
+  old_anchor_day: number | null
+  new_anchor_day: number | null
+  rows: CloseDayRow[]
+}
+
+/** A printed due or a minimum due moved from one statement close to another. */
+export interface CloseDayDue {
+  id: number
+  old_close: string
+  new_close: string
+}
+
+/** A closed statement whose rows would differ: the transaction ids moved in and out. */
+export interface CloseDayStatement {
+  old_close: string
+  new_close: string
+  moved_in: number[]
+  moved_out: number[]
+}
+
+/**
+ * POST /cards/{id}/closing-day answer: 200 for a dry run that would work or an
+ * apply that was written; 409 with this same body when refused (`refused` true,
+ * `reasons` listed, the report still says what would move). `changed` is true
+ * only when the change was written. Ids, dates and reasons only, no amount.
+ */
+export interface CloseDayReport {
+  card_id: number
+  dry_run: boolean
+  changed: boolean
+  refused: boolean
+  reasons: string[]
+  old_close_day: number | null
+  new_close_day: number
+  entries: CloseDayEntry[]
+  printed_dues: CloseDayDue[]
+  minimum_dues: CloseDayDue[]
+  past_statements: CloseDayStatement[]
+  history_shift_accepted: boolean
+}
+
 /** GET /dashboard/snapshot, exactly as the backend returns it. */
 export interface DashboardSnapshot {
   balances: {
