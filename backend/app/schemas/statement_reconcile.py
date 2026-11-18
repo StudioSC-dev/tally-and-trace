@@ -12,9 +12,9 @@ compares it with the app's rows for that statement.
   must add up: ``previous_balance + charges - credits - payments == total_due``.
   A ``total_due`` or ``previous_balance`` may be zero or negative (a credit balance).
 """
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated, List, Literal, Optional
+from typing import Annotated, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -86,3 +86,86 @@ class BankStatement(BaseModel):
                     f" = {computed}, total_due = {header.total_due},"
                     f" gap {header.total_due - computed}")
         return self
+
+
+# --- POST /cards/{account_id}/statements/reconcile (STU-749) ----------------------------
+
+Fingerprint = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+Value = Union[bool, date, Decimal, None]
+
+
+class ReconcileRequest(BaseModel):
+    """A dry run (``dry_run`` true) or an apply, which sends the dry run's
+    ``fingerprint`` back."""
+    model_config = ConfigDict(extra="forbid")
+
+    statement: BankStatement
+    dry_run: bool
+    fingerprint: Optional[Fingerprint] = None
+
+    @model_validator(mode="after")
+    def _apply_needs_fingerprint(self):
+        if not self.dry_run and self.fingerprint is None:
+            raise ValueError("an apply needs the fingerprint of its dry run")
+        return self
+
+
+class HeaderDiffOut(BaseModel):
+    field: Literal["close", "due", "minimum_due"]
+    statement: Value
+    app: Value
+
+
+class FieldChangeOut(BaseModel):
+    field: Literal["amount", "transaction_date", "posting_date", "is_posted"]
+    before: Value
+    after: Value
+
+
+class NewRowOut(BaseModel):
+    kind: LineKind
+    amount: Decimal
+    transaction_date: date
+    posting_date: Optional[date] = None
+    description: str
+
+
+class ActionOut(BaseModel):
+    kind: Literal["matched", "update", "move", "create", "unpost", "missing"]
+    line_no: Optional[int] = None
+    row_id: Optional[int] = None
+    changes: List[FieldChangeOut] = []
+    new_row: Optional[NewRowOut] = None
+    possible_duplicate_of: Optional[int] = None
+    # An apply's ``create``: the id of the row it added.
+    created_row_id: Optional[int] = None
+
+
+class DiffWarningOut(BaseModel):
+    line_no: int
+    reason: str
+
+
+class ReconciliationOut(BaseModel):
+    close_date: date
+    total_due: Decimal
+    line_balance: Decimal
+    line_count: int
+    reconciled_at: datetime
+    reconciled_by_actor: Optional[int] = None
+
+
+class ReconcileOut(BaseModel):
+    """A dry run's diff, or an apply's applied actions and its reconciliation.
+
+    ``notes`` are an apply's remarks that did not block it: each ``create`` whose
+    line may duplicate a recurring row (``possible_duplicate_of``), and a line's
+    original currency that no row can hold."""
+    dry_run: bool
+    fingerprint: str
+    balanced: bool
+    header: List[HeaderDiffOut]
+    actions: List[ActionOut]
+    warnings: List[DiffWarningOut]
+    notes: List[str] = []
+    reconciliation: Optional[ReconciliationOut] = None

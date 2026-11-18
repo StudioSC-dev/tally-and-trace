@@ -186,6 +186,9 @@ def _id_routes(w):
         ("put", f"/cards/{w['card']}/statements/{{close_date}}/due-date",
          {"json": {"due_date": "2026-10-25"}}),
         ("delete", f"/cards/{w['card']}/statements/{{close_date}}/due-date", {}),
+        ("post", f"/cards/{w['card']}/statements/reconcile",
+         {"json": {"dry_run": True, "statement": {
+             "header": {"close_date": "2026-09-24", "total_due": "0.00"}, "lines": []}}}),
         ("post", f"/cards/{w['card']}/payments",
          {"json": {"amount": 100, "from_account_id": sb, "payment_date": "2026-10-05"}}),
         ("get", f"/accounts/{w['loan']}/loan-schedule", {}),
