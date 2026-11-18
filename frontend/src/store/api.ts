@@ -154,6 +154,8 @@ import type {
   CardCredit,
   CardCreditDetail,
   CardPaymentInput,
+  CloseDayChangeInput,
+  CloseDayReport,
   MinimumDuePreset,
   StatementDueInput,
   StatementMinimumInput,
@@ -314,6 +316,22 @@ export const accountingApi = createApi({
     payCard: builder.mutation<Transaction, { accountId: number; data: CardPaymentInput }>({
       query: ({ accountId, data }) => ({ url: `cards/${accountId}/payments`, method: 'POST', body: data }),
       invalidatesTags: ['Account', 'Transaction', 'BudgetEntry', 'Allocation', 'Due'],
+    }),
+    // A card's closing day, with its installments and dues (STU-747). A dry run (`dry_run` not
+    // false) writes nothing, so it invalidates nothing. A refusal is a 409 whose body is the
+    // report (`refused` true), not `{detail}`; `closeDayRefusal` reads it. An apply sends
+    // `idempotencyKey` as `Idempotency-Key`. Owner or admin only (404 otherwise).
+    changeCloseDay: builder.mutation<CloseDayReport, { accountId: number; data: CloseDayChangeInput; idempotencyKey?: string }>({
+      query: ({ accountId, data, idempotencyKey }) => ({
+        url: `cards/${accountId}/closing-day`,
+        method: 'POST',
+        body: data,
+        ...(idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {}),
+      }),
+      // Installments and their rows move (Transaction, BudgetEntry, Allocation), printed dues move
+      // (Due, Household, as setStatementDue), and the card's day changes (Account).
+      invalidatesTags: (_result, _error, { data }) =>
+        data.dry_run === false ? ['Account', 'Transaction', 'BudgetEntry', 'Allocation', 'Due', 'Household'] : [],
     }),
     // Enter the minimum a closed statement actually shows, replacing the estimate.
     setStatementMinimum: builder.mutation<{ close_date: string; amount: number }, { accountId: number; closeDate: string; data: StatementMinimumInput }>({
@@ -910,6 +928,7 @@ export const {
   useGetCardCreditsQuery,
   useGetCardCreditQuery,
   usePayCardMutation,
+  useChangeCloseDayMutation,
   useSetStatementMinimumMutation,
   useClearStatementMinimumMutation,
   useSetStatementDueMutation,
