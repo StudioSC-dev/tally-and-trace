@@ -82,11 +82,13 @@ test('tab labels have room', async ({ page }, testInfo) => {
 
 // ─── AC2 ────────────────────────────────────────────────────────────────────────────────────────
 
-const quiet = (t: { weight: number; size: string; color: string }): string[] => [
+const quiet = (t: { weight: number; size: string; color: string }, colour: string = MUTED): string[] => [
   [400, 500].includes(t.weight) ? '' : `weight ${t.weight}`,
   ['12px', '13px'].includes(t.size) ? '' : `size ${t.size}`,
-  t.color === MUTED ? '' : `colour ${t.color}`,
+  t.color === colour ? '' : `colour ${t.color}`,
 ].filter((x) => x !== '')
+// STU-692: Posted is a done state, shown as a StatusText dot and word in `ok`; the other row words stay muted.
+const OK = 'rgb(42, 100, 64)'
 
 test('captions are quiet: dashboard', async ({ page }) => {
   await open(page, '/', quickBalances(page), household)
@@ -116,7 +118,7 @@ test('captions are quiet: transaction row status', async ({ page }) => {
     const n = await status.count()
     if (n === 0) continue
     seen.add(word)
-    for (let i = 0; i < n; i += 1) expect.soft(quiet(await typeOf(status.nth(i))), `${word} status text ${i}`).toEqual([])
+    for (let i = 0; i < n; i += 1) expect.soft(quiet(await typeOf(status.nth(i)), word === 'Posted' ? OK : MUTED), `${word} status text ${i}`).toEqual([])
   }
   expect([...seen].sort(), 'the fixture lists all four status words').toEqual(['Expense', 'Income', 'Pending', 'Posted'])
   await shot(page, 'captions-transactions')

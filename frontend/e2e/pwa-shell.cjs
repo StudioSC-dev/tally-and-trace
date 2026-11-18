@@ -84,7 +84,7 @@ async function scenarioSafeArea(browser) {
       // its position depends on the shell's offset alone (a real page adds its own spacing,
       // which would hide a shell that is a few pixels short).
       await page.evaluate(() => {
-        const outlet = document.querySelector('main .fade-in')
+        const outlet = document.querySelector('main [data-route-root]')
         outlet.replaceChildren()
         const probe = document.createElement('h1')
         probe.textContent = 'Probe heading'
@@ -143,7 +143,7 @@ async function scenarioDvh(browser) {
     // Empty-page fixture: the shell with nothing in <main>. Detached from React so a
     // re-render cannot put the content back while it is measured.
     await page.evaluate(() => {
-      const outlet = document.querySelector('main .fade-in')
+      const outlet = document.querySelector('main [data-route-root]')
       outlet.replaceChildren()
       outlet.removeAttribute('class')
     })

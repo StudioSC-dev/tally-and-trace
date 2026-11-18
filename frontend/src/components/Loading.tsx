@@ -14,16 +14,12 @@ interface SkeletonProps {
   tone?: SkeletonTone
 }
 
-/** A pulsing placeholder block. Always hidden from assistive technology. */
+/** A still placeholder block: no pulse, since nothing animates on page load. Always hidden from assistive technology. */
 export function Skeleton({ className, tone = 'default' }: SkeletonProps) {
   return (
     <div
       aria-hidden="true"
-      className={join(
-        'animate-pulse motion-reduce:animate-none',
-        tone === 'strong' ? 'bg-line-strong' : 'bg-line',
-        className,
-      )}
+      className={join(tone === 'strong' ? 'bg-line-strong' : 'bg-line', className)}
     />
   )
 }

@@ -53,6 +53,8 @@ import { SlowReload, Spinner } from '../components/Loading'
 import { Segment, SegmentedControl } from '../components/SegmentedControl'
 import { withSelection } from '../utils/selection'
 import { Button } from '../components/Button'
+import { StatusText } from '../components/StatusText'
+import type { StatusTone } from '../components/StatusText'
 
 const TRANSACTION_TYPE_LABELS: Record<Transaction['transaction_type'], string> = {
   credit: 'Income',
@@ -119,6 +121,8 @@ const formatDateWithOrdinal = (date: Date) => {
 // An unposted row is Pending once its day has come and Planned before; see `transactionStatus`.
 const STATUS_LABELS: Record<TransactionStatus, string> = { posted: 'Posted', pending: 'Pending', planned: 'Planned' }
 const STATUS_TEXT_CLASSES: Record<TransactionStatus, string> = { posted: 'text-ok', pending: 'text-warn', planned: 'text-muted' }
+/** A row's status as a dot and a word: Posted is done (ok); Pending and Planned stay quiet captions (STU-743). */
+const ROW_STATUS_TONES: Record<TransactionStatus, StatusTone> = { posted: 'ok', pending: 'muted', planned: 'muted' }
 
 const PAGE_SIZES = [25, 50, 100] as const
 type PageSize = (typeof PAGE_SIZES)[number]
@@ -2708,7 +2712,7 @@ export function TransactionsPage() {
         data-transaction-id={transaction.id}
         data-pending={pendingKind}
         data-highlighted={highlightedId === transaction.id ? 'true' : undefined}
-        className={`transition-colors duration-200 ${actionable ? 'hover:bg-sunken cursor-pointer' : 'cursor-default'} ${pendingKind === 'delete' ? 'opacity-50' : ''} ${highlightedId === transaction.id ? 'ring-2 ring-inset ring-ink' : ''} ${cardStateClasses}`}
+        className={`${actionable ? 'hover:bg-sunken cursor-pointer' : 'cursor-default'} ${pendingKind === 'delete' ? 'opacity-50' : ''} ${highlightedId === transaction.id ? 'ring-2 ring-inset ring-ink' : ''} ${cardStateClasses}`}
         onClick={open}
         role="button"
         tabIndex={0}
@@ -2733,7 +2737,7 @@ export function TransactionsPage() {
                 ? categoryName || 'Transfer'
                 : categoryName || 'Uncategorized'}
             </span>
-            <span className="font-medium text-muted">{STATUS_LABELS[status]}</span>
+            <StatusText tone={ROW_STATUS_TONES[status]} data-testid="transaction-status">{STATUS_LABELS[status]}</StatusText>
             <span className="font-medium text-muted">{typeLabel}</span>
             {transaction.created_by && <span data-testid="created-by">by {transaction.created_by}</span>}
             {scheduleLabel && <span className="text-ink">{scheduleLabel}</span>}

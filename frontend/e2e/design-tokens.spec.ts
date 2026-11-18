@@ -150,8 +150,16 @@ test.describe('Columnar pad design tokens (STU-675)', () => {
 
     for (const name of ['Button', 'SegmentedControl` / `Tabs', 'ListSheet` and `Row', 'StatusText', 'EmptyState', 'Icon']) {
       const line = doc.split('\n').find((l) => l.startsWith(`| \`${name}\``))
-      // STU-678 built the Button and STU-681 landed ListSheet and Row; the rest stay planned until their tickets land.
-      const status = name === 'Button' ? /\| built \|/ : name === 'ListSheet` and `Row' ? /\| landed \(STU-681\) \|/ : /\| planned \|/
+      // STU-678 built the Button, STU-681 landed ListSheet and Row and STU-692 StatusText and EmptyState; the rest stay
+      // planned until their tickets land.
+      const status =
+        name === 'Button'
+          ? /\| built \|/
+          : name === 'ListSheet` and `Row'
+            ? /\| landed \(STU-681\) \|/
+            : name === 'StatusText' || name === 'EmptyState'
+              ? /\| landed \(STU-692\) \|/
+              : /\| planned \|/
       expect.soft(line, `component inventory row for ${name}`).toMatch(status)
     }
 

@@ -92,7 +92,7 @@ export function Row({ title, badges, tags = [], meta, details = [], actions, amo
   const cut = wrap ? 'break-words' : 'truncate'
   return (
     <article
-      className={`block rounded-none border-b border-line px-4 py-3 last:border-b-0 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ink sm:py-2 ${className}`}
+      className={`block rounded-none border-b border-line px-4 py-3 last:border-b-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent sm:py-2 ${className}`}
       {...rest}
       data-testid="row"
       data-row-kind={kind}

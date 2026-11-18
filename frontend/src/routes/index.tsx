@@ -25,6 +25,8 @@ import { heldPaymentNotice, payableActions, payableTarget, periodWindow, queryPh
 import { Skeleton, SkeletonRows } from '../components/Loading'
 import { SegmentedControl } from '../components/SegmentedControl'
 import { Button } from '../components/Button'
+import { StatusText } from '../components/StatusText'
+import type { StatusTone } from '../components/StatusText'
 import { fullCardChargeKeys, isLimitedEvent, isOtherUpcoming, loggedDays, localToday, statusFromDate, upcomingItemAmount } from '@tally-trace/shared'
 import type { LimitedEvent, Payable, Settlement } from '@tally-trace/shared'
 
@@ -248,6 +250,9 @@ export function Dashboard() {
     const remaining = daysUntil(row.day, manilaDay)
     return row.overdue ? 'Overdue' : remaining === 0 ? 'Due today' : `${remaining} day${remaining === 1 ? '' : 's'} remaining`
   }
+  /** Overdue and Due today are states, a dot and a word; a count of days left is a plain caption. */
+  const dueToneOf = (row: PayableRow): StatusTone | null =>
+    row.overdue ? 'danger' : daysUntil(row.day, manilaDay) === 0 ? 'warn' : null
 
   const renderPlannedExpenseIcon = (status: PayableStatus) => {
     const label = STATUS_LABELS[status]
@@ -589,6 +594,7 @@ export function Dashboard() {
             <div className="divide-y divide-line" data-testid="payables">
               {(showAllPayables ? payableRows : payableRows.slice(0, MAX_PAYABLES_SHOWN)).map((row) => {
                 const status = payableStatusOf(row)
+                const dueTone = dueToneOf(row)
                 const opens = row.payable !== null && payableActions(payableTarget(row.payable)).open
                 return (
                   <div key={row.key} className="p-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between" data-testid="payable-row">
@@ -622,7 +628,7 @@ export function Dashboard() {
                     )}
                     <div className="text-right space-y-1 flex-shrink-0">
                       <p className="text-xs text-muted">
-                        {dueLabelOf(row)}
+                        {dueTone ? <StatusText tone={dueTone} data-testid="payable-due-state">{dueLabelOf(row)}</StatusText> : dueLabelOf(row)}
                       </p>
                     </div>
                   </div>

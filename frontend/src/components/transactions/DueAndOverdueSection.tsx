@@ -104,6 +104,7 @@ import type { CardPayDraft } from '../../store/outboxForms'
 import { outboxActions } from '../../store/outbox'
 import { Tab, Tabs } from '../Tabs'
 import { Button } from '../Button'
+import { StatusText } from '../StatusText'
 
 /**
  * "Due and overdue": every recurring occurrence the caller can record and every pending
@@ -767,8 +768,19 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
         <div>
           <p className="text-sm font-medium text-ink">{transactionDescription(txn) ?? 'Pending transaction'}</p>
           <p className="text-xs text-muted">
-            {formatEntryDate(row.date)} · Pending
-            {row.overdue && <span className="text-danger" data-testid="due-overdue"> · Overdue</span>}
+            {formatEntryDate(row.date)} ·{' '}
+            {/* A recurring card charge the card already took is Charged (done); any other tied row is still Pending. */}
+            {row.action === 'posted' ? (
+              <StatusText tone="ok" data-testid="due-pending-state">Charged</StatusText>
+            ) : (
+              <StatusText tone="muted" data-testid="due-pending-state">Pending</StatusText>
+            )}
+            {row.overdue && (
+              <>
+                {' · '}
+                <StatusText tone="danger" data-testid="due-overdue">Overdue</StatusText>
+              </>
+            )}
           </p>
         </div>
         <div className="flex-shrink-0 space-y-1 text-right">
@@ -834,7 +846,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
         <p className="text-sm font-medium text-ink">{row.name}</p>
         <p className="text-xs text-muted">{formatEntryDate(row.date)} · Shared item</p>
       </div>
-      {row.overdue && <span className="badge badge-danger flex-shrink-0" data-testid="due-overdue">Overdue</span>}
+      {row.overdue && <StatusText tone="danger" className="flex-shrink-0" data-testid="due-overdue">Overdue</StatusText>}
     </li>
   )
 
@@ -886,7 +898,12 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
         <p className="text-xs text-muted">
           <span data-testid="due-date">{movedText(row.occurrenceDate, row.effectiveDate)}</span>
           {row.accountName && ` · ${row.accountName}`}
-          {row.overdue && <span className="text-danger" data-testid="due-overdue"> · Overdue</span>}
+          {row.overdue && (
+              <>
+                {' · '}
+                <StatusText tone="danger" data-testid="due-overdue">Overdue</StatusText>
+              </>
+            )}
         </p>
         {credit && <CreditCheckBadge check={credit} />}
       </div>
@@ -928,7 +945,12 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
           )}
           <p className="text-xs text-muted">
             Closed {formatEntryDate(row.closeDate)} · due {formatEntryDate(row.dueDate)}
-            {row.overdue && <span className="text-danger" data-testid="due-overdue"> · Overdue</span>}
+            {row.overdue && (
+              <>
+                {' · '}
+                <StatusText tone="danger" data-testid="due-overdue">Overdue</StatusText>
+              </>
+            )}
             {row.statements > 1 && (
               <span data-testid="due-earlier-statements">
                 {` · includes ${row.statements - 1} earlier ${row.statements - 1 === 1 ? 'statement' : 'statements'}`}
@@ -1011,7 +1033,12 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
           <p className="text-sm font-semibold text-ink" data-testid="due-payments-left">{shown.leftText}</p>
           <p className="text-xs text-muted">
             {shown.nextText}
-            {shown.overdue && <span className="text-danger" data-testid="due-overdue"> · Overdue</span>}
+            {shown.overdue && (
+              <>
+                {' · '}
+                <StatusText tone="danger" data-testid="due-overdue">Overdue</StatusText>
+              </>
+            )}
             {shown.missedText !== null && (
               <span className="text-warn" data-testid="due-installment-missed">{` · ${shown.missedText}`}</span>
             )}
