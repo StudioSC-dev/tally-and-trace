@@ -1014,35 +1014,39 @@ const EXPECTED: Record<string, Expected & { phone?: Partial<Expected> }> = {
     },
   },
   'allocations, recurring, empty': {
+    // STU-692: the empty list's own next step, a primary button under its sentence.
     headings: ['Allocations'],
     titles: [],
-    buttons: ['Toggle theme', 'MS Mara Santos', 'Add recurring entry', 'Recurring', 'Budgets', 'Savings', 'Wishlist'],
+    buttons: ['Toggle theme', 'MS Mara Santos', 'Add recurring entry', 'Recurring', 'Budgets', 'Savings', 'Wishlist', 'Add a recurring entry'],
     phone: {
-      buttons: ['Toggle theme', 'MS', 'Add recurring entry', 'Recurring', 'Budgets', 'Savings', 'Wishlist'],
+      buttons: ['Toggle theme', 'MS', 'Add recurring entry', 'Recurring', 'Budgets', 'Savings', 'Wishlist', 'Add a recurring entry'],
     },
   },
   'allocations, budgets, empty': {
+    // STU-692: the empty list's own next step, a primary button under its sentence.
     headings: ['Allocations', 'Budget envelopes'],
     titles: [],
-    buttons: ['Toggle theme', 'MS Mara Santos', 'Add allocation', 'Recurring', 'Budgets', 'Savings', 'Wishlist'],
+    buttons: ['Toggle theme', 'MS Mara Santos', 'Add allocation', 'Recurring', 'Budgets', 'Savings', 'Wishlist', 'Create a budget envelope'],
     phone: {
-      buttons: ['Toggle theme', 'MS', 'Add allocation', 'Recurring', 'Budgets', 'Savings', 'Wishlist'],
+      buttons: ['Toggle theme', 'MS', 'Add allocation', 'Recurring', 'Budgets', 'Savings', 'Wishlist', 'Create a budget envelope'],
     },
   },
   'allocations, savings, empty': {
+    // STU-692: the empty list's own next step, a primary button under its sentence.
     headings: ['Allocations', 'Savings & investment targets'],
     titles: [],
-    buttons: ['Toggle theme', 'MS Mara Santos', 'Add allocation', 'Recurring', 'Budgets', 'Savings', 'Wishlist'],
+    buttons: ['Toggle theme', 'MS Mara Santos', 'Add allocation', 'Recurring', 'Budgets', 'Savings', 'Wishlist', 'Create a savings target'],
     phone: {
-      buttons: ['Toggle theme', 'MS', 'Add allocation', 'Recurring', 'Budgets', 'Savings', 'Wishlist'],
+      buttons: ['Toggle theme', 'MS', 'Add allocation', 'Recurring', 'Budgets', 'Savings', 'Wishlist', 'Create a savings target'],
     },
   },
   'accounts, empty': {
+    // STU-692: the empty list's own next step, a primary button under its sentence.
     headings: ['Accounts'],
     titles: [],
-    buttons: ['Toggle theme', 'MS Mara Santos', 'Add account'],
+    buttons: ['Toggle theme', 'MS Mara Santos', 'Add account', 'Add your first account'],
     phone: {
-      buttons: ['Toggle theme', 'MS', 'Add account'],
+      buttons: ['Toggle theme', 'MS', 'Add account', 'Add your first account'],
     },
   },
   'dashboard, loading': {
