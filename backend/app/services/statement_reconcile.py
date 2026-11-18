@@ -67,6 +67,24 @@ change the line balance and produce no writes.
 
 Close. When the statement's close differs from the app's, the header diff says so and
 there are no row actions: the rows are placed on another cycle than the statement's.
+
+A savings, checking or e-wallet statement (``diff_account_statement``, STU-753)
+--------------------------------------------------------------------------------
+The same matching rules and action kinds over the account's rows, with three
+differences:
+
+- The window is the statement's period: ``window_start`` is the day before
+  ``period_start`` and ``close`` is ``period_end``. A posted row is placed by its own
+  ``transaction_date`` (``placement="transaction_date"``), as the account's balance
+  reads it; its ``posting_date`` never moves it.
+- Rows and lines are ``debit`` (money out) or ``credit`` (money in); a debit counts
+  like a charge in ``line_balance``, so the statement's line balance is debits less
+  credits. There are no payments and no header diff.
+- A transfer between two accounts is one row carrying both sides, each placed by the
+  same date; its ``RowRecord`` has ``keeps_dates``. It keeps both its dates whatever
+  the line says (the other account's statement may print another day), so, like a
+  recurring candidate, it is paired only where its own date lands, and a ``create``
+  that it was left out for names it in ``possible_duplicate_of``.
 """
 from __future__ import annotations
 
@@ -77,10 +95,11 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Dict, Iterable, List, Literal, Optional, Sequence, Tuple
 
-from app.schemas.statement_reconcile import BankStatement, StatementLine
+from app.schemas.statement_reconcile import AccountStatement, BankStatement, StatementLine
 
-RowKind = Literal["charge", "credit", "payment"]
+RowKind = Literal["charge", "credit", "payment", "debit"]
 ActionKind = Literal["matched", "update", "move", "create", "unpost", "missing"]
+Placement = Literal["statement_day", "transaction_date"]
 
 CYCLE, CANDIDATE = 0, 1
 ONE_DAY = timedelta(days=1)
@@ -97,6 +116,8 @@ class RowRecord:
     is_posted: bool
     updated_at: Optional[datetime]
     budget_entry_id: Optional[int] = None
+    # One side of a transfer on a bank account's statement: its dates are kept.
+    keeps_dates: bool = False
 
 
 @dataclass(frozen=True)
@@ -108,6 +129,9 @@ class AppStatementView:
     window_start: date
     due: Optional[date] = None
     minimum_due: Optional[Decimal] = None
+    # What places a posted row: a card's ``statement_day`` (the later of its own day
+    # and its posting day) or, on a bank account, its own ``transaction_date``.
+    placement: Placement = "statement_day"
 
 
 @dataclass(frozen=True)
@@ -195,9 +219,13 @@ def fingerprint(statement: BankStatement, view: AppStatementView,
 # --- Diff -------------------------------------------------------------------------------
 
 
-def _posted_day(transaction_date: date, posting_date: Optional[date]) -> date:
-    """``statements.statement_day`` of a posted row with these dates."""
-    return max(transaction_date, posting_date) if posting_date is not None else transaction_date
+def _posted_day(transaction_date: date, posting_date: Optional[date],
+                placement: Placement = "statement_day") -> date:
+    """The day that places a posted row with these dates: ``statements.statement_day``,
+    or its own day under ``placement="transaction_date"``."""
+    if placement == "transaction_date" or posting_date is None:
+        return transaction_date
+    return max(transaction_date, posting_date)
 
 
 def _header_diff(statement: BankStatement, view: AppStatementView) -> List[HeaderDiff]:
@@ -263,12 +291,15 @@ def _unambiguous_pairs(lines: Sequence[StatementLine], pool: Sequence[Tuple[int,
 
 
 def _lands(view: AppStatementView, transaction_date: date, posting_date: Optional[date]) -> bool:
-    return view.window_start < _posted_day(transaction_date, posting_date) <= view.close
+    return view.window_start < _posted_day(transaction_date, posting_date,
+                                           view.placement) <= view.close
 
 
 def _target_dates(view: AppStatementView, line: StatementLine, rank: int, row: RowRecord
                   ) -> Tuple[date, Optional[date]]:
     """The dates ``row`` takes when paired with ``line`` (see the module docstring)."""
+    if row.keeps_dates:
+        return row.transaction_date, row.posting_date
     if row.budget_entry_id is None:
         return line.transaction_date, line.posting_date
     own = row.transaction_date
@@ -315,6 +346,12 @@ def _check_rows(cycle_rows, candidate_rows, payment_rows) -> None:
         raise ValueError("payment_rows takes payment rows only")
 
 
+def _keeps_day(row: RowRecord) -> bool:
+    """A row that keeps its own transaction date: linked to a recurring entry, or a
+    transfer side that keeps both dates."""
+    return row.budget_entry_id is not None or row.keeps_dates
+
+
 def _sort_key(action: Action):
     return (action.line_no is None, action.line_no or 0, action.row_id or 0)
 
@@ -339,7 +376,7 @@ def _row_diff(statement, view: AppStatementView, cycle_rows: Sequence[RowRecord]
     def eligible(line: StatementLine, rank: int, row: RowRecord) -> bool:
         # A recurring candidate keeps its own day: it can only be posted where that,
         # with the statement's posting date, puts it.
-        return (rank == CYCLE or row.budget_entry_id is None
+        return (rank == CYCLE or not _keeps_day(row)
                 or _lands(view, *_target_dates(view, line, rank, row)))
 
     pool = [(CYCLE, r) for r in cycle_rows] + [(CANDIDATE, r) for r in candidate_rows]
@@ -359,7 +396,7 @@ def _row_diff(statement, view: AppStatementView, cycle_rows: Sequence[RowRecord]
     for line in items:
         if line.line_no not in taken_lines:
             left_out = [r.id for r in candidate_rows
-                        if r.id not in taken_rows and r.budget_entry_id is not None
+                        if r.id not in taken_rows and _keeps_day(r)
                         and r.kind == line.kind and r.amount == line.amount
                         and not eligible(line, CANDIDATE, r)]
             actions.append(Action("create", line.line_no, None, (), NewRow(
@@ -389,13 +426,34 @@ def _row_diff(statement, view: AppStatementView, cycle_rows: Sequence[RowRecord]
             continue
         result = by_row[action.row_id] if action.row_id is not None else by_line[action.line_no]
         if not _lands(view, result.transaction_date, result.posting_date):
-            day = _posted_day(result.transaction_date, result.posting_date)
+            day = _posted_day(result.transaction_date, result.posting_date, view.placement)
             warnings.append(DiffWarning(action.line_no, (
                 f"its dates place it on {day.isoformat()}, outside this statement"
                 f" ({view.window_start.isoformat()}, {view.close.isoformat()}]")))
     balanced = line_balance(simulate(rows, actions, window_start=view.window_start,
-                                     close=view.close)) == statement.line_balance
+                                     close=view.close, placement=view.placement)
+                            ) == statement.line_balance
     return StatementDiff(digest, header, tuple(actions), tuple(warnings), balanced)
+
+
+def diff_account_statement(statement: AccountStatement, view: AppStatementView,
+                           cycle_rows: Sequence[RowRecord],
+                           candidate_rows: Sequence[RowRecord]) -> StatementDiff:
+    """One action per line or row of a savings, checking or e-wallet statement (see
+    "A savings, checking or e-wallet statement" in the module docstring). ``view`` is
+    the period: ``window_start`` the day before ``period_start``, ``close`` the
+    ``period_end``, ``placement`` ``"transaction_date"``; rows are ``debit`` or
+    ``credit``."""
+    header = statement.header
+    if (view.close != header.period_end
+            or view.window_start != header.period_start - ONE_DAY
+            or view.placement != "transaction_date"):
+        raise ValueError("the view is not the statement's period")
+    if any(r.kind not in ("debit", "credit") for r in (*cycle_rows, *candidate_rows)):
+        raise ValueError("an account's rows are debits or credits")
+    _check_rows(cycle_rows, candidate_rows, ())
+    digest = fingerprint(statement, view, (*cycle_rows, *candidate_rows))
+    return _row_diff(statement, view, cycle_rows, candidate_rows, (), digest, ())
 
 
 # --- Simulation -------------------------------------------------------------------------
@@ -415,13 +473,16 @@ class SimulatedRow:
 
 
 def simulate(rows: Sequence[RowRecord], actions: Sequence[Action], *,
-             window_start: date, close: date) -> List[SimulatedRow]:
+             window_start: date, close: date,
+             placement: Placement = "statement_day") -> List[SimulatedRow]:
     """The statement's rows after ``actions``: every row of ``rows`` with its changes
     applied, plus the created rows, kept when it is a posted line item whose
-    ``statement_day`` falls in ``(window_start, close]`` (a closed statement holds
-    posted rows only). Sorted by row id, then created rows by ``line_no``."""
+    ``statement_day`` (or own day, under ``placement="transaction_date"``) falls in
+    ``(window_start, close]`` (a closed statement holds posted rows only). Sorted by
+    row id, then created rows by ``line_no``."""
     kept = [r for r in _apply(rows, actions) if r.kind != "payment" and r.is_posted
-            and window_start < _posted_day(r.transaction_date, r.posting_date) <= close]
+            and window_start < _posted_day(r.transaction_date, r.posting_date,
+                                           placement) <= close]
     return sorted(kept, key=lambda r: (r.row_id is None, r.row_id or 0, r.line_no or 0))
 
 
@@ -444,10 +505,10 @@ def _apply(rows: Sequence[RowRecord], actions: Sequence[Action]) -> List[Simulat
 
 
 def line_balance(rows: Iterable[SimulatedRow]) -> Decimal:
-    """Charges less credits."""
+    """Charges (and a bank account's debits) less credits."""
     total = Decimal("0")
     for row in rows:
-        if row.kind == "charge":
+        if row.kind in ("charge", "debit"):
             total += row.amount
         elif row.kind == "credit":
             total -= row.amount
