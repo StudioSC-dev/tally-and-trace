@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
 import { formatCurrency } from '../utils/currency'
-import { amountClass, formatSigned } from '../utils/amount'
+import { amountClass, balanceClass, formatSigned } from '../utils/amount'
 import type { CurrencyCode } from '../utils/currency'
 import { estimateText, estimateTitle } from '../utils/fx'
 import type { EstimateLabels } from '../utils/fx'
@@ -208,7 +208,6 @@ export function Dashboard() {
   const periodExpenses = summaryRow?.total_expenses ?? 0
   const periodNet = summaryRow?.net_flow ?? 0
   const periodHeadingLabel = selectedPeriod === 'year' ? 'Year to date' : selectedPeriod === 'month' ? 'Month to date' : 'Week to date'
-  const periodTag = selectedPeriod === 'year' ? 'YTD' : selectedPeriod === 'month' ? 'MTD' : 'WTD'
   // period_end is exclusive (the 1st of next month); step back a calendar day, immune to DST.
   const projectionEnd = (() => {
     if (!nextPeriod) return null
@@ -370,9 +369,45 @@ export function Dashboard() {
         />
       </PageHeader>
 
-      <FxNotice fx={snapshot?.fx} />
+      {/* The leading figure: available cash, then the period's money in, out and net on ruled lines under it. */}
+      <section className="rounded-md border border-line bg-surface p-6" aria-labelledby="leading-figure-label" data-testid="leading-figure" data-onboarding="leading-figure">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-4" aria-busy={snapshotPhase === 'pending'}>
+          <h2 id="leading-figure-label" className="label leading-5">Available cash</h2>
+          {snapshotPhase === 'pending' ? (
+            <div data-testid="leading-figure-pending">
+              <span role="status" className="sr-only">Loading available cash</span>
+              <Skeleton className="h-10 w-48" />
+            </div>
+          ) : (
+            <p className={`tnum text-3xl font-semibold ${balanceClass(balanceRow?.available_cash ?? 0)}`} data-testid="leading-figure-amount">{format(balanceRow?.available_cash ?? 0)}</p>
+          )}
+        </div>
+        <h3 className="label mt-4 leading-5">{periodHeadingLabel}</h3>
+        <div className="mt-2 border-t border-line" aria-busy={totalsPending}>
+          {totalsPending && <span role="status" className="sr-only">Loading actual totals</span>}
+          <dl className="divide-y divide-line" data-testid="actual-totals">
+            {[
+              { id: 'income', label: 'In', value: format(periodIncome), color: 'text-ok' },
+              { id: 'expenses', label: 'Out', value: format(periodExpenses), color: amountClass('out') },
+              { id: 'net-flow', label: 'Net', value: format(periodNet), color: periodNet >= 0 ? 'text-ok' : 'text-danger' },
+            ].map(({ id, label, value, color }) => (
+              <div key={id} className="flex min-h-16 items-center justify-between gap-4 sm:min-h-14" data-testid="period-row">
+                <dt className="text-sm text-muted">{label}</dt>
+                {totalsPending ? (
+                  <dd data-testid={`period-${id}-pending`}><Skeleton className="h-6 w-24" /></dd>
+                ) : (
+                  <dd className={`tnum text-base font-semibold ${color}`} data-testid={`period-${id}`}>{value}</dd>
+                )}
+              </div>
+            ))}
+          </dl>
+        </div>
+      </section>
 
       <QuickBalances />
+
+      {/* Under the accounts, so a notice that arrives with the snapshot never moves the figure or the accounts. */}
+      <FxNotice fx={snapshot?.fx} />
 
       {/* Cash-Flow Timeline (pre-due-date solvency) */}
       <CashflowTimelineCard tag={selectedTag} currency={currencyReady ? currency : null} />
@@ -383,37 +418,12 @@ export function Dashboard() {
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-ink">Financial Snapshot</h2>
-              <p className="text-sm text-muted">
-                {`Actuals cover ${selectedPeriod === 'year' ? 'year to date' : selectedPeriod === 'month' ? 'month to date' : 'week to date'}; the projection runs from today to month end.`}
-              </p>
+              <p className="text-sm text-muted">The projection runs from today to month end.</p>
             </div>
-            <span className="badge badge-info">{periodHeadingLabel}</span>
           </div>
         </div>
         <div className="p-4 sm:p-6 grid gap-6 lg:grid-cols-2">
           <div className="space-y-4">
-            <h3 className="text-xs font-semibold text-muted">
-              Actual totals ({periodHeadingLabel})
-            </h3>
-            <div aria-busy={totalsPending}>
-              {totalsPending && <span role="status" className="sr-only">Loading actual totals</span>}
-              <dl className="space-y-3" data-testid="actual-totals">
-                {[
-                  { id: 'income', label: `Total income (${periodTag})`, value: format(periodIncome), color: 'text-ok' },
-                  { id: 'expenses', label: `Total expenses (${periodTag})`, value: format(periodExpenses), color: amountClass('out') },
-                  { id: 'net-flow', label: `Net flow (${periodTag})`, value: format(periodNet), color: periodNet >= 0 ? 'text-ok' : 'text-danger' },
-                ].map(({ id, label, value, color }) => (
-                  <div key={id} className="flex items-center justify-between">
-                    <dt className="text-sm text-muted">{label}</dt>
-                    {totalsPending ? (
-                      <dd data-testid={`period-${id}-pending`}><Skeleton className="h-5 w-24" /></dd>
-                    ) : (
-                      <dd className={`text-base font-semibold ${color}`} data-testid={`period-${id}`}>{value}</dd>
-                    )}
-                  </div>
-                ))}
-              </dl>
-            </div>
             <div className="border-t border-line pt-3" aria-busy={snapshotPhase === 'pending'}>
               {snapshotPhase === 'pending' && <span role="status" className="sr-only">Loading net worth</span>}
               <h4 className="text-xs font-semibold text-muted mb-2">Today</h4>

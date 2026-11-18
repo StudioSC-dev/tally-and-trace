@@ -251,9 +251,9 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
     },
     {
       id: 5,
-      title: 'Financial Snapshot',
-      description: 'View your total balance, income, expenses, and net flow for the selected period.',
-      targetSelector: '[data-onboarding="financial-snapshot"]',
+      title: 'Available cash',
+      description: 'See the cash you can spend now, with the money in, money out and net for the selected period.',
+      targetSelector: '[data-onboarding="leading-figure"]',
       navigateTo: '/',
     },
     {

@@ -238,6 +238,11 @@ test.describe('tokens-only sweep (STU-691)', () => {
       el = page.getByText("Can't filter the list by this.").first()
     }
     await expect(el).toBeVisible()
+    // The page fades in under a translateY; a box read mid-animation carries float rounding (144.00006). Wait for the
+    // finite animations to end (the skeletons' pulse is infinite and never does).
+    await el.evaluate(() =>
+      Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))),
+    )
     const box = await el.boundingBox()
     const px = await el.evaluate((e) => {
       const c = getComputedStyle(e)

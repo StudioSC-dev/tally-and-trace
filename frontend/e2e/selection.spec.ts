@@ -651,12 +651,13 @@ const INVENTORY: Group[] = [
     group: (page) => page.getByRole('group', { name: 'Period for actual totals' }),
     selected: 'month',
     other: 'week',
-    effect: 'Week relabels the actual totals "Week to Date" and asks the period summary for the last seven days, from 6 March',
+    // STU-688: the period's totals sit under the leading figure, headed by the period.
+    effect: 'Week relabels the leading panel\'s totals "Week to date" and asks the period summary for the last seven days, from 6 March',
     before: async (page) => {
-      await expect(page.getByText('Actual Totals (Month to Date)')).toBeVisible()
+      await expect(page.getByTestId('leading-figure').getByRole('heading', { name: 'Month to date' })).toBeVisible()
     },
     after: async (page, seen) => {
-      await expect(page.getByText('Actual Totals (Week to Date)')).toBeVisible()
+      await expect(page.getByTestId('leading-figure').getByRole('heading', { name: 'Week to date' })).toBeVisible()
       await expect.poll(() => lastCall(seen, '/transactions/summary/period')?.searchParams.get('start_date')?.slice(0, 10)).toBe('2026-03-06')
     },
   },

@@ -45,6 +45,7 @@ import type {
   DescriptionSuggestion,
   EntryOccurrences,
   FullBudgetEntry,
+  ForecastPeriod,
   FullTransaction,
   HouseholdDashboard,
   HouseholdMonthly,
@@ -642,20 +643,17 @@ interface Parts {
   allocations: Allocation[]
 }
 
-/** Builds a variant's API answers from its parts, so every variant stays self-consistent. */
-function build(parts: Parts): HouseholdData {
-  const { accounts } = parts
-  const categoryList = parts.categories ?? categories
-  const tagList = parts.tags ?? tags
-  const total = round2(accounts.reduce((sum, a) => sum + a.balance, 0))
-  const availableCash = round2(accounts.filter((a) => a.account_type !== 'credit' && !a.is_spending_wallet).reduce((sum, a) => sum + a.balance, 0))
-
-  const march = parts.transactions.filter((t) => t.view !== 'limited' && t.transaction_date >= '2026-03-01')
-  const sumOf = (type: 'credit' | 'debit') => round2(march.filter((t) => t.transaction_type === type).reduce((sum, t) => sum + t.amount, 0))
+/**
+ * `GET /transactions/summary/period` for the days `start` to `end` (inclusive, `YYYY-MM-DD`): the income, spending
+ * and category breakdown of the full and shared rows dated in it. A limited row carries no amount the summary counts.
+ */
+function summaryOf(transactions: Transaction[], categoryList: Category[], start: string, end: string): TransactionSummary {
+  const inWindow = transactions.filter((t) => t.view !== 'limited' && t.transaction_date.slice(0, 10) >= start && t.transaction_date.slice(0, 10) <= end)
+  const sumOf = (type: 'credit' | 'debit') => round2(inWindow.filter((t) => t.transaction_type === type).reduce((sum, t) => sum + t.amount, 0))
   const income = sumOf('credit')
   const expenses = sumOf('debit')
   const breakdown: TransactionSummary['category_breakdown'] = {}
-  for (const t of march) {
+  for (const t of inWindow) {
     if (t.view === 'limited' || t.transaction_type === 'transfer') continue
     const name = t.view === 'shared_full' ? (t.category_name ?? 'Uncategorized') : (categoryList.find((c) => c.id === t.category_id)?.name ?? 'Uncategorized')
     const row = breakdown[name] ?? { income: 0, expenses: 0 }
@@ -663,9 +661,9 @@ function build(parts: Parts): HouseholdData {
     else row.expenses = round2(row.expenses + t.amount)
     breakdown[name] = row
   }
-  const summary: TransactionSummary = {
-    period: { start_date: '2026-03-01', end_date: '2026-03-31' },
-    summary: { total_income: income, total_expenses: expenses, net_flow: round2(income - expenses), transaction_count: march.length },
+  return {
+    period: { start_date: start, end_date: end },
+    summary: { total_income: income, total_expenses: expenses, net_flow: round2(income - expenses), transaction_count: inWindow.length },
     category_breakdown: breakdown,
     by_currency: [
       {
@@ -675,12 +673,24 @@ function build(parts: Parts): HouseholdData {
         moved_in: 0,
         moved_out: 0,
         net_flow: round2(income - expenses),
-        transaction_count: march.length,
+        transaction_count: inWindow.length,
         category_breakdown: breakdown,
       },
     ],
     household_private: [],
   }
+}
+
+/** Builds a variant's API answers from its parts, so every variant stays self-consistent. */
+function build(parts: Parts): HouseholdData {
+  const { accounts } = parts
+  const categoryList = parts.categories ?? categories
+  const tagList = parts.tags ?? tags
+  const total = round2(accounts.reduce((sum, a) => sum + a.balance, 0))
+  const availableCash = round2(accounts.filter((a) => a.account_type !== 'credit' && !a.is_spending_wallet).reduce((sum, a) => sum + a.balance, 0))
+
+  // The month to date: the fixture has no rows after today, so the month and the month to date hold the same rows.
+  const summary = summaryOf(parts.transactions, categoryList, '2026-03-01', '2026-03-31')
 
   const { monthlyIncome, monthlyExpenses } = monthlyFigures(parts.entries, accounts)
   const opening = accounts.find((a) => a.id === payroll.id)?.balance ?? 0
@@ -1115,6 +1125,73 @@ export const householdRoutes = (data: HouseholdData = household): ApiRoute[] => 
   apiRoute<ReceivedHouseholdShare[]>('GET', '/shares/received/household', []),
   apiRoute<HouseholdShares>('GET', '/tags/household/shares', { tag_id: householdTag.id, shares: [] }),
 ]
+
+/**
+ * `GET /transactions/summary/period` answered for the window asked (`start_date` and `end_date`, by Manila day), from
+ * the variant's rows, so the dashboard's week, month and year each read their own totals. `householdRoutes` answers
+ * every window with the month's summary; a spec that switches the period adds this route after it.
+ */
+export const periodSummaryRoute = (data: HouseholdData = household): ApiRoute =>
+  queryRoute<TransactionSummary>('GET', '/transactions/summary/period', (q) => {
+    only(q, ['start_date', 'end_date'])
+    // A bound left out is open on that side.
+    const start = q.get('start_date')?.slice(0, 10) ?? '0000-01-01'
+    const end = q.get('end_date')?.slice(0, 10) ?? '9999-12-31'
+    return periodSummaryFor(data, start, end)
+  })
+
+/** The variant's period summary for the days `start` to `end` (inclusive, `YYYY-MM-DD`), as `periodSummaryRoute` answers. */
+export const periodSummaryFor = (data: HouseholdData, start: string, end: string): TransactionSummary =>
+  summaryOf(data.transactions, data.categories, start, end)
+
+/** The projection `withProjection` adds: the rest of March, the two payrolls in and the HMO add-on out. */
+export const PROJECTION = { income: 82500, expenses: 1450 } as const
+
+/**
+ * The variant with the snapshot's projection filled in: month 0 runs from today to 1 April, opening at available cash,
+ * with `PROJECTION`'s income and spending. The built variants leave the projection empty.
+ */
+export const withProjection = (data: HouseholdData): HouseholdData => {
+  const { snapshot } = data
+  const opening = snapshot.balances.by_currency[0].available_cash
+  const net = round2(PROJECTION.income - PROJECTION.expenses)
+  const closing = round2(opening + net)
+  const figures = {
+    opening_balance: opening,
+    income: PROJECTION.income,
+    expenses: PROJECTION.expenses,
+    unposted_expenses: 0,
+    statement_payables: 0,
+    net,
+    closing_balance: closing,
+    by_account: [],
+    unassigned_closing: 0,
+    overflow_moves: [],
+  }
+  const period: ForecastPeriod = {
+    period_label: 'March 2026',
+    period_start: `${data.today}T00:00:00`,
+    period_end: '2026-04-01T00:00:00',
+    ...figures,
+    by_currency: [{ currency: 'PHP', ...figures, moved_in: 0, moved_out: 0, loan_payables: 0 }],
+  }
+  return { ...data, snapshot: { ...snapshot, forecast_next_3_months: [period] } }
+}
+
+/**
+ * The variant whose snapshot carries exchange-rate facts, so the dashboard shows its FX notice: one row with no stored
+ * rate (the unconverted banner) and the day's dollar rate (the attribution line). Only the snapshot changes.
+ */
+export const withFxNotice = (data: HouseholdData): HouseholdData => ({
+  ...data,
+  snapshot: {
+    ...data.snapshot,
+    fx: {
+      rates: [{ base: 'USD', quote: 'PHP', rate: 58, as_of: data.today, source: 'currency-api', stale: false }],
+      unconverted_count: 1,
+    },
+  },
+})
 
 /** The Allocations Wishlist tab's calls, for a household with nothing on its wishlist yet. */
 export const wishlistRoutes = (data: HouseholdData = household): ApiRoute[] => [
