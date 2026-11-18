@@ -243,7 +243,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-body focus:outline-none"
+                  className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center text-muted hover:text-body focus:outline-none"
                   aria-label={showPassword ? "Hide password" : "Show password"}
                 >
                   <Icon name={showPassword ? 'hide' : 'show'} />
@@ -295,7 +295,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
                 <button
                   type="button"
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-body focus:outline-none"
+                  className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center text-muted hover:text-body focus:outline-none"
                   aria-label={showConfirmPassword ? "Hide password" : "Show password"}
                 >
                   <Icon name={showConfirmPassword ? 'hide' : 'show'} />

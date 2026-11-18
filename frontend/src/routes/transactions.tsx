@@ -2917,7 +2917,7 @@ export function TransactionsPage() {
               <Button
                 variant="secondary"
                 onClick={() => handleMonthChange('prev')}
-                className="px-2.5 py-1.5"
+                className="px-2.5 py-1"
                 aria-label="View previous month"
               >
                 <Icon name="caret-left" />
@@ -2926,7 +2926,7 @@ export function TransactionsPage() {
               <Button
                 variant="secondary"
                 onClick={() => handleMonthChange('next')}
-                className="px-2.5 py-1.5"
+                className="px-2.5 py-1"
                 aria-label="View next month"
                 disabled={isAtCurrentMonth}
               >

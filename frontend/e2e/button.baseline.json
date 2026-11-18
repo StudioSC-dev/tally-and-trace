@@ -159,7 +159,7 @@
           },
           {
             "name": "Toggle theme",
-            "height": 40,
+            "height": 36,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -438,7 +438,7 @@
           },
           {
             "name": "Toggle theme",
-            "height": 40,
+            "height": 36,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -659,7 +659,7 @@
           },
           {
             "name": "Toggle theme",
-            "height": 40,
+            "height": 36,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -715,7 +715,7 @@
           },
           {
             "name": "Savings target",
-            "height": 30,
+            "height": 26,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -723,7 +723,7 @@
           },
           {
             "name": "Budget envelope",
-            "height": 30,
+            "height": 26,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -731,7 +731,7 @@
           },
           {
             "name": "Mark as purchased",
-            "height": 30,
+            "height": 28,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -739,7 +739,7 @@
           },
           {
             "name": "Edit",
-            "height": 30,
+            "height": 28,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -747,7 +747,7 @@
           },
           {
             "name": "Delete",
-            "height": 30,
+            "height": 28,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -755,7 +755,7 @@
           },
           {
             "name": "Savings target",
-            "height": 30,
+            "height": 26,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -763,7 +763,7 @@
           },
           {
             "name": "Budget envelope",
-            "height": 30,
+            "height": 26,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -771,7 +771,7 @@
           },
           {
             "name": "Mark as purchased",
-            "height": 30,
+            "height": 28,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -779,7 +779,7 @@
           },
           {
             "name": "Edit",
-            "height": 30,
+            "height": 28,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -787,7 +787,7 @@
           },
           {
             "name": "Delete",
-            "height": 30,
+            "height": 28,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -848,7 +848,7 @@
           },
           {
             "name": "Toggle theme",
-            "height": 40,
+            "height": 36,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -1158,7 +1158,7 @@
           },
           {
             "name": "Toggle theme",
-            "height": 40,
+            "height": 36,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -1403,7 +1403,7 @@
           },
           {
             "name": "Toggle theme",
-            "height": 40,
+            "height": 36,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -1786,7 +1786,7 @@
           },
           {
             "name": "Toggle theme",
-            "height": 40,
+            "height": 36,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -2886,7 +2886,7 @@
           },
           {
             "name": "Toggle theme",
-            "height": 40,
+            "height": 36,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -2998,7 +2998,7 @@
           },
           {
             "name": "View previous month",
-            "height": 34,
+            "height": 30,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -3006,7 +3006,7 @@
           },
           {
             "name": "View next month",
-            "height": 34,
+            "height": 30,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -10819,7 +10819,7 @@
           },
           {
             "name": "Toggle theme",
-            "height": 40,
+            "height": 36,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -11090,7 +11090,7 @@
           },
           {
             "name": "Toggle theme",
-            "height": 40,
+            "height": 36,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -11335,7 +11335,7 @@
           },
           {
             "name": "Toggle theme",
-            "height": 40,
+            "height": 36,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -11391,7 +11391,7 @@
           },
           {
             "name": "Savings target",
-            "height": 30,
+            "height": 26,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -11399,7 +11399,7 @@
           },
           {
             "name": "Budget envelope",
-            "height": 30,
+            "height": 26,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -11407,7 +11407,7 @@
           },
           {
             "name": "Mark as purchased",
-            "height": 30,
+            "height": 28,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -11415,7 +11415,7 @@
           },
           {
             "name": "Edit",
-            "height": 30,
+            "height": 28,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -11423,7 +11423,7 @@
           },
           {
             "name": "Delete",
-            "height": 30,
+            "height": 28,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -11431,7 +11431,7 @@
           },
           {
             "name": "Savings target",
-            "height": 30,
+            "height": 26,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -11439,7 +11439,7 @@
           },
           {
             "name": "Budget envelope",
-            "height": 30,
+            "height": 26,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -11447,7 +11447,7 @@
           },
           {
             "name": "Mark as purchased",
-            "height": 30,
+            "height": 28,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -11455,7 +11455,7 @@
           },
           {
             "name": "Edit",
-            "height": 30,
+            "height": 28,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -11463,7 +11463,7 @@
           },
           {
             "name": "Delete",
-            "height": 30,
+            "height": 28,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -11516,7 +11516,7 @@
           },
           {
             "name": "Toggle theme",
-            "height": 40,
+            "height": 36,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -11818,7 +11818,7 @@
           },
           {
             "name": "Toggle theme",
-            "height": 40,
+            "height": 36,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -12055,7 +12055,7 @@
           },
           {
             "name": "Toggle theme",
-            "height": 40,
+            "height": 36,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -12430,7 +12430,7 @@
           },
           {
             "name": "Toggle theme",
-            "height": 40,
+            "height": 36,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -13522,7 +13522,7 @@
           },
           {
             "name": "Toggle theme",
-            "height": 40,
+            "height": 36,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -13634,7 +13634,7 @@
           },
           {
             "name": "View previous month",
-            "height": 34,
+            "height": 30,
             "icons": 1,
             "variant": null,
             "selection": false,
@@ -13642,7 +13642,7 @@
           },
           {
             "name": "View next month",
-            "height": 34,
+            "height": 30,
             "icons": 1,
             "variant": null,
             "selection": false,

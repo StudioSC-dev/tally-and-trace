@@ -90,7 +90,7 @@ export function Navigation() {
             <button
               onClick={toggleTheme}
               aria-label="Toggle theme"
-              className="p-2 text-muted transition-colors duration-200 hover:text-ink"
+              className="flex items-center justify-center p-2 text-muted transition-colors duration-200 hover:text-ink"
             >
               <Icon name={theme === 'dark' ? 'theme-light' : 'theme-dark'} />
             </button>

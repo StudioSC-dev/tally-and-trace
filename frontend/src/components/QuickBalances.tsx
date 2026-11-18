@@ -55,7 +55,8 @@ function Tile({ tile, defaultCurrency, noLimit }: { tile: QuickBalanceTile; defa
 
 /** The editor's and panel's action layout: 44px tall, body-size text. `Button` supplies the colours. */
 const ACTION = 'min-h-11 px-4 py-2 text-base'
-const ICON_ACTION = 'min-h-11 min-w-11 px-2 text-base'
+/** An icon-only action: a 44px square around the 20px icon. */
+const ICON_ACTION = 'min-h-11 min-w-11 px-2'
 
 const saveError = (error: unknown): string => {
   const detail = (error as { data?: { detail?: unknown } } | undefined)?.data?.detail

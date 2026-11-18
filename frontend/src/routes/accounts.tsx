@@ -1251,7 +1251,7 @@ export function AccountsPage() {
                     <button
                       type="button"
                       onClick={() => setShowCreditSettings((prev) => !prev)}
-                      className="inline-flex items-center gap-1 text-xs font-semibold text-ink hover:text-ink"
+                      className="inline-flex h-4 items-center gap-1 text-xs font-semibold text-ink hover:text-ink"
                     >
                       <Icon name={showCreditSettings ? 'caret-up' : 'caret-down'} />
                       {showCreditSettings ? 'Hide details' : 'Show details'}

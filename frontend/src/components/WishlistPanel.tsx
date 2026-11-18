@@ -15,8 +15,8 @@ import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } fro
 import { Button } from './Button'
 import { Icon } from './Icon'
 
-/** A row's icon action: 4px padding and the Button's 1px border, held at 28px square, the old 6px around a 16px icon. */
-const ICON_ACTION = 'p-1 min-h-7 min-w-7'
+/** A row's icon action: 2px padding and the Button's 1px border around the 20px icon (26px), held at 28px square as before. */
+const ICON_ACTION = 'p-0.5 min-h-7 min-w-7'
 
 const PRIORITIES: WishlistItemPriority[] = ['critical', 'high', 'medium', 'low']
 
@@ -229,7 +229,7 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
                   {item.notes && <p className="text-sm text-body mt-1">{item.notes}</p>}
                   <div className="flex flex-wrap gap-2 mt-2 text-xs text-muted">
                     {item.target_date && <span className="inline-flex items-center rounded-full bg-sunken px-2 py-1">Target {longDate(item.target_date)}</span>}
-                    {item.url && <a href={item.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-ink hover:underline">Link <Icon name="external-link" /></a>}
+                    {item.url && <a href={item.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-ink hover:underline">Link <Icon name="external-link" /></a>}
                     {item.is_purchased && item.purchased_at && <span className="inline-flex items-center rounded-full px-2 py-1 text-ok">Bought {longDate(item.purchased_at)}</span>}
                   </div>
                   {onCreateAllocationFromItem && !item.is_purchased && (
@@ -237,7 +237,7 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
                       <Button
                         variant="secondary"
                         onClick={() => onCreateAllocationFromItem(item, 'savings')}
-                        className="gap-1 px-3 py-1 text-xs"
+                        className="gap-1 px-3 py-0.5 text-xs"
                       >
                         <Icon name="savings" />
                         Savings target
@@ -245,7 +245,7 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
                       <Button
                         variant="secondary"
                         onClick={() => onCreateAllocationFromItem(item, 'budget')}
-                        className="gap-1 px-3 py-1 text-xs"
+                        className="gap-1 px-3 py-0.5 text-xs"
                       >
                         <Icon name="budget" />
                         Budget envelope
