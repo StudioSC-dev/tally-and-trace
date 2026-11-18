@@ -964,8 +964,8 @@ export const viewerEmptyHousehold: HouseholdData = build({
 })
 
 /**
- * STU-687: the variant's transactions with nothing on the Due card's Due and overdue, Not posted yet or Upcoming tabs:
- * no payable, card statement or upcoming item, and of the occurrences only the subscriptions stay. The list is the same.
+ * STU-687: the variant's transactions with nothing on any of the Due card's five tabs: no payable, card statement,
+ * upcoming item or occurrence (subscriptions included), and no installment plan. The list is the same.
  */
 export const withNothingDue = (data: HouseholdData): HouseholdData =>
   build({
@@ -975,7 +975,7 @@ export const withNothingDue = (data: HouseholdData): HouseholdData =>
     upcoming: [],
     payables: [],
     cardStatements: [],
-    occurrences: data.occurrences.filter((o) => o.plan_kind === 'subscription'),
+    occurrences: [],
     categories: data.categories,
     tags: data.tags,
     allocations: data.allocations,
@@ -984,15 +984,14 @@ export const withNothingDue = (data: HouseholdData): HouseholdData =>
 /** STU-687: `withNothingDue` plus one occurrence on the Upcoming tab: the variant's first non-subscription occurrence. */
 export const withOnlyUpcoming = (data: HouseholdData): HouseholdData => {
   const first = data.occurrences.find((o) => o.plan_kind !== 'subscription')
-  const empty = withNothingDue(data)
-  return first === undefined ? empty : build({
+  return first === undefined ? withNothingDue(data) : build({
     accounts: data.accounts,
     transactions: data.transactions,
     entries: data.entries,
     upcoming: [],
     payables: [],
     cardStatements: [],
-    occurrences: [first, ...empty.occurrences],
+    occurrences: [first],
     categories: data.categories,
     tags: data.tags,
     allocations: data.allocations,
@@ -1698,6 +1697,12 @@ const plan = (entryId: number, name: string, nextCharge: string, paymentsLeft: n
   block_reason: null,
   can_review: false,
   recordable: false,
+})
+
+/** STU-687: `withNothingDue` plus one installment plan, so only the Due card's Installments tab lists anything. */
+export const withOnlyInstallments = (data: HouseholdData): HouseholdData => ({
+  ...withNothingDue(data),
+  installmentPlans: [plan(795, 'Refrigerator, 12 months', '2026-03-20', 8, 12)],
 })
 
 /**

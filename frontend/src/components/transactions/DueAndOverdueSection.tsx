@@ -181,9 +181,6 @@ const TABS: readonly TabSpec[] = [
   { id: 'installments', label: 'Installments', slug: 'installments', badgeTestId: 'due-installments-count', usesWindow: false },
 ]
 
-/** The tabs that can lead the collapsed banner, in the order they are tried. */
-type BannerTab = Extract<DueTab, 'due' | 'not_posted' | 'upcoming'>
-
 /** A Due and overdue row's name, as its row shows it. */
 const dueRowName = (row: DueSectionRow): string =>
   row.kind === 'pending' ? (transactionDescription(row.transaction) ?? 'Pending transaction') : row.name
@@ -201,6 +198,9 @@ const dueRowDay = (row: DueSectionRow): string => {
       return row.view === 'limited' ? row.date : row.effectiveDate
   }
 }
+
+/** A count with its noun, singular for one: "1 subscription", "2 subscriptions". */
+const counted = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
 
 /** The banner's one line: the lead tab's count, the state of its first row, then that row's name, cut to fit. */
 const bannerLine = (count: string, name: string, state: ReactNode): ReactNode => (
@@ -702,20 +702,21 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     tabRefs.current[next]?.focus()
   }
 
-  // The collapsed banner (STU-687). The first of Due and overdue, Not posted yet and Upcoming that lists anything
-  // leads it, with that tab's count and the row the tab lists first; expanding the card opens on that tab. With all
-  // three settled and empty, and nothing else to say, the section is not shown at all.
-  const bannerSettled = !badges.due.pending && !badges.not_posted.pending && !badges.upcoming.pending
-  const leadTab: BannerTab | null = !bannerSettled
-    ? null
-    : badges.due.count > 0 && rows.length > 0
-      ? 'due'
-      : badges.not_posted.count > 0 && notPosted.length > 0
-        ? 'not_posted'
-        : badges.upcoming.count > 0 && upcomingRows.length > 0
-          ? 'upcoming'
-          : null
-  const bannerError = Boolean(snapshotError) || windowState.failed || linkedFailed || upcomingFailed
+  // The collapsed banner (STU-687). The first tab, in the card's order, that lists anything leads it, with that tab's
+  // count and the row the tab lists first; expanding the card opens on that tab. A tab still counting holds the lead
+  // until it settles. With all five settled and empty, and nothing else to say, the section is not shown at all.
+  const lists: Record<DueTab, boolean> = {
+    due: badges.due.count > 0 && rows.length > 0,
+    not_posted: badges.not_posted.count > 0 && notPosted.length > 0,
+    upcoming: badges.upcoming.count > 0 && upcomingRows.length > 0,
+    subscriptions: badges.subscriptions.count > 0 && subscriptionRows.length > 0,
+    installments: badges.installments.count > 0 && planItems.length > 0,
+  }
+  const firstOpen = TABS.find((spec) => badges[spec.id].pending || lists[spec.id])?.id
+  const bannerSettled = firstOpen === undefined || !badges[firstOpen].pending
+  const leadTab: DueTab | null = firstOpen !== undefined && !badges[firstOpen].pending ? firstOpen : null
+  const bannerError =
+    Boolean(snapshotError) || windowState.failed || linkedFailed || upcomingFailed || subscriptionFailed || plansFailed
   // What the Due tab shows besides its rows: the review notice, today's lines, Post now and the page-open result.
   const dueNote = reviewNotice?.text ?? todayLines[0]?.text ?? postNow ?? openPostedText
   const sectionEmpty = bannerSettled && leadTab === null && !bannerError && dueNote === null && batchResult === null
@@ -744,6 +745,35 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
       const first = upcomingRows[0]
       const name = first.kind === 'occurrence' ? first.occurrence.name : (transactionDescription(first.transaction) ?? 'Planned transaction')
       return bannerLine(`${badges.upcoming.count} upcoming`, name, <span className="shrink-0 text-xs text-muted">{formatEntryDate(first.day)}</span>)
+    }
+    if (leadTab === 'subscriptions') {
+      const first = subscriptionRows[0]
+      const count = counted(badges.subscriptions.count, 'subscription', 'subscriptions')
+      if (first.kind === 'occurrence') {
+        return bannerLine(count, first.occurrence.name, <span className="shrink-0 text-xs text-muted">{formatEntryDate(first.day)}</span>)
+      }
+      return bannerLine(
+        count,
+        first.name,
+        isOverdueRow(first) ? (
+          <StatusText tone="danger">Overdue</StatusText>
+        ) : dueRowDay(first) <= today ? (
+          <StatusText tone="warn">Due today</StatusText>
+        ) : null,
+      )
+    }
+    if (leadTab === 'installments') {
+      const first = planItems[0]
+      const shown = installmentPlanView(first, today, plans?.auto_post_scheduled ?? false)
+      return bannerLine(
+        counted(badges.installments.count, 'installment plan', 'installment plans'),
+        first.name,
+        shown.overdue ? (
+          <StatusText tone="danger">Overdue</StatusText>
+        ) : first.next_charge !== null ? (
+          <span className="shrink-0 text-xs text-muted">{formatEntryDate(first.next_charge)}</span>
+        ) : null,
+      )
     }
     if (bannerError) {
       return <p className="min-w-0 flex-1 truncate text-sm text-danger" role="alert" data-testid="due-banner-text">Could not load what is due.</p>

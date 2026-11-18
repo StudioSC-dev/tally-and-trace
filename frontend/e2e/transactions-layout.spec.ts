@@ -1,12 +1,12 @@
 // STU-687: on Transactions the list leads. The Due card is a one-line banner (count and most urgent item, with an
-// expand control) and is absent when Due and overdue, Not posted yet and Upcoming are all empty; the list's controls
+// expand control) and is absent only when all five of its tabs are empty; the list's controls
 // are one toolbar row (search, month picker, Filters) and every other filter opens in a disclosure under it. The API is
 // faked in the browser with the shared household fixture; there is no backend.
 import path from 'node:path'
 import { expect, test } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
 import type { Transaction } from '@tally-trace/shared'
-import { household, mockHousehold, withNothingDue, withOnlyUpcoming } from './support/fixtures/household'
+import { household, mockHousehold, withNothingDue, withOnlyInstallments, withOnlyUpcoming } from './support/fixtures/household'
 import type { HouseholdData } from './support/fixtures/household'
 import { shot } from './support/shot'
 
@@ -152,7 +152,12 @@ test('due card is absent when empty', async ({ page, context }) => {
   await shot(page, 'absent-banner-run')
 
   const empty = await context.newPage()
-  await open(empty, withNothingDue(household))
+  const nothing = withNothingDue(household)
+  // All five Due card lists are empty in this run, not only Due and overdue, Not posted yet and Upcoming.
+  expect(nothing.due.payables.length + nothing.due.card_statements_due.length + nothing.due.upcoming_this_month.length, 'nothing due').toBe(0)
+  expect(nothing.due.upcoming_occurrences.items.length + nothing.due.subscription_occurrences.items.length, 'no occurrences').toBe(0)
+  expect(nothing.installmentPlans.length, 'no installment plans').toBe(0)
+  await open(empty, nothing)
   await expect(empty.getByTestId('due-section')).toHaveCount(0)
   const withoutBanner = (await boxOf(rows(empty).first())).y
   await shot(empty, 'absent-empty-run')
@@ -267,6 +272,28 @@ test('upcoming-only items keep the due banner', async ({ page }) => {
   await expect(upcomingRow).toHaveCount(1)
   await expect(upcomingRow.first()).toContainText(item.name)
   await shot(page, 'upcoming-only-expanded')
+})
+
+test('installments-only items keep the due banner', async ({ page }) => {
+  const data = withOnlyInstallments(household)
+  const item = data.installmentPlans[0]
+  await open(page, data)
+  const section = dueSection(page)
+  await expect(section).toBeVisible()
+  await expect(page.getByTestId('due-banner-item')).toHaveText(item.name)
+  await expect(page.getByTestId('due-banner-count')).toHaveText('1 installment plan')
+  const banner = await boxOf(section)
+  expect(banner.height, `the banner's height (${banner.height})`).toBeLessThanOrEqual(BAR_MAX)
+  const line = await lineOf(page.getByTestId('due-banner-text'))
+  expect(line.height, `the banner text is one line (height ${line.height})`).toBeLessThanOrEqual(line.lineHeight + 1)
+  await shot(page, 'installments-only-collapsed')
+
+  await dueToggle(page).click()
+  await expect(section.getByRole('tab', { name: /^Installments/ })).toHaveAttribute('aria-selected', 'true')
+  const planRow = page.getByTestId('due-panel-installments').getByTestId('due-row')
+  await expect(planRow).toHaveCount(1)
+  await expect(planRow.first()).toContainText(item.name)
+  await shot(page, 'installments-only-expanded')
 })
 
 // ─── AC8 ─────────────────────────────────────────────────────────────────────────────────────────────────────
