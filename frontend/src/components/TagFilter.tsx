@@ -19,6 +19,8 @@ export function TagFilter({
   // A tag deleted since it was chosen must not leave the list filtered by an id that no
   // longer shows in the selector.
   const known = value === undefined || tags.some((tag) => tag.id === value)
+  // A long name is cut inside the closed select on a phone, so the name and the title carry the whole of it.
+  const selectedName = value !== undefined ? tags.find((tag) => tag.id === value)?.name : undefined
   useEffect(() => {
     if (isSuccess && !known) onChange(undefined)
   }, [isSuccess, known, onChange])
@@ -26,7 +28,8 @@ export function TagFilter({
     <label className={`inline-flex items-center gap-2 text-sm text-body ${className}`}>
       <span className={compact ? 'sr-only sm:not-sr-only' : undefined}>Tag</span>
       <select
-        aria-label="Filter by tag"
+        aria-label={selectedName !== undefined ? `Filter by tag: ${selectedName}` : 'Filter by tag'}
+        title={selectedName}
         data-testid="tag-filter"
         value={value !== undefined && known ? String(value) : ''}
         onChange={(e) => onChange(parseTagFilter(e.target.value))}
