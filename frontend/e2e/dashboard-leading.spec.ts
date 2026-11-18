@@ -5,7 +5,7 @@
 import path from 'node:path'
 import { expect, test } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
-import { PROJECTION, household, mockHousehold, periodSummaryFor, periodSummaryRoute, withProjection } from './support/fixtures/household'
+import { PROJECTION, household, mockHousehold, periodSummaryFor, periodSummaryRoute, withFxNotice, withProjection } from './support/fixtures/household'
 import type { HouseholdData } from './support/fixtures/household'
 import { addRoutes } from './support/mockApi'
 import { shot } from './support/shot'
@@ -165,49 +165,61 @@ test('dashboard order is figure, accounts, chart', async ({ page }) => {
 
 // ─── AC5 ────────────────────────────────────────────────────────────────────────────────────────
 
-test('leading figure waits for the snapshot', async ({ page }) => {
-  // Every text the figure ever shows, from the first document on.
-  await page.addInitScript(() => {
-    const seen: string[] = []
-    ;(window as unknown as { __leadingTexts: string[] }).__leadingTexts = seen
-    new MutationObserver(() => {
-      const text = document.querySelector('[data-testid="leading-figure-amount"]')?.textContent?.trim()
-      if (text !== undefined && seen[seen.length - 1] !== text) seen.push(text)
-    }).observe(document, { subtree: true, childList: true, characterData: true })
+/**
+ * The snapshot held on the busy month, and on the same month with exchange-rate facts, whose FX notice only appears once
+ * the snapshot lands: neither may move the quick balances.
+ */
+const HELD_CASES: readonly { name: string; data: HouseholdData; fx: boolean }[] = [
+  { name: 'busy month', data: household, fx: false },
+  { name: 'with an FX notice', data: withFxNotice(household), fx: true },
+]
+
+for (const c of HELD_CASES) {
+  test(`leading figure waits for the snapshot: ${c.name}`, async ({ page }) => {
+    // Every text the figure ever shows, from the first document on.
+    await page.addInitScript(() => {
+      const seen: string[] = []
+      ;(window as unknown as { __leadingTexts: string[] }).__leadingTexts = seen
+      new MutationObserver(() => {
+        const text = document.querySelector('[data-testid="leading-figure-amount"]')?.textContent?.trim()
+        if (text !== undefined && seen[seen.length - 1] !== text) seen.push(text)
+      }).observe(document, { subtree: true, childList: true, characterData: true })
+    })
+    await mockHousehold(page, c.data)
+    let release = (): void => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await page.route((url) => url.pathname.endsWith('/api/v1/dashboard/snapshot'), async (route) => {
+      await held
+      await route.fallback()
+    })
+    await page.goto('/')
+    const panel = leading(page)
+    const pending = panel.getByTestId('leading-figure-pending')
+    await expect(pending).toBeVisible({ timeout: READY_MS })
+    await expect(page.getByTestId('quick-balance-tile').first()).toBeVisible({ timeout: READY_MS })
+    await page.evaluate(() => document.fonts.ready)
+    await expect(pending.getByRole('status'), 'the placeholder is announced as a status').toHaveText('Loading available cash')
+    const heldText = await panel.innerText()
+    expect(heldText, 'no zero figure while the snapshot is held').not.toContain('0.00')
+    expect(heldText, 'no peso zero while the snapshot is held').not.toContain('₱0')
+    expect(heldText, 'no figure at all while the snapshot is held').not.toMatch(/\d/)
+    await expect(figure(page)).toHaveCount(0)
+    await shot(page, `snapshot-held-${c.fx ? 'fx' : 'plain'}`)
+    const heldY = (await boxOf(quickBalances(page))).y
+    release()
+    await expect(figure(page), "the figure lands as the fixture's available cash").toHaveText(peso(BALANCES.available_cash))
+    await expect(pending).toHaveCount(0)
+    if (c.fx) await expect(page.getByTestId('fx-notice'), 'the snapshot brings its FX notice').toBeVisible()
+    await page.waitForLoadState('networkidle')
+    const landedY = (await boxOf(quickBalances(page))).y
+    expect(Math.abs(landedY - heldY), `the quick balances move ${landedY - heldY}px when the snapshot lands`).toBeLessThanOrEqual(4)
+    const history = await page.evaluate(() => (window as unknown as { __leadingTexts: string[] }).__leadingTexts)
+    expect(history, 'the figure only ever shows the fixture value, never a zero first').toEqual([peso(BALANCES.available_cash)])
+    await shot(page, `snapshot-released-${c.fx ? 'fx' : 'plain'}`)
   })
-  await mockHousehold(page)
-  let release = (): void => undefined
-  const held = new Promise<void>((resolve) => {
-    release = resolve
-  })
-  await page.route((url) => url.pathname.endsWith('/api/v1/dashboard/snapshot'), async (route) => {
-    await held
-    await route.fallback()
-  })
-  await page.goto('/')
-  const panel = leading(page)
-  const pending = panel.getByTestId('leading-figure-pending')
-  await expect(pending).toBeVisible({ timeout: READY_MS })
-  await expect(page.getByTestId('quick-balance-tile').first()).toBeVisible({ timeout: READY_MS })
-  await page.evaluate(() => document.fonts.ready)
-  await expect(pending.getByRole('status'), 'the placeholder is announced as a status').toHaveText('Loading available cash')
-  const heldText = await panel.innerText()
-  expect(heldText, 'no zero figure while the snapshot is held').not.toContain('0.00')
-  expect(heldText, 'no peso zero while the snapshot is held').not.toContain('₱0')
-  expect(heldText, 'no figure at all while the snapshot is held').not.toMatch(/\d/)
-  await expect(figure(page)).toHaveCount(0)
-  await shot(page, 'snapshot-held')
-  const heldY = (await boxOf(quickBalances(page))).y
-  release()
-  await expect(figure(page), "the figure lands as the fixture's available cash").toHaveText(peso(BALANCES.available_cash))
-  await expect(pending).toHaveCount(0)
-  await page.waitForLoadState('networkidle')
-  const landedY = (await boxOf(quickBalances(page))).y
-  expect(Math.abs(landedY - heldY), `the quick balances move ${landedY - heldY}px when the figure lands`).toBeLessThanOrEqual(4)
-  const history = await page.evaluate(() => (window as unknown as { __leadingTexts: string[] }).__leadingTexts)
-  expect(history, 'the figure only ever shows the fixture value, never a zero first').toEqual([peso(BALANCES.available_cash)])
-  await shot(page, 'snapshot-released')
-})
+}
 
 // ─── AC6 ────────────────────────────────────────────────────────────────────────────────────────
 

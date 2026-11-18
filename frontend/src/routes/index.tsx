@@ -404,9 +404,10 @@ export function Dashboard() {
         </div>
       </section>
 
-      <FxNotice fx={snapshot?.fx} />
-
       <QuickBalances />
+
+      {/* Under the accounts, so a notice that arrives with the snapshot never moves the figure or the accounts. */}
+      <FxNotice fx={snapshot?.fx} />
 
       {/* Cash-Flow Timeline (pre-due-date solvency) */}
       <CashflowTimelineCard tag={selectedTag} currency={currencyReady ? currency : null} />
