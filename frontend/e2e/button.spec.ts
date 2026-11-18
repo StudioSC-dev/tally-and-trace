@@ -44,6 +44,10 @@ const SRC = path.join(FRONTEND, 'src')
 const BASELINE = fileURLToPath(new URL('./button.baseline.json', import.meta.url))
 const RECORD = process.env.BUTTON_RECORD === '1'
 
+// The baseline holds clock-derived values, such as a new recurring entry's default start (a `datetime-local` field),
+// so every page runs in the time zone the baseline was recorded in, whatever the host's own zone is.
+test.use({ timezoneId: 'Asia/Manila' })
+
 /** docs/design-system.md, light: spine `accent` #22483A, leaf `on-accent` #F2F5F0, `line-strong` #748870, `ink` #16241C, red pencil `danger` #AE2A20. */
 const ACCENT = 'rgb(34, 72, 58)'
 const ON_ACCENT = 'rgb(242, 245, 240)'
