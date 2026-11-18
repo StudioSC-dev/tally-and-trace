@@ -119,6 +119,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field, replace
+from types import SimpleNamespace
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -167,6 +168,8 @@ NOT_A_BANK_ACCOUNT = ("Only a savings, checking, e-wallet or cash account's stat
 TRANSFER_CHANGE = ("Row {row} is a transfer between accounts {source} and {destination}: "
                    "changing it here would change both; edit the transfer and run the dry "
                    "run again")
+TRANSFER_RECONCILED = ("Row {row} is a transfer with account {other}, whose statement {statement} "
+                       "is reconciled: changing it here would change that statement")
 TRANSFER_DUPLICATE = ("Line {line} may be transfer row {row}, whose date keeps it off this "
                       "period; change the transfer's date and run the dry run again")
 LINKED_UNPOST = ("Row {row} is linked to a recurring entry: unposting it here would leave "
@@ -555,8 +558,10 @@ class _Kind:
                      result: sr.StatementDiff) -> None:
         """Store the header values the statement differs on."""
 
-    def check_row(self, txn: Transaction, action: sr.Action) -> None:
-        """Refuse an ``update``, ``move`` or ``unpost`` of ``txn`` beyond ``_row_update``'s."""
+    def check_row(self, db: Session, account: Account, txn: Transaction, action: sr.Action,
+                  result: sr.StatementDiff) -> None:
+        """Refuse an ``update``, ``move`` or ``unpost`` of ``txn`` beyond ``_row_update``'s
+        (after the locks; ``result`` is the diff being applied)."""
 
     def check_create(self, action: sr.Action, loaded: Loaded) -> None:
         """Refuse a ``create``."""
@@ -679,7 +684,7 @@ def _apply(kind: _Kind, db: Session, user: User, account: Account, statement,
             txn = loaded.rows[action.row_id]
             line = lines.get(action.line_no)
             try:
-                kind.check_row(txn, action)
+                kind.check_row(db, account, txn, action, result)
                 if action.kind == "unpost" and txn.budget_entry_id is not None:
                     note = unpost_note(loaded, txn)
                     fields = kind.unpost_linked(db, loaded, txn)
@@ -951,6 +956,58 @@ def _record_account(db: Session, user: User, account: Account,
             .populate_existing().one())
 
 
+def _day_on(other: Account, txn: Transaction, when: datetime) -> date:
+    """The day a posted transfer dated ``when`` counts on ``other``: a card's
+    ``statement_day`` for a cash advance out of it, else its own day."""
+    if other.account_type == AccountType.CREDIT and txn.transfer_from_account_id == other.id:
+        return statement_day(SimpleNamespace(transaction_date=when, is_posted=True,
+                                             posting_date=txn.posting_date), manila_today())
+    return when.date()
+
+
+def _reconciled_on(db: Session, other: Account, day: date) -> Optional[str]:
+    """``other``'s reconciled statement holding ``day``, named; None when there is none.
+    A card's is found by its current closing day (``statement_close``)."""
+    if other.account_type == AccountType.CREDIT:
+        close = statement_close(other, day)
+        if close is not None and close in reconciled_closes(db, other.id):
+            return f"closing {close.isoformat()}"
+        return None
+    found = (db.query(AccountStatementReconciliation)
+             .filter(AccountStatementReconciliation.account_id == other.id,
+                     AccountStatementReconciliation.period_start <= day,
+                     AccountStatementReconciliation.period_end >= day).first())
+    return (f"for {found.period_start.isoformat()} to {found.period_end.isoformat()}"
+            if found is not None else None)
+
+
+def check_transfer_reconciled(db: Session, account: Account, txn: Transaction,
+                              action: sr.Action) -> None:
+    """409 when a write to transfer ``txn`` would change a statement its other account
+    has reconciled: one holding the day it counts on there before the write (when
+    posted) or after it (when the write posts or re-dates it)."""
+    if txn.transaction_type != TransactionType.TRANSFER:
+        return
+    other_id = (txn.transfer_to_account_id if txn.transfer_from_account_id == account.id
+                else txn.transfer_from_account_id)
+    other = db.get(Account, other_id) if other_id and other_id != account.id else None
+    if other is None:
+        return
+    days = []
+    if txn.is_posted:
+        days.append(_day_on(other, txn, txn.transaction_date))
+    new_date = next((c.after for c in action.changes if c.field == "transaction_date"), None)
+    if action.kind != "unpost" and (new_date is not None or not txn.is_posted):
+        days.append(_day_on(other, txn, _midnight(new_date) if new_date is not None
+                            else txn.transaction_date))
+    for day in days:
+        statement = _reconciled_on(db, other, day)
+        if statement is not None:
+            raise _refused(TRANSFER_RECONCILED.format(row=txn.id, other=other.id,
+                                                      statement=statement),
+                           row_id=txn.id, line_no=action.line_no, account_id=other.id)
+
+
 class _BankAccount(_Kind):
     noun = "account"
 
@@ -963,7 +1020,8 @@ class _BankAccount(_Kind):
     def check_account(self, account):
         check_bank_account(account)
 
-    def check_row(self, txn, action):
+    def check_row(self, db, account, txn, action, result):
+        check_transfer_reconciled(db, account, txn, action)
         if txn.transaction_type == TransactionType.TRANSFER:
             raise _refused(TRANSFER_CHANGE.format(
                 row=txn.id, source=txn.transfer_from_account_id,

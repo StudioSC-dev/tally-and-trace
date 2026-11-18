@@ -386,6 +386,68 @@ def test_an_ambiguous_fee_line_is_not_paired_and_is_refused_as_before(w):
     assert _snapshot(w) == before
 
 
+# --- STU-774: a transfer the other account has reconciled is never changed --------------------
+
+def _reconcile_savings_february(w, transfer_line=True):
+    lines = [_line(1, "2027-02-10", "5000.00", kind="credit")] if transfer_line else []
+    _apply(w, _statement(lines, opening=Decimal("20000.00")), account=w["savings"])
+
+
+def _refused_as_reconciled(w, statement, transfer, other, period, account=None):
+    account = account or w["checking"]
+    dry = _dry(w, statement, account=account)
+    before = _snapshot(w)
+    balances = (_balance(w, w["checking"]), _balance(w, w["savings"]))
+    r = _post(w, statement, False, dry["fingerprint"], account=account)
+    assert r.status_code == 409, r.text
+    detail = r.json()["detail"]
+    assert detail["message"] == (
+        f"Row {transfer} is a transfer with account {other}, whose statement {period} is "
+        "reconciled: changing it here would change that statement")
+    assert (detail["row_id"], detail["account_id"]) == (transfer, other)
+    assert _snapshot(w) == before
+    assert (_balance(w, w["checking"]), _balance(w, w["savings"])) == balances
+    return dry
+
+
+def test_an_update_of_a_transfer_the_other_account_reconciled_is_refused(w):
+    transfer = _transfer(w, "2027-02-10", 5000)
+    _reconcile_savings_february(w)
+    dry = _refused_as_reconciled(w, _statement([_line(1, "2027-02-10", "4990.00")]), transfer,
+                                 w["savings"], "for 2027-02-01 to 2027-02-28")
+    assert _kinds(dry) == [("update", 1)]
+
+
+def test_an_unpost_of_a_transfer_the_other_account_reconciled_is_refused(w):
+    transfer = _transfer(w, "2027-02-10", 5000)
+    _reconcile_savings_february(w)
+    dry = _refused_as_reconciled(w, _statement([]), transfer, w["savings"],
+                                 "for 2027-02-01 to 2027-02-28")
+    assert _kinds(dry) == [("unpost", None)]
+
+
+def test_a_cash_advance_on_a_reconciled_card_statement_is_refused(w):
+    card = sw_post(w["client"], w["me"], "/accounts/", {
+        "name": "Card", "account_type": "credit", "balance": 0, "billing_cycle_start": 24,
+        "days_until_due_date": 21, "payment_account_id": w["checking"]})["id"]
+    advance = sw_post(w["client"], w["me"], "/transactions/", {
+        "account_id": card, "transaction_type": "transfer", "amount": 3000,
+        "transfer_fee": 100, "transfer_from_account_id": card,
+        "transfer_to_account_id": w["checking"], "description": "Cash advance",
+        "transaction_date": "2027-02-05T00:00:00", "is_posted": True})["id"]
+    db = w["db"]
+    db.rollback()
+    db.execute(text(
+        "INSERT INTO statement_reconciliations (card_id, statement_close, total_due,"
+        " line_balance, line_count, reconciled_by_actor)"
+        " VALUES (:c, '2027-02-24', 3100, 3100, 1, :u)"), {"c": card, "u": w["me"]["id"]})
+    db.commit()
+    dry = _refused_as_reconciled(
+        w, _statement([_line(1, "2027-02-05", "2990.00", kind="credit")]), advance, card,
+        "closing 2027-02-24")
+    assert _kinds(dry) == [("update", 1)]
+
+
 def test_a_change_to_a_transfer_is_refused(w):
     transfer = _transfer(w, "2027-02-10", 5000)
     statement = _statement([_line(1, "2027-02-10", "4990.00", kind="credit")],
