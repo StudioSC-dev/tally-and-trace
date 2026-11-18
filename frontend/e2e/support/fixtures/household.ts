@@ -1178,6 +1178,21 @@ export const withProjection = (data: HouseholdData): HouseholdData => {
   return { ...data, snapshot: { ...snapshot, forecast_next_3_months: [period] } }
 }
 
+/**
+ * The variant whose snapshot carries exchange-rate facts, so the dashboard shows its FX notice: one row with no stored
+ * rate (the unconverted banner) and the day's dollar rate (the attribution line). Only the snapshot changes.
+ */
+export const withFxNotice = (data: HouseholdData): HouseholdData => ({
+  ...data,
+  snapshot: {
+    ...data.snapshot,
+    fx: {
+      rates: [{ base: 'USD', quote: 'PHP', rate: 58, as_of: data.today, source: 'currency-api', stale: false }],
+      unconverted_count: 1,
+    },
+  },
+})
+
 /** The Allocations Wishlist tab's calls, for a household with nothing on its wishlist yet. */
 export const wishlistRoutes = (data: HouseholdData = household): ApiRoute[] => [
   apiRoute<WishlistItem[]>('GET', '/wishlist/', []),
