@@ -182,7 +182,8 @@ Fields have no box. They are written on a ruled line (an underline in `line-stro
   `.fade-in`, for an element that appears in answer to an action, is an opacity fade
   at `dur-base` with no transform.
 - **Hover:** a `.card`, `.stat-card`, `ListSheet` or `Row` has no transition and keeps
-  its border, shadow and position; a row may take the `sunken` background at once.
+  its border, shadow and position; a card keeps its background too, and only a row may
+  take the `sunken` background, at once.
 - **Reduced motion:** under `prefers-reduced-motion: reduce` every animation and
   transition takes 1ms and runs once, smooth scrolling stops, and a spinner
   (`Spinner`, `.animate-spin`, `.loading-spinner`) does not turn at all.
@@ -198,8 +199,9 @@ Fields have no box. They are written on a ruled line (an underline in `line-stro
   dialog panel) is focused by script, not by Tab, and gets no ring.
 - **On the spine:** the light accent is the band's own colour, so a control in the top
   bar also gets a 2px `on-spine` ring inside the outline.
-- A `ListSheet` keeps 4px of room past its edge (`overflow: clip` with
-  `overflow-clip-margin`), so a focused row's ring is not cut off.
+- A `ListSheet` clips nothing, so a focused row's ring shows in full on every
+  engine; its first and last rows round their own outer corners instead (see
+  below).
 
 ## Components
 
@@ -230,14 +232,18 @@ Fields have no box. They are written on a ruled line (an underline in `line-stro
   - The rule is keyed on the class, never on an ARIA attribute selector.
 - **Ledger and Row:**
   - The sheet is leaf, `radius-md`, one `line` border, no shadow.
-  - Rows are ruled, radius 0.
+  - Rows are ruled, radius 0, but for the sheet's corners.
   - Amounts are right-aligned on one column edge.
 - **`ListSheet` and `Row` (`frontend/src/components/`):**
   - `ListSheet` is the sheet: leaf (`surface`), `radius-md`, one `line` border, no
-    shadow. It clips its rows to its corners. Hook: `data-testid="list-sheet"`.
-  - `Row` is one line on it: an `<article>`, radius 0, with a 1px `line` rule under
+    shadow. It clips nothing; its first row rounds its top corners and its last row
+    its bottom corners to the sheet's inner radius (`radius-md` less the 1px border,
+    5px), so a row's hover or state background stays inside the sheet's corners.
+    Hook: `data-testid="list-sheet"`.
+  - `Row` is one line on it: an `<article>`, radius 0 but at the sheet's corners, with a 1px `line` rule under
     every row but the last. The title (`text-base`, 600) with its badges (a saving
-    state), its tags and one meta line (`text-xs`, `muted`, cut to one line) sit on the
+    state), its tags and one meta line (`text-xs`, `muted`, cut to one line, led by the
+    row's status word when it has one) sit on the
     left; the row's own controls sit in the trailing area; the amount sits last in its
     own right-aligned slot, so the amounts of a sheet share one right edge.
   - Content that needs a line of its own (a description, a warning, a decision such
@@ -272,6 +278,8 @@ Fields have no box. They are written on a ruled line (an underline in `line-stro
   - The states: Overdue (`danger`); Due today and Not reviewed (`warn`); Posted, Fully
     paid, Charged (a card charge already taken, waiting to post) and Auto-post on
     (`ok`); Pending, Planned and Auto-post off (`muted`).
+  - The word is never cut: it does not wrap or shrink, and on a `Row` it leads the meta
+    line (`status`) outside the text that is cut, so the facts after it are cut instead.
   - An action on a state (Mark paid, Charged, Posted) stays a secondary `Button`.
   - "Overdue" and negative balances are the only red text.
 - **Empty state (`EmptyState`, `frontend/src/components/EmptyState.tsx`):**
@@ -279,6 +287,8 @@ Fields have no box. They are written on a ruled line (an underline in `line-stro
     `Button` for the next step. Left-aligned on the page, with no card chrome.
   - Someone who cannot create here (a viewer with no account of their own, or none
     they can add records to) sees the sentence alone.
+  - The sentence and its action arrive together: a list whose action depends on the
+    caller's accounts shows no empty state until the accounts have loaded.
   - Used by Accounts, the Budgets and Savings lists, Recurring and the Wishlist. A
     filter or search that matches nothing ("No accounts have this tag.", "No recurring
     entries match") is a result, not an empty list, and keeps its own line.

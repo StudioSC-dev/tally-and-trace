@@ -395,7 +395,11 @@ export function AllocationsPage() {
   const showToast = useToast()
   const beginBudgetEntriesRequest = useRequestGeneration()
   const beginAllocationsRequest = useRequestGeneration()
-  const { data: accountsData } = useGetAccountsQuery(
+  const {
+    data: accountsData,
+    isSuccess: accountsLoaded,
+    isError: accountsFailed,
+  } = useGetAccountsQuery(
     { is_active: true, limit: 100 },
     { skip: !isAuthenticated }
   )
@@ -425,6 +429,9 @@ export function AllocationsPage() {
   // An empty list offers its create action only to someone who could save one: an allocation needs an account of
   // their own, a recurring entry an account they can add records to (RecurringEntryFormModal's writable accounts).
   // A viewer, whose accounts are all shared with them to read, sees the sentence alone.
+  // An empty state waits for the accounts, so its action arrives with its sentence rather than after it, and a
+  // viewer never sees an action that then goes.
+  const accountsSettled = accountsLoaded || accountsFailed
   const canCreateAllocation = ownAccounts.length > 0
   const canCreateRecurring = useMemo(() => accounts.some((a) => a.permissions.can_add_transactions), [accounts])
   const categories = useMemo(() => categoriesData ?? [], [categoriesData])
@@ -1194,7 +1201,7 @@ export function AllocationsPage() {
     return (
       <article
         key={allocation.id}
-        className={`card p-4 sm:p-5 hover:bg-sunken cursor-pointer ${ allocation.is_active ? '' : 'opacity-60' }`}
+        className={`card p-4 sm:p-5 cursor-pointer ${ allocation.is_active ? '' : 'opacity-60' }`}
         onClick={() => openActionModal(allocation)}
         role="button"
         tabIndex={0}
@@ -1484,6 +1491,7 @@ export function AllocationsPage() {
         }
         title={entry.name}
         tags={entry.tags}
+        status={remaining === 0 ? <StatusText tone="ok" data-testid="installment-paid">Fully paid</StatusText> : undefined}
         meta={
           <>
             <span>{entry.entry_type === 'income' ? 'Recurring income' : 'Recurring expense'}</span>
@@ -1504,7 +1512,6 @@ export function AllocationsPage() {
             {allocation && <span>Envelope: {allocation.name}</span>}
             <span>{endLabel}</span>
             {remaining !== null && remaining > 0 && <span className="text-ink">{remaining} left</span>}
-            {remaining === 0 && <StatusText tone="ok" data-testid="installment-paid">Fully paid</StatusText>}
           </>
         }
         details={[
@@ -1614,7 +1621,7 @@ export function AllocationsPage() {
         </div>
       )}
       {allocations.length === 0 ? (
-        loadError ? null : (
+        loadError || !accountsSettled ? null : (
           <EmptyState
             message={emptyMessage}
             action={canCreateAllocation ? { label: emptyAction, onClick: openCreateModal } : undefined}
@@ -1720,12 +1727,12 @@ export function AllocationsPage() {
     }
     if (groups.length === 0) {
       return (
-        errorAlert || (
+        errorAlert || (!accountsSettled ? null : (
           <EmptyState
             message="No recurring entries yet. Add your regular income, bills and subscriptions to stay ahead."
             action={canCreateRecurring ? { label: 'Add a recurring entry', onClick: openCreateModal } : undefined}
           />
-        )
+        ))
       )
     }
     return (

@@ -110,6 +110,19 @@ const rowRules = (rows: Locator): Promise<RowRule[]> =>
 
 const RULE = `1px solid ${LINE}`
 const NO_RULE = /^0px /
+/**
+ * A row is square but for the corners it shares with the sheet (STU-692): the sheet clips nothing, so a focused row's
+ * ring shows in full, and the first and last rows round their outer corners to the sheet's inner radius instead.
+ */
+const INNER = '5px'
+const cornersOf = (i: number, n: number): string[] => [
+  i === 0 ? INNER : '0px',
+  i === 0 ? INNER : '0px',
+  i === n - 1 ? INNER : '0px',
+  i === n - 1 ? INNER : '0px',
+]
+const offCorners = (rules: RowRule[]): string[] =>
+  rules.filter((r, i) => r.radius.join(' ') !== cornersOf(i, rules.length).join(' ')).map((r) => `${r.name}: ${r.radius.join(' ')}`)
 
 // ─── AC1 ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -140,11 +153,11 @@ test('rows are ruled', async ({ page }) => {
   for (const [i, r] of rules.entries()) {
     if (i < rules.length - 1) expect.soft(r.bottom, `row ${i + 1} (${r.name}) has a 1px line rule under it`).toBe(RULE)
     else expect.soft(r.bottom, `the last row (${r.name}) has no rule`).toMatch(NO_RULE)
-    expect.soft(r.radius, `row ${i + 1} (${r.name}) is square`).toEqual(['0px', '0px', '0px', '0px'])
+    expect.soft(r.radius, `row ${i + 1} (${r.name}) is square but for the sheet's corners`).toEqual(cornersOf(i, rules.length))
   }
   expect(rules.slice(0, -1).filter((r) => r.bottom !== RULE).map((r) => r.name), 'rows without a rule, last excepted').toEqual([])
   expect(rules[rules.length - 1]?.bottom, 'the last row has no rule').toMatch(NO_RULE)
-  expect(rules.filter((r) => r.radius.some((v) => v !== '0px')).map((r) => r.name), 'rows with a radius').toEqual([])
+  expect(offCorners(rules), "rows rounded anywhere but the sheet's corners").toEqual([])
   await shot(page, 'rows-ruled')
 })
 
@@ -367,7 +380,7 @@ test('rows keep an even pitch: pending row', async ({ page }, testInfo) => {
   const rules = await rowRules(sheet.getByTestId('row'))
   expect(rules.slice(0, -1).filter((r) => r.bottom !== RULE).map((r) => r.name), 'rows without a rule, last excepted').toEqual([])
   expect(rules[rules.length - 1]?.bottom, 'the last row has no rule').toMatch(NO_RULE)
-  expect(rules.filter((r) => r.radius.some((v) => v !== '0px')).map((r) => r.name), 'rows with a radius').toEqual([])
+  expect(offCorners(rules), "rows rounded anywhere but the sheet's corners").toEqual([])
   await page.evaluate(() => document.fonts.ready)
   const [measured] = await measure(pending)
   const want = PITCH[testInfo.project.name]
@@ -401,7 +414,7 @@ test('recurring entries are one sheet', async ({ page }) => {
     for (const [j, r] of rules.entries()) {
       if (j < rules.length - 1) expect.soft(r.bottom, `${key}: row ${r.name} has a 1px line rule under it`).toBe(RULE)
       else expect.soft(r.bottom, `${key}: the last row (${r.name}) has no rule`).toMatch(NO_RULE)
-      expect.soft(r.radius, `${key}: row ${r.name} is square`).toEqual(['0px', '0px', '0px', '0px'])
+      expect.soft(r.radius, `${key}: row ${r.name} is square but for the sheet's corners`).toEqual(cornersOf(j, rules.length))
     }
     total += rules.length
   }

@@ -181,13 +181,34 @@ const hoverState = (el: Locator) =>
     }
   })
 
-const HOVER_TARGETS = [
-  { name: 'account card', url: '/accounts', heading: 'Accounts', target: (p: Page) => p.locator('main article.card').first() },
-  { name: 'budget envelope card', url: '/allocations?tab=budgets', heading: 'Allocations', target: (p: Page) => p.locator('main article.card').first() },
-  { name: 'transactions list panel', url: '/transactions', heading: 'Transactions', target: (p: Page) => p.getByTestId('list-sheet').first() },
-  { name: 'transaction list row', url: '/transactions', heading: 'Transactions', target: (p: Page) => p.locator('article[data-transaction-id]').first() },
-  { name: 'recurring list row', url: '/allocations?tab=recurring', heading: 'Allocations', target: (p: Page) => p.locator('[data-testid^="kind-section-"] article').first() },
-] as const
+interface HoverTarget {
+  name: string
+  url: string
+  heading: string
+  target: (p: Page) => Locator
+  /** A card's clickable surface: hovered at its centre, its background stays put (a row may take `sunken` at once). */
+  fill?: (p: Page) => Locator
+}
+
+const HOVER_TARGETS: HoverTarget[] = [
+  {
+    name: 'account card',
+    url: '/accounts',
+    heading: 'Accounts',
+    target: (p) => p.locator('main article.card').first(),
+    fill: (p) => p.locator('main article.card').first().locator('[role="button"]').first(),
+  },
+  {
+    name: 'budget envelope card',
+    url: '/allocations?tab=budgets',
+    heading: 'Allocations',
+    target: (p) => p.locator('main article.card').first(),
+    fill: (p) => p.locator('main article.card').first(),
+  },
+  { name: 'transactions list panel', url: '/transactions', heading: 'Transactions', target: (p) => p.getByTestId('list-sheet').first() },
+  { name: 'transaction list row', url: '/transactions', heading: 'Transactions', target: (p) => p.locator('article[data-transaction-id]').first() },
+  { name: 'recurring list row', url: '/allocations?tab=recurring', heading: 'Allocations', target: (p) => p.locator('[data-testid^="kind-section-"] article').first() },
+]
 
 for (const h of HOVER_TARGETS) {
   test(`panels have no hover motion: ${h.name}`, async ({ page }, testInfo) => {
@@ -210,13 +231,24 @@ for (const h of HOVER_TARGETS) {
     expect(after.borderColor, 'border colour on hover').toBe(before.borderColor)
     const durations = after.transitionDuration.split(',').map((d) => d.trim())
     expect(after.transitionProperty === 'none' || durations.every((d) => d === '0s'), `transition ${after.transitionProperty} ${after.transitionDuration}`).toBe(true)
+    if (h.fill) {
+      const fill = h.fill(page)
+      const background = () => fill.evaluate((e) => getComputedStyle(e).backgroundColor)
+      await page.mouse.move(0, 0)
+      const rest = await background()
+      const centre = await fill.boundingBox()
+      expect(centre, "the card's surface has a box").not.toBeNull()
+      await page.mouse.move((centre?.x ?? 0) + (centre?.width ?? 0) / 2, (centre?.y ?? 0) + (centre?.height ?? 0) / 2)
+      await page.waitForTimeout(400)
+      expect(await background(), "the card's background on hover").toBe(rest)
+    }
     await viewportShot(page, `no-hover-motion-${slug(h.name)}`)
   })
 }
 
 // ─── AC3 ────────────────────────────────────────────────────────────────────────────────────────
 
-test('reduced motion stops motion: button, dialog panel, selection rule and spinner', async ({ page }) => {
+test('reduced motion stops motion: button, dialog panel and selection rule', async ({ page }) => {
   await open(page, '/transactions', 'Transactions', { reducedMotion: 'reduce' })
   const add = page.getByRole('button', { name: 'Add Transaction', exact: true }).first()
   await expect(add).toBeVisible()
@@ -224,20 +256,6 @@ test('reduced motion stops motion: button, dialog panel, selection rule and spin
   const selection = page.locator('.seg.is-selected').first()
   await expect(selection).toBeVisible()
   expect(await longestTransition(selection), 'selection rule transition-duration (s)').toBeLessThanOrEqual(0.001)
-  // A spinner ring as the Spinner component draws it, and the bare loading ring: neither turns.
-  const spinners = await page.evaluate(() => {
-    const ring = document.createElement('span')
-    ring.className = 'inline-block animate-spin motion-reduce:animate-none rounded-full h-8 w-8 border-2 border-line border-t-ink'
-    ring.dataset.testid = 'spinner'
-    const bare = document.createElement('div')
-    bare.className = 'loading-spinner'
-    document.body.append(ring, bare)
-    const out = [getComputedStyle(ring).animationName, getComputedStyle(bare).animationName]
-    ring.remove()
-    bare.remove()
-    return out
-  })
-  expect(spinners, 'the Spinner ring and .loading-spinner animation-name').toEqual(['none', 'none'])
   await add.click()
   const panel = page.locator('.modal-backdrop').last().locator('.bg-surface').first()
   await expect(panel).toBeVisible()
@@ -245,6 +263,40 @@ test('reduced motion stops motion: button, dialog panel, selection rule and spin
   await expect.poll(() => runningMotion(page), { message: 'running non-spinner animations with the dialog open' }).toEqual([])
   await viewportShot(page, 'reduced-motion-dialog')
 })
+
+/** A real loading state, held open by keeping its request unanswered: the Spinner component and the bare loading ring. */
+const SPINNERS = [
+  { name: 'Spinner on the cash-flow timeline', url: '/forecast', path: '/api/v1/forecast/timeline', find: (p: Page) => p.getByTestId('spinner') },
+  { name: 'loading ring on Accounts', url: '/accounts', path: '/api/v1/accounts/', find: (p: Page) => p.locator('.loading-spinner') },
+] as const
+
+for (const sp of SPINNERS) {
+  test(`reduced motion stops motion: spinner, ${sp.name}`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await mockHousehold(page)
+    await addRoutes(page, householdWishlistRoutes())
+    // Routes added later answer first: this request waits until the end of the test, then the mock answers it.
+    let release = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    await page.route(
+      (url) => url.pathname.endsWith(sp.path),
+      async (route) => {
+        if (route.request().method() === 'GET') await held
+        await route.fallback()
+      },
+    )
+    await page.goto(sp.url)
+    const spinner = sp.find(page).first()
+    await expect(spinner).toBeVisible({ timeout: 15_000 })
+    const animation = () => spinner.evaluate((e) => getComputedStyle(e).animationName)
+    expect(await animation(), 'animation-name under reduced motion').toBe('none')
+    await viewportShot(page, `reduced-motion-spinner-${slug(sp.name)}`)
+    // The same element turns once motion is allowed: it is the live spinner, not a still stand-in.
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    await expect.poll(animation, { message: 'animation-name with motion allowed' }).toBe('spin')
+    release()
+  })
+}
 
 for (const r of ROUTES) {
   test(`reduced motion stops motion: nothing runs on ${r.name}`, async ({ page }) => {
@@ -333,6 +385,41 @@ test('every control shows a keyboard focus ring: no .focus-ring:focus rule', asy
   expect(selectors.filter((s) => s.includes('focus-ring') && s.endsWith(':focus-visible')).length, '.focus-ring rules on :focus-visible').toBeGreaterThan(0)
   await shot(page, 'focus-ring-stylesheet')
 })
+
+/** The rows at a list sheet's corners, where a sheet that clipped would cut a focused row's ring. */
+const SHEET_ROWS = [
+  { name: 'first transaction row', url: '/transactions', heading: 'Transactions', which: 'first' },
+  { name: 'last transaction row', url: '/transactions', heading: 'Transactions', which: 'last' },
+  { name: 'first recurring row', url: '/allocations?tab=recurring', heading: 'Allocations', which: 'first' },
+] as const
+
+for (const c of SHEET_ROWS) {
+  test(`every control shows a keyboard focus ring: nothing clips the ${c.name}`, async ({ page }) => {
+    await open(page, c.url, c.heading)
+    const rows = page.getByTestId('list-sheet').first().getByTestId('row')
+    const row = c.which === 'first' ? rows.first() : rows.last()
+    await expect(row).toBeVisible()
+    await row.focus()
+    // The ring's outer edge (outline-offset plus outline-width past the row), against every ancestor that clips. The
+    // check is geometry, not an engine's overflow-clip-margin: WebKit has none, so a clipping sheet cut the ring there.
+    const ring = await row.evaluate((e) => {
+      const s = getComputedStyle(e)
+      const r = e.getBoundingClientRect()
+      const reach = parseFloat(s.outlineOffset) + parseFloat(s.outlineWidth)
+      const out = { left: r.left - reach, top: r.top - reach, right: r.right + reach, bottom: r.bottom + reach }
+      const clippers: string[] = []
+      for (let n = e.parentElement; n && n !== document.documentElement; n = n.parentElement) {
+        const ns = getComputedStyle(n)
+        if ([ns.overflowX, ns.overflowY].every((o) => o === 'visible')) continue
+        const b = n.getBoundingClientRect()
+        if (out.left < b.left || out.top < b.top || out.right > b.right || out.bottom > b.bottom) clippers.push(`${n.tagName.toLowerCase()}.${[...n.classList].join('.')}`)
+      }
+      return { offset: s.outlineOffset, clippers }
+    })
+    expect(ring.offset, 'outline-offset').toBe('2px')
+    expect(ring.clippers, 'ancestors that cut the ring').toEqual([])
+  })
+}
 
 // ─── AC5 ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -439,6 +526,54 @@ for (const s of VIEWER_STATES) {
     await expect(empty.locator('[data-variant="primary"]')).toHaveCount(0)
     await expect(empty.getByRole('button')).toHaveCount(0)
     await shot(page, `empty-state-${slug(s.state)}-viewer`)
+  })
+}
+
+/** The lists whose create action depends on the caller's accounts. */
+const ACCOUNT_GATED = EMPTY_STATES.filter((s) => s.state === 'Budgets' || s.state === 'Savings' || s.state === 'Recurring')
+
+for (const s of ACCOUNT_GATED) {
+  test(`empty states invite the next step: ${s.state} waits for the accounts`, async ({ page }) => {
+    // Records the empty state as it first reaches the DOM: with its action, or the sentence alone.
+    await page.addInitScript(() => {
+      const w = window as unknown as { firstEmpty?: string }
+      const observer = new MutationObserver(() => {
+        const e = document.querySelector('[data-testid="empty-state"]')
+        if (!e) return
+        w.firstEmpty = e.querySelector('[data-variant="primary"]') ? 'with its action' : 'the sentence alone'
+        observer.disconnect()
+      })
+      document.addEventListener('DOMContentLoaded', () => observer.observe(document.body, { childList: true, subtree: true }))
+    })
+    await mockHousehold(page, s.data)
+    await addRoutes(page, householdWishlistRoutes())
+    // Routes added later answer first: the accounts list is held until the list itself has loaded, then the mock answers.
+    let release = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    let asked = 0
+    await page.route(
+      (url) => url.pathname.endsWith('/api/v1/accounts/'),
+      async (route) => {
+        if (route.request().method() === 'GET') {
+          asked += 1
+          await held
+        }
+        await route.fallback()
+      },
+    )
+    const listPath = s.state === 'Recurring' ? '/api/v1/budget-entries/' : '/api/v1/allocations/'
+    const list = page.waitForResponse((r) => r.request().method() === 'GET' && new URL(r.url()).pathname.endsWith(listPath))
+    await page.goto(s.url)
+    await expect(page.getByRole('heading', { level: 1, name: s.heading })).toBeVisible({ timeout: 15_000 })
+    await list
+    expect(asked, 'the accounts request is held').toBeGreaterThan(0)
+    await expect(page.getByTestId('empty-state'), 'no empty state while the accounts load').toHaveCount(0)
+    await viewportShot(page, `empty-state-${slug(s.state)}-accounts-loading`)
+    release()
+    const empty = page.getByTestId('empty-state')
+    await expect(empty).toHaveCount(1)
+    await expect(empty.locator('[data-variant="primary"]')).toHaveCount(1)
+    expect(await page.evaluate(() => (window as unknown as { firstEmpty?: string }).firstEmpty), 'the empty state first appears').toBe('with its action')
   })
 }
 
@@ -571,6 +706,42 @@ for (const s of STATES) {
     expect(st.word.weight, 'word font-weight').toBe('500')
     expect(contrast(st.word.color, st.behind), `contrast of ${st.word.color} on ${st.behind}`).toBeGreaterThanOrEqual(4.5)
     await shot(page, `status-dot-word-${slug(s.state)}`)
+  })
+}
+
+/** The routes the states are on. */
+const STATUS_ROUTES = [...new Map(STATES.map((s) => [s.url, { url: s.url, heading: s.heading }])).values()]
+
+for (const r of STATUS_ROUTES) {
+  test(`status is a dot and a word: never cut, ${r.heading} ${r.url}`, async ({ page }) => {
+    await open(page, r.url, r.heading, { data: withStatusStates(household) })
+    // Every shown status word, against its row's box and every ancestor that clips (a cut meta line clips its text).
+    const words = await page.locator('.status-text [data-status-word]').evaluateAll((els) =>
+      els
+        .map((w) => {
+          const word = w.getBoundingClientRect()
+          const row = w.closest('[data-testid="row"], [data-testid="due-row"], article, li, tr') ?? w.parentElement
+          const outside = (box: DOMRect) =>
+            word.left < box.left - 0.5 || word.right > box.right + 0.5 || word.top < box.top - 0.5 || word.bottom > box.bottom + 0.5
+          const clippers: string[] = []
+          for (let n = w.parentElement; n && n !== document.body; n = n.parentElement) {
+            const st = getComputedStyle(n)
+            const clips = [st.overflowX, st.overflowY].some((o) => o === 'hidden' || o === 'clip')
+            if (clips && outside(n.getBoundingClientRect())) clippers.push(`${n.tagName.toLowerCase()}.${[...n.classList].join('.')}`)
+          }
+          return {
+            text: w.textContent ?? '',
+            shown: word.width > 0 && word.height > 0,
+            inRow: row ? !outside(row.getBoundingClientRect()) : false,
+            clippers,
+          }
+        })
+        .filter((w) => w.shown),
+    )
+    expect(words.length, 'status words on the page').toBeGreaterThan(0)
+    expect(words.filter((w) => !w.inRow).map((w) => w.text), "status words outside their row's box").toEqual([])
+    expect(words.filter((w) => w.clippers.length > 0).map((w) => `${w.text}: ${w.clippers.join(', ')}`), 'status words cut by a clipping box').toEqual([])
+    await viewportShot(page, `status-never-cut-${slug(`${r.heading} ${r.url}`)}`)
   })
 }
 

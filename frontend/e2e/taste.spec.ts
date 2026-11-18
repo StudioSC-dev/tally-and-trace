@@ -114,7 +114,8 @@ test('captions are quiet: transaction row status', async ({ page }) => {
   await open(page, '/transactions', rows(page).first(), { ...household, transactions: [pending, ...household.transactions] })
   const seen = new Set<string>()
   for (const word of ['Expense', 'Income', 'Posted', 'Pending']) {
-    const status = rows(page).locator('[data-testid="row-meta"] > span').filter({ hasText: new RegExp(`^${word}$`) })
+    // STU-692: the status word leads the meta line outside the cut text, so the words are looked for at any depth.
+    const status = rows(page).locator('[data-testid="row-meta"] span').filter({ hasText: new RegExp(`^${word}$`) })
     const n = await status.count()
     if (n === 0) continue
     seen.add(word)

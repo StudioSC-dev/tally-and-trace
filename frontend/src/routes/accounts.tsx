@@ -75,7 +75,7 @@ function AccountCard({ account, credit, creditPhase, sharedWith, onOpen }: {
   return (
     <article className={`card p-4 sm:p-5 ${isAccountActive(account) ? '' : 'opacity-60'}`}>
       <div
-        className="cursor-pointer hover:bg-sunken focus-ring"
+        className="cursor-pointer focus-ring"
         onClick={() => onOpen(account)}
         role="button"
         tabIndex={0}

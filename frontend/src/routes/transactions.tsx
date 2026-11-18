@@ -2724,6 +2724,7 @@ export function TransactionsPage() {
           }
         }}
         title={description}
+        status={<StatusText tone={ROW_STATUS_TONES[status]} data-testid="transaction-status">{STATUS_LABELS[status]}</StatusText>}
         meta={
           <>
             <span>{exactDate}</span>
@@ -2737,7 +2738,6 @@ export function TransactionsPage() {
                 ? categoryName || 'Transfer'
                 : categoryName || 'Uncategorized'}
             </span>
-            <StatusText tone={ROW_STATUS_TONES[status]} data-testid="transaction-status">{STATUS_LABELS[status]}</StatusText>
             <span className="font-medium text-muted">{typeLabel}</span>
             {transaction.created_by && <span data-testid="created-by">by {transaction.created_by}</span>}
             {scheduleLabel && <span className="text-ink">{scheduleLabel}</span>}
