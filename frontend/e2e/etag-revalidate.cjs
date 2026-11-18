@@ -103,7 +103,7 @@ async function recordApi(page, run) {
 
 async function openTransactions(page) {
   await page.goto(`${stack.webUrl}/transactions`)
-  await page.locator('article[role="button"]').filter({ hasText: 'Etag lunch 1' }).first().waitFor({ timeout: 15000 })
+  await page.locator('article[data-testid="row"]').filter({ hasText: 'Etag lunch 1' }).first().waitFor({ timeout: 15000 })
   await h.waitQuiet(page)
 }
 
@@ -143,7 +143,7 @@ async function scenarioA(browser) {
         `not 304: ${not304.map((r) => `${r.status} ${new URL(r.url).pathname}${new URL(r.url).search}`).join(', ')}`
     })
     await h.check('a.rows-shown', 'B', async () =>
-      (await page.locator('article[role="button"]').filter({ hasText: 'Etag lunch 2' }).count()) > 0 ||
+      (await page.locator('article[data-testid="row"]').filter({ hasText: 'Etag lunch 2' }).count()) > 0 ||
       'the rows are not shown after the 304s')
     console.log(`  second open: ${second.length} opted-in requests answered, ${second.filter((r) => r.status === 304).length} with 304 (${second.cancelled} cancelled by the page; first open: ${first.cancelled})`)
   } finally {
@@ -169,7 +169,7 @@ async function scenarioB(browser) {
         `not 200 after a write: ${notOk.map((r) => `${r.status} ${new URL(r.url).pathname}`).join(', ')}`
     })
     await h.check('b.new-row', 'B', async () => {
-      const row = page.locator('article[role="button"]').filter({ hasText: 'Etag lunch new' }).first()
+      const row = page.locator('article[data-testid="row"]').filter({ hasText: 'Etag lunch new' }).first()
       return (await row.waitFor({ timeout: 6000 }).then(() => true, () => false)) || 'the new row is not shown'
     })
   } finally {

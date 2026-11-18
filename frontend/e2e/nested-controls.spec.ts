@@ -6,7 +6,8 @@
 //
 // The AC6 baseline (`nested-controls.baseline.json`) is recorded once, on the PR base (STU-692's head, before this
 // ticket's app change): `NESTED_RECORD=1 pnpm exec playwright test nested-controls -g "appearance" --workers=1`. A
-// recording run only writes the baseline; it asserts nothing about the rows.
+// recording run only writes the baseline; it asserts nothing about the rows. The Transactions rows' baseline is
+// recorded the same way, on the same base, with `-g "transaction rows preserve appearance and pointer behaviour: appearance"`.
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -23,7 +24,9 @@ import {
   householdWishlistRoutes,
   limitedRecurring,
   mockHousehold,
+  TAG_OVERFLOW,
   withStatusStates,
+  withTagOverflow,
 } from './support/fixtures/household'
 import type { HouseholdData } from './support/fixtures/household'
 import { addRoutes, queryRoute } from './support/mockApi'
@@ -227,6 +230,39 @@ for (const p of PAGES) {
   })
 }
 
+// The Transactions list with a row whose tags overflow its title line, so the row draws its "+N" tag button.
+const overflowing: HouseholdData = withTagOverflow(withStatusStates(household))
+
+/** The Transactions list, once its rows and the overflowing row's "+N" are drawn. */
+async function openTransactions(page: Page): Promise<ApiMock> {
+  const api = await open(page, '/transactions', 'Transactions', overflowing)
+  await expect(txRow(page, TAG_OVERFLOW.id).getByTestId('row-tags-more')).toBeVisible()
+  await page.mouse.move(0, 0)
+  return api
+}
+
+/** The Transactions row for the transaction `id`. */
+const txRow = (page: Page, id: number): Locator => page.locator(`article[data-transaction-id="${id}"]`)
+
+/** The open Transaction Actions dialog. */
+const actionDialog = (page: Page): Locator => page.locator('.modal-backdrop').filter({ hasText: 'Transaction Actions' })
+
+test('no nested controls on the main pages: Transactions with a "+N" tag button', async ({ page }) => {
+  await openTransactions(page)
+  const row = txRow(page, TAG_OVERFLOW.id)
+  const more = row.getByTestId('row-tags-more')
+  await shot(page, 'page-transactions-tag-overflow')
+  expect(await more.count(), 'the overflowing row draws one "+N"').toBe(1)
+  expect(await page.locator(NESTED).count(), `Transactions: matches of ${NESTED}`).toBe(0)
+  expect(await row.getAttribute('role'), 'the row itself is not a control').toBeNull()
+  expect(await row.getByRole('button', { name: TAG_OVERFLOW.description, exact: true }).count(), 'one control named after the transaction').toBe(1)
+  expect(await more.evaluate((m) => m.closest('button:not([data-testid="row-tags-more"]), a, [role=button]') === null), '"+N" sits inside no other control').toBe(true)
+  const findings = await a11y(page)
+  expect(findings.filter((f) => f.rule === 'nested-interactive'), 'Transactions: critical nested-interactive findings').toEqual([])
+  const serious = test.info().annotations.filter((a) => a.type === 'a11y-serious' && (a.description ?? '').startsWith('nested-interactive '))
+  expect(serious.map((a) => a.description), 'Transactions: nested-interactive findings').toEqual([])
+})
+
 // ─── AC6 ────────────────────────────────────────────────────────────────────────────────────────
 
 /** One drawn text run in a row: its words, where they sit in the row, and how they are drawn. */
@@ -373,13 +409,14 @@ test('recurring rows preserve appearance and pointer behaviour: appearance', asy
 })
 
 /**
- * Places in a row that are not an action: its padding, its meta line and its amount. Each is clicked with the mouse at
- * that spot, as a person would: whatever is drawn on top there takes the click.
+ * Places in a row that are not an action: its padding, its meta line, its amount and a tag chip. Each is clicked with
+ * the mouse at that spot, as a person would: whatever is drawn on top there takes the click.
  */
 const AREAS = [
   { name: 'padding', find: (row: Locator) => row, at: () => ({ x: 8, y: 8 }) },
   { name: 'meta line', find: (row: Locator) => row.getByTestId('row-meta').first(), at: (b: Box) => ({ x: b.width / 2, y: b.height / 2 }) },
   { name: 'amount', find: (row: Locator) => row.getByTestId('row-amount'), at: (b: Box) => ({ x: b.width / 2, y: b.height / 2 }) },
+  { name: 'tag chip', find: (row: Locator) => row.getByTestId('row-tags').getByTestId('tag-chip').first(), at: (b: Box) => ({ x: b.width / 2, y: b.height / 2 }) },
 ] as const
 type Box = { x: number; y: number; width: number; height: number }
 
@@ -400,14 +437,20 @@ for (const area of AREAS) {
             if (n instanceof Element && [n, ...Array.from(n.querySelectorAll('button'))].some((b) => b.textContent === 'Update Recurring Entry')) w.__opened()
       }).observe(document.body, { childList: true, subtree: true })
     })
-    const target = area.find(recurringRow(page, WITH_ACTIONS))
+    // Netflix Standard draws no chip on its title line, so the chip is clicked on the first editable row that does.
+    const row =
+      area.name === 'tag chip'
+        ? page.locator('[data-testid^="kind-section-"] article[data-testid="row"]:not([data-row-kind="limited-entry"])').filter({ has: page.getByTestId('row-tags').getByTestId('tag-chip') }).first()
+        : recurringRow(page, WITH_ACTIONS)
+    const name = ((await row.locator('[data-row-title]').textContent()) ?? '').trim()
+    const target = area.find(row)
     await target.scrollIntoViewIfNeeded()
     const box = await target.boundingBox()
     if (!box) throw new Error(`no box for the ${area.name}`)
     const at = area.at(box)
     await page.mouse.click(box.x + at.x, box.y + at.y)
     await expect(editDialog(page)).toBeVisible()
-    await expect(editDialog(page).locator('[data-field="name"]')).toHaveValue(WITH_ACTIONS)
+    await expect(editDialog(page).locator('[data-field="name"]')).toHaveValue(name)
     await page.waitForLoadState('networkidle')
     await viewportShot(page, `click-${slug(area.name)}`)
     expect(opened, 'edit dialogs opened by one click').toBe(1)
@@ -415,3 +458,110 @@ for (const area of AREAS) {
     expect(await page.getByTestId('mark-paid-dialog').count(), 'the click records nothing').toBe(0)
   })
 }
+
+// ─── AC6 on the Transactions rows ───────────────────────────────────────────────────────────────
+
+/** The Transactions rows' looks, keyed apart from the recurring rows in the same baseline file. */
+const txKey = (project: string): string => `transactions:${project}`
+
+test('transaction rows preserve appearance and pointer behaviour: appearance', async ({ page }, testInfo) => {
+  await openTransactions(page)
+  const rows = page.locator('article[data-transaction-id]')
+  const looks: RowLook[] = []
+  for (let i = 0; i < (await rows.count()); i += 1) {
+    const row = rows.nth(i)
+    const look = await lookOf(row)
+    looks.push({ ...look, ...(await hoverOf(page, row)) })
+  }
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await shot(page, 'transactions-appearance')
+  for (const [i, s] of (await page.getByTestId('list-sheet').all()).entries()) {
+    await s.screenshot({ path: path.join(testInfo.project.outputDir, 'screens', `nested-controls-transactions-sheet-${i + 1}-${testInfo.project.name}.png`), animations: 'disabled' })
+  }
+  if (RECORD) {
+    fs.writeFileSync(BASELINE, `${JSON.stringify({ ...readBaseline(), [txKey(testInfo.project.name)]: looks }, null, 2)}\n`)
+    return
+  }
+  const base = readBaseline()[txKey(testInfo.project.name)] ?? []
+  expect(base.length, `the baseline has the ${testInfo.project.name} transaction rows`).toBeGreaterThan(0)
+  expect(looks.map((l) => l.name), 'the same rows in the same order').toEqual(base.map((l) => l.name))
+  const changed = base.flatMap((b, i) => (looks[i] ? differences(b, looks[i]) : [`${b.name}: missing`]))
+  expect(changed, 'differences from the baseline recorded before this change').toEqual([])
+})
+
+for (const area of AREAS) {
+  test(`transaction rows preserve appearance and pointer behaviour: a click on the ${area.name} opens the actions once`, async ({ page }) => {
+    test.skip(RECORD, 'a recording run only writes the baseline')
+    await openTransactions(page)
+    let opened = 0
+    await page.exposeFunction('__opened', () => {
+      opened += 1
+    })
+    // Counts each time a Transaction Actions dialog is added to the page.
+    await page.evaluate(() => {
+      const w = window as unknown as { __opened: () => void }
+      new MutationObserver((records) => {
+        for (const r of records)
+          for (const n of Array.from(r.addedNodes))
+            if (n instanceof Element && [n, ...Array.from(n.querySelectorAll('h2'))].some((h) => h.tagName === 'H2' && h.textContent === 'Transaction Actions')) w.__opened()
+      }).observe(document.body, { childList: true, subtree: true })
+    })
+    // On a phone the overflowing row's chips all fold into its "+N", so the chip is clicked on the first row that draws one.
+    const row =
+      area.name === 'tag chip'
+        ? page.locator('article[data-transaction-id]').filter({ has: page.getByTestId('row-tags').getByTestId('tag-chip') }).first()
+        : txRow(page, TAG_OVERFLOW.id)
+    const name = ((await row.locator('[data-row-title]').textContent()) ?? '').trim()
+    const target = area.find(row)
+    await target.scrollIntoViewIfNeeded()
+    const box = await target.boundingBox()
+    if (!box) throw new Error(`no box for the ${area.name}`)
+    const at = area.at(box)
+    await page.mouse.click(box.x + at.x, box.y + at.y)
+    await expect(actionDialog(page)).toBeVisible()
+    await expect(actionDialog(page).locator('h2 + p')).toHaveText(name)
+    await page.waitForLoadState('networkidle')
+    await viewportShot(page, `transaction-click-${slug(area.name)}`)
+    expect(opened, 'action dialogs opened by one click').toBe(1)
+    expect(await actionDialog(page).count(), 'action dialogs on the page').toBe(1)
+  })
+}
+
+for (const gesture of GESTURES) {
+  test(`transaction rows preserve appearance and pointer behaviour: ${gesture} on the title opens the actions`, async ({ page }) => {
+    test.skip(RECORD, 'a recording run only writes the baseline')
+    await openTransactions(page)
+    const title = txRow(page, TAG_OVERFLOW.id).getByRole('button', { name: TAG_OVERFLOW.description, exact: true })
+    if (gesture === 'click') await title.click()
+    else {
+      await title.focus()
+      await expect(title).toBeFocused()
+      await page.keyboard.press(gesture)
+    }
+    await expect(actionDialog(page)).toBeVisible()
+    await viewportShot(page, `transaction-title-${gesture.toLowerCase()}`)
+    expect(await actionDialog(page).count(), 'action dialogs on the page').toBe(1)
+  })
+}
+
+test('transaction rows preserve appearance and pointer behaviour: "+N" shows the tags and opens nothing', async ({ page }) => {
+  test.skip(RECORD, 'a recording run only writes the baseline')
+  await openTransactions(page)
+  const row = txRow(page, TAG_OVERFLOW.id)
+  const more = row.getByTestId('row-tags-more')
+  await expect(more).toHaveAttribute('aria-expanded', 'false')
+  await more.click()
+  await expect(more).toHaveAttribute('aria-expanded', 'true')
+  await expect(row.locator('[data-row-tags-rest]')).toBeVisible()
+  await page.waitForLoadState('networkidle')
+  await viewportShot(page, 'transaction-tags-more')
+  expect(await actionDialog(page).count(), '"+N" opens no action dialog').toBe(0)
+  // Keyboard: Tab from the title reaches "+N", and Enter on it toggles the tags without opening the row.
+  const title = row.getByRole('button', { name: TAG_OVERFLOW.description, exact: true })
+  await title.focus()
+  await page.keyboard.press('Tab')
+  await expect(more).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(more).toHaveAttribute('aria-expanded', 'false')
+  expect(await actionDialog(page).count(), 'Enter on "+N" opens no action dialog').toBe(0)
+})

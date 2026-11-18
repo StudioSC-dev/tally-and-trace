@@ -72,8 +72,8 @@ async function openPage(browser) {
 }
 
 const everShownEmpty = (page) => page.evaluate(() => window.__txnSeen === true)
-const rowFor = (page, description) => page.locator('article[role="button"]').filter({ hasText: description }).first()
-const rowCount = (page) => page.locator('article[role="button"]').count()
+const rowFor = (page, description) => page.locator('article[data-testid="row"]').filter({ hasText: description }).first()
+const rowCount = (page) => page.locator('article[data-testid="row"]').count()
 
 /** The API's total for the exact list request the page sent. */
 async function apiTotalFor(request) {
@@ -143,7 +143,7 @@ async function scenarioB(browser) {
     await h.check('b.alert-above', 'B', async () => {
       const box = await alert.boundingBox()
       const retry = await alert.locator(tid('transactions-retry')).isVisible().catch(() => false)
-      const row = await page.locator('article[role="button"]').first().boundingBox()
+      const row = await page.locator('article[data-testid="row"]').first().boundingBox()
       if (!box || !retry) return 'no alert with Retry'
       if (!row) return 'no rows'
       return box.y + box.height <= row.y || `alert bottom ${box.y + box.height} below row top ${row.y}`

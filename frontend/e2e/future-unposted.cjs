@@ -53,7 +53,7 @@ const postedBox = (modal) => modal.getByRole('checkbox', { name: 'Mark as posted
 const noteOf = (modal) => modal.locator('[data-testid="future-posted-note"]')
 const isCreate = (r) => r.method() === 'POST' && new URL(r.url()).pathname.replace(/\/$/, '').endsWith('/transactions')
 const isUpdate = (r) => r.method() === 'PUT' && /\/transactions\/\d+$/.test(new URL(r.url()).pathname)
-const rowFor = (page, description) => page.locator('article[role="button"]').filter({ hasText: description }).first()
+const rowFor = (page, description) => page.locator('article[data-testid="row"]').filter({ hasText: description }).first()
 
 async function openPage(browser) {
   const { ctx, page } = await h.newPage(browser)

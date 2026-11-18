@@ -566,6 +566,18 @@ body {
   }
 
   /*
+    The tag line is positioned too (its ruler measures inside it), which would lift
+    its chips above the area: it lets the pointer through, and only its "+N" takes it.
+  */
+  :where(.row-opener) .row-tags {
+    pointer-events: none;
+  }
+
+  :where(.row-opener) .row-tags :where(button) {
+    pointer-events: auto;
+  }
+
+  /*
     The selection rule (docs/design-system.md, "Selection rule"): selection is
     not an action, so a selected tab or segment is never filled like the primary
     button. Selected is a leaf background, ink 600 and a 2px spine rule

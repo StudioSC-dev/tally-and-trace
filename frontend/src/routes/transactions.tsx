@@ -2713,16 +2713,8 @@ export function TransactionsPage() {
         data-pending={pendingKind}
         data-highlighted={highlightedId === transaction.id ? 'true' : undefined}
         className={`${actionable ? 'hover:bg-sunken cursor-pointer' : 'cursor-default'} ${pendingKind === 'delete' ? 'opacity-50' : ''} ${highlightedId === transaction.id ? 'ring-2 ring-inset ring-ink' : ''} ${cardStateClasses}`}
-        onClick={open}
-        role="button"
-        tabIndex={0}
-        aria-disabled={actionable ? undefined : 'true'}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault()
-            open()
-          }
-        }}
+        onOpen={open}
+        openDisabled={!actionable}
         title={description}
         status={<StatusText tone={ROW_STATUS_TONES[status]} data-testid="transaction-status">{STATUS_LABELS[status]}</StatusText>}
         meta={

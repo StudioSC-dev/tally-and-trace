@@ -51,6 +51,8 @@ interface RowProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
    * so its controls (the actions, a detail's buttons, the "+N") are never inside another one.
    */
   onOpen?: () => void
+  /** The record cannot be opened for now (a save of its own is in flight): the title says so and shows no pointer. */
+  openDisabled?: boolean
 }
 
 /**
@@ -59,7 +61,7 @@ interface RowProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
  * controls, then the amount. A row with one meta line is 56px between rules on desktop and 64px
  * on a phone. A row that opens its record takes `onOpen`; other attributes pass through to the `<article>`.
  */
-export function Row({ title, badges, tags = [], meta, status, details = [], actions, amount, kind, wrap = false, onOpen, className = '', ...rest }: RowProps) {
+export function Row({ title, badges, tags = [], meta, status, details = [], actions, amount, kind, wrap = false, onOpen, openDisabled = false, className = '', ...rest }: RowProps) {
   const lines = details.filter((d) => d !== undefined && d !== null && d !== false && d !== '')
   const lineRef = useRef<HTMLDivElement>(null)
   const rulerRef = useRef<HTMLSpanElement>(null)
@@ -117,7 +119,14 @@ export function Row({ title, badges, tags = [], meta, status, details = [], acti
         <div className="min-w-0 flex-1">
           <div ref={lineRef} className="flex min-w-0 items-center gap-2">
             {onOpen ? (
-              <button type="button" data-testid="row-open" data-row-title className="row-open min-w-0 truncate text-left text-base font-semibold text-ink" onClick={onOpen}>
+              <button
+                type="button"
+                data-testid="row-open"
+                data-row-title
+                aria-disabled={openDisabled ? 'true' : undefined}
+                className={`row-open min-w-0 truncate text-left text-base font-semibold text-ink ${openDisabled ? 'cursor-default' : ''}`}
+                onClick={onOpen}
+              >
                 {title}
               </button>
             ) : (

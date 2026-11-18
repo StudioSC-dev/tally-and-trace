@@ -30,7 +30,7 @@ interface PageCase {
 /** The three pages. `row` is the fixed locator for the first content row of each. */
 const PAGES: PageCase[] = [
   { name: 'dashboard', path: '/', row: (page) => page.getByTestId('quick-balance-tile').first(), late: (page) => page.getByTestId('payables'), label: (row) => row.getByTestId('quick-balance-name'), amount: (row) => row.getByTestId('quick-balance-balance') },
-  { name: 'transactions', path: '/transactions', row: (page) => page.locator('article[data-transaction-id]').first(), late: (page) => page.getByTestId('due-list'), label: (row) => row.locator('p.text-base'), amount: (row) => row.locator('p.text-lg') },
+  { name: 'transactions', path: '/transactions', row: (page) => page.locator('article[data-transaction-id]').first(), late: (page) => page.getByTestId('due-list'), label: (row) => row.locator('[data-row-title]'), amount: (row) => row.locator('p.text-lg') },
   { name: 'allocations', path: '/allocations', row: (page) => page.locator('[data-testid^="kind-section-"] article').first(), label: (row) => row.locator('[data-row-title]'), amount: (row) => row.locator('p.text-lg') },
 ]
 

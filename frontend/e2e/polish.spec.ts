@@ -388,11 +388,11 @@ test('every control shows a keyboard focus ring: no .focus-ring:focus rule', asy
 
 /**
  * The rows at a list sheet's corners, where a sheet that clipped would cut a focused row's ring. `focus` is what takes
- * focus there: a transaction row is itself the control; a recurring row's title is (STU-683).
+ * focus there: the row's title, which is the row's control (STU-683).
  */
 const SHEET_ROWS = [
-  { name: 'first transaction row', url: '/transactions', heading: 'Transactions', which: 'first', focus: 'row' },
-  { name: 'last transaction row', url: '/transactions', heading: 'Transactions', which: 'last', focus: 'row' },
+  { name: 'first transaction row', url: '/transactions', heading: 'Transactions', which: 'first', focus: 'title' },
+  { name: 'last transaction row', url: '/transactions', heading: 'Transactions', which: 'last', focus: 'title' },
   { name: 'first recurring row', url: '/allocations?tab=recurring', heading: 'Allocations', which: 'first', focus: 'title' },
 ] as const
 

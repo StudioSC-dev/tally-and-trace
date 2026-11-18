@@ -215,7 +215,7 @@ async function setRange(page, start, end) {
  */
 const lists = async (page) => {
   const main = await page.evaluate(() => {
-    const nameOf = (a) => a.querySelector('p.text-base')?.textContent.trim() ?? ''
+    const nameOf = (a) => a.querySelector('[data-row-title]')?.textContent.trim() ?? ''
     return [...document.querySelectorAll('article')].filter((a) => !a.closest('[data-testid="due-section"]')).map(nameOf)
   })
   return { main, upcoming: (await readTab(page, 'upcoming')).map((r) => r.name) }

@@ -585,7 +585,8 @@ for (const gesture of ['click', 'Enter'] as const) {
     const row = txRow(page, TX)
     const id = Number(await row.getAttribute('data-transaction-id'))
     expect(household.transactions.find((t) => t.id === id && t.view !== 'limited' && t.description === TX), 'the row is the fixture record').toBeTruthy()
-    await trigger(page, row, gesture, 'row')
+    // The title is the row's control (STU-683): a click lands anywhere on the row, a key goes to the title.
+    await trigger(page, gesture === 'click' ? row : row.getByRole('button', { name: TX, exact: true }), gesture, 'row')
     const modal = actionModal(page)
     await expect(modal).toBeVisible()
     expect(await modal.locator('h2 + p').textContent(), 'the details dialog names the row it opened from').toBe(TX)
