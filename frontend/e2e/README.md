@@ -4,11 +4,16 @@ The `*.spec.ts` files are a Playwright suite run by `pnpm test:e2e`, against a
 mocked API, with Chromium and the desktop and phone projects.
 
 The suite serves the app from a production build (STU-771). Playwright's
-`webServer` runs `vite build --minify false` once, then serves `dist/` with
+`webServer` runs `vite build --minify false` once into
+`node_modules/.e2e-dist/$E2E_PORT`, then serves that directory with
 `vite preview --port $E2E_PORT --strictPort` (`E2E_PORT` defaults to 4317), so
-no page waits for the dev server to transform its modules. The build is not
-minified, so the CSS keeps the tokens as written (`100ms`, not `.1s`), as the
-dev server served them. A failed build stops the run before any test, and a
+no page waits for the dev server to transform its modules. The build never
+goes to the shared `dist/`, so another build (`pnpm build`, or a run on another
+port) cannot replace the files a running preview serves, which would load a
+page with no stylesheet. The build is not minified, so the suite covers an
+unminified production build, not the minified output that ships; the CSS keeps
+the tokens as written (`100ms`, not `.1s`), as the dev server served them. A
+failed build stops the run before any test, and a
 port already in use fails it: Playwright never attaches to a server it did
 not start, and preview never moves to another port. The `/api` proxy in
 `vite.config.ts` applies to preview as to the dev server; the specs fake

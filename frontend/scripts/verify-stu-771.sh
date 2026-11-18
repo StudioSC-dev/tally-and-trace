@@ -78,13 +78,16 @@ scenario_ac1() {
   local command
   command="$(cd "$FRONTEND" && node --input-type=module -e "const c = (await import('./playwright.config.ts')).default; process.stdout.write(c.webServer.command)")"
   log "  webServer.command: $command"
-  if [[ ! "$command" =~ ^pnpm\ exec\ vite\ build\ (--minify\ false\ )?\&\&\ pnpm\ exec\ vite\ preview\ --port\ $PORT\ --strictPort$ ]] \
-    || [[ "$command" =~ (^|[^a-z])vite\ --port ]]; then
-    flunk "$name" "webServer.command is not 'vite build [--minify false] && vite preview --port $PORT --strictPort'"
+  local outdir="node_modules/.e2e-dist/$PORT"
+  if [[ "$command" != "pnpm exec vite build --minify false --outDir $outdir && pnpm exec vite preview --outDir $outdir --port $PORT --strictPort" ]]; then
+    flunk "$name" "webServer.command is not 'vite build --minify false --outDir $outdir && vite preview --outDir $outdir --port $PORT --strictPort'"
     return
   fi
 
-  # (b) A successful build runs once, before preview listens on E2E_PORT, and no dev server starts.
+  # (b) A successful build runs once into the run's own directory, before preview listens on E2E_PORT; no dev server
+  # starts, and the shared dist/ is left as it was.
+  local dist_before dist_after
+  dist_before="$(cd "$FRONTEND" && find dist -printf '%p %T@ %s\n' 2>/dev/null | sort | sha256sum)"
   (cd "$FRONTEND" && DEBUG=pw:webserver "$PW" test e2e/manifest.spec.ts --project=desktop --reporter=line \
     --output "$out/ok-results") >"$out/ok.log" 2>&1
   code=$?
@@ -93,8 +96,10 @@ scenario_ac1() {
   build_line="$(grep -n 'built in' "$out/ok.log" | head -1 | cut -d: -f1)"
   ready_line="$(grep -n "Local: *http://localhost:$PORT/" "$out/ok.log" | head -1 | cut -d: -f1)"
   dev_lines="$(grep -c 'ready in' "$out/ok.log")"
-  log "  build+preview run: exit $code, builds $builds, build line ${build_line:-none}, preview line ${ready_line:-none}, dev-server ready lines $dev_lines"
-  if [ "$code" -ne 0 ] || [ "$builds" -ne 1 ] || [ -z "$ready_line" ] || [ "$build_line" -ge "$ready_line" ] || [ "$dev_lines" -ne 0 ]; then
+  dist_after="$(cd "$FRONTEND" && find dist -printf '%p %T@ %s\n' 2>/dev/null | sort | sha256sum)"
+  log "  build+preview run: exit $code, builds $builds, build line ${build_line:-none}, preview line ${ready_line:-none}, dev-server ready lines $dev_lines, $outdir/index.html: $([ -f "$FRONTEND/$outdir/index.html" ] && echo present || echo missing), dist/ unchanged: $([ "$dist_before" = "$dist_after" ] && echo yes || echo no)"
+  if [ "$code" -ne 0 ] || [ "$builds" -ne 1 ] || [ -z "$ready_line" ] || [ "$build_line" -ge "$ready_line" ] || [ "$dev_lines" -ne 0 ] \
+    || [ ! -f "$FRONTEND/$outdir/index.html" ] || [ "$dist_before" != "$dist_after" ]; then
     flunk "$name" "the successful start did not build once and then preview on $PORT (see $out/ok.log)"
     return
   fi
@@ -106,6 +111,9 @@ scenario_ac1() {
   ln -s "$FRONTEND/node_modules" "$broken/node_modules"
   printf '\nexport const stu771BrokenBuild = ;\n' >>"$broken/src/main.tsx"
   : >"$out/port-probe.log"
+  # The copy's node_modules is this checkout's, so its build would land in the same run directory: it must not change.
+  local stamp_before stamp_after
+  stamp_before="$(stat -c %Y.%s "$FRONTEND/$outdir/index.html" 2>/dev/null)"
   (for _ in $(seq 1 600); do port_open && echo "open $(date +%s)" >>"$out/port-probe.log"; sleep 0.2; done) &
   local prober=$!
   (cd "$broken" && DEBUG=pw:webserver "$PW" test e2e/manifest.spec.ts --project=desktop --reporter=line \
@@ -114,12 +122,14 @@ scenario_ac1() {
   kill "$prober" 2>/dev/null
   wait "$prober" 2>/dev/null
   rm -f "$broken/node_modules"
+  stamp_after="$(stat -c %Y.%s "$FRONTEND/$outdir/index.html" 2>/dev/null)"
   local preview_lines opened
   preview_lines="$(grep -c "Local: *http://localhost" "$out/broken.log")"
   opened="$(wc -l <"$out/port-probe.log")"
-  log "  broken build run: exit $code, preview lines $preview_lines, port seen open $opened times, dist written: $([ -e "$broken/dist/index.html" ] && echo yes || echo no)"
+  log "  broken build run: exit $code, preview lines $preview_lines, port seen open $opened times, build output written: $([ -e "$broken/dist/index.html" ] || [ "$stamp_before" != "$stamp_after" ] && echo yes || echo no)"
   if [ "$code" -eq 0 ] || ! grep -q 'Build failed\|error during build' "$out/broken.log" || [ "$preview_lines" -ne 0 ] \
-    || [ "$opened" -ne 0 ] || ! grep -q 'config.webServer' "$out/broken.log"; then
+    || [ "$opened" -ne 0 ] || ! grep -q 'config.webServer' "$out/broken.log" || [ -e "$broken/dist/index.html" ] \
+    || [ "$stamp_before" != "$stamp_after" ]; then
     flunk "$name" "a failed build did not stop startup before preview (see $out/broken.log)"
     return
   fi
@@ -142,7 +152,7 @@ scenario_ac1() {
     --output "$out/busy-results") >"$out/busy.log" 2>&1
   code=$?
   local strict_code
-  (cd "$FRONTEND" && timeout 60 pnpm exec vite preview --port "$PORT" --strictPort) >"$out/busy-preview.log" 2>&1
+  (cd "$FRONTEND" && timeout 60 pnpm exec vite preview --outDir "$outdir" --port "$PORT" --strictPort) >"$out/busy-preview.log" 2>&1
   strict_code=$?
   kill "$decoy" 2>/dev/null
   wait "$decoy" 2>/dev/null

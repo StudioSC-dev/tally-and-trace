@@ -2,6 +2,9 @@ import { defineConfig, devices } from '@playwright/test'
 
 const port = Number(process.env.E2E_PORT ?? 4317)
 const baseURL = `http://localhost:${port}`
+// Each run builds into its own directory, keyed by its port, never the shared `dist/`: a build that rewrites the files
+// a running preview is serving makes a page load with no stylesheet (STU-771).
+const outDir = `node_modules/.e2e-dist/${port}`
 
 export default defineConfig({
   testDir: 'e2e',
@@ -29,7 +32,7 @@ export default defineConfig({
   // `--minify false` keeps the CSS as written, as the dev server served it: specs read tokens such as `100ms`, which
   // the minifier would rewrite as `.1s`.
   webServer: {
-    command: `pnpm exec vite build --minify false && pnpm exec vite preview --port ${port} --strictPort`,
+    command: `pnpm exec vite build --minify false --outDir ${outDir} && pnpm exec vite preview --outDir ${outDir} --port ${port} --strictPort`,
     url: baseURL,
     reuseExistingServer: false,
     timeout: 300_000,
