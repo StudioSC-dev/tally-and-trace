@@ -1761,8 +1761,7 @@ export function AllocationsPage() {
           </Button>
         )}
       </PageHeader>
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border border-line p-2 bg-surface">
-          <nav className="flex flex-wrap gap-1">
+          <nav className="grid grid-cols-4 gap-1 sm:flex">
             {[
               { value: 'subscriptions' as const, label: 'Recurring' },
               { value: 'budgets' as const, label: 'Budgets' },
@@ -1774,17 +1773,13 @@ export function AllocationsPage() {
                   key={tab.value}
                   selected={activeTab === tab.value}
                   onClick={() => setActiveTab(tab.value)}
-                  className="px-4 py-2 text-sm"
+                  className="min-w-0 whitespace-nowrap px-1 py-2 text-sm sm:px-4"
                 >
                   {tab.label}
                   </Segment>
               )
             })}
           </nav>
-          <p className="text-xs sm:text-sm text-muted">
-            Switch tabs to view recurring subscriptions, monthly budgets, savings envelopes, or your wishlist.
-          </p>
-                </div>
 
       {activeTab === 'subscriptions' && (
         <div>
