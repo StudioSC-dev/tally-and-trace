@@ -734,6 +734,10 @@ export function TransactionsPage() {
     () => new Map(accounts.map((account) => [account.id, account.currency as CurrencyCode])),
     [accounts],
   )
+  const accountNames = useMemo(
+    () => new Map(accounts.map((account) => [account.id, account.name])),
+    [accounts],
+  )
   // The form's account pickers offer only accounts the caller may add transactions to
   // (a viewer's shared account can be read and filtered by, never written to).
   const writableAccounts = useMemo(
@@ -2883,6 +2887,7 @@ export function TransactionsPage() {
         onOpenTransaction={openActionModal}
         onSeeScheduled={seeScheduled}
         accountCurrencies={accountCurrencies}
+        accountNames={accountNames}
       />
 
       {/* Search and Filters */}

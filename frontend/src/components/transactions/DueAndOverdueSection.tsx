@@ -310,6 +310,8 @@ interface Props {
   onSeeScheduled: () => void
   /** Each account's currency by id, so a pending foreign row shows its face in its own currency; a row whose account is missing keeps its stored figure. */
   accountCurrencies?: ReadonlyMap<number, CurrencyCode>
+  /** Each account's name by id, so a one-off pending row shows the account it is tagged to; a Limited row names its own account. */
+  accountNames?: ReadonlyMap<number, string>
 }
 
 /** The last batch review's outcome: its line and one failure per entry that was not reviewed, kept for its Manila day. */
@@ -324,7 +326,7 @@ const buttonClass =
 const primaryButtonClass =
   'bg-ok px-2.5 py-1 text-xs font-semibold text-paper hover:bg-ok disabled:opacity-50 transition-colors focus-ring'
 
-export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransaction, onSeeScheduled, accountCurrencies }: Props) {
+export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransaction, onSeeScheduled, accountCurrencies, accountNames }: Props) {
   const panelId = useId()
   const [open, setOpen] = useState(true)
   // The selected tab: Due and overdue on every mount, never stored.
@@ -747,6 +749,10 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
       </button>
     ))
 
+  // The account a one-off row is tagged to: a Limited row names it through its reference, every other row by id.
+  const transactionAccountName = (txn: Transaction) =>
+    txn.view === 'limited' ? txn.account?.name : accountNames?.get(txn.account_id)
+
   const pendingRow = (row: DuePendingRow) => {
     const txn = row.transaction
     const accountCurrency = accountCurrencies?.get(txn.account_id)
@@ -763,7 +769,8 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
         <div>
           <p className="text-sm font-medium text-ink">{transactionDescription(txn) ?? 'Pending transaction'}</p>
           <p className="text-xs text-muted">
-            {formatEntryDate(row.date)} · Pending
+            {formatEntryDate(row.date)}
+            {transactionAccountName(txn) && ` · ${transactionAccountName(txn)}`} · Pending
             {row.overdue && <span className="text-danger" data-testid="due-overdue"> · Overdue</span>}
           </p>
         </div>
@@ -803,7 +810,8 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
         <div>
           <p className="text-sm font-medium text-ink">{transactionDescription(txn) ?? 'Pending transaction'}</p>
           <p className="text-xs text-muted">
-            {formatEntryDate(row.date)} · <span data-testid="due-logged">{row.logged}</span>
+            {formatEntryDate(row.date)}
+            {transactionAccountName(txn) && ` · ${transactionAccountName(txn)}`} · <span data-testid="due-logged">{row.logged}</span>
           </p>
         </div>
         <div className="flex-shrink-0 space-y-1 text-right">
