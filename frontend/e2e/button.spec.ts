@@ -59,6 +59,11 @@ const OLD_GREEN = 'rgb(42, 100, 64)'
 const TRANSPARENT = 'rgba(0, 0, 0, 0)'
 /** The page-header primary's desktop limit (AC6): at most 260px wide. */
 const HEADER_MAX_PX = 260
+/**
+ * The Allocations tab bar's helper line, which STU-686 removed (its AC6). The baseline was recorded before that and
+ * still holds it, so the layout check drops it from the base text; everything else must match as recorded.
+ */
+const REMOVED_ALLOCATIONS_HELP = 'Switch tabs to view recurring subscriptions, monthly budgets, savings envelopes, or your wishlist.'
 
 /** Selection controls, owned by STU-679: AC2 skips them and AC6 checks they are untouched. */
 const SELECTION = '[role="tab"], [aria-pressed], [aria-current], [role="switch"]'
@@ -1095,7 +1100,7 @@ test.describe('AC6: button migration preserves surrounding behavior and layout',
       const selectionNow = controls.filter((c) => c.selection).map((c) => `${c.name}: ${c.look}, ${c.height}px`)
       const selectionBase = base.controls.flatMap((c, i) => (c.selection ? [`${c.name}: ${c.look}, ${floor(c.height, controls[i])}px`] : []))
       expect(selectionNow, 'selection controls and tabs are untouched').toEqual(selectionBase)
-      expect(text, 'labels and status text are untouched').toBe(base.text)
+      expect(text, 'labels and status text are untouched').toBe(base.text.replace(REMOVED_ALLOCATIONS_HELP, ''))
     })
 
     for (const c of migratedCases(s)) {
