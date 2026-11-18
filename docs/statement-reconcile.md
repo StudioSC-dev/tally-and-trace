@@ -242,6 +242,19 @@ A transfer is one row carrying both accounts' sides, so:
 - it is matched on each account's statement and never created twice;
 - it keeps both its dates whatever the line says (the other bank may print another day),
   so it is only paired with a line when its own date is in the period;
+- a bank often prints a transfer out and its fee as two lines, while the app holds one
+  transfer whose fee is part of it. Before any other matching, a posted transfer out of
+  the account in the period, with a fee above 0, is matched to two lines: the one `debit`
+  line equal to its amount and the one `debit` line equal to its fee, both within one
+  day of the transfer's date. A transfer of 2,000.00 with a fee of 25.00 on 2026-07-10
+  matches a line of `2000.00` on 2026-07-10 and a line of `25.00` on 2026-07-11: the dry
+  run shows two `matched` actions with the same `row_id`, and the apply writes nothing
+  to the transfer. It is not paired, and falls to the usual matching, when there is more
+  than one line that could be the amount line or the fee line, when a line could belong
+  to another such transfer, when the amount equals the fee, when the fee line is dated
+  more than a day away, when fees are charged together in one line, or when the bank's
+  amount line differs from the transfer's amount. A transfer into the account is never
+  paired this way (the receiving bank charges no fee of the transfer's);
 - any change to it (its amount, posting or unposting it) is refused, since it would
   change the other account too: "Row 41 is a transfer between accounts 7 and 9: changing
   it here would change both; edit the transfer and run the dry run again";
