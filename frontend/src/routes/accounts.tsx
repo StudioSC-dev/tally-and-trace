@@ -1027,7 +1027,7 @@ export function AccountsPage() {
               <Button
                 variant="secondary"
                 onClick={() => handleToggleActive(actionAccount)}
-                className="flex min-h-12 justify-between gap-3 py-2.5"
+                className="flex h-12 justify-between gap-3 py-2.5"
               >
                 <span>{isAccountActive(actionAccount) ? 'Mark as inactive' : 'Activate account'}</span>
                 <span

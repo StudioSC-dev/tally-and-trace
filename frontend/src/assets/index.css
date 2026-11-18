@@ -703,6 +703,41 @@ body {
 }
 
 /*
+  Touch targets (docs/design-system.md rule 9): on a coarse pointer every control a finger taps is at least 44px
+  tall and wide. The shared controls carry the floor: `.button` (Button and `buttonClass`), `.seg` (Segment,
+  SegmentedControl, Tabs and the pager), the underlined fields, and `.tap-target` for a link used as an action or
+  an icon button. Outside @layer, so it wins over a caller's size utilities (`min-h-6`, `py-1`). Desktop density
+  does not change: a mouse is a fine pointer.
+
+  A row on a ListSheet keeps its pitch (rule 6, "Ledger and Row"): its controls reach 2px into the row's padding,
+  and its "+N" tag button reaches 10px above and below the title line, inside the tag strip's own padding (the
+  strip clips its chips, and a clipped target cannot be hit).
+*/
+@media (pointer: coarse) {
+  .button,
+  .seg,
+  .tap-target,
+  .input-field,
+  .select-field {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .row-actions {
+    margin-block: -2px;
+  }
+
+  .row-tags {
+    margin-block: -10px;
+    padding-block: 10px;
+  }
+
+  .row-more {
+    margin-block: -10px;
+  }
+}
+
+/*
   The default tap flash is a saturated blue rectangle — the one piece of
   unthemed colour left on mobile. Elements carry their own `active:` states.
 */
