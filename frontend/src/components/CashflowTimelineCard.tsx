@@ -21,7 +21,7 @@ export function CashflowTimelineCard({ tag, currency }: { tag?: number; currency
       <div className="p-4 sm:p-6 border-b border-line">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold text-ink">Cash-Flow Timeline</h2>
+            <h2 className="text-lg font-semibold text-ink">Cash-flow timeline</h2>
             <p className="text-sm text-muted">Your running balance over the next 60 days. It shows the low point before payday, not just month-end.</p>
           </div>
           <Link to="/forecast" className="text-sm font-medium text-ink hover:underline flex-shrink-0">

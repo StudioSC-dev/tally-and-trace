@@ -224,28 +224,28 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
   const steps: OnboardingStep[] = useMemo(() => [
     {
       id: 1,
-      title: 'Welcome to Your Dashboard',
+      title: 'Welcome to your dashboard',
       description: 'This is your home overview where you can see all your financial information at a glance.',
       targetSelector: '[data-onboarding="nav-home"]',
       navigateTo: '/',
     },
     {
       id: 2,
-      title: 'Manage Your Accounts',
+      title: 'Manage your accounts',
       description: 'Track all your accounts - cash, savings, checking, and credit cards - in one place.',
       targetSelector: '[data-onboarding="nav-accounts"]',
       navigateTo: '/accounts',
     },
     {
       id: 3,
-      title: 'Record Transactions',
+      title: 'Record transactions',
       description: 'Add and categorize your income and expenses to keep track of your spending.',
       targetSelector: '[data-onboarding="nav-transactions"]',
       navigateTo: '/transactions',
     },
     {
       id: 4,
-      title: 'Set Financial Goals',
+      title: 'Set financial goals',
       description: 'Create budgets, savings goals, and track your progress toward financial milestones.',
       targetSelector: '[data-onboarding="nav-allocations"]',
       navigateTo: '/allocations',
@@ -259,14 +259,14 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
     },
     {
       id: 6,
-      title: 'Budget Envelope Status',
+      title: 'Budget envelope status',
       description: 'Monitor your spending against budget limits to stay on track with your financial goals.',
       targetSelector: '[data-onboarding="budget-envelopes"]',
       navigateTo: '/',
     },
     {
       id: 7,
-      title: 'Upcoming Planned Expenses',
+      title: 'Upcoming planned expenses',
       description: 'See your scheduled payments and expenses to plan ahead and avoid surprises.',
       targetSelector: '[data-onboarding="upcoming-expenses"]',
       navigateTo: '/',
@@ -531,7 +531,7 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
               onClick={handleNext}
               className="ml-auto min-h-8 py-1"
             >
-              {currentStep === TOTAL_STEPS - 1 ? 'Get Started' : 'Next'}
+              {currentStep === TOTAL_STEPS - 1 ? 'Get started' : 'Next'}
             </Button>
           </div>
         </div>

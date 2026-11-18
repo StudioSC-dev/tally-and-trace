@@ -67,8 +67,8 @@ const dayOfLabel = (label) => {
 }
 const NAMED = /^This date is in the past\. The first occurrence will be (.+)\.$/
 
-const addForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Save Recurring Entry' }) })
-const editForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Update Recurring Entry' }) })
+const addForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Save recurring entry' }) })
+const editForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Update recurring entry' }) })
 const field = (form, key) => form.locator(`[data-field="${key}"]`)
 const warning = (form) => form.locator('[data-testid="past-start-warning"]')
 const nextYear = (form) => form.locator('[data-testid="past-start-next-year"]')
@@ -82,13 +82,13 @@ async function openAllocations(browser, user) {
   const native = d.trackNativeDialogs(page)
   await h.uiLogin(page, stack, user)
   await page.goto(`${stack.webUrl}/allocations`)
-  await page.getByRole('button', { name: 'Add Recurring Entry' }).waitFor()
+  await page.getByRole('button', { name: 'Add recurring entry' }).waitFor()
   await h.waitQuiet(page)
   return { ctx, page, native }
 }
 
 async function openAdd(page, bank, name) {
-  await page.getByRole('button', { name: 'Add Recurring Entry' }).click()
+  await page.getByRole('button', { name: 'Add recurring entry' }).click()
   const form = addForm(page)
   await form.waitFor()
   await h.waitQuiet(page)
@@ -109,7 +109,7 @@ const namedDay = async (form) => {
 }
 
 async function saveAdd(page, form) {
-  await page.getByRole('button', { name: 'Save Recurring Entry' }).click()
+  await page.getByRole('button', { name: 'Save recurring entry' }).click()
   await form.waitFor({ state: 'detached' })
   await h.waitQuiet(page)
 }
@@ -300,7 +300,7 @@ async function savedPastDateMatchesWarning(browser) {
     const semi = await openEdit(page, 'Pay semi_monthly')
     await field(semi, 'next_occurrence').fill(pastDate())
     const semiNamed = await namedDay(semi)
-    await page.getByRole('button', { name: 'Update Recurring Entry' }).click()
+    await page.getByRole('button', { name: 'Update recurring entry' }).click()
     await semi.waitFor({ state: 'detached' })
     await h.waitQuiet(page)
     const semiEntry = await entryNamed(user, 'Pay semi_monthly')
@@ -388,7 +388,7 @@ async function editLeavingOnDateMatchesWarning(browser) {
       const named = m ? dayOfLabel(m[1]) : null
       await h.check(`edit_leaving_on_date_matches_warning.${mode}.named`, 'S', () =>
         (named !== null && named > addDays(today, -350)) || `warning ${JSON.stringify(text)}`)
-      await page.getByRole('button', { name: 'Update Recurring Entry' }).click()
+      await page.getByRole('button', { name: 'Update recurring entry' }).click()
       await form.waitFor({ state: 'detached' })
       await h.waitQuiet(page)
       const entry = await entryNamed(user, name)
@@ -411,7 +411,7 @@ async function editLeavingOnDateMatchesWarning(browser) {
         return (named !== null && days[0] === named) || `Due card days ${JSON.stringify(days)}, warning named ${named}`
       })
       await page.goto(`${stack.webUrl}/allocations`)
-      await page.getByRole('button', { name: 'Add Recurring Entry' }).waitFor()
+      await page.getByRole('button', { name: 'Add recurring entry' }).waitFor()
       await h.waitQuiet(page)
     }
   } finally {

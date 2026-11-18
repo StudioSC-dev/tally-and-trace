@@ -12,7 +12,7 @@
 //   (b) search "rent" and the account filter narrow both kinds of row; switching to To date
 //       and back keeps the search and the filter
 //   (c) row actions: a transaction row opens the action modal, and changing its date in Edit
-//       moves it; Mark as Posted posts it; an occurrence's Mark paid sends one materialise POST
+//       moves it; Mark as posted posts it; an occurrence's Mark paid sends one materialise POST
 //       and the row goes; Change date opens its dialog
 //   (d) the pager: 60 rows at 25 a page read 1-25, 26-50, 51-60 going Next, Previous returns
 //       to 26-50, a filter change and a page-size change go back to page 1
@@ -189,7 +189,7 @@ async function showFilters(page) {
   const toggle = page.getByRole('button', { name: 'Show filters' })
   if (await toggle.count()) await toggle.click()
 }
-const actionModal = (page) => page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: 'Transaction Actions', exact: true }) })
+const actionModal = (page) => page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: 'Transaction actions', exact: true }) })
 
 // (a) The T+45 one-off and the T+300 annual occurrence.
 async function farRows(browser) {
@@ -266,7 +266,7 @@ async function searchAndAccount(browser) {
 
 // (c) Row actions.
 async function rowActions(browser) {
-  console.log('\n=== (c) row actions: Edit moves a row, Mark as Posted posts it, Mark paid sends one POST, Change date opens its dialog')
+  console.log('\n=== (c) row actions: Edit moves a row, Mark as posted posts it, Mark paid sends one POST, Change date opens its dialog')
   const today = manilaToday()
   const u = await makeUser('c')
   const bank = await account(u, 'C Checking')
@@ -287,29 +287,29 @@ async function rowActions(browser) {
   await page.locator(`${LIST} li`).filter({ hasText: 'C Edit me' }).locator('[data-testid="upcoming-transaction"]').click()
   const modal = actionModal(page)
   await modal.waitFor({ timeout: 10000 })
-  check('(c) a transaction row opens the action modal with Edit, Delete and Mark as Posted',
-    [await modal.getByRole('button', { name: 'Edit Transaction', exact: true }).count(), await modal.getByRole('button', { name: 'Delete Transaction', exact: true }).count(),
-      await modal.getByRole('button', { name: 'Mark as Posted', exact: true }).count()], [1, 1, 1])
-  await modal.getByRole('button', { name: 'Edit Transaction', exact: true }).click()
-  const form = page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: 'Edit Transaction', exact: true }) })
+  check('(c) a transaction row opens the action modal with Edit, Delete and Mark as posted',
+    [await modal.getByRole('button', { name: 'Edit transaction', exact: true }).count(), await modal.getByRole('button', { name: 'Delete transaction', exact: true }).count(),
+      await modal.getByRole('button', { name: 'Mark as posted', exact: true }).count()], [1, 1, 1])
+  await modal.getByRole('button', { name: 'Edit transaction', exact: true }).click()
+  const form = page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: 'Edit transaction', exact: true }) })
   await form.waitFor()
   await waitQuiet(page)
   await form.locator('[data-testid="transaction-date"]').fill(addDays(today, 40))
   const put = page.waitForResponse((r) => r.request().method() === 'PUT' && new URL(r.url()).pathname.endsWith(`/transactions/${edit.id}`))
-  await form.getByRole('button', { name: 'Update Transaction', exact: true }).click()
+  await form.getByRole('button', { name: 'Save changes', exact: true }).click()
   check('(c) saving the new date is 200', (await put).status(), 200)
   await form.waitFor({ state: 'detached' })
   check('(c) the edited row moved after the others', await namesBecome(page, ['C Post me', 'C Pay', 'C Move', 'C Edit me']), ['C Post me', 'C Pay', 'C Move', 'C Edit me'])
   check('(c) and reads its new day', (await readRows(page)).find((r) => r.name === 'C Edit me')?.day, addDays(today, 40))
 
-  // Mark as Posted posts the row.
+  // Mark as posted posts the row.
   await page.locator(`${LIST} li`).filter({ hasText: 'C Post me' }).locator('[data-testid="upcoming-transaction"]').click()
   await modal.waitFor({ timeout: 10000 })
   await waitQuiet(page)
-  await modal.getByRole('button', { name: 'Mark as Posted', exact: true }).click()
+  await modal.getByRole('button', { name: 'Mark as posted', exact: true }).click()
   const posted = page.waitForResponse((r) => ['PUT', 'POST'].includes(r.request().method()) && /\/transactions\//.test(new URL(r.url()).pathname))
-  await modal.getByRole('button', { name: 'Save Posted Amount', exact: true }).click()
-  check('(c) Mark as Posted is accepted', (await posted).status() < 300, true)
+  await modal.getByRole('button', { name: 'Save posted amount', exact: true }).click()
+  check('(c) Mark as posted is accepted', (await posted).status() < 300, true)
   await waitQuiet(page)
   // The action modal may stay open on the posted row: close it when it does.
   const closeModal = page.getByRole('button', { name: 'Close actions modal' })

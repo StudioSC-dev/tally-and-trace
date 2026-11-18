@@ -41,8 +41,8 @@ const wireIn = (days) => `${new Date(Date.now() + days * 86400000).toISOString()
 const posts = (log) => log.filter((r) => r.method === 'POST' && pathOf(r.url).endsWith('/budget-entries')).length
 
 const modalClose = (page) => page.getByLabel('Close allocation modal')
-const addForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Save Recurring Entry' }) })
-const editForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Update Recurring Entry' }) })
+const addForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Save recurring entry' }) })
+const editForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Update recurring entry' }) })
 const field = (form, key) => form.locator(`[data-field="${key}"]`)
 
 /** A fresh signed-in page on Allocations, its native dialogs tracked and its requests logged. */
@@ -53,13 +53,13 @@ async function openAllocations(browser) {
   const log = h.logRequests(page)
   await h.uiLogin(page, stack, owner)
   await page.goto(`${stack.webUrl}/allocations`)
-  await page.getByRole('button', { name: 'Add Recurring Entry' }).waitFor()
+  await page.getByRole('button', { name: 'Add recurring entry' }).waitFor()
   await h.waitQuiet(page)
   return { ctx, page, native, log }
 }
 
 async function openAddForm(page) {
-  await page.getByRole('button', { name: 'Add Recurring Entry' }).click()
+  await page.getByRole('button', { name: 'Add recurring entry' }).click()
   await modalClose(page).waitFor()
   await h.waitQuiet(page)
   return addForm(page)
@@ -106,7 +106,7 @@ async function scenarioA(browser) {
     await field(form, 'account_id').selectOption({ label: bank.name })
     // Two fields fail the browser's check in this attempt; only the first is shown and focused.
     const firstBefore = posts(log)
-    await form.getByRole('button', { name: 'Save Recurring Entry' }).click()
+    await form.getByRole('button', { name: 'Save recurring entry' }).click()
     await h.check('a.two-invalid', 'S', async () => {
       const flagged = [
         await field(form, 'name').evaluate((el) => el.validity.valueMissing),
@@ -124,7 +124,7 @@ async function scenarioA(browser) {
     await field(form, 'name').fill('')
     await field(form, 'amount').fill('250')
     const before = posts(log)
-    await form.getByRole('button', { name: 'Save Recurring Entry' }).click()
+    await form.getByRole('button', { name: 'Save recurring entry' }).click()
     await checkFieldError(page, form, log, 'a', 'name', 'Please provide a name for the recurring entry.', before)
     await h.check('a.typing-clears', 'B', async () => {
       await field(form, 'name').fill('x')
@@ -145,7 +145,7 @@ async function scenarioB(browser) {
     await field(form, 'name').fill('Dialog B Entry')
     await field(form, 'amount').fill('250')
     const before = posts(log)
-    await form.getByRole('button', { name: 'Save Recurring Entry' }).click()
+    await form.getByRole('button', { name: 'Save recurring entry' }).click()
     await checkFieldError(page, form, log, 'b', 'account_id', 'Please select an account to post this recurring entry into.', before)
   } finally {
     await d.checkNoNativeDialogs(h, 'b', native)
@@ -163,7 +163,7 @@ async function scenarioC(browser) {
     await form.getByRole('button', { name: 'After runs', exact: true }).click()
     await field(form, 'max_occurrences').fill('')
     const before = posts(log)
-    await form.getByRole('button', { name: 'Save Recurring Entry' }).click()
+    await form.getByRole('button', { name: 'Save recurring entry' }).click()
     await checkFieldError(page, form, log, 'c', 'max_occurrences', 'Please specify how many occurrences before the entry stops.', before)
   } finally {
     await d.checkNoNativeDialogs(h, 'c', native)
@@ -180,7 +180,7 @@ async function scenarioE(browser) {
     await fillValid(form, 'Dialog E Entry')
     await field(form, 'amount').fill('0.005')
     const before = posts(log)
-    await form.getByRole('button', { name: 'Save Recurring Entry' }).click()
+    await form.getByRole('button', { name: 'Save recurring entry' }).click()
     await checkFieldError(page, form, log, 'e', 'amount', null, before)
     await h.check('e.browser-text', 'B', async () => {
       const [shown, native] = await Promise.all([
@@ -211,7 +211,7 @@ async function scenarioD(browser) {
     await modalClose(page).waitFor()
     await h.waitQuiet(page)
     const form = editForm(page)
-    const opener = form.getByRole('button', { name: 'Delete Recurring Entry' })
+    const opener = form.getByRole('button', { name: 'Delete recurring entry' })
     fail = await h.failWith(page, isDelete(entry.id), 409, { times: 1 })
     await opener.click()
     await h.check('d.shown', 'B', async () =>
@@ -267,7 +267,7 @@ async function scenarioF(browser) {
     await fillValid(form, 'Dialog F Entry')
     await field(form, 'lead_time_days').fill('-1')
     const before = posts(log)
-    await form.getByRole('button', { name: 'Save Recurring Entry' }).click()
+    await form.getByRole('button', { name: 'Save recurring entry' }).click()
     await checkFieldError(page, form, log, 'f', 'lead_time_days', null, before)
     await h.check('f.browser-text', 'B', async () => {
       const [shown, browserText] = await Promise.all([
@@ -304,7 +304,7 @@ async function scenarioG(browser) {
     await h.check('g.native-invalid', 'S', async () =>
       (await field(form, 'day_of_month').evaluate((el) => el.validity.rangeOverflow)) || 'day 45 is not rangeOverflow')
     const before = posts(log)
-    await form.getByRole('button', { name: 'Save Recurring Entry' }).click()
+    await form.getByRole('button', { name: 'Save recurring entry' }).click()
     await checkFieldError(page, form, log, 'g', 'day_of_month', null, before)
     await h.check('g.typing-clears', 'B', async () => {
       // A value the field does not already hold, so the fill is an edit on any date
@@ -331,7 +331,7 @@ async function scenarioH(browser) {
     await lead.fill('-1')
     await lead.evaluate((el) => { el.removeAttribute('data-field'); el.setAttribute('data-testid', 'unwired-lead') })
     const before = posts(log)
-    await form.getByRole('button', { name: 'Save Recurring Entry' }).click()
+    await form.getByRole('button', { name: 'Save recurring entry' }).click()
     const err = page.locator('[data-testid="recurring-save-error"]')
     await h.check('h.form-level-error', 'B', async () => {
       const shown = await err.waitFor({ timeout: 3000 }).then(() => true, () => false)

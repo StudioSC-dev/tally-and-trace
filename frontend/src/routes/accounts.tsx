@@ -827,7 +827,7 @@ export function AccountsPage() {
           onClick={() => setIsCreateModalOpen(true)}
           className="w-full sm:w-auto justify-center"
         >
-          Add Account
+          Add account
         </Button>
       </PageHeader>
 
@@ -1088,7 +1088,7 @@ export function AccountsPage() {
           <div className="bg-surface p-6 w-full max-w-md border border-line">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-semibold text-ink">
-                {editingAccount ? 'Edit Account' : 'Create Account'}
+                {editingAccount ? 'Edit account' : 'Create account'}
               </h2>
               <button
                 onClick={() => {
@@ -1253,7 +1253,7 @@ export function AccountsPage() {
               {formData.account_type === 'credit' && (
                 <div className="space-y-3 p-4 border border-line">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-medium text-ink">Credit Card Settings</h3>
+                    <h3 className="text-sm font-medium text-ink">Credit card settings</h3>
                     <button
                       type="button"
                       onClick={() => setShowCreditSettings((prev) => !prev)}
@@ -1608,7 +1608,7 @@ export function AccountsPage() {
                   type="submit"
                   className="flex-1 w-full sm:w-auto py-3 px-4 text-base"
                 >
-                  {editingAccount ? 'Update Account' : 'Create Account'}
+                  {editingAccount ? 'Update account' : 'Create account'}
                 </Button>
                 <Button
                   variant="quiet"

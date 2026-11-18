@@ -24,7 +24,7 @@ const ROUTES = [
   { name: 'allocations', path: '/allocations', title: 'Allocations', lands: '/allocations' },
   { name: 'accounts', path: '/accounts', title: 'Accounts', lands: '/accounts' },
   { name: 'settings', path: '/settings', title: 'Settings', lands: '/settings' },
-  { name: 'forecast', path: '/forecast', title: 'Cash-Flow Timeline', lands: '/forecast' },
+  { name: 'forecast', path: '/forecast', title: 'Cash-flow timeline', lands: '/forecast' },
   { name: 'household', path: '/household', title: 'Your Household', lands: '/accounts/household' },
   { name: 'wishlist', path: '/wishlist', title: 'Allocations', lands: '/allocations' },
 ] as const
@@ -64,9 +64,9 @@ const BASE_TOTALS = {
 const BASE_TRANSACTIONS_SECTIONS = ['due-section', 'transactions-list-card', 'role:status', 'holds:list-sheet']
 /** The Allocations tabs on `origin/main`, in order, and the header action each one shows (none on Wishlist). */
 const BASE_ALLOCATION_TABS = [
-  { label: 'Recurring', action: 'Add Recurring Entry' },
-  { label: 'Budgets', action: 'Add Allocation' },
-  { label: 'Savings', action: 'Add Allocation' },
+  { label: 'Recurring', action: 'Add recurring entry' },
+  { label: 'Budgets', action: 'Add allocation' },
+  { label: 'Savings', action: 'Add allocation' },
   { label: 'Wishlist', action: null },
 ]
 

@@ -2,7 +2,7 @@
   "desktop": {
     "transaction": [
       {
-        "label": "Create Transaction",
+        "label": "Add transaction",
         "x": 376,
         "y": 694,
         "w": 168,
@@ -25,7 +25,7 @@
     ],
     "account": [
       {
-        "label": "Create Account",
+        "label": "Create account",
         "x": 441,
         "y": 701,
         "w": 193,
@@ -41,7 +41,7 @@
     ],
     "recurring": [
       {
-        "label": "Save Recurring Entry",
+        "label": "Save recurring entry",
         "x": 328,
         "y": 712,
         "w": 306,

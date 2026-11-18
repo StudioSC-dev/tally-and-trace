@@ -89,7 +89,7 @@
             "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(116, 136, 112) | 0px"
           },
           {
-            "name": "Create Account",
+            "name": "Create account",
             "height": 50,
             "icons": 0,
             "variant": null,
@@ -174,7 +174,7 @@
             "look": ""
           },
           {
-            "name": "Add Account",
+            "name": "Add account",
             "height": 38,
             "icons": 0,
             "variant": null,
@@ -368,7 +368,7 @@
             "look": ""
           },
           {
-            "name": "Create Budget Envelope",
+            "name": "Create budget envelope",
             "height": 40,
             "icons": 0,
             "variant": null,
@@ -453,7 +453,7 @@
             "look": ""
           },
           {
-            "name": "Add Recurring Entry",
+            "name": "Add recurring entry",
             "height": 38,
             "icons": 0,
             "variant": null,
@@ -1716,7 +1716,7 @@
             "look": ""
           },
           {
-            "name": "Save Recurring Entry",
+            "name": "Save recurring entry",
             "height": 40,
             "icons": 0,
             "variant": null,
@@ -2561,7 +2561,7 @@
             "look": ""
           },
           {
-            "name": "Edit Transaction",
+            "name": "Edit transaction",
             "height": 44,
             "icons": 1,
             "variant": null,
@@ -2569,7 +2569,7 @@
             "look": ""
           },
           {
-            "name": "Delete Transaction",
+            "name": "Delete transaction",
             "height": 44,
             "icons": 1,
             "variant": null,
@@ -2686,7 +2686,7 @@
             "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
           },
           {
-            "name": "Create Transaction",
+            "name": "Add transaction",
             "height": 38,
             "icons": 0,
             "variant": null,
@@ -2787,7 +2787,7 @@
             "look": ""
           },
           {
-            "name": "Create Transaction",
+            "name": "Add transaction",
             "height": 38,
             "icons": 0,
             "variant": null,
@@ -2901,7 +2901,7 @@
             "look": ""
           },
           {
-            "name": "Add Transaction",
+            "name": "Add transaction",
             "height": 38,
             "icons": 0,
             "variant": null,
@@ -3114,7 +3114,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for BPI Payroll",
           "View transactions for Metrobank Savings",
           "View transactions for HSBC Red Mastercard",
@@ -3153,7 +3153,7 @@
           "Cash (1)",
           "Shared (1)",
           "Debit (1)",
-          "Edit Account"
+          "Edit account"
         ],
         "buttons": [
           "₱Tally & Trace",
@@ -3164,7 +3164,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for BPI Payroll",
           "View transactions for Metrobank Savings",
           "View transactions for HSBC Red Mastercard",
@@ -3175,7 +3175,7 @@
           "Household",
           "Japan trip",
           "Active",
-          "Update Account",
+          "Update account",
           "Cancel"
         ],
         "requests": []
@@ -3207,7 +3207,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for Metrobank Savings",
           "View transactions for BPI Payroll",
           "View transactions for HSBC Red Mastercard",
@@ -3257,7 +3257,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for BPI Payroll",
           "View transactions for Metrobank Savings",
           "View transactions for HSBC Red Mastercard",
@@ -3331,7 +3331,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for BPI Payroll",
           "View transactions for Metrobank Savings",
           "View transactions for HSBC Red Mastercard",
@@ -3341,7 +3341,7 @@
         ],
         "requests": []
       },
-      "account-create | Create Account | 1": {
+      "account-create | Create account | 1": {
         "fields": [],
         "rows": [
           "Maya savingscheckingActiveCurrency: PHP₱0.00ActiveTransactions"
@@ -3367,7 +3367,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for BPI Payroll",
           "View transactions for Maya savings",
           "View transactions for Metrobank Savings",
@@ -3382,7 +3382,7 @@
           "POST /accounts/ {\"name\":\"Maya savings\",\"account_type\":\"checking\",\"balance\":0,\"description\":\"\",\"currency\":\"PHP\",\"days_until_due_date\":21,\"is_spending_wallet\":false,\"is_active\":true,\"tag_ids\":[]}"
         ]
       },
-      "accounts | Add Account | 1": {
+      "accounts | Add account | 1": {
         "fields": [
           "text:",
           "select-one:checking",
@@ -3403,7 +3403,7 @@
           "Cash (1)",
           "Shared (1)",
           "Debit (1)",
-          "Create Account"
+          "Create account"
         ],
         "buttons": [
           "₱Tally & Trace",
@@ -3414,7 +3414,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for BPI Payroll",
           "View transactions for Metrobank Savings",
           "View transactions for HSBC Red Mastercard",
@@ -3425,7 +3425,7 @@
           "Household",
           "Japan trip",
           "Active",
-          "Create Account",
+          "Create account",
           "Cancel"
         ],
         "requests": []
@@ -3437,7 +3437,7 @@
         "dialogs": 3,
         "headings": [
           "Allocations",
-          "Budget Envelopes",
+          "Budget envelopes",
           "Dining out",
           "Budget snapshot",
           "Details",
@@ -3452,7 +3452,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Allocation",
+          "Add allocation",
           "Recurring",
           "Budgets",
           "Savings",
@@ -3481,8 +3481,8 @@
         "dialogs": 1,
         "headings": [
           "Allocations",
-          "Budget Envelopes",
-          "Edit Allocation"
+          "Budget envelopes",
+          "Edit allocation"
         ],
         "buttons": [
           "₱Tally & Trace",
@@ -3493,7 +3493,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Allocation",
+          "Add allocation",
           "Recurring",
           "Budgets",
           "Savings",
@@ -3510,7 +3510,7 @@
           "Monthly",
           "Quarterly",
           "Active",
-          "Update Allocation",
+          "Update allocation",
           "Cancel"
         ],
         "requests": []
@@ -3522,7 +3522,7 @@
         "dialogs": 1,
         "headings": [
           "Allocations",
-          "Budget Envelopes",
+          "Budget envelopes",
           "Dining out",
           "Budget snapshot",
           "Details"
@@ -3536,7 +3536,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Allocation",
+          "Add allocation",
           "Recurring",
           "Budgets",
           "Savings",
@@ -3558,7 +3558,7 @@
         "dialogs": 0,
         "headings": [
           "Allocations",
-          "Budget Envelopes"
+          "Budget envelopes"
         ],
         "buttons": [
           "₱Tally & Trace",
@@ -3569,7 +3569,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Allocation",
+          "Add allocation",
           "Recurring",
           "Budgets",
           "Savings",
@@ -3577,7 +3577,7 @@
         ],
         "requests": []
       },
-      "allocation-create | Create Budget Envelope | 1": {
+      "allocation-create | Create budget envelope | 1": {
         "fields": [],
         "rows": [
           "Pet careBudget EnvelopeBPI PayrollDining outCadence: MonthlyStarts Mar 1, 2026Ends Mar 31, 2026ActiveSpending limit₱3,000.00Spent this period₱0.000.0% of limit usedRemaining₱3,000.00Active"
@@ -3586,7 +3586,7 @@
         "dialogs": 0,
         "headings": [
           "Allocations",
-          "Budget Envelopes"
+          "Budget envelopes"
         ],
         "buttons": [
           "₱Tally & Trace",
@@ -3597,7 +3597,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Allocation",
+          "Add allocation",
           "Recurring",
           "Budgets",
           "Savings",
@@ -3608,7 +3608,7 @@
           "POST /allocations/ {\"account_id\":11,\"name\":\"Pet care\",\"allocation_type\":\"budget\",\"target_amount\":3000,\"current_amount\":0,\"period_frequency\":\"monthly\",\"period_start\":\"2026-03-01T00:00:00Z\",\"period_end\":\"2026-04-01T00:00:00Z\",\"is_active\":true,\"configuration\":{\"category_ids\":[23]}}"
         ]
       },
-      "allocations-recurring | Add Recurring Entry | 1": {
+      "allocations-recurring | Add recurring entry | 1": {
         "fields": [
           "text:",
           "select-one:0",
@@ -3632,7 +3632,7 @@
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
-          "Add Recurring Entry"
+          "Add recurring entry"
         ],
         "buttons": [
           "₱Tally & Trace",
@@ -3643,7 +3643,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -3671,7 +3671,7 @@
           "Household",
           "Japan trip",
           "Active",
-          "Save Recurring Entry",
+          "Save recurring entry",
           "Cancel"
         ],
         "requests": []
@@ -3700,7 +3700,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -3753,7 +3753,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -3806,7 +3806,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -3858,7 +3858,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -3910,7 +3910,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -3962,7 +3962,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -4014,7 +4014,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -4066,7 +4066,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -4118,7 +4118,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -4170,7 +4170,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -4222,7 +4222,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -4275,7 +4275,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -4327,7 +4327,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -4380,7 +4380,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -4473,7 +4473,7 @@
         "headings": [
           "Allocations",
           "Wishlist",
-          "Create Savings Tracker"
+          "Create savings tracker"
         ],
         "buttons": [
           "₱Tally & Trace",
@@ -4511,7 +4511,7 @@
           "Monthly",
           "Quarterly",
           "Active",
-          "Create Budget Envelope",
+          "Create budget envelope",
           "Cancel"
         ],
         "requests": []
@@ -4532,7 +4532,7 @@
         "headings": [
           "Allocations",
           "Wishlist",
-          "Create Savings Tracker"
+          "Create savings tracker"
         ],
         "buttons": [
           "₱Tally & Trace",
@@ -4570,7 +4570,7 @@
           "Monthly",
           "Quarterly",
           "Active",
-          "Create Budget Envelope",
+          "Create budget envelope",
           "Cancel"
         ],
         "requests": []
@@ -4845,7 +4845,7 @@
         "headings": [
           "Allocations",
           "Wishlist",
-          "Create Savings Tracker"
+          "Create savings tracker"
         ],
         "buttons": [
           "₱Tally & Trace",
@@ -4876,7 +4876,7 @@
           "Combined account totalWatch a collection of accounts grow together.",
           "Savings transactions totalSum the transfers tagged as savings over time.",
           "Active",
-          "Create Savings Tracker",
+          "Create savings tracker",
           "Cancel"
         ],
         "requests": []
@@ -4897,7 +4897,7 @@
         "headings": [
           "Allocations",
           "Wishlist",
-          "Create Savings Tracker"
+          "Create savings tracker"
         ],
         "buttons": [
           "₱Tally & Trace",
@@ -4928,7 +4928,7 @@
           "Combined account totalWatch a collection of accounts grow together.",
           "Savings transactions totalSum the transfers tagged as savings over time.",
           "Active",
-          "Create Savings Tracker",
+          "Create savings tracker",
           "Cancel"
         ],
         "requests": []
@@ -4943,11 +4943,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -5002,7 +5002,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -5042,7 +5042,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -5090,7 +5090,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -5130,7 +5130,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -5170,7 +5170,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -5219,7 +5219,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -5259,7 +5259,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -5299,7 +5299,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -5338,7 +5338,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -5377,7 +5377,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -5417,11 +5417,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -5460,11 +5460,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -5514,11 +5514,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -5557,11 +5557,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -5608,11 +5608,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -5659,11 +5659,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -5710,11 +5710,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -5761,11 +5761,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -5809,11 +5809,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -5857,11 +5857,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -5905,11 +5905,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -5950,11 +5950,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -6005,11 +6005,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -6048,11 +6048,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -6100,11 +6100,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -6152,11 +6152,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -6204,11 +6204,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -6256,11 +6256,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -6305,11 +6305,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -6354,11 +6354,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -6407,11 +6407,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -6452,11 +6452,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -6507,7 +6507,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -6549,7 +6549,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -6600,7 +6600,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -6642,7 +6642,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -6693,7 +6693,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -6715,7 +6715,7 @@
         ],
         "requests": []
       },
-      "recurring-create | Save Recurring Entry | 1": {
+      "recurring-create | Save recurring entry | 1": {
         "fields": [],
         "rows": [
           "Water deliveryRecurring expenseMonthlyScheduledNext Mar 12th, 2026TodayAccount: BPI Payrollby Mara S.IndefiniteMark paid₱350.00"
@@ -6737,7 +6737,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -9303,7 +9303,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for BPI Payroll",
           "View transactions for Metrobank Savings",
           "View transactions for HSBC Red Mastercard",
@@ -9347,7 +9347,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for BPI Payroll",
           "View transactions for Metrobank Savings",
           "View transactions for HSBC Red Mastercard",
@@ -9393,7 +9393,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for BPI Payroll",
           "View transactions for Metrobank Savings",
           "View transactions for HSBC Red Mastercard",
@@ -9437,7 +9437,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for BPI Payroll",
           "View transactions for Metrobank Savings",
           "View transactions for HSBC Red Mastercard",
@@ -9486,7 +9486,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for BPI Payroll",
           "View transactions for Metrobank Savings",
           "View transactions for HSBC Red Mastercard",
@@ -9523,7 +9523,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -9545,7 +9545,7 @@
         ],
         "requests": []
       },
-      "transaction-actions | Delete Transaction | 1": {
+      "transaction-actions | Delete transaction | 1": {
         "fields": [],
         "rows": [],
         "url": "/transactions",
@@ -9553,7 +9553,7 @@
         "headings": [
           "Transactions",
           "Due and overdue",
-          "Transaction Actions",
+          "Transaction actions",
           "Dates",
           "Details",
           "Delete transaction?"
@@ -9567,7 +9567,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -9589,14 +9589,14 @@
           "Close actions modal",
           "Upload receipt",
           "Mark as not posted",
-          "Edit Transaction",
-          "Delete Transaction",
+          "Edit transaction",
+          "Delete transaction",
           "Cancel",
           "Delete transaction"
         ],
         "requests": []
       },
-      "transaction-actions | Edit Transaction | 1": {
+      "transaction-actions | Edit transaction | 1": {
         "fields": [
           "text:Grab to Makati",
           "number:286",
@@ -9612,7 +9612,7 @@
         "headings": [
           "Transactions",
           "Due and overdue",
-          "Edit Transaction"
+          "Edit transaction"
         ],
         "buttons": [
           "₱Tally & Trace",
@@ -9623,7 +9623,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -9650,7 +9650,7 @@
           "Transfer",
           "Household",
           "Japan trip",
-          "Update Transaction",
+          "Save changes",
           "Cancel"
         ],
         "requests": [
@@ -9667,7 +9667,7 @@
         "headings": [
           "Transactions",
           "Due and overdue",
-          "Transaction Actions",
+          "Transaction actions",
           "Dates",
           "Details"
         ],
@@ -9680,7 +9680,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -9702,8 +9702,8 @@
           "Close actions modal",
           "Upload receipt",
           "Mark as not posted",
-          "Edit Transaction",
-          "Delete Transaction"
+          "Edit transaction",
+          "Delete transaction"
         ],
         "requests": [
           "GET /budget-entries/installment-plans",
@@ -9731,7 +9731,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -9753,7 +9753,7 @@
         ],
         "requests": []
       },
-      "transaction-create | Create Transaction | 1": {
+      "transaction-create | Add transaction | 1": {
         "fields": [],
         "rows": [
           "Button checkMar 12th, 2026BPI PayrollUncategorizedPostedExpenseby Mara S.₱120.00"
@@ -9773,7 +9773,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -9822,7 +9822,7 @@
         "headings": [
           "Transactions",
           "Due and overdue",
-          "Create Transaction"
+          "Add transaction"
         ],
         "buttons": [
           "₱Tally & Trace",
@@ -9833,7 +9833,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -9860,7 +9860,7 @@
           "Transfer",
           "Household",
           "Japan trip",
-          "Create Transaction",
+          "Add transaction",
           "Save and add another",
           "Cancel",
           "Dismiss",
@@ -9893,7 +9893,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -9931,7 +9931,7 @@
         "headings": [
           "Transactions",
           "Due and overdue",
-          "Create Transaction"
+          "Add transaction"
         ],
         "buttons": [
           "₱Tally & Trace",
@@ -9942,7 +9942,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -9976,13 +9976,13 @@
           "Household",
           "Japan trip",
           "Change",
-          "Create Transaction",
+          "Add transaction",
           "Save and add another",
           "Cancel"
         ],
         "requests": []
       },
-      "transaction-create-installment | Create Transaction | 1": {
+      "transaction-create-installment | Add transaction | 1": {
         "fields": [],
         "rows": [
           "Button check laptopMar 12th, 2026HSBC Red MastercardUncategorizedPostedExpenseby Mara S.₱2,000.00"
@@ -10002,7 +10002,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -10052,7 +10052,7 @@
         "headings": [
           "Transactions",
           "Due and overdue",
-          "Create Transaction"
+          "Add transaction"
         ],
         "buttons": [
           "₱Tally & Trace",
@@ -10063,7 +10063,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -10090,7 +10090,7 @@
           "Transfer",
           "Household",
           "Japan trip",
-          "Create Transaction",
+          "Add transaction",
           "Save and add another",
           "Cancel",
           "Dismiss",
@@ -10115,7 +10115,7 @@
         "headings": [
           "Transactions",
           "Due and overdue",
-          "Transaction Actions",
+          "Transaction actions",
           "Dates",
           "Details"
         ],
@@ -10128,7 +10128,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -10150,8 +10150,8 @@
           "Close actions modal",
           "Upload receipt",
           "Mark as not posted",
-          "Edit Transaction",
-          "Delete Transaction"
+          "Edit transaction",
+          "Delete transaction"
         ],
         "requests": []
       },
@@ -10173,7 +10173,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -10202,7 +10202,7 @@
           "GET /transactions/?start_date=2026-03-13T00%3A00%3A00Z&end_date=2026-04-11T23%3A59%3A59.999999Z&limit=100&offset=0&order=asc"
         ]
       },
-      "transactions | Add Transaction | 1": {
+      "transactions | Add transaction | 1": {
         "fields": [
           "text:",
           "search:",
@@ -10219,7 +10219,7 @@
         "headings": [
           "Transactions",
           "Due and overdue",
-          "Create Transaction"
+          "Add transaction"
         ],
         "buttons": [
           "₱Tally & Trace",
@@ -10230,7 +10230,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -10262,7 +10262,7 @@
           "Transfer",
           "Household",
           "Japan trip",
-          "Create Transaction",
+          "Add transaction",
           "Save and add another",
           "Cancel"
         ],
@@ -10291,7 +10291,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -10333,7 +10333,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Show",
           "Due and overdue2",
           "Not posted yet0",
@@ -10374,7 +10374,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -10422,7 +10422,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -10473,7 +10473,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -10537,7 +10537,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -10589,7 +10589,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -10789,7 +10789,7 @@
             "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(116, 136, 112) | 0px"
           },
           {
-            "name": "Create Account",
+            "name": "Create account",
             "height": 50,
             "icons": 0,
             "variant": null,
@@ -10834,7 +10834,7 @@
             "look": ""
           },
           {
-            "name": "Add Account",
+            "name": "Add account",
             "height": 38,
             "icons": 0,
             "variant": null,
@@ -11060,7 +11060,7 @@
             "look": ""
           },
           {
-            "name": "Create Budget Envelope",
+            "name": "Create budget envelope",
             "height": 40,
             "icons": 0,
             "variant": null,
@@ -11105,7 +11105,7 @@
             "look": ""
           },
           {
-            "name": "Add Recurring Entry",
+            "name": "Add recurring entry",
             "height": 38,
             "icons": 0,
             "variant": null,
@@ -12400,7 +12400,7 @@
             "look": ""
           },
           {
-            "name": "Save Recurring Entry",
+            "name": "Save recurring entry",
             "height": 40,
             "icons": 0,
             "variant": null,
@@ -13237,7 +13237,7 @@
             "look": ""
           },
           {
-            "name": "Edit Transaction",
+            "name": "Edit transaction",
             "height": 44,
             "icons": 1,
             "variant": null,
@@ -13245,7 +13245,7 @@
             "look": ""
           },
           {
-            "name": "Delete Transaction",
+            "name": "Delete transaction",
             "height": 44,
             "icons": 1,
             "variant": null,
@@ -13362,7 +13362,7 @@
             "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
           },
           {
-            "name": "Create Transaction",
+            "name": "Add transaction",
             "height": 78,
             "icons": 0,
             "variant": null,
@@ -13463,7 +13463,7 @@
             "look": ""
           },
           {
-            "name": "Create Transaction",
+            "name": "Add transaction",
             "height": 78,
             "icons": 0,
             "variant": null,
@@ -13537,7 +13537,7 @@
             "look": ""
           },
           {
-            "name": "Add Transaction",
+            "name": "Add transaction",
             "height": 38,
             "icons": 0,
             "variant": null,
@@ -13777,7 +13777,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for BPI Payroll",
           "View transactions for Metrobank Savings",
           "View transactions for HSBC Red Mastercard",
@@ -13820,13 +13820,13 @@
           "Cash (1)",
           "Shared (1)",
           "Debit (1)",
-          "Edit Account"
+          "Edit account"
         ],
         "buttons": [
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for BPI Payroll",
           "View transactions for Metrobank Savings",
           "View transactions for HSBC Red Mastercard",
@@ -13837,7 +13837,7 @@
           "Household",
           "Japan trip",
           "Active",
-          "Update Account",
+          "Update account",
           "Cancel",
           "Dashboard",
           "Accounts",
@@ -13868,7 +13868,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for Metrobank Savings",
           "View transactions for BPI Payroll",
           "View transactions for HSBC Red Mastercard",
@@ -13917,7 +13917,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for BPI Payroll",
           "View transactions for Metrobank Savings",
           "View transactions for HSBC Red Mastercard",
@@ -13989,7 +13989,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for BPI Payroll",
           "View transactions for Metrobank Savings",
           "View transactions for HSBC Red Mastercard",
@@ -14003,7 +14003,7 @@
         ],
         "requests": []
       },
-      "account-create | Create Account | 1": {
+      "account-create | Create account | 1": {
         "fields": [],
         "rows": [
           "Maya savingscheckingActiveCurrency: PHP₱0.00ActiveTransactions"
@@ -14024,7 +14024,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for BPI Payroll",
           "View transactions for Maya savings",
           "View transactions for Metrobank Savings",
@@ -14043,7 +14043,7 @@
           "POST /accounts/ {\"name\":\"Maya savings\",\"account_type\":\"checking\",\"balance\":0,\"description\":\"\",\"currency\":\"PHP\",\"days_until_due_date\":21,\"is_spending_wallet\":false,\"is_active\":true,\"tag_ids\":[]}"
         ]
       },
-      "accounts | Add Account | 1": {
+      "accounts | Add account | 1": {
         "fields": [
           "text:",
           "select-one:checking",
@@ -14064,13 +14064,13 @@
           "Cash (1)",
           "Shared (1)",
           "Debit (1)",
-          "Create Account"
+          "Create account"
         ],
         "buttons": [
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for BPI Payroll",
           "View transactions for Metrobank Savings",
           "View transactions for HSBC Red Mastercard",
@@ -14081,7 +14081,7 @@
           "Household",
           "Japan trip",
           "Active",
-          "Create Account",
+          "Create account",
           "Cancel",
           "Dashboard",
           "Accounts",
@@ -14097,7 +14097,7 @@
         "dialogs": 3,
         "headings": [
           "Allocations",
-          "Budget Envelopes",
+          "Budget envelopes",
           "Dining out",
           "Budget snapshot",
           "Details",
@@ -14107,7 +14107,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Allocation",
+          "Add allocation",
           "Recurring",
           "Budgets",
           "Savings",
@@ -14140,14 +14140,14 @@
         "dialogs": 1,
         "headings": [
           "Allocations",
-          "Budget Envelopes",
-          "Edit Allocation"
+          "Budget envelopes",
+          "Edit allocation"
         ],
         "buttons": [
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Allocation",
+          "Add allocation",
           "Recurring",
           "Budgets",
           "Savings",
@@ -14164,7 +14164,7 @@
           "Monthly",
           "Quarterly",
           "Active",
-          "Update Allocation",
+          "Update allocation",
           "Cancel",
           "Dashboard",
           "Accounts",
@@ -14180,7 +14180,7 @@
         "dialogs": 1,
         "headings": [
           "Allocations",
-          "Budget Envelopes",
+          "Budget envelopes",
           "Dining out",
           "Budget snapshot",
           "Details"
@@ -14189,7 +14189,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Allocation",
+          "Add allocation",
           "Recurring",
           "Budgets",
           "Savings",
@@ -14215,13 +14215,13 @@
         "dialogs": 0,
         "headings": [
           "Allocations",
-          "Budget Envelopes"
+          "Budget envelopes"
         ],
         "buttons": [
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Allocation",
+          "Add allocation",
           "Recurring",
           "Budgets",
           "Savings",
@@ -14233,7 +14233,7 @@
         ],
         "requests": []
       },
-      "allocation-create | Create Budget Envelope | 1": {
+      "allocation-create | Create budget envelope | 1": {
         "fields": [],
         "rows": [
           "Pet careBudget EnvelopeBPI PayrollDining outCadence: MonthlyStarts Mar 1, 2026Ends Mar 31, 2026ActiveSpending limit₱3,000.00Spent this period₱0.000.0% of limit usedRemaining₱3,000.00Active"
@@ -14242,13 +14242,13 @@
         "dialogs": 0,
         "headings": [
           "Allocations",
-          "Budget Envelopes"
+          "Budget envelopes"
         ],
         "buttons": [
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Allocation",
+          "Add allocation",
           "Recurring",
           "Budgets",
           "Savings",
@@ -14263,7 +14263,7 @@
           "POST /allocations/ {\"account_id\":11,\"name\":\"Pet care\",\"allocation_type\":\"budget\",\"target_amount\":3000,\"current_amount\":0,\"period_frequency\":\"monthly\",\"period_start\":\"2026-03-01T00:00:00Z\",\"period_end\":\"2026-04-01T00:00:00Z\",\"is_active\":true,\"configuration\":{\"category_ids\":[23]}}"
         ]
       },
-      "allocations-recurring | Add Recurring Entry | 1": {
+      "allocations-recurring | Add recurring entry | 1": {
         "fields": [
           "text:",
           "select-one:0",
@@ -14287,13 +14287,13 @@
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
-          "Add Recurring Entry"
+          "Add recurring entry"
         ],
         "buttons": [
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -14325,7 +14325,7 @@
           "Household",
           "Japan trip",
           "Active",
-          "Save Recurring Entry",
+          "Save recurring entry",
           "Cancel",
           "Dashboard",
           "Accounts",
@@ -14353,7 +14353,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -14409,7 +14409,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -14465,7 +14465,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -14520,7 +14520,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -14575,7 +14575,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -14630,7 +14630,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -14685,7 +14685,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -14740,7 +14740,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -14795,7 +14795,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -14850,7 +14850,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -14905,7 +14905,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -14961,7 +14961,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -15016,7 +15016,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -15072,7 +15072,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -15172,7 +15172,7 @@
         "headings": [
           "Allocations",
           "Wishlist",
-          "Create Savings Tracker"
+          "Create savings tracker"
         ],
         "buttons": [
           "₱Tally & Trace",
@@ -15205,7 +15205,7 @@
           "Monthly",
           "Quarterly",
           "Active",
-          "Create Budget Envelope",
+          "Create budget envelope",
           "Cancel",
           "Dashboard",
           "Accounts",
@@ -15230,7 +15230,7 @@
         "headings": [
           "Allocations",
           "Wishlist",
-          "Create Savings Tracker"
+          "Create savings tracker"
         ],
         "buttons": [
           "₱Tally & Trace",
@@ -15263,7 +15263,7 @@
           "Monthly",
           "Quarterly",
           "Active",
-          "Create Budget Envelope",
+          "Create budget envelope",
           "Cancel",
           "Dashboard",
           "Accounts",
@@ -15536,7 +15536,7 @@
         "headings": [
           "Allocations",
           "Wishlist",
-          "Create Savings Tracker"
+          "Create savings tracker"
         ],
         "buttons": [
           "₱Tally & Trace",
@@ -15562,7 +15562,7 @@
           "Combined account totalWatch a collection of accounts grow together.",
           "Savings transactions totalSum the transfers tagged as savings over time.",
           "Active",
-          "Create Savings Tracker",
+          "Create savings tracker",
           "Cancel",
           "Dashboard",
           "Accounts",
@@ -15587,7 +15587,7 @@
         "headings": [
           "Allocations",
           "Wishlist",
-          "Create Savings Tracker"
+          "Create savings tracker"
         ],
         "buttons": [
           "₱Tally & Trace",
@@ -15613,7 +15613,7 @@
           "Combined account totalWatch a collection of accounts grow together.",
           "Savings transactions totalSum the transfers tagged as savings over time.",
           "Active",
-          "Create Savings Tracker",
+          "Create savings tracker",
           "Cancel",
           "Dashboard",
           "Accounts",
@@ -15632,11 +15632,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -15685,7 +15685,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -15724,7 +15724,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -15771,7 +15771,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -15810,7 +15810,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -15849,7 +15849,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -15897,7 +15897,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -15936,7 +15936,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -15975,7 +15975,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -16013,7 +16013,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -16051,7 +16051,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -16095,11 +16095,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -16137,11 +16137,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -16190,11 +16190,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -16232,11 +16232,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -16282,11 +16282,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -16332,11 +16332,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -16382,11 +16382,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -16432,11 +16432,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -16479,11 +16479,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -16526,11 +16526,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -16573,11 +16573,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -16617,11 +16617,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -16671,11 +16671,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -16713,11 +16713,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -16764,11 +16764,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -16815,11 +16815,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -16866,11 +16866,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -16917,11 +16917,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -16965,11 +16965,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -17013,11 +17013,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -17065,11 +17065,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -17109,11 +17109,11 @@
           "Available cash",
           "Month to date",
           "Quick balances",
-          "Cash-Flow Timeline",
-          "Financial Snapshot",
+          "Cash-flow timeline",
+          "Financial snapshot",
           "Projected",
-          "Budget Envelope Status",
-          "Upcoming Payables",
+          "Budget envelope status",
+          "Upcoming payables",
           "Also coming up"
         ],
         "buttons": [
@@ -17158,7 +17158,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -17203,7 +17203,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -17257,7 +17257,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -17302,7 +17302,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -17356,7 +17356,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -17386,7 +17386,7 @@
         ],
         "requests": []
       },
-      "recurring-create | Save Recurring Entry | 1": {
+      "recurring-create | Save recurring entry | 1": {
         "fields": [],
         "rows": [
           "Water deliveryRecurring expenseMonthlyScheduledNext Mar 12th, 2026TodayAccount: BPI Payrollby Mara S.IndefiniteMark paid₱350.00"
@@ -17403,7 +17403,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Recurring Entry",
+          "Add recurring entry",
           "Recurring",
           "Budgets",
           "Savings",
@@ -19934,7 +19934,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for BPI Payroll",
           "View transactions for Metrobank Savings",
           "View transactions for HSBC Red Mastercard",
@@ -19977,7 +19977,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for BPI Payroll",
           "View transactions for Metrobank Savings",
           "View transactions for HSBC Red Mastercard",
@@ -20022,7 +20022,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for BPI Payroll",
           "View transactions for Metrobank Savings",
           "View transactions for HSBC Red Mastercard",
@@ -20065,7 +20065,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for BPI Payroll",
           "View transactions for Metrobank Savings",
           "View transactions for HSBC Red Mastercard",
@@ -20113,7 +20113,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Account",
+          "Add account",
           "View transactions for BPI Payroll",
           "View transactions for Metrobank Savings",
           "View transactions for HSBC Red Mastercard",
@@ -20149,7 +20149,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -20175,7 +20175,7 @@
         ],
         "requests": []
       },
-      "transaction-actions | Delete Transaction | 1": {
+      "transaction-actions | Delete transaction | 1": {
         "fields": [],
         "rows": [],
         "url": "/transactions",
@@ -20183,7 +20183,7 @@
         "headings": [
           "Transactions",
           "Due and overdue",
-          "Transaction Actions",
+          "Transaction actions",
           "Dates",
           "Details",
           "Delete transaction?"
@@ -20192,7 +20192,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -20214,8 +20214,8 @@
           "Close actions modal",
           "Upload receipt",
           "Mark as not posted",
-          "Edit Transaction",
-          "Delete Transaction",
+          "Edit transaction",
+          "Delete transaction",
           "Dashboard",
           "Accounts",
           "Transactions",
@@ -20225,7 +20225,7 @@
         ],
         "requests": []
       },
-      "transaction-actions | Edit Transaction | 1": {
+      "transaction-actions | Edit transaction | 1": {
         "fields": [
           "text:Grab to Makati",
           "number:286",
@@ -20241,13 +20241,13 @@
         "headings": [
           "Transactions",
           "Due and overdue",
-          "Edit Transaction"
+          "Edit transaction"
         ],
         "buttons": [
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -20274,7 +20274,7 @@
           "Transfer",
           "Household",
           "Japan trip",
-          "Update Transaction",
+          "Save changes",
           "Cancel",
           "Dashboard",
           "Accounts",
@@ -20295,7 +20295,7 @@
         "headings": [
           "Transactions",
           "Due and overdue",
-          "Transaction Actions",
+          "Transaction actions",
           "Dates",
           "Details"
         ],
@@ -20303,7 +20303,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -20325,8 +20325,8 @@
           "Close actions modal",
           "Upload receipt",
           "Mark as not posted",
-          "Edit Transaction",
-          "Delete Transaction",
+          "Edit transaction",
+          "Delete transaction",
           "Dashboard",
           "Accounts",
           "Transactions",
@@ -20353,7 +20353,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -20379,7 +20379,7 @@
         ],
         "requests": []
       },
-      "transaction-create | Create Transaction | 1": {
+      "transaction-create | Add transaction | 1": {
         "fields": [],
         "rows": [
           "Button checkMar 12th, 2026BPI PayrollUncategorizedPostedExpenseby Mara S.₱120.00"
@@ -20394,7 +20394,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -20447,13 +20447,13 @@
         "headings": [
           "Transactions",
           "Due and overdue",
-          "Create Transaction"
+          "Add transaction"
         ],
         "buttons": [
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -20480,7 +20480,7 @@
           "Transfer",
           "Household",
           "Japan trip",
-          "Create Transaction",
+          "Add transaction",
           "Save and add another",
           "Cancel",
           "Dashboard",
@@ -20512,7 +20512,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -20554,13 +20554,13 @@
         "headings": [
           "Transactions",
           "Due and overdue",
-          "Create Transaction"
+          "Add transaction"
         ],
         "buttons": [
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -20594,7 +20594,7 @@
           "Household",
           "Japan trip",
           "Change",
-          "Create Transaction",
+          "Add transaction",
           "Save and add another",
           "Cancel",
           "Dashboard",
@@ -20604,7 +20604,7 @@
         ],
         "requests": []
       },
-      "transaction-create-installment | Create Transaction | 1": {
+      "transaction-create-installment | Add transaction | 1": {
         "fields": [],
         "rows": [
           "Button check laptopMar 12th, 2026HSBC Red MastercardUncategorizedPostedExpenseby Mara S.₱2,000.00"
@@ -20619,7 +20619,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -20673,13 +20673,13 @@
         "headings": [
           "Transactions",
           "Due and overdue",
-          "Create Transaction"
+          "Add transaction"
         ],
         "buttons": [
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -20706,7 +20706,7 @@
           "Transfer",
           "Household",
           "Japan trip",
-          "Create Transaction",
+          "Add transaction",
           "Save and add another",
           "Cancel",
           "Dashboard",
@@ -20735,7 +20735,7 @@
         "headings": [
           "Transactions",
           "Due and overdue",
-          "Transaction Actions",
+          "Transaction actions",
           "Dates",
           "Details"
         ],
@@ -20743,7 +20743,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -20765,8 +20765,8 @@
           "Close actions modal",
           "Upload receipt",
           "Mark as not posted",
-          "Edit Transaction",
-          "Delete Transaction",
+          "Edit transaction",
+          "Delete transaction",
           "Dashboard",
           "Accounts",
           "Transactions",
@@ -20787,7 +20787,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -20820,7 +20820,7 @@
           "GET /transactions/?start_date=2026-03-13T00%3A00%3A00Z&end_date=2026-04-11T23%3A59%3A59.999999Z&limit=100&offset=0&order=asc"
         ]
       },
-      "transactions | Add Transaction | 1": {
+      "transactions | Add transaction | 1": {
         "fields": [
           "text:",
           "search:",
@@ -20837,13 +20837,13 @@
         "headings": [
           "Transactions",
           "Due and overdue",
-          "Create Transaction"
+          "Add transaction"
         ],
         "buttons": [
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -20875,7 +20875,7 @@
           "Transfer",
           "Household",
           "Japan trip",
-          "Create Transaction",
+          "Add transaction",
           "Save and add another",
           "Cancel",
           "Dashboard",
@@ -20903,7 +20903,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -20944,7 +20944,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Show",
           "Due and overdue2",
           "Not posted yet0",
@@ -20984,7 +20984,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -21031,7 +21031,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -21081,7 +21081,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -21144,7 +21144,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",
@@ -21195,7 +21195,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add Transaction",
+          "Add transaction",
           "Hide",
           "Due and overdue2",
           "Not posted yet0",

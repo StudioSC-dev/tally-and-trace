@@ -258,7 +258,7 @@ for (const { width, height } of VIEWPORTS) {
     test(`AC6 closing-day change moves the installment (${size})`, async ({ page }) => {
       const { api, calls } = await openApp(page, report({ entries: [movingInstallment] }), true)
       await openForm(page)
-      await page.getByRole('button', { name: 'Update Account', exact: true }).click()
+      await page.getByRole('button', { name: 'Update account', exact: true }).click()
 
       // The confirm step names the installment with its next charge before and after.
       const dialog = page.getByTestId('close-day-dialog')
@@ -295,12 +295,12 @@ for (const { width, height } of VIEWPORTS) {
     test(`AC6 card with nothing to move saves without a step (${size})`, async ({ page }) => {
       const { api, calls } = await openApp(page, report({}), false)
       await openForm(page)
-      await page.getByRole('button', { name: 'Update Account', exact: true }).click()
+      await page.getByRole('button', { name: 'Update account', exact: true }).click()
 
       // No step is shown: the form saves through the PUT and closes.
       await expect.poll(() => api.bodies('PUT', `/accounts/${CARD_ID}`).length).toBe(1)
       expect(api.bodies('PUT', `/accounts/${CARD_ID}`)[0]).toHaveProperty('billing_cycle_start', NEW_CLOSE)
-      await expect(page.getByRole('button', { name: 'Update Account', exact: true })).toBeHidden()
+      await expect(page.getByRole('button', { name: 'Update account', exact: true })).toBeHidden()
       await expect(page.getByTestId('close-day-dialog')).toHaveCount(0)
       // Only dry runs reached the closing-day route; nothing was applied.
       expect(calls.length).toBeGreaterThan(0)

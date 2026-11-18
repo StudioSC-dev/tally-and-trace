@@ -1,6 +1,6 @@
 // Browser checks for STU-629: the stacked save toasts (STU-605) never cover a dialog's action
 // buttons or the list rows' actions, at a phone width or on desktop.
-//   (a) phone_dialog_button_clear: 390x844, 3 saves pending, the Add Transaction dialog open:
+//   (a) phone_dialog_button_clear: 390x844, 3 saves pending, the Add transaction dialog open:
 //       its Create button is not covered by a toast (elementFromPoint) and takes a click.
 //   (b) phone_last_row_clear: 390x844, 3 pending, dialog closed: the last list row scrolls into
 //       view and can be clicked (its actions modal opens).
@@ -91,14 +91,14 @@ async function openPage(browser, user, size = DESKTOP) {
   page.on('dialog', (dialog) => dialog.accept().catch(() => {}))
   await h.uiLogin(page, stack, user)
   await page.goto(`${stack.webUrl}/transactions`)
-  await page.getByRole('button', { name: 'Add Transaction' }).first().waitFor()
+  await page.getByRole('button', { name: 'Add transaction' }).first().waitFor()
   await rows(page).first().waitFor()
   await h.waitQuiet(page)
   return { ctx, page }
 }
 
 async function fillCreate(page, { accountName, amount, description }) {
-  await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+  await page.getByRole('button', { name: 'Add transaction' }).first().click()
   const form = formOf(page)
   await form.waitFor()
   await form.locator('input[placeholder="Add notes about this transaction"]').fill(description)
@@ -263,7 +263,7 @@ async function scenarioA(browser) {
     await makePending(page, checking, held, 0, 3, 'TP A')
     await h.check('a.three-pending', 'S', async () => ((await toasts(page).count()) === 3) || `${await toasts(page).count()} toasts`)
     const form = await fillCreate(page, { accountName: checking.name, amount: 999, description: 'TP A Fourth' })
-    const create = form.getByRole('button', { name: 'Create Transaction', exact: true })
+    const create = form.getByRole('button', { name: 'Add transaction', exact: true })
     await dialogToEnd(page, form)
     await shot(page, 'a-dialog')
     const aPlaced = await uncovered(create, ['centre'])
@@ -443,7 +443,7 @@ async function eachWidthAndCount(browser, tag, body, { dialog }) {
 async function scenarioE(browser) {
   console.log('\n(e) responsive_dialog_actions_clear: every dialog action button, 2 and 3 pending, all widths')
   await eachWidthAndCount(browser, 'tpe', async ({ page, width, count, form }) => {
-    for (const label of ['Create Transaction', 'Save and add another', 'Cancel']) {
+    for (const label of ['Add transaction', 'Save and add another', 'Cancel']) {
       await h.check(`e.${count}pending.w${width}.${label.replace(/\W+/g, '-').toLowerCase()}`, 'B', async () => {
         const button = form.getByRole('button', { name: label, exact: true })
         await dialogToEnd(page, form)
@@ -457,7 +457,7 @@ async function scenarioF(browser) {
   console.log('\n(f) responsive_form_primary_clear: the filled form\'s primary button, 2 and 3 pending, all widths')
   await eachWidthAndCount(browser, 'tpf', async ({ page, width, count, form }) => {
     await h.check(`f.${count}pending.w${width}.primary`, 'B', async () => {
-      const button = form.getByRole('button', { name: 'Create Transaction', exact: true })
+      const button = form.getByRole('button', { name: 'Add transaction', exact: true })
       await dialogToEnd(page, form)
       return verdict((await uncovered(button)) ?? (await clickable(button)))
     })
