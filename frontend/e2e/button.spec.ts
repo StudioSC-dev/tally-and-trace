@@ -1109,22 +1109,33 @@ test.describe('AC6: button migration preserves surrounding behavior and layout',
   test('button migration preserves surrounding behavior and layout: the page-header primary width', async ({ page }, testInfo) => {
     test.skip(RECORD, 'a recording run only writes the baseline')
     await surface('allocations-recurring').open(page)
-    // AC6 as amended for STU-685: the primary sits in PageHeader, stays inside the page content, and nothing scrolls sideways.
+    // AC6 as amended for STU-685: the primary sits in PageHeader on the title's row, inside the page content, and nothing scrolls sideways.
     const header = page.getByTestId('page-header')
     await expect(header.getByRole('button', { name: 'Add Recurring Entry', exact: true })).toHaveCount(1)
     const add = header.getByRole('button', { name: 'Add Recurring Entry', exact: true })
     const m = await add.evaluate((e) => {
       const root = e.closest('.page') as HTMLElement
       const head = e.closest('[data-testid="page-header"]') as HTMLElement
+      const title = (head.querySelector('h1') as HTMLElement).getBoundingClientRect()
       const r = e.getBoundingClientRect()
+      const rootBox = root.getBoundingClientRect()
+      const rootStyle = getComputedStyle(root)
       return {
         width: r.width,
+        left: r.left,
         right: r.right,
-        contentRight: root.getBoundingClientRect().right - parseFloat(getComputedStyle(root).paddingRight),
+        centreY: r.top + r.height / 2,
+        title: { top: title.top, bottom: title.bottom },
+        contentLeft: rootBox.left + parseFloat(rootStyle.paddingLeft),
+        contentRight: rootBox.right - parseFloat(rootStyle.paddingRight),
         header: { scroll: head.scrollWidth, client: head.clientWidth },
         doc: { scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth },
       }
     })
+    // It fits beside "Allocations" on both projects, so it sits on the title's row: its centre y lies within the h1.
+    expect(m.centreY, `Add Recurring Entry's centre y (${m.centreY}) is at or below the title's top (${m.title.top})`).toBeGreaterThanOrEqual(m.title.top)
+    expect(m.centreY, `Add Recurring Entry's centre y (${m.centreY}) is at or above the title's bottom (${m.title.bottom})`).toBeLessThanOrEqual(m.title.bottom)
+    expect(m.left, `Add Recurring Entry starts inside the page content (left ${m.left}, content left ${m.contentLeft})`).toBeGreaterThanOrEqual(m.contentLeft)
     expect(m.right, `Add Recurring Entry ends inside the page content (right ${m.right}, content right ${m.contentRight})`).toBeLessThanOrEqual(m.contentRight)
     expect(m.header.scroll, 'the page header does not overflow sideways').toBeLessThanOrEqual(m.header.client)
     expect(m.doc.scroll, 'the document does not overflow sideways').toBeLessThanOrEqual(m.doc.client)
