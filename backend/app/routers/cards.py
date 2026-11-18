@@ -13,9 +13,7 @@ from decimal import Decimal
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import func
 
 from app.core import locking
 from app.core.access import (
@@ -40,6 +38,7 @@ from app.schemas.card import (
 from app.schemas.minimum_due import MinimumDueRule
 from app.schemas.transaction import TransactionCreate, TransactionOut
 from app.services import card_credit
+from app.services import statement_reconcile_apply as reconcile
 from app.services import forecast as fc
 from app.services.fx import FxRates, get_fx
 from app.services.minimum_due import statement_minimums
@@ -371,14 +370,7 @@ def set_statement_minimum(
     """
     card = _managed_card(db, current_user, account_id)
     day = _closed_statement(card, close_date)
-    statement = pg_insert(CardStatementMinimum).values(
-        account_id=card.id, statement_close=day, amount=body.amount,
-        created_by_actor=current_user.id)
-    db.execute(statement.on_conflict_do_update(
-        constraint="uq_card_statement_minimums_account_close",
-        set_={"amount": statement.excluded.amount,
-              "created_by_actor": statement.excluded.created_by_actor,
-              "updated_at": func.now()}))
+    reconcile.store_minimum(db, card, day, body.amount, current_user.id)
     db.commit()
     return {"close_date": day.isoformat(), "amount": _amount(body.amount)}
 
@@ -463,22 +455,7 @@ def set_statement_due(
     Returns ``{close_date, due_date, computed_due}``.
     """
     card, day = _locked_due_statement(db, current_user, account_id, close_date)
-    overrides = load_due_overrides(db, [card.id])[card.id]
-    if body.due_date <= day:
-        raise HTTPException(status_code=422, detail="The due date must be after the close")
-    if not due_in_order(card, day, {**overrides, day: body.due_date}):
-        raise HTTPException(
-            status_code=422,
-            detail="The due date must fall between the previous and the next statement's "
-                   "due dates")
-    statement = pg_insert(CardStatementDueOverride).values(
-        account_id=card.id, statement_close=day, due_date=body.due_date,
-        created_by_actor=current_user.id)
-    db.execute(statement.on_conflict_do_update(
-        constraint="uq_card_statement_due_overrides_account_close",
-        set_={"due_date": statement.excluded.due_date,
-              "created_by_actor": statement.excluded.created_by_actor,
-              "updated_at": func.now()}))
+    reconcile.store_due_override(db, card, day, body.due_date, current_user.id)
     db.commit()
     days_until_due = resolve_cycle_fields(card)[1]
     return {"close_date": day.isoformat(), "due_date": body.due_date.isoformat(),
