@@ -18,6 +18,7 @@ import { downloadAuthed } from '../utils/download'
 import { HouseholdShares } from '../components/HouseholdShares'
 import { SkeletonRows } from '../components/Loading'
 import { Swatch } from '../components/SegmentedControl'
+import { CustomColourInput } from '../components/CustomColourInput'
 import { useConfirm } from '../hooks/useConfirm'
 import { localToday } from '@tally-trace/shared'
 import { accountPickerGroups } from '@tally-trace/shared'
@@ -367,7 +368,7 @@ function SettingsPage() {
                     {SWATCHES.map(({ n, stored }) => (
                       <Swatch key={n} selected={swatchOf(tagForm.color) === n} color={tokenColor(`swatch-${n}`)} onClick={() => setTagForm({ ...tagForm, color: stored })} aria-label={`Colour ${stored}`} />
                     ))}
-                    <input type="color" value={tagForm.color} onChange={(e) => setTagForm({ ...tagForm, color: e.target.value })} className="h-7 w-10 border border-line bg-transparent" aria-label="Custom colour" />
+                    <CustomColourInput value={tagForm.color} onChange={(color) => setTagForm({ ...tagForm, color })} />
                   </div>
                 </div>
                 {tagError && <p role="alert" className="text-sm text-danger">{tagError}</p>}
@@ -405,7 +406,7 @@ function SettingsPage() {
                     {SWATCHES.map(({ n, stored }) => (
                       <Swatch key={n} selected={swatchOf(categoryForm.color) === n} color={tokenColor(`swatch-${n}`)} onClick={() => setCategoryForm({ ...categoryForm, color: stored })} aria-label={`Colour ${stored}`} />
                     ))}
-                    <input type="color" value={categoryForm.color} onChange={(e) => setCategoryForm({ ...categoryForm, color: e.target.value })} className="h-7 w-10 border border-line bg-transparent" />
+                    <CustomColourInput value={categoryForm.color} onChange={(color) => setCategoryForm({ ...categoryForm, color })} />
                   </div>
                 </div>
                 <div>

@@ -633,7 +633,7 @@ export function Dashboard() {
           )}
           {otherUpcoming.length > 0 && (
             <div className="border-t border-line p-4 sm:p-6 space-y-3" data-testid="other-upcoming">
-              <h3 className="text-xs font-semibold text-muted">Also coming up</h3>
+              <h3 className="text-xs font-medium text-muted">Also coming up</h3>
               {otherUpcoming.slice(0, MAX_OTHER_UPCOMING_SHOWN).map((item, index) => {
                 // The face amount, never a limited event's `cash_delta` (0 for a Household bill).
                 const { amount, direction } = upcomingItemAmount(item)

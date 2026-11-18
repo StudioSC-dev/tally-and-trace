@@ -1727,6 +1727,12 @@ export async function mockHousehold(page: Page, data: HouseholdData = household)
   return mockApi(page, householdRoutes(data))
 }
 
+/** A tag whose name is too long for the phone's closed tag filter (STU-743). */
+export const LONG_TAG: Tag = { id: 43, name: 'Japan trip 2027 with the whole family and cousins', color: '#a35f2a', is_system: false, created_at: '2025-06-01T00:00:00' }
+
+/** The household with `LONG_TAG` among its tags. */
+export const withLongTag = (data: HouseholdData): HouseholdData => ({ ...data, tags: [...data.tags, LONG_TAG] })
+
 /** Two wishlist items, neither bought: a laptop for work and a rice cooker. */
 export const householdWishlist: WishlistItem[] = [
   { id: 801, user_id: householdUser.id, name: 'Work laptop', estimated_cost: 65000, currency: 'PHP', priority: 'high', notes: 'For freelance work', target_date: '2026-06-30', is_purchased: false, created_at: '2026-02-01T09:00:00Z' },

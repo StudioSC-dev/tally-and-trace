@@ -22,7 +22,7 @@ const TABS: TabItem[] = [
 ]
 
 const tabBase =
-  'relative flex flex-1 flex-col items-center justify-center gap-1 transition-colors duration-150 active:bg-sunken'
+  'relative flex min-w-0 flex-1 flex-col items-center justify-center gap-1 px-1 transition-colors duration-150 active:bg-sunken'
 
 export function BottomNav() {
   return (
