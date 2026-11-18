@@ -41,8 +41,25 @@ a candidate row is a ``move`` (posted, and given the statement's amount and date
 
 Dates. A row's target dates are the line's ``transaction_date`` and ``posting_date``
 (none when the line gives none). A row linked to a recurring entry (``budget_entry_id``
-set) keeps its dates and only its amount is compared; such a candidate row is paired
-only when its own dates, once posted, place it on this statement.
+set) keeps its ``transaction_date``; its ``posting_date`` follows the line, since a
+posted row is placed on the later of its own day and its posting day:
+
+- a candidate row (a ``move``) takes the line's posting date, else the line's
+  transaction date when that is after the row's own day, else keeps its own posting
+  date when that still places it on this statement, else none;
+- a cycle row takes the line's posting date when the line gives one; otherwise its
+  posting date changes only when needed to keep it on this statement (to the line's
+  transaction date when that is after the row's own day, else none).
+
+A recurring candidate row is paired with a line only when, so dated, it lands on this
+statement (a row whose own day is after the close never does). When a line becomes a
+``create`` and a recurring candidate of the same kind and amount was left out only for
+that reason, the ``create`` names it in ``possible_duplicate_of`` (lowest id).
+
+Warnings. A line whose resulting row would not land on this statement (its dates fall
+outside ``(window_start, close]``) still gets its action, and ``warnings`` names it.
+``balanced`` is True only when ``simulate`` on the actions gives the statement's line
+balance; an apply must be refused when it is False.
 
 Payments. A ``payment`` line is paired with a payment row by rule 1 only (exact amount,
 nearest date, lowest id) and reported ``matched`` or ``missing``; payments never
@@ -55,7 +72,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Dict, Iterable, List, Literal, Optional, Sequence, Tuple
@@ -126,13 +143,22 @@ class Action:
     row_id: Optional[int] = None
     changes: Tuple[FieldChange, ...] = ()
     new_row: Optional[NewRow] = None
+    possible_duplicate_of: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class DiffWarning:
+    line_no: int
+    reason: str
 
 
 @dataclass(frozen=True)
 class StatementDiff:
     fingerprint: str
     header: Tuple[HeaderDiff, ...]
-    actions: Tuple[Action, ...] = field(default_factory=tuple)
+    actions: Tuple[Action, ...] = ()
+    warnings: Tuple[DiffWarning, ...] = ()
+    balanced: bool = False
 
 
 # --- Fingerprint ------------------------------------------------------------------------
@@ -146,17 +172,22 @@ def _canon(value):
     return value
 
 
-def fingerprint(statement: BankStatement, rows: Iterable[RowRecord]) -> str:
-    """SHA-256 over the canonical statement JSON (keys sorted, lines by ``line_no``)
-    and, for every row read, its id, amount, dates, posted flag and ``updated_at``
-    (rows by id). Input order does not change it."""
+def fingerprint(statement: BankStatement, view: AppStatementView,
+                rows: Iterable[RowRecord]) -> str:
+    """SHA-256 over the canonical statement JSON (keys sorted, lines by ``line_no``),
+    the app's view (close, window start, due, minimum due) and, for every row read,
+    its id, amount, dates, posted flag and ``updated_at`` (rows by id). Input order
+    does not change it; a change to the card's cycle settings or overrides does."""
     header = {k: _canon(v) for k, v in statement.header.model_dump().items()}
     lines = [{k: _canon(v) for k, v in line.model_dump().items()}
              for line in sorted(statement.lines, key=lambda line: line.line_no)]
     read = [[r.id, _canon(r.amount), _canon(r.transaction_date), _canon(r.posting_date),
              r.is_posted, _canon(r.updated_at)]
             for r in sorted(rows, key=lambda r: r.id)]
-    body = json.dumps({"statement": {"header": header, "lines": lines}, "rows": read},
+    app = {"close": _canon(view.close), "window_start": _canon(view.window_start),
+           "due": _canon(view.due), "minimum_due": _canon(view.minimum_due)}
+    body = json.dumps({"statement": {"header": header, "lines": lines}, "view": app,
+                       "rows": read},
                       sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
@@ -185,7 +216,8 @@ def _distance(line: StatementLine, row: RowRecord) -> int:
     return abs((line.transaction_date - row.transaction_date).days)
 
 
-def _exact_pairs(lines: Sequence[StatementLine], pool: Sequence[Tuple[int, RowRecord]]
+def _exact_pairs(lines: Sequence[StatementLine], pool: Sequence[Tuple[int, RowRecord]],
+                 eligible=lambda line, rank, row: True
                  ) -> List[Tuple[StatementLine, int, RowRecord]]:
     """Rule 1: pairs of equal amount and kind, best ranked first, each side used once."""
     by_key: Dict[Tuple[str, Decimal], List[Tuple[int, RowRecord]]] = {}
@@ -194,6 +226,8 @@ def _exact_pairs(lines: Sequence[StatementLine], pool: Sequence[Tuple[int, RowRe
     ranked = []
     for line in lines:
         for rank, row in by_key.get((line.kind, line.amount), ()):
+            if not eligible(line, rank, row):
+                continue
             ranked.append(((rank, _distance(line, row), row.id, line.line_no), line, rank, row))
     ranked.sort(key=lambda item: item[0])
     used_lines: set = set()
@@ -208,15 +242,15 @@ def _exact_pairs(lines: Sequence[StatementLine], pool: Sequence[Tuple[int, RowRe
     return pairs
 
 
-def _unambiguous_pairs(lines: Sequence[StatementLine], pool: Sequence[Tuple[int, RowRecord]]
-                       ) -> List[Tuple[StatementLine, int, RowRecord]]:
+def _unambiguous_pairs(lines: Sequence[StatementLine], pool: Sequence[Tuple[int, RowRecord]],
+                       eligible) -> List[Tuple[StatementLine, int, RowRecord]]:
     """Rule 2: a line and a row of the same kind within one day of each other, when
     each is the other's only remaining counterpart within a day."""
     near_rows: Dict[int, List[Tuple[int, RowRecord]]] = {}
     near_lines: Dict[int, List[StatementLine]] = {}
     for line in lines:
         for rank, row in pool:
-            if row.kind == line.kind and _distance(line, row) <= 1:
+            if row.kind == line.kind and _distance(line, row) <= 1 and eligible(line, rank, row):
                 near_rows.setdefault(line.line_no, []).append((rank, row))
                 near_lines.setdefault(row.id, []).append(line)
     pairs = []
@@ -228,23 +262,44 @@ def _unambiguous_pairs(lines: Sequence[StatementLine], pool: Sequence[Tuple[int,
     return pairs
 
 
-def _row_changes(line: StatementLine, row: RowRecord) -> Tuple[FieldChange, ...]:
+def _lands(view: AppStatementView, transaction_date: date, posting_date: Optional[date]) -> bool:
+    return view.window_start < _posted_day(transaction_date, posting_date) <= view.close
+
+
+def _target_dates(view: AppStatementView, line: StatementLine, rank: int, row: RowRecord
+                  ) -> Tuple[date, Optional[date]]:
+    """The dates ``row`` takes when paired with ``line`` (see the module docstring)."""
+    if row.budget_entry_id is None:
+        return line.transaction_date, line.posting_date
+    own = row.transaction_date
+    if line.posting_date is not None:
+        return own, line.posting_date
+    later = line.transaction_date if line.transaction_date > own else None
+    if rank == CANDIDATE and later is not None:
+        return own, later
+    if _lands(view, own, row.posting_date):
+        return own, row.posting_date
+    return own, later
+
+
+def _row_changes(view: AppStatementView, line: StatementLine, rank: int, row: RowRecord
+                 ) -> Tuple[FieldChange, ...]:
     changes: List[FieldChange] = []
     if row.amount != line.amount:
         changes.append(FieldChange("amount", row.amount, line.amount))
-    if row.budget_entry_id is None:
-        if row.transaction_date != line.transaction_date:
-            changes.append(FieldChange("transaction_date", row.transaction_date,
-                                       line.transaction_date))
-        if row.posting_date != line.posting_date:
-            changes.append(FieldChange("posting_date", row.posting_date, line.posting_date))
+    transaction_date, posting_date = _target_dates(view, line, rank, row)
+    if row.transaction_date != transaction_date:
+        changes.append(FieldChange("transaction_date", row.transaction_date, transaction_date))
+    if row.posting_date != posting_date:
+        changes.append(FieldChange("posting_date", row.posting_date, posting_date))
     if not row.is_posted:
         changes.append(FieldChange("is_posted", False, True))
     return tuple(changes)
 
 
-def _pair_action(line: StatementLine, rank: int, row: RowRecord) -> Action:
-    changes = _row_changes(line, row)
+def _pair_action(view: AppStatementView, line: StatementLine, rank: int, row: RowRecord
+                 ) -> Action:
+    changes = _row_changes(view, line, rank, row)
     if rank == CANDIDATE:
         return Action("move", line.line_no, row.id, changes)
     return Action("update" if changes else "matched", line.line_no, row.id, changes)
@@ -269,37 +324,40 @@ def diff_statement(statement: BankStatement, view: AppStatementView,
                    payment_rows: Sequence[RowRecord] = ()) -> StatementDiff:
     """The header diff and one action per line or row; see the module docstring."""
     _check_rows(cycle_rows, candidate_rows, payment_rows)
-    digest = fingerprint(statement, (*cycle_rows, *candidate_rows, *payment_rows))
+    digest = fingerprint(statement, view, (*cycle_rows, *candidate_rows, *payment_rows))
     header = tuple(_header_diff(statement, view))
     if statement.header.close_date != view.close:
-        return StatementDiff(digest, header, ())
+        return StatementDiff(digest, header)
 
-    def placeable(row: RowRecord) -> bool:
-        # A recurring row keeps its dates: it can only be posted where they put it.
-        return (row.budget_entry_id is None
-                or view.window_start < _posted_day(row.transaction_date, row.posting_date)
-                <= view.close)
+    def eligible(line: StatementLine, rank: int, row: RowRecord) -> bool:
+        # A recurring candidate keeps its own day: it can only be posted where that,
+        # with the statement's posting date, puts it.
+        return (rank == CYCLE or row.budget_entry_id is None
+                or _lands(view, *_target_dates(view, line, rank, row)))
 
-    pool = ([(CYCLE, r) for r in cycle_rows]
-            + [(CANDIDATE, r) for r in candidate_rows if placeable(r)])
+    pool = [(CYCLE, r) for r in cycle_rows] + [(CANDIDATE, r) for r in candidate_rows]
     items = [line for line in statement.lines if line.kind != "payment"]
     actions: List[Action] = []
 
-    paired = _exact_pairs(items, pool)
+    paired = _exact_pairs(items, pool, eligible)
     taken_lines = {line.line_no for line, _, _ in paired}
     taken_rows = {row.id for _, _, row in paired}
     rest_lines = [line for line in items if line.line_no not in taken_lines]
     rest_pool = [(rank, row) for rank, row in pool if row.id not in taken_rows]
-    for line, rank, row in paired + _unambiguous_pairs(rest_lines, rest_pool):
+    for line, rank, row in paired + _unambiguous_pairs(rest_lines, rest_pool, eligible):
         taken_lines.add(line.line_no)
         taken_rows.add(row.id)
-        actions.append(_pair_action(line, rank, row))
+        actions.append(_pair_action(view, line, rank, row))
 
     for line in items:
         if line.line_no not in taken_lines:
+            left_out = [r.id for r in candidate_rows
+                        if r.id not in taken_rows and r.budget_entry_id is not None
+                        and r.kind == line.kind and r.amount == line.amount
+                        and not eligible(line, CANDIDATE, r)]
             actions.append(Action("create", line.line_no, None, (), NewRow(
                 line.kind, line.amount, line.transaction_date, line.posting_date,
-                line.description)))
+                line.description), min(left_out) if left_out else None))
     for row in cycle_rows:
         if row.id not in taken_rows:
             actions.append(Action("unpost", None, row.id,
@@ -312,7 +370,25 @@ def diff_statement(statement: BankStatement, view: AppStatementView,
     actions += [Action("missing", line.line_no) for line in payment_lines
                 if line.line_no not in found]
 
-    return StatementDiff(digest, header, tuple(sorted(actions, key=_sort_key)))
+    actions.sort(key=_sort_key)
+    rows = [*cycle_rows, *candidate_rows]
+    after = _apply(rows, actions)
+    by_row = {r.row_id: r for r in after if r.row_id is not None}
+    by_line = {r.line_no: r for r in after if r.line_no is not None}
+    item_nos = {line.line_no for line in items}
+    warnings = []
+    for action in actions:
+        if action.line_no not in item_nos:
+            continue
+        result = by_row[action.row_id] if action.row_id is not None else by_line[action.line_no]
+        if not _lands(view, result.transaction_date, result.posting_date):
+            day = _posted_day(result.transaction_date, result.posting_date)
+            warnings.append(DiffWarning(action.line_no, (
+                f"its dates place it on {day.isoformat()}, outside this statement"
+                f" ({view.window_start.isoformat()}, {view.close.isoformat()}]")))
+    balanced = line_balance(simulate(rows, actions, window_start=view.window_start,
+                                     close=view.close)) == statement.line_balance
+    return StatementDiff(digest, header, tuple(actions), tuple(warnings), balanced)
 
 
 # --- Simulation -------------------------------------------------------------------------
@@ -337,6 +413,13 @@ def simulate(rows: Sequence[RowRecord], actions: Sequence[Action], *,
     applied, plus the created rows, kept when it is a posted line item whose
     ``statement_day`` falls in ``(window_start, close]`` (a closed statement holds
     posted rows only). Sorted by row id, then created rows by ``line_no``."""
+    kept = [r for r in _apply(rows, actions) if r.kind != "payment" and r.is_posted
+            and window_start < _posted_day(r.transaction_date, r.posting_date) <= close]
+    return sorted(kept, key=lambda r: (r.row_id is None, r.row_id or 0, r.line_no or 0))
+
+
+def _apply(rows: Sequence[RowRecord], actions: Sequence[Action]) -> List[SimulatedRow]:
+    """Every row of ``rows`` with its changes applied, then the created rows."""
     changes = {a.row_id: a.changes for a in actions if a.row_id is not None}
     out: List[SimulatedRow] = []
     for row in rows:
@@ -350,9 +433,7 @@ def simulate(rows: Sequence[RowRecord], actions: Sequence[Action], *,
             new = action.new_row
             out.append(SimulatedRow(None, action.line_no, new.kind, new.amount,
                                     new.transaction_date, new.posting_date, new.is_posted))
-    kept = [r for r in out if r.kind != "payment" and r.is_posted
-            and window_start < _posted_day(r.transaction_date, r.posting_date) <= close]
-    return sorted(kept, key=lambda r: (r.row_id is None, r.row_id or 0, r.line_no or 0))
+    return out
 
 
 def line_balance(rows: Iterable[SimulatedRow]) -> Decimal:

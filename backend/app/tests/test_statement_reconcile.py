@@ -13,7 +13,7 @@ import pytest
 
 from app.schemas.statement_reconcile import BankStatement
 from app.services.statement_reconcile import (
-    Action, AppStatementView, FieldChange, HeaderDiff, NewRow, RowRecord, diff_statement,
+    Action, AppStatementView, DiffWarning, FieldChange, HeaderDiff, NewRow, RowRecord, diff_statement,
     fingerprint, line_balance, simulate,
 )
 
@@ -76,6 +76,7 @@ def test_statement_equal_to_cycle_is_all_matched():
              row(13, day(7, 20), "45.00", posting=day(7, 21))]
     diff = run(st, cycle)
     assert diff.header == ()
+    assert diff.balanced and diff.warnings == ()
     assert diff.actions == (Action("matched", 1, 11), Action("matched", 2, 12),
                             Action("matched", 3, 13))
 
@@ -146,29 +147,73 @@ def test_unpost():
 # --- AC3 --------------------------------------------------------------------------------
 
 
-def test_recurring_row_keeps_its_dates():
+def test_recurring_row_keeps_its_transaction_date():
     # An installment row is dated on the close by design; the bank prints another date.
-    st = statement([line(1, day(7, 20), "1500.00", posting=day(7, 21))])
+    st = statement([line(1, day(7, 20), "1500.00")])
     diff = run(st, [row(40, CLOSE, "1500.00", entry=7)])
     assert diff.actions == (Action("matched", 1, 40),)
 
 
+def test_recurring_row_takes_the_lines_posting_date_only():
+    st = statement([line(1, day(7, 20), "1500.00", posting=day(7, 21))])
+    diff = run(st, [row(40, CLOSE, "1500.00", entry=7)])
+    assert diff.actions == (
+        Action("update", 1, 40, (FieldChange("posting_date", None, day(7, 21)),)),)
+    assert diff.balanced
+
+
 def test_recurring_row_amount_difference_is_an_update_of_the_amount_only():
-    st = statement([line(1, day(7, 23), "1250.00", posting=day(7, 23))])
+    st = statement([line(1, day(7, 23), "1250.00")])
     diff = run(st, [row(40, CLOSE, "1200.00", entry=7)])
     assert diff.actions == (
         Action("update", 1, 40, (FieldChange("amount", D("1200.00"), D("1250.00")),)),)
 
 
-def test_recurring_candidate_is_moved_only_where_its_own_dates_place_it():
+def test_recurring_candidate_planned_before_the_window_posts_onto_it():
+    # Planned on its own day in the previous window; the bank posted it after that close.
+    st = statement([line(1, day(6, 22), "800.00", posting=day(6, 25))])
+    planned = row(41, day(6, 22), "800.00", posted=False, entry=7)
+    diff = run(st, [], [planned])
+    assert diff.actions == (Action("move", 1, 41, (
+        FieldChange("posting_date", None, day(6, 25)), FieldChange("is_posted", False, True))),)
+    assert diff.balanced and diff.warnings == ()
+
+
+def test_recurring_candidate_is_moved_only_where_it_lands():
     st = statement([line(1, day(7, 24), "800.00"), line(2, day(7, 24), "60.00")])
     on_this = row(41, CLOSE, "800.00", posted=False, entry=7)          # posts onto this one
-    on_next = row(42, day(8, 24), "60.00", posted=False, entry=8)      # its dates are next month's
+    on_next = row(42, day(8, 24), "60.00", posted=False, entry=8)      # its own day is after the close
     diff = run(st, [], [on_this, on_next])
     assert diff.actions == (
         Action("move", 1, 41, (FieldChange("is_posted", False, True),)),
-        Action("create", 2, None, (), NewRow("charge", D("60.00"), day(7, 24), None, "Line 2")),
+        Action("create", 2, None, (), NewRow("charge", D("60.00"), day(7, 24), None, "Line 2"),
+               possible_duplicate_of=42),
     )
+
+
+def test_create_names_the_lowest_left_out_recurring_row_as_a_possible_duplicate():
+    st = statement([line(1, day(7, 10), "60.00"), line(2, day(7, 11), "75.00")])
+    candidates = [row(44, day(8, 10), "60.00", posted=False, entry=8),
+                  row(43, day(8, 12), "60.00", posted=False, entry=8),
+                  row(45, day(8, 10), "60.00", "credit", posted=False, entry=8),  # other kind
+                  row(42, day(8, 10), "60.01", posted=False, entry=8)]             # other amount
+    diff = run(st, [], candidates)
+    assert diff.actions == (
+        Action("create", 1, None, (), NewRow("charge", D("60.00"), day(7, 10), None, "Line 1"),
+               possible_duplicate_of=43),
+        Action("create", 2, None, (), NewRow("charge", D("75.00"), day(7, 11), None, "Line 2")),
+    )
+
+
+def test_a_line_that_would_land_off_the_statement_is_a_warning():
+    st = statement([line(1, day(6, 20), "300.00"), line(2, day(7, 2), "40.00")])
+    diff = run(st, [row(10, day(7, 2), "40.00")])
+    assert diff.actions == (
+        Action("create", 1, None, (), NewRow("charge", D("300.00"), day(6, 20), None, "Line 1")),
+        Action("matched", 2, 10))
+    assert diff.warnings == (DiffWarning(
+        1, "its dates place it on 2026-06-20, outside this statement (2026-06-24, 2026-07-24]"),)
+    assert diff.balanced is False
 
 
 # --- AC4 --------------------------------------------------------------------------------
@@ -243,6 +288,7 @@ def test_property_simulated_cycle_equals_statement():
         diff = run(st, cycle, candidates, payments)
         kinds_seen.update(a.kind for a in diff.actions)
         assert simulated_balance(st, diff, cycle, candidates, payments) == st.line_balance, case
+        assert diff.balanced and diff.warnings == (), case
         row_ids = [a.row_id for a in diff.actions if a.row_id is not None]
         assert len(row_ids) == len(set(row_ids)), case
         assert sorted(a.line_no for a in diff.actions if a.line_no is not None) == \
@@ -302,10 +348,22 @@ def test_same_inputs_in_any_order_give_the_same_diff():
 ])
 def test_fingerprint_changes_with_a_row(change):
     st, cycle, candidates, payments = _duplicates_case()
-    before = fingerprint(st, [*cycle, *candidates, *payments])
+    before = fingerprint(st, VIEW, [*cycle, *candidates, *payments])
     changed = [replace(cycle[0], **change), *cycle[1:]]
     assert run(st, changed, candidates, payments).fingerprint != before
     assert run(st, cycle, candidates, payments).fingerprint == before
+
+
+@pytest.mark.parametrize("change", [
+    {"close": day(7, 25)},
+    {"window_start": day(6, 23)},
+    {"due": day(8, 15)},
+    {"minimum_due": D("500.01")},
+])
+def test_fingerprint_changes_with_the_apps_view(change):
+    st, cycle, candidates, payments = _duplicates_case()
+    before = run(st, cycle, candidates, payments).fingerprint
+    assert run(st, cycle, candidates, payments, view=replace(VIEW, **change)).fingerprint != before
 
 
 # --- AC6 --------------------------------------------------------------------------------
