@@ -13,6 +13,7 @@ that save. The routes that honour it are listed in `OUTBOX_ENDPOINTS` (`core/ide
 | `POST /transactions/repeating` | add a transaction that repeats |
 | `POST /transactions/{id}/repeat` | make a saved transaction repeat |
 | `POST /cards/{id}/payments` | pay a card (one transfer) |
+| `POST /cards/{id}/statements/reconcile` | reconcile a card statement (an apply) |
 | `POST /budget-entries/` | add a recurring entry |
 | `POST /budget-entries/{id}/materialize` | Mark paid, Charged (Due card Record) |
 | `POST /budget-entries/{id}/materialize-due` | Post N due |

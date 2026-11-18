@@ -36,6 +36,7 @@ from app.schemas.card import (
     StatementMinimumSet,
 )
 from app.schemas.minimum_due import MinimumDueRule
+from app.schemas.statement_reconcile import ReconcileOut, ReconcileRequest
 from app.schemas.transaction import TransactionCreate, TransactionOut
 from app.services import card_credit
 from app.services import statement_reconcile_apply as reconcile
@@ -333,6 +334,44 @@ def get_card_statement(
             "transaction_id": line["transaction"].id,
         } for line in found["unconverted"]]
     return body
+
+
+@router.post("/{account_id}/statements/reconcile", response_model=ReconcileOut)
+def reconcile_statement(
+    account_id: int,
+    body: ReconcileRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    fx: FxRates = Depends(get_fx),
+    idem: Idempotency = Depends(idempotency),
+):
+    """Reconcile one closed statement with the bank's (STU-749,
+    ``services/statement_reconcile_apply.py``). The statement always wins.
+
+    Owner or admin of the card only (404 otherwise); 400 for a non-card or a card
+    without cycle settings; 422 unless the statement's cycle has closed.
+
+    ``dry_run`` true returns the header diff, the actions, the warnings,
+    ``balanced`` and the fingerprint, and writes nothing. An apply sends the same
+    statement with that ``fingerprint``: under the card's lock it recomputes the
+    diff and applies it in one transaction through the existing write paths, then
+    checks the app's statement equals the bank's. 422 when the statement's close
+    is not the app's (the card's closing day must change first); 409, with nothing
+    written, when the fingerprint differs, the diff is unbalanced, a write path
+    refuses an action, or the check finds a gap (returned). On success every line
+    item on the statement is reconciled and the reconciliation is returned with
+    the applied actions and any notes. ``Idempotency-Key`` is honoured.
+    """
+    card = _managed_card(db, current_user, account_id)
+    statement = body.statement
+    if body.dry_run:
+        loaded = reconcile.load(db, current_user, card, statement, fx)
+        return finish(idem, db, reconcile.as_out(reconcile.diff(loaded, statement),
+                                                 dry_run=True), model=ReconcileOut)
+    applied = reconcile.apply(db, current_user, card, statement, body.fingerprint, fx)
+    return finish(idem, db, reconcile.as_out(
+        applied.diff, dry_run=False, created=applied.created, notes=applied.notes,
+        reconciliation=applied.reconciliation), model=ReconcileOut)
 
 
 def _closed_statement(card: Account, close_date: str) -> date:

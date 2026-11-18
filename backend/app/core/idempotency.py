@@ -52,6 +52,7 @@ OUTBOX_ENDPOINTS: tuple[tuple[str, str], ...] = (
     ("POST", "/transactions/repeating"),
     ("POST", "/transactions/{transaction_id}/repeat"),
     ("POST", "/cards/{account_id}/payments"),
+    ("POST", "/cards/{account_id}/statements/reconcile"),
     ("POST", "/budget-entries/"),
     ("POST", "/budget-entries/{entry_id}/materialize"),
     ("POST", "/budget-entries/{entry_id}/materialize-due"),

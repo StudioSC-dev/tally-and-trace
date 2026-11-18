@@ -24,6 +24,9 @@ from app.models.card_statement import (
     CardStatement as CardStatement,
     CardStatementState as CardStatementState,
 )
+from app.models.statement_reconciliation import (
+    StatementReconciliation as StatementReconciliation,
+)
 
 # ---------------------------------------------------------------------------
 # User relationships
