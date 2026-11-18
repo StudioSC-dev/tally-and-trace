@@ -867,7 +867,7 @@ const EXPECTED: Record<string, Expected & { phone?: Partial<Expected> }> = {
     },
   },
   'household, dashboard': {
-    headings: ['Your Household', 'Accounts', 'March 2026', 'Next 30 days'],
+    headings: ['Your household', 'Accounts', 'March 2026', 'Next 30 days'],
     titles: [],
     buttons: ['Toggle theme', 'MS Mara Santos', 'Dashboard', 'Transactions', 'Upcoming', 'Monthly'],
     phone: {
@@ -875,7 +875,7 @@ const EXPECTED: Record<string, Expected & { phone?: Partial<Expected> }> = {
     },
   },
   'household, transactions': {
-    headings: ['Your Household', 'Transactions'],
+    headings: ['Your household', 'Transactions'],
     titles: [],
     buttons: [
       'Toggle theme',
@@ -892,7 +892,7 @@ const EXPECTED: Record<string, Expected & { phone?: Partial<Expected> }> = {
     },
   },
   'household, upcoming': {
-    headings: ['Your Household', 'Next 30 days'],
+    headings: ['Your household', 'Next 30 days'],
     titles: [],
     buttons: ['Toggle theme', 'MS Mara Santos', 'Dashboard', 'Transactions', 'Upcoming', 'Monthly'],
     phone: {
@@ -900,7 +900,7 @@ const EXPECTED: Record<string, Expected & { phone?: Partial<Expected> }> = {
     },
   },
   'household, monthly': {
-    headings: ['Your Household', 'March 2026'],
+    headings: ['Your household', 'March 2026'],
     titles: [],
     buttons: ['Toggle theme', 'MS Mara Santos', 'Dashboard', 'Transactions', 'Upcoming', 'Monthly'],
     phone: {
@@ -923,7 +923,7 @@ const EXPECTED: Record<string, Expected & { phone?: Partial<Expected> }> = {
       'Categories',
       'Tags',
       'Household sharing',
-      'People who can see your Household',
+      'People who can see your household',
       'Add a person',
     ],
     titles: [],

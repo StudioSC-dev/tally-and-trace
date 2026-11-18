@@ -989,7 +989,7 @@ const INVENTORY: Group[] = [
     route: '/accounts/household',
     what: 'Household view tabs (Tabs, role=tab)',
     kind: 'tab',
-    open: (page) => openPage(page, '/accounts/household', 'Your Household', household, householdViewRoutes(household)),
+    open: (page) => openPage(page, '/accounts/household', 'Your household', household, householdViewRoutes(household)),
     group: (page) => page.getByRole('tablist'),
     selected: 'Dashboard',
     other: 'Transactions',

@@ -2049,7 +2049,7 @@
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosSettingsChoose your cash-flow timeline's main account, manage categories and tags, and export your data.Cash-flow timelineThe timeline opens on your main account's own running balance. You can still switch to all cash accounts there.Main accountNone (all cash accounts)BPI Payroll (PHP)Metrobank Savings (PHP)BDO Joint household (PHP)Export your dataDownload everything you own as one JSON file, or as a ZIP of CSV files (one per table). Accounts shared with you and other people's records on your accounts are included with limited details.JSONCSV (ZIP)CategoriesColour-coded labels for transactions and budgets.Add categorySalaryIncomeEditDeleteGroceriesExpenseEditDeleteDining outExpenseEditDeleteUtilitiesExpenseEditDeleteTransportExpenseEditDeleteRentExpenseEditDeleteSubscriptionsExpenseEditDeleteHealthExpenseEditDeleteSavings transferTransferEditDeleteFreelanceIncomeEditDeleteHousehold helpExpenseEditDeleteTagsLabel accounts, transactions and recurring entries, then filter by tag.Add tagHouseholdSystemRecolourDeleteJapan tripEditDeleteHousehold sharingShare your Household tag with someone, by their email. They can see your Household-tagged accounts, their balances and your Household-tagged transactions and recurring entries, read-only: they can't change anything, and they see nothing that isn't tagged Household.People who can see your HouseholdNot shared with anyone yet.Add a personLook upDashboardAccountsTransactionsAllocations"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosSettingsChoose your cash-flow timeline's main account, manage categories and tags, and export your data.Cash-flow timelineThe timeline opens on your main account's own running balance. You can still switch to all cash accounts there.Main accountNone (all cash accounts)BPI Payroll (PHP)Metrobank Savings (PHP)BDO Joint household (PHP)Export your dataDownload everything you own as one JSON file, or as a ZIP of CSV files (one per table). Accounts shared with you and other people's records on your accounts are included with limited details.JSONCSV (ZIP)CategoriesColour-coded labels for transactions and budgets.Add categorySalaryIncomeEditDeleteGroceriesExpenseEditDeleteDining outExpenseEditDeleteUtilitiesExpenseEditDeleteTransportExpenseEditDeleteRentExpenseEditDeleteSubscriptionsExpenseEditDeleteHealthExpenseEditDeleteSavings transferTransferEditDeleteFreelanceIncomeEditDeleteHousehold helpExpenseEditDeleteTagsLabel accounts, transactions and recurring entries, then filter by tag.Add tagHouseholdSystemRecolourDeleteJapan tripEditDeleteHousehold sharingShare your Household tag with someone, by their email. They can see your Household-tagged accounts, their balances and your Household-tagged transactions and recurring entries, read-only: they can't change anything, and they see nothing that isn't tagged Household.People who can see your householdNot shared with anyone yet.Add a personLook upDashboardAccountsTransactionsAllocations"
       },
       "settings-category": {
         "controls": [
@@ -6783,7 +6783,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Add category"
         ],
@@ -6855,7 +6855,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Add tag"
         ],
@@ -6924,7 +6924,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person"
         ],
         "buttons": [
@@ -6984,7 +6984,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete tag?"
         ],
@@ -7045,7 +7045,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete category?"
         ],
@@ -7106,7 +7106,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete category?"
         ],
@@ -7167,7 +7167,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete category?"
         ],
@@ -7228,7 +7228,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete category?"
         ],
@@ -7289,7 +7289,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete category?"
         ],
@@ -7350,7 +7350,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete category?"
         ],
@@ -7411,7 +7411,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete category?"
         ],
@@ -7472,7 +7472,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete category?"
         ],
@@ -7533,7 +7533,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete category?"
         ],
@@ -7594,7 +7594,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete category?"
         ],
@@ -7655,7 +7655,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete category?"
         ],
@@ -7719,7 +7719,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit tag"
         ],
@@ -7793,7 +7793,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit category"
         ],
@@ -7867,7 +7867,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit category"
         ],
@@ -7941,7 +7941,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit category"
         ],
@@ -8015,7 +8015,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit category"
         ],
@@ -8089,7 +8089,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit category"
         ],
@@ -8163,7 +8163,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit category"
         ],
@@ -8237,7 +8237,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit category"
         ],
@@ -8311,7 +8311,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit category"
         ],
@@ -8385,7 +8385,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit category"
         ],
@@ -8459,7 +8459,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit category"
         ],
@@ -8533,7 +8533,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit category"
         ],
@@ -8602,7 +8602,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person"
         ],
         "buttons": [
@@ -8662,7 +8662,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person"
         ],
         "buttons": [
@@ -8726,7 +8726,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Recolour tag"
         ],
@@ -8795,7 +8795,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person"
         ],
         "buttons": [
@@ -8855,7 +8855,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person"
         ],
         "buttons": [
@@ -8918,7 +8918,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person"
         ],
         "buttons": [
@@ -8978,7 +8978,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person"
         ],
         "buttons": [
@@ -9039,7 +9039,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person"
         ],
         "buttons": [
@@ -9099,7 +9099,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person"
         ],
         "buttons": [
@@ -9162,7 +9162,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person"
         ],
         "buttons": [
@@ -9222,7 +9222,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person"
         ],
         "buttons": [
@@ -12725,7 +12725,7 @@
             "look": ""
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosSettingsChoose your cash-flow timeline's main account, manage categories and tags, and export your data.Cash-flow timelineThe timeline opens on your main account's own running balance. You can still switch to all cash accounts there.Main accountNone (all cash accounts)BPI Payroll (PHP)Metrobank Savings (PHP)BDO Joint household (PHP)Export your dataDownload everything you own as one JSON file, or as a ZIP of CSV files (one per table). Accounts shared with you and other people's records on your accounts are included with limited details.JSONCSV (ZIP)CategoriesColour-coded labels for transactions and budgets.Add categorySalaryIncomeEditDeleteGroceriesExpenseEditDeleteDining outExpenseEditDeleteUtilitiesExpenseEditDeleteTransportExpenseEditDeleteRentExpenseEditDeleteSubscriptionsExpenseEditDeleteHealthExpenseEditDeleteSavings transferTransferEditDeleteFreelanceIncomeEditDeleteHousehold helpExpenseEditDeleteTagsLabel accounts, transactions and recurring entries, then filter by tag.Add tagHouseholdSystemRecolourDeleteJapan tripEditDeleteHousehold sharingShare your Household tag with someone, by their email. They can see your Household-tagged accounts, their balances and your Household-tagged transactions and recurring entries, read-only: they can't change anything, and they see nothing that isn't tagged Household.People who can see your HouseholdNot shared with anyone yet.Add a personLook upDashboardAccountsTransactionsAllocations"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosSettingsChoose your cash-flow timeline's main account, manage categories and tags, and export your data.Cash-flow timelineThe timeline opens on your main account's own running balance. You can still switch to all cash accounts there.Main accountNone (all cash accounts)BPI Payroll (PHP)Metrobank Savings (PHP)BDO Joint household (PHP)Export your dataDownload everything you own as one JSON file, or as a ZIP of CSV files (one per table). Accounts shared with you and other people's records on your accounts are included with limited details.JSONCSV (ZIP)CategoriesColour-coded labels for transactions and budgets.Add categorySalaryIncomeEditDeleteGroceriesExpenseEditDeleteDining outExpenseEditDeleteUtilitiesExpenseEditDeleteTransportExpenseEditDeleteRentExpenseEditDeleteSubscriptionsExpenseEditDeleteHealthExpenseEditDeleteSavings transferTransferEditDeleteFreelanceIncomeEditDeleteHousehold helpExpenseEditDeleteTagsLabel accounts, transactions and recurring entries, then filter by tag.Add tagHouseholdSystemRecolourDeleteJapan tripEditDeleteHousehold sharingShare your Household tag with someone, by their email. They can see your Household-tagged accounts, their balances and your Household-tagged transactions and recurring entries, read-only: they can't change anything, and they see nothing that isn't tagged Household.People who can see your householdNot shared with anyone yet.Add a personLook upDashboardAccountsTransactionsAllocations"
       },
       "settings-category": {
         "controls": [
@@ -17457,7 +17457,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Add category"
         ],
@@ -17528,7 +17528,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Add tag"
         ],
@@ -17596,7 +17596,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person"
         ],
         "buttons": [
@@ -17655,7 +17655,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete tag?"
         ],
@@ -17715,7 +17715,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete category?"
         ],
@@ -17775,7 +17775,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete category?"
         ],
@@ -17835,7 +17835,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete category?"
         ],
@@ -17895,7 +17895,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete category?"
         ],
@@ -17955,7 +17955,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete category?"
         ],
@@ -18015,7 +18015,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete category?"
         ],
@@ -18075,7 +18075,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete category?"
         ],
@@ -18135,7 +18135,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete category?"
         ],
@@ -18195,7 +18195,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete category?"
         ],
@@ -18255,7 +18255,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete category?"
         ],
@@ -18315,7 +18315,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Delete category?"
         ],
@@ -18378,7 +18378,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit tag"
         ],
@@ -18451,7 +18451,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit category"
         ],
@@ -18524,7 +18524,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit category"
         ],
@@ -18597,7 +18597,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit category"
         ],
@@ -18670,7 +18670,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit category"
         ],
@@ -18743,7 +18743,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit category"
         ],
@@ -18816,7 +18816,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit category"
         ],
@@ -18889,7 +18889,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit category"
         ],
@@ -18962,7 +18962,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit category"
         ],
@@ -19035,7 +19035,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit category"
         ],
@@ -19108,7 +19108,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit category"
         ],
@@ -19181,7 +19181,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Edit category"
         ],
@@ -19249,7 +19249,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person"
         ],
         "buttons": [
@@ -19308,7 +19308,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person"
         ],
         "buttons": [
@@ -19371,7 +19371,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person",
           "Recolour tag"
         ],
@@ -19439,7 +19439,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person"
         ],
         "buttons": [
@@ -19498,7 +19498,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person"
         ],
         "buttons": [
@@ -19560,7 +19560,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person"
         ],
         "buttons": [
@@ -19619,7 +19619,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person"
         ],
         "buttons": [
@@ -19679,7 +19679,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person"
         ],
         "buttons": [
@@ -19738,7 +19738,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person"
         ],
         "buttons": [
@@ -19800,7 +19800,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person"
         ],
         "buttons": [
@@ -19859,7 +19859,7 @@
           "Categories",
           "Tags",
           "Household sharing",
-          "People who can see your Household",
+          "People who can see your household",
           "Add a person"
         ],
         "buttons": [

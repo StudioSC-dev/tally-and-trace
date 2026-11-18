@@ -39,7 +39,7 @@ async function seedShare(tag) {
   const views = await client.get(b.token, '/household/')
   const theirs = views.find((v) => !v.is_self)
   if (!theirs) throw new Error(`STOP: B has no Household view of A: ${JSON.stringify(views)}`)
-  return { a, b, sharerId: theirs.sharer_id, title: `${theirs.sharer_name}'s Household` }
+  return { a, b, sharerId: theirs.sharer_id, title: `${theirs.sharer_name}'s household` }
 }
 
 async function openPage(browser) {

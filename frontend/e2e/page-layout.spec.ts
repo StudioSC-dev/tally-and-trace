@@ -25,7 +25,7 @@ const ROUTES = [
   { name: 'accounts', path: '/accounts', title: 'Accounts', lands: '/accounts' },
   { name: 'settings', path: '/settings', title: 'Settings', lands: '/settings' },
   { name: 'forecast', path: '/forecast', title: 'Cash-flow timeline', lands: '/forecast' },
-  { name: 'household', path: '/household', title: 'Your Household', lands: '/accounts/household' },
+  { name: 'household', path: '/household', title: 'Your household', lands: '/accounts/household' },
   { name: 'wishlist', path: '/wishlist', title: 'Allocations', lands: '/allocations' },
 ] as const
 type PageCase = (typeof ROUTES)[number]
