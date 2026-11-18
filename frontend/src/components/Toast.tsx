@@ -8,6 +8,7 @@ import type { AppDispatch, RootState } from '../store'
 import { outboxActions } from '../store/outbox'
 import { OUTBOX_FORMS } from '../store/outboxForms'
 import { Spinner } from './Loading'
+import { Button } from './Button'
 
 // The in-app toast stack. Two sources share it:
 // - `useToast(message)` (STU-410): one message at a time, for an outcome with no dialog or form
@@ -238,14 +239,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom,0px))] left-4 right-4 z-[70] flex max-h-[70vh] flex-col gap-2 overflow-y-auto sm:bottom-6 sm:left-auto sm:right-6 sm:w-96"
         >
           {hiddenCount > 0 && (
-            <button
-              type="button"
-              className="btn-secondary focus-ring self-end text-xs"
+            <Button
+              variant="secondary"
+              className="self-end text-xs"
               onClick={() => setExpanded(true)}
               data-testid="toast-more"
             >
               +{hiddenCount} more
-            </button>
+            </Button>
           )}
           {visible.map((item) =>
             item.variant === 'info' ? (
@@ -259,9 +260,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 <p className="flex-1 text-sm text-body" data-testid="toast-message">
                   {item.message}
                 </p>
-                <button type="button" onClick={() => item.onDismiss?.()} className="btn-secondary focus-ring" data-testid="toast-dismiss">
+                <Button variant="secondary" onClick={() => item.onDismiss?.()} data-testid="toast-dismiss">
                   Dismiss
-                </button>
+                </Button>
               </div>
             ) : (
               <div
@@ -292,15 +293,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 {item.actions.length > 0 && (
                   <div className="flex flex-wrap justify-end gap-2">
                     {item.actions.map((action) => (
-                      <button
+                      <Button
+                        variant="secondary"
                         key={action.testId}
-                        type="button"
                         onClick={action.onClick}
-                        className="btn-secondary focus-ring !px-2.5 !py-1 text-xs"
+                        className="!px-2.5 !py-1 text-xs"
                         data-testid={action.testId}
                       >
                         {action.label}
-                      </button>
+                      </Button>
                     ))}
                   </div>
                 )}

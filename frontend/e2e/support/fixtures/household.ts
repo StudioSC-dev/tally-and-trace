@@ -30,6 +30,8 @@ import type {
   Account,
   AccountInput,
   AccountPermissions,
+  AccountShare,
+  AccountShares,
   Allocation,
   BudgetEntry,
   BudgetEntryInput,
@@ -44,6 +46,7 @@ import type {
   DashboardSnapshot,
   DescriptionSuggestion,
   EntryOccurrences,
+  ForcedDateResult,
   FullBudgetEntry,
   ForecastPeriod,
   FullTransaction,
@@ -55,6 +58,8 @@ import type {
   HouseholdView,
   InstallmentPlan,
   InstallmentPlans,
+  InstallmentReview,
+  InstallmentReviewResult,
   LimitedBudgetEntry,
   MinimumDuePreset,
   PaginatedResponse,
@@ -64,6 +69,7 @@ import type {
   ReceivedHouseholdShare,
   ReceivedShare,
   RecordPermissions,
+  RepeatingCreated,
   ScheduledList,
   SharedFullTransaction,
   Tag,
@@ -74,6 +80,7 @@ import type {
   UpcomingOccurrence,
   UpcomingOccurrences,
   User,
+  UserMatch,
   WishlistItem,
   WishlistPlan,
 } from '@tally-trace/shared'
@@ -1614,6 +1621,101 @@ export const entryOccurrencesRoute = (data: HouseholdData, entryId: number): Api
 }
 
 /**
+ * The lookups the Due card's and Recurring tab's dialogs make when they open, answered from `data`: each full
+ * recurring entry (`GET /budget-entries/{id}`, for Mark paid) with the occurrence it was opened for listed as due and
+ * unrecorded (`.../occurrences?include=`), and each credit card's detail for Pay (no limit, no closed statements).
+ */
+export const householdDialogRoutes = (data: HouseholdData): ApiRoute[] => [
+  ...data.entries
+    .filter((e) => e.view !== 'limited')
+    .flatMap((e) => [
+      apiRoute<BudgetEntry>('GET', `/budget-entries/${e.id}`, e),
+      queryRoute<EntryOccurrences>('GET', `/budget-entries/${e.id}/occurrences`, (q) => {
+        only(q, ['include'])
+        const day = q.get('include') ?? data.today
+        return {
+          entry_id: e.id,
+          today: data.today,
+          capped: false,
+          kind: e.kind ?? null,
+          due_unposted: 0,
+          oldest_due: null,
+          latest_due: null,
+          oldest_unrecorded: day,
+          omitted: 0,
+          occurrences: [{ occurrence_date: day, effective_date: day, due: day <= data.today, linked: null, skipped_before: 0, omitted_before: 0 }],
+        }
+      }),
+    ]),
+  ...data.accounts.filter((a) => a.account_type === 'credit').flatMap((a) => accountDetailRoutes(data, a.id).filter((r) => r.path.endsWith('/credit'))),
+]
+
+/**
+ * The saves the action dialogs send, each answered as the API would (200) from `data`: a transaction or account
+ * update returns the record, a Mark paid or Charged (`.../materialize`) returns the recorded transaction, a forced
+ * date on a payable's occurrence returns that date, and an account's shares list only its owner. Opening an account
+ * (`GET /accounts/{id}`) returns it.
+ */
+/** The person the share dialog's lookup finds. */
+export const SHARE_MATCH: UserMatch = { id: 3, display_name: 'Lia M.' }
+
+/** The share `POST /accounts/{id}/shares` answers for Lia, the person the lookup finds. */
+export const sharedWithMatch = (data: HouseholdData, account: Account): AccountShare => ({
+  id: 400 + account.id,
+  account_id: account.id,
+  user_id: SHARE_MATCH.id,
+  display_name: SHARE_MATCH.display_name,
+  role: 'viewer',
+  created_at: `${data.today}T09:00:00Z`,
+})
+
+/** `GET /accounts/{id}/shares`: Jun can edit, so the share dialog lists a person it can remove, then any `added`. */
+export const accountSharesRoute = (data: HouseholdData, account: Account, added: AccountShare[] = []): ApiRoute =>
+  apiRoute<AccountShares>('GET', `/accounts/${account.id}/shares`, {
+    account_id: account.id,
+    owner: { user_id: data.user.id, display_name: `${data.user.first_name} ${data.user.last_name}`, role: 'owner' },
+    shares: [{ id: 300 + account.id, account_id: account.id, user_id: 2, display_name: 'Jun R.', role: 'editor', created_at: '2026-02-01T09:00:00Z' }, ...added],
+  })
+
+export const householdSaveRoutes = (data: HouseholdData): ApiRoute[] => [
+  ...data.transactions.filter((t) => t.view !== 'limited').map((t) => apiRoute<Transaction>('PUT', `/transactions/${t.id}`, t)),
+  ...data.accounts.flatMap((a) => [
+    apiRoute<Account>('GET', `/accounts/${a.id}`, a),
+    apiRoute<Account>('PUT', `/accounts/${a.id}`, a),
+    accountSharesRoute(data, a),
+  ]),
+  ...data.accounts.map((a) => apiRoute<AccountShare>('POST', `/accounts/${a.id}/shares`, sharedWithMatch(data, a), 201)),
+  // The share dialog's lookup finds one person by exact email.
+  queryRoute<UserMatch>('GET', '/users/lookup', (q) => {
+    only(q, ['email'])
+    return SHARE_MATCH
+  }),
+  ...data.allocations.map((a) => apiRoute<Allocation>('PUT', `/allocations/${a.id}`, a)),
+  apiRoute<QuickBalances>('PUT', '/dashboard/quick-balances', data.quickBalances),
+  // Add Transaction with a repeat or an installment: the first payment and its recurring entry, on the card.
+  apiRoute<RepeatingCreated>('POST', '/transactions/repeating', { transaction: tx(data.today, 'New installment', 2000, card, 0), entry: entry('New installment', 'expense', 2000, data.today, card) }, 201),
+  apiRoute<Category>('POST', '/categories/', { id: 90, name: 'New category', is_expense: true, kind: 'expense', is_active: true, created_at: `${data.today}T09:00:00Z` }, 201),
+  apiRoute<Tag>('POST', '/tags/', { id: 90, name: 'New tag', color: '#5B7553', is_system: false, created_at: `${data.today}T09:00:00Z` }, 201),
+  // Settings' category and tag Update.
+  ...data.categories.map((c) => apiRoute<Category>('PUT', `/categories/${c.id}`, c)),
+  ...data.tags.map((t) => apiRoute<Tag>('PUT', `/tags/${t.id}`, t)),
+  // Settings' two exports; the browser saves whatever comes back.
+  apiRoute<Record<string, never>>('GET', '/data/export.json', {}),
+  apiRoute<Record<string, never>>('GET', '/data/export.csv', {}),
+  ...data.entries.flatMap((e) => {
+    if (e.view === 'limited') return []
+    const account = data.accounts.find((a) => a.id === e.account_id)
+    if (!account) return []
+    return [apiRoute<Transaction>('POST', `/budget-entries/${e.id}/materialize`, tx(data.today, e.name, e.amount, account, 0), 201)]
+  }),
+  ...data.payables.flatMap((p) =>
+    p.source === 'budget_entry' && p.occurrence_date
+      ? [apiRoute<ForcedDateResult>('PUT', `/budget-entries/${p.source_id}/occurrences/${p.occurrence_date}/date`, { occurrence_date: p.occurrence_date, effective_date: p.due_date })]
+      : [],
+  ),
+]
+
+/**
  * Signs in as the household's user, freezes the clock on `HOUSEHOLD_NOW` and fakes the API
  * with `householdRoutes(data)`.
  */
@@ -1622,3 +1724,77 @@ export async function mockHousehold(page: Page, data: HouseholdData = household)
   await signedIn(page, data.user)
   return mockApi(page, householdRoutes(data))
 }
+
+/** Two wishlist items, neither bought: a laptop for work and a rice cooker. */
+export const householdWishlist: WishlistItem[] = [
+  { id: 801, user_id: householdUser.id, name: 'Work laptop', estimated_cost: 65000, currency: 'PHP', priority: 'high', notes: 'For freelance work', target_date: '2026-06-30', is_purchased: false, created_at: '2026-02-01T09:00:00Z' },
+  { id: 802, user_id: householdUser.id, name: 'Rice cooker', estimated_cost: 3500, currency: 'PHP', priority: 'medium', is_purchased: false, created_at: '2026-02-10T09:00:00Z' },
+]
+
+/**
+ * The wishlist tab's reads and writes, answered from `items`: the list (with or without bought items), the plan,
+ * and each item's update and delete.
+ */
+export const householdWishlistRoutes = (items: WishlistItem[] = householdWishlist): ApiRoute[] => [
+  queryRoute<WishlistItem[]>('GET', '/wishlist/', (q) => {
+    only(q, ['is_purchased'])
+    return q.get('is_purchased') === 'false' ? items.filter((i) => !i.is_purchased) : items
+  }),
+  apiRoute<WishlistPlan>('GET', '/wishlist/plan', { monthly_disposable: 0, savings_rate: 0, items: [] }),
+  apiRoute<WishlistItem>('POST', '/wishlist/', { id: 803, user_id: householdUser.id, name: 'New item', estimated_cost: 1, currency: 'PHP', priority: 'medium', is_purchased: false, created_at: '2026-03-12T09:00:00Z' }, 201),
+  ...items.flatMap((i) => [apiRoute<WishlistItem>('PUT', `/wishlist/${i.id}`, { ...i, is_purchased: !i.is_purchased }), apiRoute<Record<string, never>>('DELETE', `/wishlist/${i.id}`, {})]),
+]
+
+/** The installment plan the review variant adds: a laptop on the card, ten of twelve payments left. */
+export const REVIEW_PLAN_ID = 795
+
+/** A variant whose Installments tab has one plan waiting for review, so the row offers Review. */
+export const withInstallmentReview = (data: HouseholdData): HouseholdData => ({
+  ...data,
+  installmentPlans: [{ ...plan(REVIEW_PLAN_ID, 'Laptop, 12 months', '2026-03-20', 10, 12), auto_post: 'unreviewed', can_review: true }],
+})
+
+/** What the review dialog reads and sends for the review variant's plan: one missed month and its recording. */
+export const installmentReviewRoutes = (): ApiRoute[] => [
+  apiRoute<InstallmentReview>('GET', `/budget-entries/${REVIEW_PLAN_ID}/auto-post-review`, {
+    entry_id: REVIEW_PLAN_ID,
+    name: 'Laptop, 12 months',
+    account_name: card.name,
+    currency: 'PHP',
+    amount: 2500,
+    reviewed: false,
+    auto_post_enabled: false,
+    block: null,
+    missed: [{ occurrence_date: '2026-02-20', linked: null }],
+    candidates: [],
+    remaining_after: 9,
+    envelope: null,
+    past_cycles: false,
+    entry_version: null,
+    review_token: `review-${REVIEW_PLAN_ID}`,
+  }),
+  apiRoute<InstallmentReviewResult>('POST', `/budget-entries/${REVIEW_PLAN_ID}/auto-post-review`, {
+    replayed: false,
+    reviewed: true,
+    auto_post_enabled: true,
+    next_occurrence: '2026-03-20',
+    max_occurrences: 12,
+    outcomes: [{ occurrence_date: '2026-02-20', outcome: 'recorded' }],
+  }),
+]
+
+/**
+ * Records as the lists return them once a save has landed, for the button spec, which reads the row a save
+ * produced: a debit on `accountId` dated today, a monthly expense due today, and an allocation.
+ */
+export const savedTransaction = (data: HouseholdData, id: number, description: string, amount: number, accountId: number): Transaction => {
+  const account = data.accounts.find((a) => a.id === accountId)
+  if (!account) throw new Error(`no account ${accountId}`)
+  return tx(data.today, description, amount, account, 0, 'debit', { id, category_id: undefined })
+}
+export const savedEntry = (data: HouseholdData, id: number, name: string, amount: number, accountId: number): BudgetEntry => {
+  const account = data.accounts.find((a) => a.id === accountId)
+  if (!account) throw new Error(`no account ${accountId}`)
+  return entry(name, 'expense', amount, data.today, account, { id })
+}
+export const savedAllocation = alloc

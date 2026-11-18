@@ -22,6 +22,7 @@ import type { CurrencyCode } from '../store/api'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 import { formatCurrency } from '../utils/currency'
 import { balanceClass, formatBalance } from '../utils/amount'
+import { Button } from '../components/Button'
 
 export const Route = createFileRoute('/accounts_/$accountId')({
   component: AccountDetailPage,
@@ -131,9 +132,9 @@ function AccountDetailPage() {
         <BackLink />
         <div className="card p-6 space-y-3" role="alert" data-testid="account-error">
           <p className="text-sm text-danger">{apiErrorMessage(accountError) || 'Could not load this account.'}</p>
-          <button type="button" className="btn-secondary focus-ring" onClick={() => refetchAccount()}>
+          <Button variant="secondary" onClick={() => refetchAccount()}>
             Retry
-          </button>
+          </Button>
         </div>
       </div>
     )
@@ -210,9 +211,9 @@ function AccountDetailPage() {
             <p className="text-sm text-danger">
               {apiErrorMessage(transactionsError) || 'Could not load the transactions.'}
             </p>
-            <button type="button" className="btn-secondary focus-ring" onClick={() => refetchTransactions()}>
+            <Button variant="secondary" onClick={() => refetchTransactions()}>
               Retry
-            </button>
+            </Button>
           </div>
         ) : !transactions ? (
           <div className="card p-4" data-testid="account-transactions-loading">

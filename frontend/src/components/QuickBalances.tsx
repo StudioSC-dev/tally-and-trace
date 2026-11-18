@@ -6,6 +6,7 @@ import { useGetAccountsQuery, useGetQuickBalancesQuery, usePutQuickBalancesMutat
 import { useCurrency } from '../hooks/useCurrency'
 import { formatSigned } from '../utils/amount'
 import { Skeleton } from './Loading'
+import { Button } from './Button'
 
 const TONE: Record<TileLine['tone'], string> = {
   normal: 'text-ink',
@@ -51,8 +52,9 @@ function Tile({ tile, defaultCurrency, noLimit }: { tile: QuickBalanceTile; defa
   )
 }
 
-const ACTION = 'min-h-11 px-4 py-2 transition-colors duration-200 focus-ring'
-const ICON_ACTION = 'min-h-11 min-w-11 px-2 border border-line-strong text-ink hover:border-ink transition-colors duration-200 focus-ring disabled:opacity-40 disabled:hover:border-line-strong'
+/** The editor's and panel's action layout: 44px tall, body-size text. `Button` supplies the colours. */
+const ACTION = 'min-h-11 px-4 py-2 text-base'
+const ICON_ACTION = 'min-h-11 min-w-11 px-2 text-base'
 
 const saveError = (error: unknown): string => {
   const detail = (error as { data?: { detail?: unknown } } | undefined)?.data?.detail
@@ -157,16 +159,16 @@ function PinEditor({ tiles, pinned, onDone }: { tiles: QuickBalanceTile[]; pinne
         <p className="text-sm text-body">Choose up to 6 accounts and put them in order.</p>
         <div className="flex flex-wrap gap-2">
           {pinned && (
-            <button type="button" data-testid="quick-balances-reset" disabled={saving} onClick={() => void submit([])} className={`${ACTION} border border-line-strong text-ink hover:border-ink disabled:opacity-40`}>
+            <Button variant="secondary" data-testid="quick-balances-reset" disabled={saving} onClick={() => void submit([])} className={ACTION}>
               Reset to defaults
-            </button>
+            </Button>
           )}
-          <button type="button" data-testid="quick-balances-cancel" disabled={saving} onClick={onDone} className={`${ACTION} border border-line-strong text-ink hover:border-ink disabled:opacity-40`}>
+          <Button variant="quiet" data-testid="quick-balances-cancel" disabled={saving} onClick={onDone} className={ACTION}>
             Cancel
-          </button>
-          <button type="button" data-testid="quick-balances-save" disabled={saving} onClick={() => void submit(draft)} className={`${ACTION} bg-ink text-paper disabled:opacity-40`}>
+          </Button>
+          <Button variant="primary" data-testid="quick-balances-save" disabled={saving} onClick={() => void submit(draft)} className={ACTION}>
             {saving ? 'Saving...' : 'Save'}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -184,31 +186,31 @@ function PinEditor({ tiles, pinned, onDone }: { tiles: QuickBalanceTile[]; pinne
                 <p className="text-xs font-semibold text-muted">{account ? tileGroupLabel(account) : ''}</p>
                 <p className="text-sm font-medium text-ink truncate" data-testid="quick-balance-edit-name">{name}</p>
               </div>
-              <button type="button" data-testid={`quick-balance-move-earlier-${id}`} aria-label={`Move ${name} earlier`} disabled={index === 0} onClick={() => move(index, 'earlier')} className={ICON_ACTION}>
+              <Button variant="secondary" data-testid={`quick-balance-move-earlier-${id}`} aria-label={`Move ${name} earlier`} disabled={index === 0} onClick={() => move(index, 'earlier')} className={ICON_ACTION}>
                 <span aria-hidden="true">‹</span>
-              </button>
-              <button type="button" data-testid={`quick-balance-move-later-${id}`} aria-label={`Move ${name} later`} disabled={index === draft.length - 1} onClick={() => move(index, 'later')} className={ICON_ACTION}>
+              </Button>
+              <Button variant="secondary" data-testid={`quick-balance-move-later-${id}`} aria-label={`Move ${name} later`} disabled={index === draft.length - 1} onClick={() => move(index, 'later')} className={ICON_ACTION}>
                 <span aria-hidden="true">›</span>
-              </button>
-              <button type="button" data-testid={`quick-balance-remove-${id}`} aria-label={`Remove ${name}`} onClick={() => setDraft((ids) => ids.filter((x) => x !== id))} className={ICON_ACTION}>
+              </Button>
+              <Button variant="secondary" data-testid={`quick-balance-remove-${id}`} aria-label={`Remove ${name}`} onClick={() => setDraft((ids) => ids.filter((x) => x !== id))} className={ICON_ACTION}>
                 <span aria-hidden="true">✕</span>
-              </button>
+              </Button>
             </li>
           )
         })}
       </ul>
 
       <div className="mt-3 flex flex-wrap items-center gap-3">
-        <button
-          type="button"
+        <Button
+          variant="secondary"
           data-testid="quick-balances-add"
           disabled={!canAdd}
           aria-expanded={adding && canAdd}
           onClick={() => setAdding((open) => !open)}
-          className={`${ACTION} border border-line text-ink hover:border-ink disabled:opacity-40`}
+          className={ACTION}
         >
           + Add account
-        </button>
+        </Button>
         <span className="text-xs text-muted" data-testid="quick-balances-count">
           {draft.length} of 6{canAdd ? '' : ' (the most you can pin)'}
         </span>
@@ -250,9 +252,9 @@ export function QuickBalances() {
       <div className="p-4 sm:p-6 border-b border-line flex flex-wrap items-center justify-between gap-2">
         <h2 id="quick-balances-heading" className="text-lg font-semibold text-ink">Quick balances</h2>
         {data !== undefined && !isError && !editing && (
-          <button type="button" data-testid="quick-balances-edit" onClick={() => setEditing(true)} className={`${ACTION} border border-line-strong text-ink hover:border-ink`}>
+          <Button variant="secondary" data-testid="quick-balances-edit" onClick={() => setEditing(true)} className={ACTION}>
             Edit
-          </button>
+          </Button>
         )}
       </div>
       <div className="p-4 sm:p-6">
@@ -266,14 +268,9 @@ export function QuickBalances() {
         ) : isError || data === undefined ? (
           <div className="flex flex-wrap items-center gap-3" role="alert" data-testid="quick-balances-error">
             <p className="text-sm text-body">Couldn&apos;t load balances</p>
-            <button
-              type="button"
-              data-testid="quick-balances-retry"
-              onClick={() => void refetch()}
-              className="min-h-11 px-4 py-2 bg-ink text-paper transition-colors duration-200"
-            >
+            <Button variant="secondary" data-testid="quick-balances-retry" onClick={() => void refetch()} className={ACTION}>
               Retry
-            </button>
+            </Button>
           </div>
         ) : editing ? (
           <PinEditor tiles={data.tiles} pinned={data.pinned} onDone={() => setEditing(false)} />

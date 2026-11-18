@@ -2,6 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import type { CloseDayReport } from '@tally-trace/shared'
+import { Button } from './Button'
 import { useChangeCloseDayMutation } from '../store/api'
 import { newOutboxId } from '../store/outbox'
 import { apiErrorMessage } from '../utils/apiError'
@@ -105,40 +106,34 @@ export function CloseDayStepView({ phase, newDay, ack, titleId, onAck, onConfirm
         </label>
       )}
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-        <button
-          type="button"
+        <Button
+          variant="quiet"
           onClick={onCancel}
           disabled={phase.kind === 'applying'}
-          className="btn-secondary focus-ring min-h-11"
+          className="min-h-11"
           data-testid="close-day-cancel"
         >
           Cancel
-        </button>
+        </Button>
         {phase.kind === 'review' && (
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={!canConfirm}
-            className="btn-primary focus-ring min-h-11"
-            data-testid="close-day-confirm"
-          >
+          <Button variant="primary" onClick={onConfirm} disabled={!canConfirm} className="min-h-11" data-testid="close-day-confirm">
             Change closing day
-          </button>
+          </Button>
         )}
         {phase.kind === 'error' && phase.retry === 'apply' && (
-          <button type="button" onClick={onTryAgain} className="btn-primary focus-ring min-h-11" data-testid="close-day-retry">
+          <Button variant="primary" onClick={onTryAgain} className="min-h-11" data-testid="close-day-retry">
             Try again
-          </button>
+          </Button>
         )}
         {((phase.kind === 'error' && phase.retry === 'check') || (phase.kind === 'refused' && phase.refusedOn === 'apply')) && (
-          <button type="button" onClick={onCheckAgain} className="btn-primary focus-ring min-h-11" data-testid="close-day-recheck">
+          <Button variant="primary" onClick={onCheckAgain} className="min-h-11" data-testid="close-day-recheck">
             Check again
-          </button>
+          </Button>
         )}
         {phase.kind === 'applying' && summary && (
-          <button type="button" disabled className="btn-primary min-h-11" data-testid="close-day-confirm">
+          <Button variant="primary" disabled className="min-h-11" data-testid="close-day-confirm">
             Changing…
-          </button>
+          </Button>
         )}
       </div>
     </>

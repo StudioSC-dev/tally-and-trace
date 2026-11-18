@@ -23,6 +23,7 @@ import {
   useUndoCascadeMutation,
 } from '../store/api'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
+import { Button } from './Button'
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -73,15 +74,15 @@ function ChoiceCard({ id, choice, action, busy, onChoose }: {
       {choice.total && <p className="text-sm font-semibold text-ink" data-testid="date-choice-total">{choice.total}</p>}
       {choice.note && <p className="text-xs text-muted" data-testid="date-choice-note">({choice.note})</p>}
       <div className="flex justify-end">
-        <button
-          type="button"
+        <Button
+          variant="secondary"
           onClick={onChoose}
           disabled={busy}
-          className="btn-secondary focus-ring min-h-11 w-full sm:w-auto"
+          className="min-h-11 w-full sm:w-auto"
           data-testid={`date-choice-${id}-button`}
         >
           {action}
-        </button>
+        </Button>
       </div>
     </div>
   )
@@ -287,9 +288,9 @@ export function ForceDateDialog({ target, onClose, onChanged }: Props) {
                 {forced && ` · now ${formatEntryDate(effectiveDate)}`}
               </p>
             </div>
-            <button type="button" onClick={onClose} className="btn-secondary focus-ring" data-testid="force-date-close">
+            <Button variant="secondary" onClick={onClose} data-testid="force-date-close">
               {confirmation ? 'Done' : 'Close'}
-            </button>
+            </Button>
           </div>
 
           {cascadeDone ? (
@@ -299,18 +300,18 @@ export function ForceDateDialog({ target, onClose, onChanged }: Props) {
                 <p className="text-sm text-danger" role="alert" data-testid="force-date-error">{error}</p>
               )}
               <div className="flex gap-3">
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
                   onClick={() => void undo()}
                   disabled={busy}
-                  className="flex-1 btn-secondary focus-ring min-h-11"
+                  className="flex-1 min-h-11"
                   data-testid="force-date-undo"
                 >
                   {undoing ? 'Undoing…' : 'Undo'}
-                </button>
-                <button type="button" onClick={onClose} className="flex-1 btn-primary focus-ring min-h-11" data-testid="force-date-done">
+                </Button>
+                <Button variant="primary" onClick={onClose} className="flex-1 min-h-11" data-testid="force-date-done">
                   Done
-                </button>
+                </Button>
               </div>
             </div>
           ) : confirmation ? (
@@ -353,19 +354,19 @@ export function ForceDateDialog({ target, onClose, onChanged }: Props) {
                 )
               })()}
               <div className="flex gap-3">
-                <button type="submit" disabled={busy || loading} className="flex-1 btn-primary focus-ring" data-testid="force-date-save">
+                <Button variant="primary" type="submit" disabled={busy || loading} className="flex-1" data-testid="force-date-save">
                   {busy ? 'Saving…' : 'Save'}
-                </button>
+                </Button>
                 {forced && (
-                  <button
-                    type="button"
+                  <Button
+                    variant="secondary"
                     onClick={() => void clear()}
                     disabled={busy}
-                    className="flex-1 btn-secondary focus-ring"
+                    className="flex-1"
                     data-testid="force-date-clear"
                   >
                     Clear
-                  </button>
+                  </Button>
                 )}
               </div>
             </form>

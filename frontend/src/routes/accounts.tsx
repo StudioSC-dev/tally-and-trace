@@ -29,6 +29,7 @@ import { useToast } from '../hooks/useToast'
 import { useConfirm } from '../hooks/useConfirm'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 import { withSelection } from '../utils/selection'
+import { Button, buttonClass } from '../components/Button'
 
 export const Route = createFileRoute('/accounts')({
   component: AccountsPage,
@@ -821,12 +822,13 @@ export function AccountsPage() {
   return (
     <div className="page">
       <PageHeader title="Accounts">
-        <button
+        <Button
+          variant="primary"
           onClick={() => setIsCreateModalOpen(true)}
-          className="btn-primary focus-ring w-full sm:w-auto justify-center"
+          className="w-full sm:w-auto justify-center"
         >
           Add Account
-        </button>
+        </Button>
       </PageHeader>
 
       <TagFilter value={selectedTag} onChange={setSelectedTag} />
@@ -836,14 +838,13 @@ export function AccountsPage() {
       {loadError && (
         <div className="card p-4 space-y-3" role="alert" data-testid="accounts-load-error">
           <p className="text-sm text-danger">Could not load accounts.</p>
-          <button
-            type="button"
-            className="btn-secondary focus-ring"
+          <Button
+            variant="secondary"
             onClick={() => void loadAccounts()}
             data-testid="accounts-retry"
           >
             Retry
-          </button>
+          </Button>
         </div>
       )}
       {orderedAccounts.length === 0 ? (
@@ -1013,15 +1014,17 @@ export function AccountsPage() {
               <Link
                 to="/accounts/$accountId"
                 params={{ accountId: String(actionAccount.id) }}
-                className="flex items-center justify-center gap-2 border border-line px-4 py-3 text-sm font-semibold text-ink transition-colors duration-200 hover:bg-sunken focus-ring sm:col-span-2"
+                className={buttonClass('secondary', 'flex py-3 sm:col-span-2')}
+                data-variant="secondary"
                 data-testid="view-account-transactions"
               >
                 View transactions
               </Link>
               {actionAccount.permissions.can_delete && (
-              <button
+              <Button
+                variant="secondary"
                 onClick={() => handleToggleActive(actionAccount)}
-                className={`flex items-center justify-between gap-3 px-4 py-3 text-sm font-semibold transition-colors duration-200 ${ isAccountActive(actionAccount) ? 'text-ink hover:bg-sunken' : 'bg-sunken text-body hover:bg-sunken' }`}
+                className="flex min-h-12 justify-between gap-3 py-2.5"
               >
                 <span>{isAccountActive(actionAccount) ? 'Mark as inactive' : 'Activate account'}</span>
                 <span
@@ -1031,38 +1034,41 @@ export function AccountsPage() {
                     className={`inline-block h-4 w-4 transform rounded-full bg-surface transition-transform duration-200 ${ isAccountActive(actionAccount) ? 'translate-x-5' : 'translate-x-1' }`}
                   />
                 </span>
-              </button>
+              </Button>
               )}
               {actionAccount.permissions.can_edit_settings && (
-              <button
+              <Button
+                variant="primary"
                 onClick={() => openEditFromModal(actionAccount)}
-                className="flex items-center justify-center gap-2 bg-ink px-4 py-3 text-sm font-semibold text-paper transition-colors duration-200 hover:bg-ink"
+                className="flex min-h-11 py-2.5"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                 </svg>
                 Edit account
-              </button>
+              </Button>
               )}
               {actionAccount.permissions.can_manage_shares && (
-              <button
+              <Button
+                variant="secondary"
                 onClick={() => setShareAccount(actionAccount)}
-                className="flex items-center justify-center gap-2 border border-line px-4 py-3 text-sm font-semibold text-ink transition-colors duration-200 hover:bg-sunken"
+                className="flex py-3"
                 data-testid="share-account"
               >
                 Share account
-              </button>
+              </Button>
               )}
               {actionAccount.permissions.can_delete && (
-              <button
+              <Button
+                variant="danger"
                 onClick={() => handleDelete(actionAccount.id)}
-                className="flex items-center justify-center gap-2 bg-sunken px-4 py-3 text-sm font-semibold text-body transition-colors duration-200 hover:bg-sunken sm:col-span-2"
+                className="flex min-h-11 py-2.5 sm:col-span-2"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                 </svg>
                 Delete account
-              </button>
+              </Button>
               )}
             </div>
             {actionError && (
@@ -1597,14 +1603,15 @@ export function AccountsPage() {
               )}
               
               <div className="flex space-x-3 pt-6 border-t border-line">
-                <button
+                <Button
+                  variant="primary"
                   type="submit"
-                  className="flex-1 btn-primary focus-ring w-full sm:w-auto py-3 px-4 text-base"
+                  className="flex-1 w-full sm:w-auto py-3 px-4 text-base"
                 >
                   {editingAccount ? 'Update Account' : 'Create Account'}
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  variant="quiet"
                   onClick={() => {
                     setIsCreateModalOpen(false)
                     setEditingAccount(null)
@@ -1613,10 +1620,10 @@ export function AccountsPage() {
                     setRuleDraft(null)
                     setSaveError(null)
                   }}
-                  className="flex-1 btn-secondary focus-ring w-full sm:w-auto py-3 px-4 text-base"
+                  className="flex-1 w-full sm:w-auto py-3 px-4 text-base"
                 >
                   Cancel
-                </button>
+                </Button>
               </div>
             </form>
           </div>

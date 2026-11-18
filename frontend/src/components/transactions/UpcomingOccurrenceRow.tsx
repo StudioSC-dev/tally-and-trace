@@ -3,6 +3,7 @@ import type { CreditCheck, RecurringAction, UpcomingOccurrence } from '@tally-tr
 import { amountClass, formatAmount } from '../../utils/amount'
 import type { CurrencyCode } from '../../utils/currency'
 import { CreditCheckBadge } from '../CreditSummary'
+import { Button } from '../Button'
 
 const ACTION_TEST_IDS: Record<RecurringAction, string> = {
   mark_paid: 'upcoming-mark-paid',
@@ -11,10 +12,13 @@ const ACTION_TEST_IDS: Record<RecurringAction, string> = {
   posted: 'upcoming-posted',
 }
 
-const buttonClass =
-  'border border-line px-2.5 py-1 text-xs font-semibold text-ink hover:bg-sunken disabled:opacity-50 transition-colors focus-ring'
-const primaryButtonClass =
-  'bg-ok px-2.5 py-1 text-xs font-semibold text-paper hover:bg-ok disabled:opacity-50 transition-colors focus-ring'
+/**
+ * Row actions are secondary buttons (docs/design-system.md, "Button"). Each keeps the height it had until STU-682
+ * sizes buttons: an action that was outlined keeps its padding, and one that was filled had no border, so it takes
+ * 2px less padding and a 24px floor.
+ */
+const ROW_ACTION = 'px-2.5 py-1 text-xs'
+const WAS_FILLED_ROW_ACTION = 'min-h-6 px-2.5 py-0.5 text-xs'
 
 const NOT_RECORDED = 'Not recorded'
 
@@ -87,26 +91,26 @@ export function UpcomingOccurrenceRow({ occurrence, scheduled, credit, onRecord,
           {(view.actions.length > 0 || view.review || (onChangeDate && occurrence.can_mark_paid)) && (
             <div className="flex flex-wrap justify-end gap-2">
               {view.review && (
-                <button type="button" onClick={onReview} disabled={disabled} className={`${buttonClass}${size}`} data-testid="upcoming-review">
+                <Button variant="secondary" onClick={onReview} disabled={disabled} className={`${ROW_ACTION}${size}`} data-testid="upcoming-review">
                   Review
-                </button>
+                </Button>
               )}
               {view.actions.map((action, index) => (
-                <button
+                <Button
                   key={action}
-                  type="button"
+                  variant="secondary"
                   onClick={() => onRecord(action)}
                   disabled={disabled}
-                  className={`${index === 0 ? primaryButtonClass : buttonClass}${size}`}
+                  className={`${index === 0 ? WAS_FILLED_ROW_ACTION : ROW_ACTION}${size}`}
                   data-testid={ACTION_TEST_IDS[action]}
                 >
                   {RECURRING_ACTION_LABELS[action]}
-                </button>
+                </Button>
               ))}
               {onChangeDate && occurrence.can_mark_paid && (
-                <button type="button" onClick={onChangeDate} disabled={disabled} className={`${buttonClass}${size}`} data-testid="occurrence-change-date">
+                <Button variant="secondary" onClick={onChangeDate} disabled={disabled} className={`${ROW_ACTION}${size}`} data-testid="occurrence-change-date">
                   Change date
-                </button>
+                </Button>
               )}
             </div>
           )}

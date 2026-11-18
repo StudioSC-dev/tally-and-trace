@@ -636,7 +636,8 @@ for (const a of ACTIONS) {
       const dialog = page.getByTestId('mark-paid-dialog')
       await expect(dialog).toBeVisible()
       expect(await dialog.getByRole('heading').first().textContent(), 'the dialog is for the same record').toBe(a.title)
-      expect(await dialog.locator('.btn-primary').first().textContent(), 'the dialog leads with the same action').toBe(a.label)
+      // STU-678 replaced .btn-primary with the Button component's primary variant.
+      expect(await dialog.locator('[data-variant="primary"]').first().textContent(), 'the dialog leads with the same action').toBe(a.label)
       await expect.poll(() => api.count('GET', `/budget-entries/${entry.id}/occurrences`), { message: "the dialog reads the same record's occurrences" }).toBeGreaterThan(0)
       expect(await recurringForm(page).count(), 'the action does not also open the row').toBe(0)
       await viewportShot(page, `action-${a.testId}-${gesture.toLowerCase()}`)

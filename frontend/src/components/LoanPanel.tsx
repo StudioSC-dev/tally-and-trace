@@ -13,6 +13,7 @@ import { formatCurrency, CurrencyCode } from '../utils/currency'
 import { ForceDateDialog } from './ForceDateDialog'
 import { SettlementControl } from './SettlementControl'
 import type { ForceDateTarget } from './ForceDateDialog'
+import { Button } from './Button'
 
 /** A calendar date (YYYY-MM-DD) shown without a timezone shift. */
 const formatDueDate = (value: string): string => {
@@ -119,14 +120,13 @@ export function LoanDueDates({ account }: { account: Account }) {
               {row.amount != null && <p className="text-xs text-muted">{formatCurrency(row.amount, currency)}</p>}
             </div>
             {canChange && (
-              <button
-                type="button"
+              <Button
+                variant="secondary"
                 onClick={() => setTarget({ kind: 'loan', id: account.id, name: account.name, occurrenceDate: row.day, effectiveDate: row.effective })}
-                className="btn-secondary focus-ring"
                 data-testid="loan-change-date"
               >
                 Change date
-              </button>
+              </Button>
             )}
           </li>
         ))}
@@ -239,18 +239,17 @@ export function LoanActions({
   return (
     <div className="space-y-3 border border-line p-4">
       <div className="flex flex-wrap gap-3">
-        <button type="button" onClick={() => open('payment')} className="btn-primary focus-ring">
+        <Button variant="primary" onClick={() => open('payment')}>
           Record payment
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          variant="secondary"
           onClick={() => open('prepayment')}
           disabled={!schedule || isFixed}
           title={isFixed ? 'A fixed loan follows the bank’s schedule: no extra principal' : undefined}
-          className="btn-secondary focus-ring disabled:opacity-50"
         >
           Extra principal
-        </button>
+        </Button>
       </div>
       {isFixed && (
         <p className="text-xs text-muted">Extra principal is not available on a fixed loan.</p>
@@ -354,12 +353,12 @@ export function LoanActions({
           </label>
           {error && <p className="text-sm text-danger" role="alert">{error}</p>}
           <div className="flex gap-3">
-            <button type="submit" disabled={isPaying || isPrepaying} className="flex-1 btn-primary focus-ring">
+            <Button variant="primary" type="submit" disabled={isPaying || isPrepaying} className="flex-1">
               {isPaying || isPrepaying ? 'Saving...' : 'Save'}
-            </button>
-            <button type="button" onClick={() => setMode(null)} className="flex-1 btn-secondary focus-ring">
+            </Button>
+            <Button variant="quiet" onClick={() => setMode(null)} className="flex-1">
               Cancel
-            </button>
+            </Button>
           </div>
         </form>
       )}

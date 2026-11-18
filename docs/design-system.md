@@ -250,7 +250,7 @@ The shared components later tickets add. Each is marked planned until its ticket
 
 | Component | Status | What it is |
 |---|---|---|
-| `Button` | planned | the four variants above, one component for every action |
+| `Button` | built | the four variants above, one component for every action: `frontend/src/components/Button.tsx` (`buttonClass` styles a link as a button) |
 | `SegmentedControl` / `Tabs` | planned | the selection rule, shared by every tab and segment |
 | `PageHeader` and `.page` | landed (STU-685) | every page's title row and container (see Page, under Spacing) |
 | `ListSheet` and `Row` | landed (STU-681) | one leaf sheet with ruled rows, figures on one right edge (see below) |

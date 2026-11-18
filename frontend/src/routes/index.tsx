@@ -24,6 +24,7 @@ import { CardChargesPanel } from '../components/payables/CardChargesPanel'
 import { heldPaymentNotice, payableActions, payableTarget, periodWindow, queryPhase, settlementDetail } from '@tally-trace/shared'
 import { Skeleton, SkeletonRows } from '../components/Loading'
 import { SegmentedControl } from '../components/SegmentedControl'
+import { Button } from '../components/Button'
 import { fullCardChargeKeys, isLimitedEvent, isOtherUpcoming, loggedDays, localToday, statusFromDate, upcomingItemAmount } from '@tally-trace/shared'
 import type { LimitedEvent, Payable, Settlement } from '@tally-trace/shared'
 
@@ -340,14 +341,14 @@ export function Dashboard() {
             {summaryQuery.isError && <p>Period totals: {getErrorDetail(summaryError) ?? 'Failed to load'}</p>}
             {allocationsQuery.isError && <p>Budgets: {getErrorDetail(allocationsError) ?? 'Failed to load'}</p>}
           </div>
-          <button
-            type="button"
+          <Button
+            variant="secondary"
             data-testid="dashboard-retry"
             onClick={retryFailed}
-            className="mt-4 px-4 py-2 bg-ink text-paper hover:bg-ink transition-colors duration-200"
+            className="mt-4 min-h-10 px-4 py-1.5 text-base"
           >
             Retry
-          </button>
+          </Button>
         </div>
       </div>
     )

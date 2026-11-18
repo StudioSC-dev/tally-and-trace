@@ -68,6 +68,7 @@ import { useToast } from '../hooks/useToast'
 import { apiErrorMessage } from '../utils/apiError'
 import { SkeletonRows } from '../components/Loading'
 import { Segment } from '../components/SegmentedControl'
+import { Button } from '../components/Button'
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000
 
@@ -1501,33 +1502,31 @@ export function AllocationsPage() {
                 {AUTO_POST_STATE_LABELS[autoPostState]}
               </span>
               {canEdit && autoPostState !== 'on' && (
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
                   onClick={(event) => {
                     event.stopPropagation()
                     setReviewFor({ entryId: entry.id, name: entry.name })
                   }}
                   onKeyDown={(event) => event.stopPropagation()}
-                  className="btn-secondary focus-ring"
                   data-testid="installment-review"
                 >
                   Review
-                </button>
+                </Button>
               )}
               {canEdit && autoPostState === 'on' && (
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
                   disabled={turningOffId === entry.id}
                   onClick={(event) => {
                     event.stopPropagation()
                     void handleTurnOffAutoPost(entry)
                   }}
                   onKeyDown={(event) => event.stopPropagation()}
-                  className="btn-secondary focus-ring"
                   data-testid="installment-turn-off"
                 >
                   Turn off
-                </button>
+                </Button>
               )}
             </div>
           ),
@@ -1536,19 +1535,19 @@ export function AllocationsPage() {
           actions.length > 0 || canDeleteOnly ? (
             <>
               {actions.map((action) => (
-                <button
+                <Button
                   key={action}
-                  type="button"
+                  variant="secondary"
                   onClick={(event) => {
                     event.stopPropagation()
                     setMarkPaidFor({ entry, action })
                   }}
                   onKeyDown={(event) => event.stopPropagation()}
-                  className="inline-flex items-center gap-1 bg-ok px-2.5 py-1 text-xs font-semibold text-paper hover:bg-ok transition-colors"
+                  className="min-h-6 gap-1 px-2.5 py-0.5 text-xs"
                   data-testid={ENTRY_ACTION_TEST_IDS[action]}
                 >
                   {RECURRING_ACTION_LABELS[action]}
-                </button>
+                </Button>
               ))}
               {canDeleteOnly && (
                 <button
@@ -1590,14 +1589,13 @@ export function AllocationsPage() {
       {loadError && (
         <div className="card p-4 space-y-3" role="alert" data-testid="allocations-load-error">
           <p className="text-sm text-danger">Could not load allocations.</p>
-          <button
-            type="button"
-            className="btn-secondary focus-ring"
+          <Button
+            variant="secondary"
             data-testid="allocations-retry"
             onClick={() => void loadAllocations(true)}
           >
             Retry
-          </button>
+          </Button>
         </div>
       )}
       {allocations.length === 0 ? (
@@ -1681,14 +1679,13 @@ export function AllocationsPage() {
     const errorAlert = recurringError && (
       <div className="card p-4 space-y-3" role="alert" data-testid="recurring-load-error">
         <p className="text-sm text-danger">Could not load recurring entries.</p>
-        <button
-          type="button"
-          className="btn-secondary focus-ring"
+        <Button
+          variant="secondary"
           data-testid="recurring-retry"
           onClick={() => void loadBudgetEntries()}
         >
           Retry
-        </button>
+        </Button>
       </div>
     )
     if (groups.length === 0 && recurringSearch.trim() !== '') {
@@ -1755,12 +1752,13 @@ export function AllocationsPage() {
     <div className="page">
       <PageHeader title="Allocations">
         {activeTab !== 'wishlist' && (
-          <button
+          <Button
+              variant="primary"
               onClick={openCreateModal}
-            className="btn-primary focus-ring w-full sm:w-auto justify-center"
+            className="w-full sm:w-auto justify-center"
           >
               {activeTab === 'subscriptions' ? 'Add Recurring Entry' : 'Add Allocation'}
-          </button>
+          </Button>
         )}
       </PageHeader>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border border-line p-2 bg-surface">
@@ -1834,14 +1832,13 @@ export function AllocationsPage() {
           {hasLoaded && loadMoreError && !isFetchingMore && (
             <div className="flex items-center justify-center gap-3 pb-2" role="alert" data-testid="allocations-more-error">
               <p className="text-sm text-danger">Could not load more envelopes.</p>
-              <button
-                type="button"
-                className="btn-secondary focus-ring"
+              <Button
+                variant="secondary"
                 data-testid="allocations-more-retry"
                 onClick={() => void loadAllocations(false)}
               >
                 Retry
-              </button>
+              </Button>
             </div>
           )}
           {hasLoaded && !loadMoreError && (isFetchingMore || hasMoreAllocations) && (
@@ -1997,9 +1994,10 @@ export function AllocationsPage() {
             </div>
 
             <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <button
+                  <Button
+                variant="secondary"
                 onClick={() => handleToggleAllocationActive(actionAllocation)}
-                className={`flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold transition-colors duration-200 ${ actionAllocation.is_active ? 'text-ink hover:bg-sunken' : 'bg-sunken text-body hover:bg-sunken' }`}
+                className="flex min-h-11 py-2.5"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   {actionAllocation.is_active ? (
@@ -2009,25 +2007,27 @@ export function AllocationsPage() {
                   )}
                 </svg>
                 <span>{actionAllocation.is_active ? 'Pause allocation' : 'Resume allocation'}</span>
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                variant="primary"
                 onClick={() => openEditFromModal(actionAllocation)}
-                className="flex items-center justify-center gap-2 bg-ink px-4 py-3 text-sm font-semibold text-paper transition-colors duration-200 hover:bg-ink"
+                className="flex min-h-11 py-2.5"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                 </svg>
                 Edit allocation
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="danger"
                 onClick={() => handleDelete(actionAllocation.id)}
-                className="flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold text-danger transition-colors duration-200 hover:bg-sunken sm:col-span-2"
+                className="flex min-h-11 py-2.5 sm:col-span-2"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                 </svg>
                 Delete allocation
-                  </button>
+                  </Button>
                 </div>
               </div>
           </div>
@@ -2434,19 +2434,20 @@ export function AllocationsPage() {
               )}
 
               <div className="flex flex-col sm:flex-row gap-3 pt-2">
-                <button
+                <Button
+                  variant="primary"
                   type="submit"
-                  className="flex-1 bg-ink text-paper py-2 px-4 hover:bg-ink"
+                  className="flex-1 min-h-10 py-1.5 px-4 text-base"
                 >
                   {submitButtonLabel}
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  variant="quiet"
                   onClick={closeModal}
-                  className="flex-1 bg-sunken text-body py-2 px-4 hover:bg-surface"
+                  className="flex-1 min-h-10 py-1.5 px-4 text-base"
                 >
                   Cancel
-                </button>
+                </Button>
               </div>
             </form>
           </div>

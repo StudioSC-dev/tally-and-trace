@@ -1,5 +1,6 @@
 import { pageItems, pageWindow } from '@tally-trace/shared'
 import { withSelection } from '../utils/selection'
+import { Button } from './Button'
 
 interface PagerProps {
   total: number
@@ -28,14 +29,13 @@ export function Pager({ total, page, pageSize, onPage, label, testId, disabled =
         {view.from}–{view.to} of {total}
       </p>
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
+        <Button
+          variant="secondary"
           onClick={() => onPage(view.page - 1)}
           disabled={disabled || view.page <= 1}
-          className="btn-secondary focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Previous
-        </button>
+        </Button>
         {pageItems(view.pages, view.page).map((item, index) =>
           item === 0 ? (
             <span key={`gap-${index}`} className="px-1 text-muted" aria-hidden="true">…</span>
@@ -52,14 +52,13 @@ export function Pager({ total, page, pageSize, onPage, label, testId, disabled =
             </button>
           ),
         )}
-        <button
-          type="button"
+        <Button
+          variant="secondary"
           onClick={() => onPage(view.page + 1)}
           disabled={disabled || view.page >= view.pages}
-          className="btn-secondary focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Next
-        </button>
+        </Button>
       </div>
     </nav>
   )

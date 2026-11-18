@@ -28,6 +28,7 @@ import { CARD_PAY_FORM, dueAction } from '../store/outboxForms'
 import type { CardPayDraft } from '../store/outboxForms'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 import { formatCurrency, getCurrencySymbol } from '../utils/currency'
+import { Button } from './Button'
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -272,9 +273,9 @@ export function CardPayDialog({ cardId, onClose, onPaid, background = false, res
         >
           <div className="flex items-start justify-between gap-4">
             <h2 id={titleId} className="text-lg font-semibold text-ink" data-testid="card-pay-title">{title}</h2>
-            <button ref={closeRef} type="button" onClick={onClose} className="btn-secondary focus-ring">
+            <Button variant="secondary" ref={closeRef} onClick={onClose}>
               Close
-            </button>
+            </Button>
           </div>
 
           {notFound && (
@@ -326,28 +327,26 @@ export function CardPayDialog({ cardId, onClose, onPaid, background = false, res
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
                   onClick={() => {
                     setAmountInput(choices.full.toFixed(2))
                     setError(null)
                   }}
                   disabled={choices.cleared}
-                  className="btn-secondary focus-ring disabled:opacity-50"
                   data-testid="card-pay-full"
                   title={choices.incomplete ? INCOMPLETE_NOTE : undefined}
                 >
                   Full {formatCurrency(choices.full, currency)}
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  variant="secondary"
                   onClick={() => {
                     if (!choices.minimum) return
                     setAmountInput(choices.minimum.amount.toFixed(2))
                     setError(null)
                   }}
                   disabled={choices.minimum === null}
-                  className="btn-secondary focus-ring disabled:opacity-50"
                   data-testid="card-pay-minimum"
                   title={choices.minimumReason ? MINIMUM_REASONS[choices.minimumReason] : undefined}
                 >
@@ -361,7 +360,7 @@ export function CardPayDialog({ cardId, onClose, onPaid, background = false, res
                   ) : (
                     'Minimum'
                   )}
-                </button>
+                </Button>
               </div>
               {choices.minimumReason && (
                 <p className="text-xs text-muted" data-testid="card-pay-minimum-reason">{MINIMUM_REASONS[choices.minimumReason]}</p>
@@ -447,15 +446,14 @@ export function CardPayDialog({ cardId, onClose, onPaid, background = false, res
               {note !== null && <p className="text-warn" data-testid="card-pay-unposted-note">{note.text}</p>}
               {note?.review && <p className="text-xs text-muted" data-testid="card-pay-unposted-review">{note.review}</p>}
               {unposted.postable > 0 && (
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
                   onClick={() => void postNow()}
                   disabled={posting || submitting}
-                  className="btn-secondary focus-ring disabled:opacity-50"
                   data-testid="card-pay-unposted-post"
                 >
                   {posting ? 'Posting…' : 'Post due installments now'}
-                </button>
+                </Button>
               )}
               {posted !== null && (
                 <p className="text-sm text-ok" role="status" data-testid="card-pay-unposted-result">{postedResultText(posted)}</p>
@@ -467,17 +465,16 @@ export function CardPayDialog({ cardId, onClose, onPaid, background = false, res
 
           <div className="flex flex-wrap gap-2">
             {!notFound && (
-              <button
-                type="button"
+              <Button
+                variant="primary"
                 onClick={() => void handleSubmit()}
                 disabled={!canSubmit}
-                className="btn-primary focus-ring disabled:opacity-50"
                 data-testid="card-pay-submit"
               >
                 {submitting ? 'Paying…' : 'Pay'}
-              </button>
+              </Button>
             )}
-            <button type="button" onClick={onClose} className="btn-secondary focus-ring">Cancel</button>
+            <Button variant="quiet" onClick={onClose}>Cancel</Button>
           </div>
         </div>
       </div>

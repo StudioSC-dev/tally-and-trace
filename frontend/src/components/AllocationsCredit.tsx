@@ -1,6 +1,7 @@
 import { availableCreditText, formatEntryDate } from '@tally-trace/shared'
 import type { Account, CardCredit, EntryCreditWarning } from '@tally-trace/shared'
 import { CreditCheckBadge } from './CreditSummary'
+import { Button } from './Button'
 
 /**
  * What a recurring-kind group shows above its entries:
@@ -33,7 +34,7 @@ export function KindCreditLines({ cardIds, accountsById, creditByCard, state, on
   const error = (state === 'error' || state === 'ready-error') && (
     <div role="alert" className="flex flex-wrap items-center gap-2" data-testid="kind-credit-error">
       <p className="text-xs text-warn">{errorCopy}</p>
-      <button type="button" className="btn-secondary focus-ring" onClick={onRetry}>Retry</button>
+      <Button variant="secondary" onClick={onRetry}>Retry</Button>
     </div>
   )
   if (state === 'error') return error
