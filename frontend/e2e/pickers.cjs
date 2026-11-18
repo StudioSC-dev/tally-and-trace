@@ -622,7 +622,7 @@ const listRequests = (page) => {
 }
 const filterGroup = (page, key) => page.locator(`[data-field="${key}"]`)
 const filtersTab = async (page) => {
-  await page.getByRole('button', { name: 'Show filters' }).click()
+  await page.getByRole('button', { name: 'Filters', exact: true }).click()
   await h.waitQuiet(page)
   await filterGroup(page, 'filter_accounts').waitFor()
 }

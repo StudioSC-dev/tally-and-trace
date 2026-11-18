@@ -186,8 +186,9 @@ async function rangeBecomes(page, want) {
 const pressed = (page, which) => page.locator(`[data-testid="view-${which}"]`).getAttribute('aria-pressed')
 const search = (page) => page.locator('[data-testid="transactions-search"]')
 async function showFilters(page) {
-  const toggle = page.getByRole('button', { name: 'Show filters' })
-  if (await toggle.count()) await toggle.click()
+  // STU-687: one Filters button with aria-expanded opens the filters under the toolbar.
+  const toggle = page.getByRole('button', { name: 'Filters', exact: true })
+  if ((await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click()
 }
 const actionModal = (page) => page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: 'Transaction Actions', exact: true }) })
 
@@ -221,6 +222,8 @@ async function farRows(browser) {
     [await page.getByRole('button', { name: 'View previous month' }).count(), await page.getByRole('button', { name: /Spending breakdown/ }).count()], [0, 0])
   const api1 = await get(u.token, `/transactions/scheduled?limit=100`)
   check('(a) the page lists what the API returns', rows.map((r) => r.day), api1.items.map((i) => i.day))
+  // STU-687: the Date range line is inside the Filters disclosure.
+  await showFilters(page)
   check('(a) the range reads tomorrow to a year ahead',
     (await page.locator('p', { hasText: 'Date range:' }).textContent()).replace(/\s+/g, ' ').includes(' to '), true)
   await page.locator('[data-testid="view-to-date"]').click()
