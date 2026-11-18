@@ -384,6 +384,28 @@ def _redate_entry(db: Session, entry_id: int, today: date) -> EntryResult:
     return result
 
 
+def redate_one(db: Session, entry_id: int, today: date) -> EntryResult:
+    """Convert one entry inside the caller's transaction, in a savepoint of its own.
+
+    A refusal rolls the savepoint back and is returned as a ``refused`` result;
+    any other error rolls it back and propagates. Nothing is committed: the
+    caller ends the transaction (``run`` does after each entry; the close-day
+    change, ``services/close_day_change.py``, after the whole card)."""
+    savepoint = db.begin_nested()
+    try:
+        result = _redate_entry(db, entry_id, today)
+    except Refused as exc:
+        savepoint.rollback()
+        db.expire_all()
+        found = db.get(BudgetEntry, entry_id)
+        return EntryResult(entry_id, found.account_id if found else None, "refused", str(exc))
+    except Exception:
+        savepoint.rollback()
+        raise
+    savepoint.commit()
+    return result
+
+
 def run(db: Session, *, apply: bool, today: Optional[date] = None) -> List[EntryResult]:
     """Convert every legacy card installment; each entry in its own savepoint.
 
@@ -398,21 +420,7 @@ def run(db: Session, *, apply: bool, today: Optional[date] = None) -> List[Entry
     results: List[EntryResult] = []
     try:
         for entry_id in candidate_ids(db):
-            savepoint = db.begin_nested()
-            try:
-                result = _redate_entry(db, entry_id, today)
-            except Refused as exc:
-                savepoint.rollback()
-                db.expire_all()
-                found = db.get(BudgetEntry, entry_id)
-                result = EntryResult(entry_id, found.account_id if found else None,
-                                     "refused", str(exc))
-            except Exception:
-                savepoint.rollback()
-                raise
-            else:
-                savepoint.commit()
-            results.append(result)
+            results.append(redate_one(db, entry_id, today))
             if apply:
                 db.commit()
             else:
