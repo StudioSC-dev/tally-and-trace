@@ -13,9 +13,8 @@ from decimal import Decimal
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import func
 
 from app.core import locking
 from app.core.access import (
@@ -37,9 +36,14 @@ from app.schemas.card import (
     CardPaymentCreate, CardStatementDetailOut, CardStatementListOut, StatementDueSet,
     StatementMinimumSet,
 )
+from app.schemas.close_day import (
+    CloseDayChange, CloseDayDue, CloseDayEntry, CloseDayReport, CloseDayRow, CloseDayStatement,
+)
 from app.schemas.minimum_due import MinimumDueRule
+from app.schemas.statement_reconcile import ReconcileOut, ReconcileRequest
 from app.schemas.transaction import TransactionCreate, TransactionOut
 from app.services import card_credit
+from app.services import statement_reconcile_apply as reconcile
 from app.services import forecast as fc
 from app.services.fx import FxRates, get_fx
 from app.services.minimum_due import statement_minimums
@@ -64,10 +68,7 @@ def _amount(value: Optional[Decimal]) -> Optional[float]:
 def _managed_card(db: Session, user: User, account_id: int) -> Account:
     """The card, 404 unless the caller is an owner or admin of it, 400 when it
     is not a credit card."""
-    card = get_account_or_404(db, user, account_id, roles=MANAGE_ROLES)
-    if card.account_type != AccountType.CREDIT:
-        raise HTTPException(status_code=400, detail="Only a credit card has available credit")
-    return card
+    return reconcile.managed_card(db, user, account_id)
 
 
 def _rule(card: Account) -> Optional[MinimumDueRule]:
@@ -226,7 +227,8 @@ def _statement_rows(db: Session, user: User, card: Account, fx: Optional[FxRates
     return [s for s in summaries if s["window_start"].date() < today]
 
 
-def _summary_out(statement: dict, limited: bool) -> dict:
+def _summary_out(statement: dict, limited: bool,
+                 reconciled: Dict[date, datetime]) -> dict:
     close = statement["close"].date()
     out = {
         "close_date": close,
@@ -239,6 +241,8 @@ def _summary_out(statement: dict, limited: bool) -> dict:
         "owed": _amount(statement["owed"]),
         "line_count": statement["line_count"],
         "incomplete": statement["incomplete"],
+        "reconciled": close in reconciled,
+        "reconciled_at": reconciled.get(close),
     }
     if not limited:
         out.update({key: _amount(statement[key]) for key in (
@@ -277,8 +281,9 @@ def list_card_statements(
     rows = [s for s in _statement_rows(db, current_user, card, fx)
             if (from_ is None or s["close"].date() >= from_)
             and (to is None or s["close"].date() <= to)]
+    reconciled = reconcile.reconciled_closes(db, card.id)
     return {**_card_head(card, limited),
-            "statements": [_summary_out(s, limited) for s in rows]}
+            "statements": [_summary_out(s, limited, reconciled) for s in rows]}
 
 
 @router.get("/{account_id}/statements/{close_date}", response_model=CardStatementDetailOut,
@@ -323,7 +328,9 @@ def get_card_statement(
             if posted is not None and posted != txn.transaction_date.date():
                 item["posted_date"] = posted
         lines.append(item)
-    body = {**_card_head(card, limited), "statement": _summary_out(statement, limited),
+    body = {**_card_head(card, limited),
+            "statement": _summary_out(statement, limited,
+                                      reconcile.reconciled_closes(db, card.id)),
             "lines": lines}
     if not limited:
         body["unconverted_lines"] = [{
@@ -334,6 +341,44 @@ def get_card_statement(
             "transaction_id": line["transaction"].id,
         } for line in found["unconverted"]]
     return body
+
+
+@router.post("/{account_id}/statements/reconcile", response_model=ReconcileOut)
+def reconcile_statement(
+    account_id: int,
+    body: ReconcileRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    fx: FxRates = Depends(get_fx),
+    idem: Idempotency = Depends(idempotency),
+):
+    """Reconcile one closed statement with the bank's (STU-749,
+    ``services/statement_reconcile_apply.py``). The statement always wins.
+
+    Owner or admin of the card only (404 otherwise); 400 for a non-card or a card
+    without cycle settings; 422 unless the statement's cycle has closed.
+
+    ``dry_run`` true returns the header diff, the actions, the warnings,
+    ``balanced`` and the fingerprint, and writes nothing. An apply sends the same
+    statement with that ``fingerprint``: under the card's lock it recomputes the
+    diff and applies it in one transaction through the existing write paths, then
+    checks the app's statement equals the bank's. 422 when the statement's close
+    is not the app's (the card's closing day must change first); 409, with nothing
+    written, when the fingerprint differs, the diff is unbalanced, a write path
+    refuses an action, or the check finds a gap (returned). On success every line
+    item on the statement is reconciled and the reconciliation is returned with
+    the applied actions and any notes. ``Idempotency-Key`` is honoured.
+    """
+    card = _managed_card(db, current_user, account_id)
+    statement = body.statement
+    if body.dry_run:
+        loaded = reconcile.load(db, current_user, card, statement, fx)
+        return finish(idem, db, reconcile.as_out(reconcile.diff(loaded, statement),
+                                                 dry_run=True), model=ReconcileOut)
+    applied = reconcile.apply(db, current_user, card, statement, body.fingerprint, fx)
+    return finish(idem, db, reconcile.as_out(
+        applied.diff, dry_run=False, created=applied.created, notes=applied.notes,
+        reconciliation=applied.reconciliation), model=ReconcileOut)
 
 
 def _closed_statement(card: Account, close_date: str) -> date:
@@ -371,14 +416,7 @@ def set_statement_minimum(
     """
     card = _managed_card(db, current_user, account_id)
     day = _closed_statement(card, close_date)
-    statement = pg_insert(CardStatementMinimum).values(
-        account_id=card.id, statement_close=day, amount=body.amount,
-        created_by_actor=current_user.id)
-    db.execute(statement.on_conflict_do_update(
-        constraint="uq_card_statement_minimums_account_close",
-        set_={"amount": statement.excluded.amount,
-              "created_by_actor": statement.excluded.created_by_actor,
-              "updated_at": func.now()}))
+    reconcile.store_minimum(db, card, day, body.amount, current_user.id)
     db.commit()
     return {"close_date": day.isoformat(), "amount": _amount(body.amount)}
 
@@ -463,22 +501,7 @@ def set_statement_due(
     Returns ``{close_date, due_date, computed_due}``.
     """
     card, day = _locked_due_statement(db, current_user, account_id, close_date)
-    overrides = load_due_overrides(db, [card.id])[card.id]
-    if body.due_date <= day:
-        raise HTTPException(status_code=422, detail="The due date must be after the close")
-    if not due_in_order(card, day, {**overrides, day: body.due_date}):
-        raise HTTPException(
-            status_code=422,
-            detail="The due date must fall between the previous and the next statement's "
-                   "due dates")
-    statement = pg_insert(CardStatementDueOverride).values(
-        account_id=card.id, statement_close=day, due_date=body.due_date,
-        created_by_actor=current_user.id)
-    db.execute(statement.on_conflict_do_update(
-        constraint="uq_card_statement_due_overrides_account_close",
-        set_={"due_date": statement.excluded.due_date,
-              "created_by_actor": statement.excluded.created_by_actor,
-              "updated_at": func.now()}))
+    reconcile.store_due_override(db, card, day, body.due_date, current_user.id)
     db.commit()
     days_until_due = resolve_cycle_fields(card)[1]
     return {"close_date": day.isoformat(), "due_date": body.due_date.isoformat(),
@@ -599,3 +622,72 @@ def record_card_payment(
     db.refresh(txn)
     return finish(idem, db, serialize_transaction(db, current_user, txn),
                   model=TransactionOut, status_code=201)
+
+
+def _close_day_report(result, *, dry_run: bool) -> CloseDayReport:
+    """The STU-744 result as the response: ids, dates and reasons, no amount.
+    ``changed`` only for an apply that was written."""
+    return CloseDayReport(
+        card_id=result.card_id,
+        dry_run=dry_run,
+        changed=result.status == "changed" and not dry_run,
+        refused=result.status == "refused",
+        reasons=list(result.reasons),
+        old_close_day=result.old_day,
+        new_close_day=result.new_day,
+        entries=[CloseDayEntry(
+            entry_id=e.entry_id,
+            old_next_occurrence=e.old_next, new_next_occurrence=e.new_next,
+            old_anchor_day=e.old_anchor, new_anchor_day=e.new_anchor,
+            rows=[CloseDayRow(
+                transaction_id=r.txn_id, date_kept=r.new_occurrence is not None,
+                old_date=r.old_date, new_date=r.new_date, old_occurrence=r.old_occurrence,
+                new_occurrence=r.new_occurrence if r.new_occurrence is not None else r.new_date,
+            ) for r in e.rows]) for e in result.entries],
+        printed_dues=[CloseDayDue(id=d.row_id, old_close=d.old_close, new_close=d.new_close)
+                      for d in result.dues],
+        minimum_dues=[CloseDayDue(id=d.row_id, old_close=d.old_close, new_close=d.new_close)
+                      for d in result.minimums],
+        past_statements=[CloseDayStatement(
+            old_close=s.old_close, new_close=s.new_close, moved_in=list(s.moved_in),
+            moved_out=list(s.moved_out)) for s in result.shifts],
+        history_shift_accepted=result.history_accepted,
+    )
+
+
+@router.post("/{account_id}/closing-day", response_model=CloseDayReport,
+             responses={409: {"model": CloseDayReport}})
+def change_closing_day(
+    account_id: int,
+    body: CloseDayChange,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    idem: Idempotency = Depends(idempotency),
+):
+    """Change a card's statement closing day, with its installments and dues (STU-747).
+
+    Owner or admin of the card only (404 otherwise); 400 for a non-card; 422 for
+    a day outside 1 to 31. The change is ``close_day_change.change_close_day``
+    (docs/close-day-change.md): the card, its printed and minimum dues and its
+    open installments with their linked rows move whole or not at all.
+
+    ``dry_run`` (the default) makes and checks everything, writes nothing and
+    returns the report (200). Without it the change is committed, and the answer
+    keeps ``Idempotency-Key`` (stored with the change). Any refusal, a dry run's
+    included, is a 409 whose body is the report, with ``refused`` true and every
+    reason, so the caller can show what would move: for an apply that includes
+    past statements whose rows would move while ``accept_history_shift`` is false.
+    """
+    from app.services import close_day_change
+
+    _managed_card(db, current_user, account_id)
+    result = close_day_change.change_close_day(
+        db, account_id, body.close_day, accept_history_shift=body.accept_history_shift)
+    report = _close_day_report(result, dry_run=body.dry_run)
+    if result.status == "refused":
+        db.rollback()
+        return JSONResponse(status_code=409, content=report.model_dump(mode="json"))
+    if body.dry_run:
+        db.rollback()
+        return report
+    return finish(idem, db, report.model_dump(mode="json"), model=CloseDayReport)

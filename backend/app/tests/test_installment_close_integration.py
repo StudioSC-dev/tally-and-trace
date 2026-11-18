@@ -344,7 +344,8 @@ def test_close4_installment_payable_rolls_then_due_override_wins(world):
 # --- close-day guard --------------------------------------------------------------------------
 
 INSTALLMENT_GUARD = ("This card has installments charged on its statement close with payments "
-                     "left; its closing day can't change until they are paid off")
+                     "left; change its closing day with POST /cards/{account_id}/closing-day, "
+                     "which moves them with it")
 
 
 def test_close_day_change_with_active_installment_is_409(world):

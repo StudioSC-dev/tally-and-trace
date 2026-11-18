@@ -3,6 +3,28 @@
 The `*.spec.ts` files are a Playwright suite run by `pnpm test:e2e`, against a
 mocked API, with Chromium and the desktop and phone projects.
 
+The suite serves the app from a production build (STU-771). Playwright's
+`webServer` runs `vite build --minify false` once into
+`node_modules/.e2e-dist/$E2E_PORT`, then serves that directory with
+`vite preview --port $E2E_PORT --strictPort` (`E2E_PORT` defaults to 4317), so
+no page waits for the dev server to transform its modules. The build never
+goes to the shared `dist/`, so another build (`pnpm build`, or a run on another
+port) cannot replace the files a running preview serves, which would load a
+page with no stylesheet. The build is not minified, so the suite covers an
+unminified production build, not the minified output that ships; the CSS keeps
+the tokens as written (`100ms`, not `.1s`), as the dev server served them. A
+failed build stops the run before any test, and a
+port already in use fails it: Playwright never attaches to a server it did
+not start, and preview never moves to another port. The `/api` proxy in
+`vite.config.ts` applies to preview as to the dev server; the specs fake
+`/api/v1` in the browser, so nothing reaches it.
+
+There is no dev-server mode: the configuration always builds and previews.
+To debug a spec, run it headed or step through it against the same build,
+for example `pnpm exec playwright test e2e/nav.spec.ts --project=desktop --headed`
+or `--debug`. To look at a page on the dev server, run `pnpm dev` and open it
+by hand.
+
 The standalone `*.cjs` scripts are unchanged and still run by hand against a local
 API. They are not part of `pnpm build`, the lint, or CI. Run them by hand when you
 change the auth or session code.
@@ -27,6 +49,7 @@ change the auth or session code.
 | `shared-limit.cjs` | Shared credit limit: a card created linked to another card's limit (Credit Limit hidden, the link sent, no limit sent), the "Shares limit with" line, both Accounts rows and the card panel showing one available figure, the select listing only eligible cards, the primary's form disabled and naming its linked cards, and None unlinking with null (an unchanged link is not sent). The same-available assertions need the API's shared calculation |
 | `card-pay-cross-currency.cjs` | STU-654: the card Pay dialog from an account in another currency asks for the amount sent and the amount the card receives (390x844 and 1280x800); a same-currency payer shows no new field |
 | `card-pay.cjs` | STU-343 Plan C: the card's credit panel on its account page; Pay with a suggested Full or Minimum, another amount, a planned payment and the excess note; the statement's own minimum; Manila's day in a UTC browser and at midnight; inactive cards and no payer; no panel or Pay for an editor or viewer; the card's statement row in "Due and overdue" (its figure, Pay from it, Minimum and Full, two owed statements as one Overdue row, no payment account) on any page, and none for an editor or viewer |
+| `closing-day.cjs` | STU-747: changing a card's closing day in the account form, on a card with an installment with payments left, opens a confirm step (focus inside, "Installment #id" with its next charge before and after, no sideways scroll at 390x844 and 1280x800); Cancel returns focus to Update Account and saves nothing; Change closing day moves the card and the installment onto the new close, and the Installments tab shows it. With an installment and a closed statement the new day would change, it asks for "I understand past statements will change" before it can apply; a card with nothing to move (no installment or due) shows no step and saves through the PUT. Escape closes the step and returns focus. Starts its own stack |
 | `allocations-credit.cjs` | STU-373 Plan C W3: Allocations shows "Available credit on <card>" under Subscriptions and Card-billed bills for each managed card with an active entry there, and each entry's worst upcoming credit check as a badge; planned payments; no credit for an editor, viewer or tag viewer under a held and a failed request; loading, error and error with stale data; a fresh fetch on client navigation and when Manila's day turns |
 | `recurring-past-start.cjs` | STU-630: a recurring entry's next occurrence before today. Add (monthly, weekly, quarterly, annual) and Edit (monthly, and semi-monthly on an entry seeded through the API, since Add offers none) warn and name the first date that will be used (`warning_names_first_used_date`); "Use next year" sets the year to Manila's year plus one keeping month, day and time, 29 February becoming 28 February in a common year, inside the field's max, and the warning goes (`move_to_next_year`, `move_older_date_to_next_year`, `move_leap_day_to_next_year`); today and later show none (`no_warning_for_future`); a saved past date is the forecast's first occurrence as named (`saved_past_date_matches_warning`) and the Due card's Upcoming next date (`due_card_matches_warning`); an edit from On date to Keep running or After runs clears the stored end date, and the forecast and the Due card use the named date (`edit_leaving_on_date_matches_warning`); the saved date is the picked one and Edit reopens it (`save_preserves_selected_past_date`); a future entry has no warning and its own date first (`existing_recurrence_results_unchanged`); no browser dialog fires |
 | `allocations-card.cjs` | STU-639: a savings allocation whose API `monthly_target` is null renders on the Allocations page (card and modal) with no Monthly figure and no page error; a numeric, zero and missing target keep the card text they had. Starts its own stack |

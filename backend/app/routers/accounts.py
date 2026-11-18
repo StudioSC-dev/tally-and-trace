@@ -7,6 +7,7 @@ from app.core import locking
 from app.core.context import request_context
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
+from app.core.idempotency import Idempotency, finish, idempotency
 from app.core.access import (
     DIRECT_ROLES,
     EDIT_ROLES,
@@ -34,9 +35,11 @@ from app.schemas.account import AccountCreate, AccountResponse, AccountUpdate, A
 from app.schemas.budget_entry import AutoPostPreview, AutoPostToggle, ForcedDateSet
 from app.schemas.loan import LoanPaymentCreate, LoanPrepaymentCreate
 from app.schemas.minimum_due import MinimumDuePresetOut, MinimumDueRule
+from app.schemas.statement_reconcile import AccountReconcileOut, AccountReconcileRequest
 from app.schemas.transaction import TransactionOut
 from app.services import loans as loan_svc
 from app.services import payment_dates, posting
+from app.services import statement_reconcile_apply as reconcile
 from app.services.minimum_due import PRESETS as MINIMUM_DUE_PRESETS
 from app.services.fx import FxRates, get_fx
 from app.services.statements import (
@@ -407,15 +410,17 @@ def _refuse_cycle_identity_change(db: Session, data: dict, account: Account) -> 
         raise HTTPException(
             status_code=409,
             detail="This card has installments charged on its statement close with payments "
-                   "left; its closing day can't change until they are paid off")
+                   "left; change its closing day with POST /cards/{account_id}/closing-day, "
+                   "which moves them with it")
     overrides = load_due_overrides(db, [account.id])[account.id]
     if not overrides:
         return
     if close_moved:
         raise HTTPException(
             status_code=409,
-            detail="This card has statement due dates entered from its statements; clear them "
-                   "before changing its closing day")
+            detail="This card has statement due dates entered from its statements; change its "
+                   "closing day with POST /cards/{account_id}/closing-day, which moves them "
+                   "with it")
     if due_override_conflicts(merged, overrides):
         raise HTTPException(
             status_code=409,
@@ -1012,6 +1017,46 @@ def get_card_statements(
     if not limited:
         body["account_id"] = card.id
     return body
+
+
+@router.post("/{account_id}/statements/reconcile", response_model=AccountReconcileOut)
+def reconcile_account_statement(
+    account_id: int,
+    body: AccountReconcileRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    fx: FxRates = Depends(get_fx),
+    idem: Idempotency = Depends(idempotency),
+):
+    """Reconcile a savings, checking or e-wallet statement with the bank's (STU-753,
+    ``services/statement_reconcile_apply.py``). The statement always wins.
+
+    Owner or admin of the account only (404 otherwise); 400 for a card (its
+    statement is reconciled at ``POST /cards/{account_id}/statements/reconcile``) or
+    any other account type; 422 unless the statement's period has ended.
+
+    ``dry_run`` true returns the actions, the warnings, ``balanced`` and the
+    fingerprint, and writes nothing. An apply sends the same statement with that
+    ``fingerprint``: under the account's lock it recomputes the diff and applies it
+    in one transaction through the existing write paths, then checks the period's
+    rows add up to the statement's change and the account's balance at
+    ``period_end`` is its closing balance. 409, with nothing written, when the
+    fingerprint differs, the diff is unbalanced, a write path or the transfer rule
+    refuses an action, or the check finds a gap (returned). On success every row in
+    the period is reconciled and the reconciliation is returned with the applied
+    actions and any notes. ``Idempotency-Key`` is honoured.
+    """
+    account = get_account_or_404(db, current_user, account_id, roles=MANAGE_ROLES)
+    reconcile.check_bank_account(account)
+    statement = body.statement
+    if body.dry_run:
+        loaded = reconcile.load_account(db, current_user, account, statement, fx)
+        return finish(idem, db, reconcile.account_as_out(
+            reconcile.diff_account(loaded, statement), dry_run=True), model=AccountReconcileOut)
+    applied = reconcile.apply_account(db, current_user, account, statement, body.fingerprint, fx)
+    return finish(idem, db, reconcile.account_as_out(
+        applied.diff, dry_run=False, created=applied.created, notes=applied.notes,
+        reconciliation=applied.reconciliation), model=AccountReconcileOut)
 
 
 # --- Loans -------------------------------------------------------------------

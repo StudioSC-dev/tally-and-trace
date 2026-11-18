@@ -23,6 +23,9 @@ import { StatementsPanel } from '../components/StatementsPanel'
 import { CreditSummary } from '../components/CreditSummary'
 import { Skeleton } from '../components/Loading'
 import { apiErrorMessage } from '../utils/apiError'
+import { closeDayChanged, ordinalDay } from '../utils/closeDaySummary'
+import { CloseDayDialog } from '../components/CloseDayDialog'
+import { useToast } from '../hooks/useToast'
 import { useConfirm } from '../hooks/useConfirm'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 import { withSelection } from '../utils/selection'
@@ -376,6 +379,7 @@ export function AccountsPage() {
   const [actionAccount, setActionAccount] = useState<Account | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const askConfirm = useConfirm()
+  const showToast = useToast()
   const [shareAccount, setShareAccount] = useState<Account | null>(null)
   const [formData, setFormData] = useState(() => blankForm(defaultCurrency))
   // Once the amortization is picked by hand, changing the loan kind no longer resets it.
@@ -386,6 +390,8 @@ export function AccountsPage() {
   const [ruleDraft, setRuleDraft] = useState<MinimumDueRule | null>(null)
   // Why the last save failed, shown in the form until the next attempt or close.
   const [saveError, setSaveError] = useState<string | null>(null)
+  // The card whose closing day is being changed, and the day it is being changed to (STU-747).
+  const [closeDayStep, setCloseDayStep] = useState<{ account: Account; day: number } | null>(null)
 
   const cardCreditsQuery = useGetCardCreditsQuery(undefined, { skip: !isAuthenticated })
   const cardCredits = cardCreditsQuery.data
@@ -590,9 +596,9 @@ export function AccountsPage() {
     return sameRule(ruleDraft, stored) ? {} : { minimum_due_rule: ruleDraft }
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSaveError(null)
+  // Saves the form. `editing` is the account being edited: after the closing-day step it is the
+  // account as it now stands, so the PUT carries the new day as its stored one.
+  const saveAccount = async (editing: Account | null, afterCloseDay = false) => {
     try {
       const isLoan = formData.account_type === 'loan'
       // Loan terms are accepted on loans only: drop them from every other type.
@@ -600,7 +606,7 @@ export function AccountsPage() {
       if (!isLoan) {
         for (const field of LOAN_FIELDS) delete payload[field]
       }
-      if (editingAccount) {
+      if (editing) {
         // Routing is sent only when it changes: the backend checks every target it is
         // sent, and an admin may not use a stored one (the owner's own account).
         // A cleared selector is undefined, which JSON drops; send null so "None" saves.
@@ -610,7 +616,7 @@ export function AccountsPage() {
         // card has no limit of its own, so a stored one is not sent along with a new link.
         delete payload.shares_limit_with_account_id
         const link = isLoan || formData.account_type !== 'credit' ? null : formData.shares_limit_with_account_id ?? null
-        const changedLink = link !== (editingAccount.shares_limit_with_account_id ?? null)
+        const changedLink = link !== (editing.shares_limit_with_account_id ?? null)
         if (link !== null) delete payload.credit_limit
         const routing = {
           payment_account_id: formData.payment_account_id ?? null,
@@ -618,19 +624,19 @@ export function AccountsPage() {
         }
         const changedRouting = Object.fromEntries(
           Object.entries(routing).filter(
-            ([field, value]) => value !== (editingAccount[field as keyof typeof routing] ?? null),
+            ([field, value]) => value !== (editing[field as keyof typeof routing] ?? null),
           ),
         )
         await updateAccount({
-          id: editingAccount.id,
+          id: editing.id,
           data: {
             ...payload,
             // Activating or deactivating is the owner's alone: an admin's save leaves it out.
-            ...(editingAccount.permissions.can_delete ? { is_active: isActive } : {}),
-            ...tagIdsIfChanged(selectedTagIds, tagIdsOf(editingAccount.tags)),
+            ...(editing.permissions.can_delete ? { is_active: isActive } : {}),
+            ...tagIdsIfChanged(selectedTagIds, tagIdsOf(editing.tags)),
             ...changedRouting,
             ...(changedLink ? { shares_limit_with_account_id: link } : {}),
-            ...changedRule(editingAccount),
+            ...changedRule(editing),
             ...(isLoan
               ? {
                   loan_annual_rate: formData.loan_annual_rate ?? null,
@@ -658,8 +664,36 @@ export function AccountsPage() {
       setIsCreateModalOpen(false)
       await loadAccountsRef.current()
     } catch (error) {
-      setSaveError(apiErrorMessage(error) || 'Could not save the account. Please try again.')
+      const reason = apiErrorMessage(error) || 'Please try again.'
+      setSaveError(
+        afterCloseDay && editing
+          ? `The closing day is now the ${ordinalDay(editing.billing_cycle_start ?? 0)}, but the other changes were not saved: ${reason}`
+          : apiErrorMessage(error) || 'Could not save the account. Please try again.',
+      )
+      // The closing day was written before the PUT failed: the list shows it.
+      if (afterCloseDay) await loadAccountsRef.current()
     }
+  }
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaveError(null)
+    // A changed closing day is dry-run first. A card with installments, printed dues or minimum
+    // dues to move goes through the confirm step (the PUT refuses it); any other card saves
+    // through the PUT exactly as before.
+    if (editingAccount && closeDayChanged(editingAccount, formData)) {
+      setCloseDayStep({ account: editingAccount, day: formData.billing_cycle_start ?? 0 })
+      return
+    }
+    void saveAccount(editingAccount)
+  }
+
+  const closeDayApplied = (step: { account: Account; day: number }) => {
+    setCloseDayStep(null)
+    showToast(`The closing day is now the ${ordinalDay(step.day)}.`)
+    const moved = { ...step.account, billing_cycle_start: step.day }
+    setEditingAccount(moved)
+    void saveAccount(moved, true)
   }
 
   const handleEdit = (account: Account) => {
@@ -1595,6 +1629,19 @@ export function AccountsPage() {
           </div>
           </div>
         </div>
+      )}
+
+      {closeDayStep && (
+        <CloseDayDialog
+          accountId={closeDayStep.account.id}
+          newDay={closeDayStep.day}
+          onApplied={() => closeDayApplied(closeDayStep)}
+          onPlain={() => {
+            setCloseDayStep(null)
+            void saveAccount(closeDayStep.account)
+          }}
+          onCancel={() => setCloseDayStep(null)}
+        />
       )}
     </div>
   )
