@@ -359,7 +359,8 @@ def reconcile_statement(
     without cycle settings; 422 unless the statement's cycle has closed.
 
     ``dry_run`` true returns the header diff, the actions, the warnings,
-    ``balanced`` and the fingerprint, and writes nothing. An apply sends the same
+    ``balanced``, the fingerprint and a note for each unpost of a row linked to a
+    recurring entry (what it does, or that it is refused), and writes nothing. An apply sends the same
     statement with that ``fingerprint``: under the card's lock it recomputes the
     diff and applies it in one transaction through the existing write paths, then
     checks the app's statement equals the bank's. 422 when the statement's close
@@ -373,8 +374,10 @@ def reconcile_statement(
     statement = body.statement
     if body.dry_run:
         loaded = reconcile.load(db, current_user, card, statement, fx)
-        return finish(idem, db, reconcile.as_out(reconcile.diff(loaded, statement),
-                                                 dry_run=True), model=ReconcileOut)
+        result = reconcile.diff(loaded, statement)
+        return finish(idem, db, reconcile.as_out(
+            result, dry_run=True, notes=reconcile.unpost_notes(loaded, result)),
+            model=ReconcileOut)
     applied = reconcile.apply(db, current_user, card, statement, body.fingerprint, fx)
     return finish(idem, db, reconcile.as_out(
         applied.diff, dry_run=False, created=applied.created, notes=applied.notes,

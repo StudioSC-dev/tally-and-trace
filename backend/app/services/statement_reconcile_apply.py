@@ -51,7 +51,14 @@ run's, or an unbalanced diff refuses the apply (409) before anything is written.
   ``original_amount``/``original_currency`` (and the ``exchange_rate`` between
   them) as a posted foreign create stores them;
 - ``unpost``: ``apply_transaction_update`` with ``is_posted`` False. A row linked
-  to a recurring entry is refused (see ``LINKED_UNPOST``).
+  to a recurring entry is also unlinked from it, as ``unpost_plan`` decides
+  (STU-761): the latest recorded payment of a capped installment is given back
+  (``_give_back``: one more payment left, ``next_occurrence`` back on its
+  occurrence, a completed installment active again, auto-post off); a row of any
+  other recurring entry but a transfer is unlinked with its schedule untouched;
+  any other installment row, and a recurring transfer's, is refused. The entries
+  those rows are linked to are locked after the budget locks and before the rows
+  (``core/locking.py``), and the fingerprint covers what each such unpost does.
 
 Any refusal from a write path refuses the whole apply with its reason (409) and
 writes nothing.
@@ -92,7 +99,7 @@ the same apply (``_apply`` with ``ACCOUNT``) over the account's rows; what diffe
   the other account too, and so is a ``create`` whose possible duplicate is a
   transfer (``TRANSFER_DUPLICATE``): the line is most likely that transfer, dated
   off the period. A row linked to a recurring entry is refused unposting
-  (``LINKED_UNPOST``), as on a card.
+  (``LINKED_UNPOST``): the un-record a card's unpost does is not done here.
 - No header writes.
 - Verify (``verify_account``): after the writes, the posted rows in the period
   must add up to the statement's change (``opening_balance`` plus them is the
@@ -106,7 +113,9 @@ the same apply (``_apply`` with ``ACCOUNT``) over the account's rows; what diffe
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import hashlib
+import json
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -122,8 +131,9 @@ from app.core import locking
 from app.core.access import (
     MANAGE_ROLES, NONE, get_account_or_404, role_map, viewable_account_ids,
 )
-from app.core.time import manila_day, manila_midnight, manila_today
+from app.core.time import manila_day, manila_midnight, manila_today, utc_now
 from app.models.account import Account, AccountType
+from app.models.budget_entry import BudgetEntry
 from app.models.card_statement_due_override import CardStatementDueOverride
 from app.models.card_statement_minimum import CardStatementMinimum
 from app.models.statement_reconciliation import (
@@ -133,6 +143,7 @@ from app.models.transaction import Transaction, TransactionType, transfer_sides
 from app.models.user import CurrencyType, User
 from app.schemas.statement_reconcile import AccountStatement, BankStatement, StatementLine
 from app.services import statement_reconcile as sr
+from app.services.recurring_kinds import is_capped
 from app.services.statements import (
     _card_rows, _split_card_rows, due_in_order, iter_cycles_from, load_due_overrides,
     normalise_lines, resolve_cycle_fields, statement_close, statement_day, statement_lines,
@@ -155,6 +166,13 @@ TRANSFER_DUPLICATE = ("Line {line} may be transfer row {row}, whose date keeps i
                       "period; change the transfer's date and run the dry run again")
 LINKED_UNPOST = ("Row {row} is linked to a recurring entry: unposting it here would leave "
                  "the entry's paid count and schedule as they are")
+NOT_LATEST = ("Row {row} is a payment of installment {entry} but not its latest one: only "
+              "the latest payment can be given back here; handle this row by hand and run "
+              "the dry run again")
+LINKED_BY_HAND = ("Row {row} was linked to installment {entry} by hand, not recorded as one "
+                  "of its payments: handle this row by hand and run the dry run again")
+# What unposting a row linked to a recurring entry does on a card (STU-761).
+UNRECORD, UNLINK, REFUSE = "unrecord", "unlink", "refuse"
 
 
 def managed_card(db: Session, user: User, account_id: int) -> Account:
@@ -213,6 +231,33 @@ class Loaded:
     payments: List[sr.RowRecord]
     # Every line-item row read (cycle and candidates), by id.
     rows: Dict[int, Transaction] = field(default_factory=dict)
+    # The recurring entries those rows are linked to, by id (a card's only).
+    entries: Dict[int, "LinkedEntry"] = field(default_factory=dict)
+
+
+@dataclass
+class LinkedEntry:
+    """A recurring entry linked to a row read, and the ids of its linked rows on its
+    latest linked day (``coalesce(occurrence_date, transaction_date)``, the day
+    ``forecast.linked_transactions`` gives a row; the entry owner's rows)."""
+    entry: BudgetEntry
+    latest: Tuple[int, ...]
+
+
+def linked_entries(db: Session, rows: Dict[int, Transaction]) -> Dict[int, LinkedEntry]:
+    """``LinkedEntry`` for every entry a row in ``rows`` is linked to."""
+    ids = sorted({t.budget_entry_id for t in rows.values() if t.budget_entry_id is not None})
+    out: Dict[int, LinkedEntry] = {}
+    if not ids:
+        return out
+    for entry in db.query(BudgetEntry).filter(BudgetEntry.id.in_(ids)).order_by(BudgetEntry.id):
+        days = [(txn_id, day.date()) for txn_id, day in db.query(
+            Transaction.id, func.coalesce(Transaction.occurrence_date, Transaction.transaction_date))
+            .filter(Transaction.budget_entry_id == entry.id,
+                    Transaction.user_id == entry.user_id)]
+        last = max((day for _, day in days), default=None)
+        out[entry.id] = LinkedEntry(entry, tuple(sorted(i for i, day in days if day == last)))
+    return out
 
 
 def statement_view(db: Session, card: Account, statement: BankStatement) -> sr.AppStatementView:
@@ -308,14 +353,88 @@ def load(db: Session, user: User, card: Account, statement: BankStatement, fx) -
             out.payments.append(sr.RowRecord(
                 id=row.id, kind="payment", amount=received, transaction_date=day,
                 posting_date=None, is_posted=bool(row.is_posted), updated_at=row.updated_at))
+    out.entries = linked_entries(db, out.rows)
     return out
 
 
 def diff(loaded: Loaded, statement: BankStatement) -> sr.StatementDiff:
     """``diff_statement`` over ``loaded`` (read through the module, so one patch reaches
-    every caller)."""
-    return sr.diff_statement(statement, loaded.view, loaded.cycle, loaded.candidates,
-                             loaded.payments)
+    every caller). When an ``unpost`` names a row linked to a recurring entry, the
+    fingerprint also covers what that unpost does (``unpost_plan``) and the entry's
+    figures it changes, so an apply refuses when either changed since the dry run."""
+    result = sr.diff_statement(statement, loaded.view, loaded.cycle, loaded.candidates,
+                               loaded.payments)
+    covered = []
+    for txn in _linked_unposts(loaded, result):
+        linked = loaded.entries.get(txn.budget_entry_id)
+        covered.append([txn.id, txn.budget_entry_id, unpost_plan(loaded, txn)[0]] + (
+            [] if linked is None else [
+                linked.entry.max_occurrences, bool(linked.entry.is_active),
+                bool(linked.entry.auto_post_enabled),
+                sr._canon(linked.entry.next_occurrence), sr._canon(linked.entry.updated_at)]))
+    if not covered:
+        return result
+    body = json.dumps({"diff": result.fingerprint, "linked_unposts": covered},
+                      sort_keys=True, separators=(",", ":"))
+    return replace(result, fingerprint=hashlib.sha256(body.encode("utf-8")).hexdigest())
+
+
+def _linked_unposts(loaded: Loaded, result: sr.StatementDiff) -> List[Transaction]:
+    """The rows ``result`` unposts that are linked to a recurring entry, by id."""
+    return [loaded.rows[a.row_id] for a in sorted(
+        (a for a in result.actions if a.kind == "unpost"), key=lambda a: a.row_id)
+        if loaded.rows[a.row_id].budget_entry_id is not None]
+
+
+def unpost_plan(loaded: Loaded, txn: Transaction) -> Tuple[str, Optional[str]]:
+    """What unposting ``txn``, a row linked to a recurring entry, does on a card
+    (STU-761): ``(UNRECORD | UNLINK | REFUSE, the refusal's reason or None)``.
+
+    - A capped installment (``recurring_kinds.is_capped``), when ``txn`` was recorded
+      as one of its payments (``occurrence_date`` set) and is the only linked row on
+      its latest linked day: ``UNRECORD``, the payment is given back (``_give_back``).
+    - Any other row of a capped installment: refused (``LINKED_BY_HAND``,
+      ``NOT_LATEST``).
+    - A recurring transfer, capped or not: refused (``LINKED_UNPOST``).
+    - Any other recurring entry: ``UNLINK``, its schedule untouched.
+    """
+    linked = loaded.entries.get(txn.budget_entry_id)
+    if linked is None or linked.entry.transfer_to_account_id is not None:
+        return REFUSE, LINKED_UNPOST.format(row=txn.id)
+    entry = linked.entry
+    if not is_capped(entry):
+        return UNLINK, None
+    if txn.occurrence_date is None:
+        return REFUSE, LINKED_BY_HAND.format(row=txn.id, entry=entry.id)
+    if linked.latest != (txn.id,):
+        return REFUSE, NOT_LATEST.format(row=txn.id, entry=entry.id)
+    return UNRECORD, None
+
+
+def unpost_note(loaded: Loaded, txn: Transaction) -> str:
+    """What unposting ``txn`` (linked to a recurring entry) does, read before it is
+    done: a note in the dry run's and the apply's answer. No amount."""
+    outcome, reason = unpost_plan(loaded, txn)
+    if outcome == REFUSE:
+        return f"row {txn.id}: unposting it is refused: {reason}"
+    entry = loaded.entries[txn.budget_entry_id].entry
+    if outcome == UNLINK:
+        return (f"row {txn.id}: unposted and unlinked from recurring entry {entry.id}; "
+                "its schedule is unchanged")
+    day = txn.occurrence_date.date().isoformat()
+    text = (f"row {txn.id}: unposted and unlinked from installment {entry.id}; its payment "
+            f"due {day} is given back ({entry.max_occurrences + 1} left, the next due {day})")
+    if not entry.is_active and entry.max_occurrences == 0:
+        text += "; the completed installment is active again"
+    if entry.auto_post_enabled:
+        text += "; auto-post is turned off"
+    return text
+
+
+def unpost_notes(loaded: Loaded, result: sr.StatementDiff) -> List[str]:
+    """A dry run's notes: what each unpost of a row linked to a recurring entry does
+    (``unpost_note``). Writes nothing."""
+    return [unpost_note(loaded, txn) for txn in _linked_unposts(loaded, result)]
 
 
 # --- apply --------------------------------------------------------------------------------
@@ -333,8 +452,11 @@ def _lock(db: Session, user: User, account: Account, loaded: Loaded, kind: "_Kin
     ids = sorted(loaded.rows)
     owners = {user.id} | {owner for (owner,) in db.query(Transaction.user_id)
                           .filter(Transaction.id.in_(ids))} if ids else {user.id}
+    owners |= {linked.entry.user_id for linked in loaded.entries.values()}
     for owner in sorted(owners):
         locking.lock_owner_budgets(db, owner)
+    for entry_id in sorted(loaded.entries):
+        locking.lock_entry(db, entry_id)
     accounts = {account.id}
     for txn_id in ids:
         txn = locking.lock_transaction(db, txn_id)
@@ -434,6 +556,11 @@ class _Kind:
     def check_create(self, action: sr.Action, loaded: Loaded) -> None:
         """Refuse a ``create``."""
 
+    def unpost_linked(self, db: Session, loaded: Loaded, txn: Transaction) -> dict:
+        """The ``TransactionUpdate`` fields that unpost ``txn``, a row linked to a
+        recurring entry, after any write to the entry; refused by default."""
+        raise _refused(LINKED_UNPOST.format(row=txn.id), row_id=txn.id)
+
     def verify(self, db: Session, user: User, account: Account, loaded: Loaded, statement,
                fx) -> List[Transaction]:
         raise NotImplementedError
@@ -472,6 +599,14 @@ class _Card(_Kind):
                 raise _refused(f"The statement's {header.field} was refused: {exc.detail}",
                                field=header.field)
 
+    def unpost_linked(self, db, loaded, txn):
+        outcome, reason = unpost_plan(loaded, txn)
+        if outcome == REFUSE:
+            raise _refused(reason, row_id=txn.id)
+        if outcome == UNRECORD:
+            _give_back(loaded.entries[txn.budget_entry_id].entry, txn)
+        return {"is_posted": False, "budget_entry_id": None}
+
     def verify(self, db, user, account, loaded, statement, fx):
         return verify(db, user, account, loaded.view.close, statement.line_balance, fx)
 
@@ -480,6 +615,23 @@ class _Card(_Kind):
 
 
 CARD = _Card()
+
+
+def _give_back(entry: BudgetEntry, txn: Transaction) -> None:
+    """Un-record the installment payment ``txn`` stands for (STU-761), the one path
+    that moves a schedule back past a recorded payment: ``max_occurrences`` (the
+    payments left) gains the one ``posting._advance`` used up, ``next_occurrence``
+    returns to that occurrence, a completed installment is active again, and
+    auto-post is turned off as a schedule edit moving the next date earlier turns
+    it off (``routers/budget_entries.py``), so the next run does not post the
+    occurrence again. The caller holds the entry's lock; ``txn`` is then unlinked."""
+    if not entry.is_active and entry.max_occurrences == 0:
+        entry.is_active = True
+    entry.max_occurrences += 1
+    entry.next_occurrence = txn.occurrence_date
+    entry.installment_reviewed_at = None
+    entry.auto_post_enabled = False
+    entry.updated_at = utc_now()
 
 
 def apply(db: Session, user: User, card: Account, statement: BankStatement,
@@ -500,7 +652,7 @@ def _apply(kind: _Kind, db: Session, user: User, account: Account, statement,
         db.expire_all()  # every row read again, as the locks leave it
         loaded = kind.load(db, user, account, statement, fx)
         result = kind.diff(loaded, statement)
-        if set(loaded.rows) - set(first.rows):
+        if set(loaded.rows) - set(first.rows) or set(loaded.entries) - set(first.entries):
             raise _refused(f"The {kind.noun}'s rows changed while this ran; "
                            "run the dry run again")
         kind.check_view(loaded, statement)
@@ -515,6 +667,7 @@ def _apply(kind: _Kind, db: Session, user: User, account: Account, statement,
 
         lines = {line.line_no: line for line in statement.lines}
         unposted: List[int] = []
+        notes: List[str] = []
         for action in sorted((a for a in result.actions
                               if a.kind in ("update", "move", "unpost")),
                              key=lambda a: a.row_id):
@@ -522,7 +675,12 @@ def _apply(kind: _Kind, db: Session, user: User, account: Account, statement,
             line = lines.get(action.line_no)
             try:
                 kind.check_row(txn, action)
-                fields = _row_update(txn, action, line)
+                if action.kind == "unpost" and txn.budget_entry_id is not None:
+                    note = unpost_note(loaded, txn)
+                    fields = kind.unpost_linked(db, loaded, txn)
+                    notes.append(note)
+                else:
+                    fields = _row_update(txn, action, line)
                 apply_transaction_update(db, user, txn, TransactionUpdate(**fields))
             except HTTPException as exc:
                 if isinstance(exc.detail, dict):
@@ -536,7 +694,6 @@ def _apply(kind: _Kind, db: Session, user: User, account: Account, statement,
                 unposted.append(txn.id)
 
         created: Dict[int, int] = {}
-        notes: List[str] = []
         for action in sorted((a for a in result.actions if a.kind == "create"),
                              key=lambda a: a.line_no):
             new, line = action.new_row, lines[action.line_no]
