@@ -82,7 +82,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 
 from app.core import locking
-from app.core.access import MANAGE_ROLES, NONE, role_map, viewable_account_ids
+from app.core.access import (
+    MANAGE_ROLES, NONE, get_account_or_404, role_map, viewable_account_ids,
+)
 from app.core.time import manila_day, manila_midnight, manila_today
 from app.models.account import Account, AccountType
 from app.models.card_statement_due_override import CardStatementDueOverride
@@ -105,6 +107,15 @@ CLOSING_DAY = ("This statement closes on {statement}, but this card's cycle clos
 NEAR_CLOSE_DAYS = 7
 LINKED_UNPOST = ("Row {row} is linked to a recurring entry: unposting it here would leave "
                  "the entry's paid count and schedule as they are")
+
+
+def managed_card(db: Session, user: User, account_id: int) -> Account:
+    """The card, 404 unless ``user`` is an owner or admin of it, 400 when it is not a
+    credit card. The reconcile route's access check, shared with its owner-run script."""
+    card = get_account_or_404(db, user, account_id, roles=MANAGE_ROLES)
+    if card.account_type != AccountType.CREDIT:
+        raise HTTPException(status_code=400, detail="Only a credit card has available credit")
+    return card
 
 
 # --- header writes (shared with the printed-due and minimum-due PUT handlers) -------------

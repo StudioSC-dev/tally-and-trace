@@ -64,10 +64,7 @@ def _amount(value: Optional[Decimal]) -> Optional[float]:
 def _managed_card(db: Session, user: User, account_id: int) -> Account:
     """The card, 404 unless the caller is an owner or admin of it, 400 when it
     is not a credit card."""
-    card = get_account_or_404(db, user, account_id, roles=MANAGE_ROLES)
-    if card.account_type != AccountType.CREDIT:
-        raise HTTPException(status_code=400, detail="Only a credit card has available credit")
-    return card
+    return reconcile.managed_card(db, user, account_id)
 
 
 def _rule(card: Account) -> Optional[MinimumDueRule]:
