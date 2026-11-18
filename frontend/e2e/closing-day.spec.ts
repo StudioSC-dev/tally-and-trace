@@ -242,7 +242,9 @@ async function openForm(page: Page): Promise<void> {
 /** A viewport screenshot (the step is a fixed overlay), saved under the project's screens folder and attached. */
 async function viewportShot(page: Page, name: string): Promise<string> {
   const info = test.info()
-  const file = path.join(info.project.outputDir, 'screens', `closing-day-${name}-${info.project.name}.png`)
+  const size = page.viewportSize()
+  const tag = size ? `${size.width}x${size.height}` : 'unsized'
+  const file = path.join(info.project.outputDir, 'screens', `closing-day-${name}-${tag}-${info.project.name}.png`)
   await page.screenshot({ path: file, animations: 'disabled' })
   await info.attach(name, { path: file, contentType: 'image/png' })
   return file
