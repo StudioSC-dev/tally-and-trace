@@ -384,7 +384,7 @@ async function scenario6(browser) {
     })
     await h.check('6.creates', 'S', async () => creates.length === 3 || `${creates.length} POST(s)`)
     // An edit that moves the row to another account.
-    await page.locator('article[data-testid="row"]').filter({ hasText: 'Picker refused' }).first().click()
+    await page.locator('article[data-transaction-id]').filter({ hasText: 'Picker refused' }).first().click()
     const actions = formModal(page, 'Transaction Actions')
     await actions.waitFor()
     await h.waitQuiet(page)

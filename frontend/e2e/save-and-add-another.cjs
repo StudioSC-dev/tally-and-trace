@@ -87,7 +87,7 @@ const chosen = async (group, name) => {
   const line = group.locator('[data-picker-value]')
   return (await line.count()) === 1 && ((await line.textContent()) || '').trim().startsWith(name) ? 'true' : 'false'
 }
-const rowFor = (page, description) => page.locator('article[data-testid="row"]').filter({ hasText: description }).first()
+const rowFor = (page, description) => page.locator('article[data-transaction-id]').filter({ hasText: description }).first()
 const textOf = async (locator) => ((await locator.textContent({ timeout: 3000 }).catch(() => null)) || '').trim()
 const isFocused = (locator) => locator.evaluate((el) => el === document.activeElement).catch(() => false)
 const activeField = (page) => page.evaluate(() => document.activeElement?.getAttribute('data-field') ?? null)

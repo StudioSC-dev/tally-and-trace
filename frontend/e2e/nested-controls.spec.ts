@@ -36,6 +36,12 @@ import { shot } from './support/shot'
 const BASELINE = fileURLToPath(new URL('./nested-controls.baseline.json', import.meta.url))
 const RECORD = process.env.NESTED_RECORD === '1'
 
+/** Writes `looks` into the baseline under `key`. Recording is a local, one-off step on the PR base: CI never records. */
+function recordBaseline(key: string, looks: RowLook[]): void {
+  if (process.env.CI) throw new Error('NESTED_RECORD is set on CI: the baseline is recorded once, locally, on the PR base, never on CI')
+  fs.writeFileSync(BASELINE, `${JSON.stringify({ ...readBaseline(), [key]: looks }, null, 2)}\n`)
+}
+
 /** The ticket's nested-control selector (AC1, AC5): a control that is a descendant of another control. */
 const NESTED = '[role=button] button, [role=button] a, button button, a button'
 
@@ -150,10 +156,13 @@ for (const gesture of GESTURES) {
 
 // ─── AC3 ────────────────────────────────────────────────────────────────────────────────────────
 
-/** Each card action on its row, and the button in the record dialog that sends it. */
+/**
+ * Each card action on its row, the button in the record dialog that sends it, and what the request says about posting:
+ * Charged sends `is_posted: false` (charged, not yet posted); Posted sends no `is_posted` field, so the record is posted.
+ */
 const ACTIONS = [
-  { label: 'Charged', testId: 'entry-charged-button', submit: 'mark-paid-charged', isPosted: false },
-  { label: 'Posted', testId: 'entry-posted-button', submit: 'mark-paid-submit', isPosted: undefined },
+  { label: 'Charged', testId: 'entry-charged-button', submit: 'mark-paid-charged', sendsIsPosted: true },
+  { label: 'Posted', testId: 'entry-posted-button', submit: 'mark-paid-submit', sendsIsPosted: false },
 ] as const
 
 for (const a of ACTIONS) {
@@ -176,8 +185,12 @@ for (const a of ACTIONS) {
     await page.waitForLoadState('networkidle')
     await viewportShot(page, `action-${slug(a.label)}`)
     expect(api.count('POST', path), `${a.label}: POST ${path} sent exactly once`).toBe(1)
-    const sent = api.bodies('POST', path)[0] as { is_posted?: boolean } | undefined
-    expect(sent?.is_posted, `${a.label}: is_posted sent`).toBe(a.isPosted)
+    const sent = api.bodies('POST', path)[0] as Record<string, unknown> | undefined
+    expect(sent, `${a.label}: the request has a body`).toBeDefined()
+    expect(sent?.occurrence_date, `${a.label}: the occurrence recorded`).toMatch(/^\d{4}-\d{2}-\d{2}/)
+    expect(sent?.transaction_date, `${a.label}: the date recorded`).toMatch(/^\d{4}-\d{2}-\d{2}/)
+    expect(Object.hasOwn(sent ?? {}, 'is_posted'), `${a.label}: is_posted is sent`).toBe(a.sendsIsPosted)
+    if (a.sendsIsPosted) expect(sent?.is_posted, `${a.label}: is_posted`).toBe(false)
     expect(await editDialog(page).count(), `${a.label}: edit dialogs open`).toBe(0)
   })
 }
@@ -398,7 +411,7 @@ test('recurring rows preserve appearance and pointer behaviour: appearance', asy
     await s.screenshot({ path: path.join(testInfo.project.outputDir, 'screens', `nested-controls-appearance-sheet-${i + 1}-${testInfo.project.name}.png`), animations: 'disabled' })
   }
   if (RECORD) {
-    fs.writeFileSync(BASELINE, `${JSON.stringify({ ...readBaseline(), [testInfo.project.name]: looks }, null, 2)}\n`)
+    recordBaseline(testInfo.project.name, looks)
     return
   }
   const base = readBaseline()[testInfo.project.name] ?? []
@@ -479,7 +492,7 @@ test('transaction rows preserve appearance and pointer behaviour: appearance', a
     await s.screenshot({ path: path.join(testInfo.project.outputDir, 'screens', `nested-controls-transactions-sheet-${i + 1}-${testInfo.project.name}.png`), animations: 'disabled' })
   }
   if (RECORD) {
-    fs.writeFileSync(BASELINE, `${JSON.stringify({ ...readBaseline(), [txKey(testInfo.project.name)]: looks }, null, 2)}\n`)
+    recordBaseline(txKey(testInfo.project.name), looks)
     return
   }
   const base = readBaseline()[txKey(testInfo.project.name)] ?? []

@@ -67,7 +67,7 @@ async function openModal(browser, description) {
   const native = dialogs.trackNativeDialogs(page)
   await h.uiLogin(page, stack, owner)
   await page.goto(`${stack.webUrl}/transactions`)
-  const row = page.locator('article[data-testid="row"]').filter({ hasText: description }).first()
+  const row = page.locator('article[data-transaction-id]').filter({ hasText: description }).first()
   await row.waitFor()
   await h.waitQuiet(page)
   await row.click()

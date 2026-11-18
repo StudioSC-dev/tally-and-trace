@@ -104,7 +104,7 @@ async function checkFieldError(page, modal, prefix, key, wantText, focusTarget) 
   }
 }
 
-const rowFor = (page, description) => page.locator('article[data-testid="row"]').filter({ hasText: description }).first()
+const rowFor = (page, description) => page.locator('article[data-transaction-id]').filter({ hasText: description }).first()
 const actionModal = (page) => formModal(page, 'Transaction Actions')
 const toast = (page) => page.locator('[data-testid="toast"]')
 

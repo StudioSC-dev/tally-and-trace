@@ -90,8 +90,8 @@ async function scrollThrough(page: Page): Promise<void> {
 
 /**
  * Every visible tap target on the page, in document order, including those below the first screen. A checkbox or
- * radio is measured by its label when the label holds it (the label is what a finger hits), and a control whose hit
- * area an `::after` stretches over its row (a row's title, STU-683) by that area, the row it fills. An element hidden from
+ * radio is measured by its label when the label holds it (the label is what a finger hits), and a row's title
+ * (`.row-open`, STU-683), whose `::after` stretches its hit area over the row, by that area, the row it fills. An element hidden from
  * view (`display: none`, `visibility: hidden`, a screen-reader-only clip) is skipped. The identity is the element's
  * test id, or its role and accessible name, with a count for repeats.
  */
@@ -108,8 +108,7 @@ const targetsOn = (page: Page): Promise<Target[]> =>
     for (const e of Array.from(document.querySelectorAll(selector))) {
       const toggle = e instanceof HTMLInputElement && (e.type === 'checkbox' || e.type === 'radio')
       const label = toggle ? e.closest('label') : null
-      const after = getComputedStyle(e, '::after')
-      const stretched = after.content !== 'none' && after.position === 'absolute' && [after.top, after.right, after.bottom, after.left].every((v) => v === '0px') && e instanceof HTMLElement ? e.offsetParent : null
+      const stretched = e instanceof HTMLElement && e.matches('.row-open') ? e.offsetParent : null
       const area: Element = label ?? stretched ?? e
       if (!area.checkVisibility({ checkVisibilityCSS: true }) || area.getClientRects().length === 0) continue
       const box = area.getBoundingClientRect()
