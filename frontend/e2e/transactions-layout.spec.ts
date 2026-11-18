@@ -236,15 +236,28 @@ test('due tabs sit on one row at 390', async ({ page }, testInfo) => {
   for (const y of ys) expect(Math.abs(y - ys[0]), `every tab's top (${y}) is within 1px of the first's (${ys[0]})`).toBeLessThanOrEqual(1)
   expect(await tablist.evaluate((e) => getComputedStyle(e).flexWrap), 'the tab row does not wrap').toBe('nowrap')
   expect(await page.evaluate(() => document.documentElement.scrollWidth), 'page scroll width').toBeLessThanOrEqual(PHONE_WIDTH)
-  // None is clipped: each tab's label fits its button, and the row scrolls each tab wholly into view.
+  // None of the ticket's three tabs is clipped, before any scrolling: each lies wholly inside the tab row's box and its
+  // label is whole.
+  const row = await boxOf(tablist)
+  for (const name of ['Due and overdue', 'Not posted yet', 'Upcoming']) {
+    const tab = tablist.getByRole('tab', { name: new RegExp(`^${name}`) })
+    const t = await boxOf(tab)
+    expect(t.x >= row.x - 0.5 && t.x + t.width <= row.x + row.width + 0.5, `${name} (${t.x}..${t.x + t.width}) lies inside the tab row (${row.x}..${row.x + row.width}) before scrolling`).toBe(true)
+    expect(await tab.evaluate((e) => e.scrollWidth <= e.clientWidth), `${name}'s label is not cut`).toBe(true)
+  }
+  // The card's five tabs: the strip scrolls inside the card, and the page does not scroll sideways.
+  const strip = await tablist.evaluate((e) => ({ scroll: e.scrollWidth, client: e.clientWidth }))
+  expect(strip.scroll, `the tab strip scrolls (scrollWidth ${strip.scroll}, clientWidth ${strip.client})`).toBeGreaterThan(strip.client)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth), 'page scroll width before scrolling the tabs').toBeLessThanOrEqual(PHONE_WIDTH)
+  // Every tab can be reached: scrolled into view, it lies wholly inside the row with its label whole.
   const count = await tabs.count()
+  expect(count, 'the card has five tabs').toBe(5)
   for (let i = 0; i < count; i += 1) {
     const tab = tabs.nth(i)
-    expect(await tab.evaluate((e) => e.scrollWidth <= e.clientWidth), `tab ${i + 1}'s label is not cut`).toBe(true)
     await tab.scrollIntoViewIfNeeded()
     const t = await boxOf(tab)
-    const row = await boxOf(tablist)
-    expect(t.x >= row.x - 0.5 && t.x + t.width <= row.x + row.width + 0.5, `tab ${i + 1} (${t.x}..${t.x + t.width}) lies inside the tab row (${row.x}..${row.x + row.width})`).toBe(true)
+    expect(t.x >= row.x - 0.5 && t.x + t.width <= row.x + row.width + 0.5, `tab ${i + 1} (${t.x}..${t.x + t.width}) can be scrolled wholly into the tab row (${row.x}..${row.x + row.width})`).toBe(true)
+    expect(await tab.evaluate((e) => e.scrollWidth <= e.clientWidth), `tab ${i + 1}'s label is not cut`).toBe(true)
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth), 'page scroll width after scrolling the tabs').toBeLessThanOrEqual(PHONE_WIDTH)
   await shot(page, 'tabs-last-in-view')

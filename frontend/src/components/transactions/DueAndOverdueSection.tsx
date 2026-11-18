@@ -1600,7 +1600,9 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
           variant="secondary"
           onClick={expand}
           aria-expanded={open}
-          aria-controls={TABS.map(({ id }) => tabPanelId(id)).join(' ')}
+          aria-label={open ? 'Hide due items' : 'Show due items'}
+          // The tab panels mount only while the card is open, so the toggle names them only then.
+          aria-controls={open ? TABS.map(({ id }) => tabPanelId(id)).join(' ') : undefined}
           className={`${ROW_ACTION} shrink-0`}
           data-testid="due-section-toggle"
         >
@@ -1624,7 +1626,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
                 tabIndex={selectedTab ? 0 : -1}
                 onClick={() => selectTab(id)}
                 onKeyDown={(event) => onTabKey(event, index)}
-                className="flex shrink-0 flex-auto items-center justify-between gap-2 whitespace-nowrap px-3 py-1.5 text-left text-sm focus-ring"
+                className="flex shrink-0 flex-auto items-center justify-between gap-1.5 whitespace-nowrap px-1.5 py-1.5 text-left text-sm focus-ring sm:gap-2 sm:px-3"
                 data-testid={`due-tab-${slug}`}
               >
                 <span>{label}</span>

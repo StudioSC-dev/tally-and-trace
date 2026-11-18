@@ -2976,7 +2976,8 @@ export function TransactionsPage() {
               variant="secondary"
               onClick={() => setShowFilters((prev) => !prev)}
               aria-expanded={showFilters}
-              aria-controls="transactions-filters"
+              // The panel mounts only while it is open, so the button names it only then.
+              aria-controls={showFilters ? 'transactions-filters' : undefined}
               className="shrink-0 px-3"
               data-testid="transactions-filters-toggle"
             >

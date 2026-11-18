@@ -326,7 +326,7 @@ const PAGES: Surface[] = [
     },
     migrated: [
       'Add Transaction',
-      'Hide',
+      'Hide due items',
       'Mark paid',
       'Change date',
       'Pay',
