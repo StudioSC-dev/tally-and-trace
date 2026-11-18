@@ -493,6 +493,35 @@ def test_a_close_mismatch_is_refused(w):
     assert _snapshot(w) == before
 
 
+def test_a_close_one_day_after_the_cards_is_refused(w):
+    """The statement closes 2027-02-25, a day after the card's 2027-02-24 close and
+    inside its cycle still open today: the same closing-day refusal, nothing written."""
+    _row(w, "2027-02-01", 100)
+    _statements(w)
+    statement = _statement([_line(1, "2027-02-01", "100.00")], close="2027-02-25")
+    before = _snapshot(w)
+    dry = _dry(w, statement)
+    assert dry["header"] == [{"field": "close", "statement": "2027-02-25",
+                              "app": "2027-02-24"}]
+    assert dry["actions"] == [] and dry["balanced"] is False
+    r = _post(w, statement, False, dry["fingerprint"])
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["message"] == (
+        "This statement closes on 2027-02-25, but this card's cycle closes on 2027-02-24: "
+        "change the card's closing day first")
+    assert _snapshot(w) == before
+
+
+@pytest.mark.parametrize("close", ["2027-03-10", "2027-02-10"])
+def test_a_close_far_from_the_cards_is_not_its_statement(w, close):
+    """More than ``NEAR_CLOSE_DAYS`` from every close of the card: not its statement."""
+    before = _snapshot(w)
+    r = _post(w, _statement([], close=close), True)
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == "Not a closed statement of this card"
+    assert _snapshot(w) == before
+
+
 def test_header_only_differences_are_applied(w):
     _row(w, "2027-02-01", 100)
     assert _detail(w)["statement"]["due_date"] == "2027-03-17"

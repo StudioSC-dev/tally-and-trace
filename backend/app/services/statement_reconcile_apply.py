@@ -8,10 +8,11 @@ computation.
 
 Which statement
 ---------------
-The statement's cycle is the app's: ``statements.statement_close`` of the
-statement's ``close_date``. It must have closed (before Manila's today). When the
-statement's close differs from the app's, the diff has no row actions and an apply
-is refused: the card's closing day must be changed first.
+The statement's ``close_date`` must be before Manila's today. When it is a close of
+the card, that statement (closed) is the one compared. Otherwise it is compared with
+the card's nearest close either side, at most ``NEAR_CLOSE_DAYS`` away (``app_close``;
+farther, 422): the diff has no row actions and an apply is refused, since the card's
+closing day must be changed first.
 
 Rows (``load``)
 ---------------
@@ -99,6 +100,9 @@ from app.services.statements import (
 
 CLOSING_DAY = ("This statement closes on {statement}, but this card's cycle closes on {app}: "
                "change the card's closing day first")
+# A statement closing at most this many days from one of the card's closes is that
+# statement with the closing day moved (refused as such); farther, it is not the card's.
+NEAR_CLOSE_DAYS = 7
 LINKED_UNPOST = ("Row {row} is linked to a recurring entry: unposting it here would leave "
                  "the entry's paid count and schedule as they are")
 
@@ -154,13 +158,11 @@ class Loaded:
 
 def statement_view(db: Session, card: Account, statement: BankStatement) -> sr.AppStatementView:
     """The app's statement for the bank statement's cycle. 400 for a card without
-    cycle settings; 422 unless that statement has closed."""
+    cycle settings; 422 unless that statement has closed (see ``app_close``)."""
     if resolve_cycle_fields(card) is None:
         raise HTTPException(status_code=400,
                             detail="This card has no statement cycle (set its closing day)")
-    close = statement_close(card, statement.header.close_date)
-    if close >= manila_today():
-        raise HTTPException(status_code=422, detail="Not a closed statement of this card")
+    close = app_close(card, statement.header.close_date, manila_today())
     overrides = load_due_overrides(db, [card.id])[card.id]
     cycle = next(iter_cycles_from(card, close, datetime.min, through=close,
                                   due_overrides=overrides))
@@ -170,6 +172,30 @@ def statement_view(db: Session, card: Account, statement: BankStatement) -> sr.A
     return sr.AppStatementView(
         close=close, window_start=cycle["window_start"].date(), due=cycle["due"].date(),
         minimum_due=Decimal(minimum) if minimum is not None else None)
+
+
+def app_close(card: Account, stated: date, today: date) -> date:
+    """The card's close that a statement closing on ``stated`` is compared with.
+
+    - ``stated`` on or after ``today``: 422, the statement has not closed.
+    - ``stated`` a close of the card: that close, 422 unless it is before ``today``.
+    - Otherwise the card's nearest close either side (the earlier on a tie), when it
+      is at most ``NEAR_CLOSE_DAYS`` away: the diff then reports the close mismatch
+      and an apply is refused until the card's closing day changes. Farther: 422.
+    """
+    not_closed = HTTPException(status_code=422, detail="Not a closed statement of this card")
+    if stated >= today:
+        raise not_closed
+    following = statement_close(card, stated)
+    if following == stated:
+        return stated
+    # One close a month: the one before ``following`` is in the month before it.
+    previous = statement_close(
+        card, (following.replace(day=1) - timedelta(days=1)).replace(day=1))
+    nearest = min((previous, following), key=lambda close: (abs((close - stated).days), close))
+    if abs((nearest - stated).days) > NEAR_CLOSE_DAYS:
+        raise not_closed
+    return nearest
 
 
 def _bounds(card: Account, view: sr.AppStatementView) -> Tuple[date, date]:
