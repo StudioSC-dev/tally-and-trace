@@ -118,11 +118,6 @@ const formatDateWithOrdinal = (date: Date) => {
 
 // An unposted row is Pending once its day has come and Planned before; see `transactionStatus`.
 const STATUS_LABELS: Record<TransactionStatus, string> = { posted: 'Posted', pending: 'Pending', planned: 'Planned' }
-const STATUS_BADGE_CLASSES: Record<TransactionStatus, string> = {
-  posted: 'text-ink',
-  pending: 'text-warn',
-  planned: 'text-body',
-}
 const STATUS_TEXT_CLASSES: Record<TransactionStatus, string> = { posted: 'text-ok', pending: 'text-warn', planned: 'text-muted' }
 
 const PAGE_SIZES = [25, 50, 100] as const
@@ -2680,7 +2675,6 @@ export function TransactionsPage() {
       amountLabel,
       projectedLabel,
       transferFeeLabel,
-      typeBadgeStyles,
       amountClass,
       scheduleLabel,
     } = getTransactionMeta(transaction)
@@ -2739,8 +2733,8 @@ export function TransactionsPage() {
                 ? categoryName || 'Transfer'
                 : categoryName || 'Uncategorized'}
             </span>
-            <span className={`font-semibold ${STATUS_BADGE_CLASSES[status]}`}>{STATUS_LABELS[status]}</span>
-            <span className={`font-semibold ${typeBadgeStyles}`}>{typeLabel}</span>
+            <span className="font-medium text-muted">{STATUS_LABELS[status]}</span>
+            <span className="font-medium text-muted">{typeLabel}</span>
             {transaction.created_by && <span data-testid="created-by">by {transaction.created_by}</span>}
             {scheduleLabel && <span className="text-ink">{scheduleLabel}</span>}
             {transferFeeLabel && <span className="text-warn">Fee {transferFeeLabel}</span>}

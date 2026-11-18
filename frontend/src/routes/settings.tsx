@@ -367,7 +367,14 @@ function SettingsPage() {
                     {SWATCHES.map(({ n, stored }) => (
                       <Swatch key={n} selected={swatchOf(tagForm.color) === n} color={tokenColor(`swatch-${n}`)} onClick={() => setTagForm({ ...tagForm, color: stored })} aria-label={`Colour ${stored}`} />
                     ))}
-                    <input type="color" value={tagForm.color} onChange={(e) => setTagForm({ ...tagForm, color: e.target.value })} className="h-7 w-10 border border-line bg-transparent" aria-label="Custom colour" />
+                    {/* Outlined and empty until a colour that is not one of the swatches is chosen; the native input sits over it, unseen. */}
+                    <span
+                      data-testid="custom-swatch"
+                      className="relative inline-block h-7 w-10 border border-line-strong focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ink"
+                      style={{ backgroundColor: swatchOf(tagForm.color) === null ? tagForm.color : 'transparent' }}
+                    >
+                      <input type="color" value={tagForm.color} onChange={(e) => setTagForm({ ...tagForm, color: e.target.value })} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" aria-label="Custom colour" />
+                    </span>
                   </div>
                 </div>
                 {tagError && <p role="alert" className="text-sm text-danger">{tagError}</p>}
