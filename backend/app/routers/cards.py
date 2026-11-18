@@ -13,6 +13,7 @@ from decimal import Decimal
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.core import locking
@@ -34,6 +35,9 @@ from app.models.user import User
 from app.schemas.card import (
     CardPaymentCreate, CardStatementDetailOut, CardStatementListOut, StatementDueSet,
     StatementMinimumSet,
+)
+from app.schemas.close_day import (
+    CloseDayChange, CloseDayDue, CloseDayEntry, CloseDayReport, CloseDayRow, CloseDayStatement,
 )
 from app.schemas.minimum_due import MinimumDueRule
 from app.schemas.statement_reconcile import ReconcileOut, ReconcileRequest
@@ -621,3 +625,72 @@ def record_card_payment(
     db.refresh(txn)
     return finish(idem, db, serialize_transaction(db, current_user, txn),
                   model=TransactionOut, status_code=201)
+
+
+def _close_day_report(result, *, dry_run: bool) -> CloseDayReport:
+    """The STU-744 result as the response: ids, dates and reasons, no amount.
+    ``changed`` only for an apply that was written."""
+    return CloseDayReport(
+        card_id=result.card_id,
+        dry_run=dry_run,
+        changed=result.status == "changed" and not dry_run,
+        refused=result.status == "refused",
+        reasons=list(result.reasons),
+        old_close_day=result.old_day,
+        new_close_day=result.new_day,
+        entries=[CloseDayEntry(
+            entry_id=e.entry_id,
+            old_next_occurrence=e.old_next, new_next_occurrence=e.new_next,
+            old_anchor_day=e.old_anchor, new_anchor_day=e.new_anchor,
+            rows=[CloseDayRow(
+                transaction_id=r.txn_id, date_kept=r.new_occurrence is not None,
+                old_date=r.old_date, new_date=r.new_date, old_occurrence=r.old_occurrence,
+                new_occurrence=r.new_occurrence if r.new_occurrence is not None else r.new_date,
+            ) for r in e.rows]) for e in result.entries],
+        printed_dues=[CloseDayDue(id=d.row_id, old_close=d.old_close, new_close=d.new_close)
+                      for d in result.dues],
+        minimum_dues=[CloseDayDue(id=d.row_id, old_close=d.old_close, new_close=d.new_close)
+                      for d in result.minimums],
+        past_statements=[CloseDayStatement(
+            old_close=s.old_close, new_close=s.new_close, moved_in=list(s.moved_in),
+            moved_out=list(s.moved_out)) for s in result.shifts],
+        history_shift_accepted=result.history_accepted,
+    )
+
+
+@router.post("/{account_id}/closing-day", response_model=CloseDayReport,
+             responses={409: {"model": CloseDayReport}})
+def change_closing_day(
+    account_id: int,
+    body: CloseDayChange,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    idem: Idempotency = Depends(idempotency),
+):
+    """Change a card's statement closing day, with its installments and dues (STU-747).
+
+    Owner or admin of the card only (404 otherwise); 400 for a non-card; 422 for
+    a day outside 1 to 31. The change is ``close_day_change.change_close_day``
+    (docs/close-day-change.md): the card, its printed and minimum dues and its
+    open installments with their linked rows move whole or not at all.
+
+    ``dry_run`` (the default) makes and checks everything, writes nothing and
+    returns the report (200). Without it the change is committed, and the answer
+    keeps ``Idempotency-Key`` (stored with the change). Any refusal, a dry run's
+    included, is a 409 whose body is the report, with ``refused`` true and every
+    reason, so the caller can show what would move: for an apply that includes
+    past statements whose rows would move while ``accept_history_shift`` is false.
+    """
+    from app.services import close_day_change
+
+    _managed_card(db, current_user, account_id)
+    result = close_day_change.change_close_day(
+        db, account_id, body.close_day, accept_history_shift=body.accept_history_shift)
+    report = _close_day_report(result, dry_run=body.dry_run)
+    if result.status == "refused":
+        db.rollback()
+        return JSONResponse(status_code=409, content=report.model_dump(mode="json"))
+    if body.dry_run:
+        db.rollback()
+        return report
+    return finish(idem, db, report.model_dump(mode="json"), model=CloseDayReport)

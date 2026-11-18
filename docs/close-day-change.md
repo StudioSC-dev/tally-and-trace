@@ -114,3 +114,34 @@ amount. A second run is refused: the card already closes on that day.
 Exit codes: 0 changed (in a dry run: would change), 3 refused (nothing written),
 1 an error (nothing written), 2 refused before connecting (the URL did not match
 the `--expect-*` flags).
+
+## From the app
+
+`POST /cards/{account_id}/closing-day` makes the same change through the API
+(STU-747), for an owner or admin of the card (a viewer, an editor or a stranger
+gets a 404; a card that is not a credit card, a 400). It calls the same service,
+so the changes, checks and refusals above apply unchanged.
+
+Body: `close_day` (1 to 31; anything else is a 422), `dry_run` (default `true`)
+and `accept_history_shift` (default `false`).
+
+- A dry run makes and checks everything, writes nothing and answers 200 with the
+  report.
+- An apply (`dry_run: false`) commits the change whole or not at all. It honours
+  `Idempotency-Key` (docs/idempotency.md).
+- A refusal, from a dry run or an apply, is a 409 whose body is the same report
+  with `refused: true` and every reason. That includes past statements that would
+  change while `accept_history_shift` is false: the report lists each one (old
+  and new close, ids moved in and out) so the caller can show it.
+- If an installment was created on the card while the apply waited for its locks,
+  the apply is refused (409, reason "run it again") and nothing is written.
+
+The report has `changed` (true only when written), `refused`, `reasons`, the old
+and new close day, `entries` (each installment's old and new next occurrence and
+anchor day, and each linked row's id, whether its date was kept, old and new date
+and occurrence), `printed_dues` and `minimum_dues` (id, old and new close),
+`past_statements` and `history_shift_accepted`. It never carries an amount. The
+type is `CloseDayReport` in `@tally-trace/shared`.
+
+`PUT /accounts/{id}` still refuses (409) a closing-day change while the card has
+open installments or printed dues, and its message names this route.
