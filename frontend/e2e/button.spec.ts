@@ -126,9 +126,15 @@ async function openDialog(
   extra: ApiRoute[] = [],
 ): Promise<ApiMock> {
   const api = await openPage(page, route, heading, extra)
-  await trigger(page).click()
-  await expect(dialogOf(page).getByRole('heading', { name: title }).first()).toBeVisible()
-  await untilStill(page)
+  // Tracked from before the click, so a lookup the dialog starts as it opens is counted until it finishes.
+  const requests = trackRequests(page)
+  try {
+    await trigger(page).click()
+    await expect(dialogOf(page).getByRole('heading', { name: title }).first()).toBeVisible()
+    await untilStill(page, requests)
+  } finally {
+    requests.stop()
+  }
   return api
 }
 
@@ -684,32 +690,56 @@ async function screenOf(page: Page, row?: Locator): Promise<Omit<Effect, 'reques
 const QUIET_MS = 500
 const QUIET_TRIES = 20
 
-/**
- * Waits until a just-opened dialog has filled in: no request sent or finished and no change on screen for QUIET_MS.
- * `networkidle` alone returns at once after the first load, so a dialog's own lookups could still be in flight and
- * move its buttons under the next click.
- */
-async function untilStill(page: Page): Promise<void> {
+/** The requests a page has sent and not yet seen finish or fail, plus a count of every send, finish and failure. */
+interface RequestTracker {
+  inFlight: Set<Request>
+  events: () => number
+  stop: () => void
+}
+
+function trackRequests(page: Page): RequestTracker {
+  const inFlight = new Set<Request>()
   let events = 0
-  const onEvent = (): void => {
+  const sent = (r: Request): void => {
     events += 1
+    inFlight.add(r)
   }
-  page.on('request', onEvent)
-  page.on('requestfinished', onEvent)
-  page.on('requestfailed', onEvent)
+  const done = (r: Request): void => {
+    events += 1
+    inFlight.delete(r)
+  }
+  page.on('request', sent)
+  page.on('requestfinished', done)
+  page.on('requestfailed', done)
+  return {
+    inFlight,
+    events: () => events,
+    stop: () => {
+      page.off('request', sent)
+      page.off('requestfinished', done)
+      page.off('requestfailed', done)
+    },
+  }
+}
+
+/**
+ * Waits until a just-opened dialog has filled in: no request in flight, none sent or finished, and no change on screen
+ * for QUIET_MS. `networkidle` alone returns at once after the first load, so a dialog's own lookups could still be in
+ * flight and move its buttons under the next click. Throws if that never happens within QUIET_TRIES windows.
+ */
+async function untilStill(page: Page, requests: RequestTracker): Promise<void> {
   let screen = await screenOf(page)
   for (let i = 0; i < QUIET_TRIES; i += 1) {
-    const count = events
+    const count = requests.events()
     await settle(page)
     await page.waitForTimeout(QUIET_MS)
     const next = await screenOf(page)
-    const still = events === count && JSON.stringify(next) === JSON.stringify(screen)
+    const still = requests.inFlight.size === 0 && requests.events() === count && JSON.stringify(next) === JSON.stringify(screen)
     screen = next
-    if (still) break
+    if (still) return
   }
-  page.off('request', onEvent)
-  page.off('requestfinished', onEvent)
-  page.off('requestfailed', onEvent)
+  const pending = [...requests.inFlight].map((r) => `${r.method()} ${r.url()}`)
+  throw new Error(`the dialog did not settle within ${QUIET_TRIES} windows of ${QUIET_MS}ms (in flight: ${pending.join(', ') || 'none'})`)
 }
 
 async function effectOf(page: Page, target: Locator, row?: Locator): Promise<Effect> {
