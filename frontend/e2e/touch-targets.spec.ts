@@ -90,7 +90,8 @@ async function scrollThrough(page: Page): Promise<void> {
 
 /**
  * Every visible tap target on the page, in document order, including those below the first screen. A checkbox or
- * radio is measured by its label when the label holds it (the label is what a finger hits). An element hidden from
+ * radio is measured by its label when the label holds it (the label is what a finger hits), and a control whose hit
+ * area an `::after` stretches over its row (a row's title, STU-683) by that area, the row it fills. An element hidden from
  * view (`display: none`, `visibility: hidden`, a screen-reader-only clip) is skipped. The identity is the element's
  * test id, or its role and accessible name, with a count for repeats.
  */
@@ -107,7 +108,9 @@ const targetsOn = (page: Page): Promise<Target[]> =>
     for (const e of Array.from(document.querySelectorAll(selector))) {
       const toggle = e instanceof HTMLInputElement && (e.type === 'checkbox' || e.type === 'radio')
       const label = toggle ? e.closest('label') : null
-      const area: Element = label ?? e
+      const after = getComputedStyle(e, '::after')
+      const stretched = after.content !== 'none' && after.position === 'absolute' && [after.top, after.right, after.bottom, after.left].every((v) => v === '0px') && e instanceof HTMLElement ? e.offsetParent : null
+      const area: Element = label ?? stretched ?? e
       if (!area.checkVisibility({ checkVisibilityCSS: true }) || area.getClientRects().length === 0) continue
       const box = area.getBoundingClientRect()
       const cs = getComputedStyle(area)
@@ -261,33 +264,33 @@ const DESKTOP_BASE: Record<PageKey, readonly (readonly [string, number, number])
     ['button "Wishlist"', 84, 36],
     ['input[search]#recurring-search', 1232, 44],
     ['select#tag-filter', 113, 40],
-    ['button#row', 1230, 57],
+    ['button#row-open', 1230, 57],
     ['button#entry-charged-button', 66, 24],
     ['button#entry-posted-button', 60, 24],
-    ['button#row (2)', 1230, 57],
+    ['button#row-open (2)', 1230, 57],
     ['button#entry-charged-button (2)', 66, 24],
     ['button#entry-posted-button (2)', 60, 24],
-    ['button#row (3)', 1230, 56],
-    ['button#row (4)', 1230, 57],
+    ['button#row-open (3)', 1230, 56],
+    ['button#row-open (4)', 1230, 57],
     ['button#entry-mark-paid-button', 74, 24],
-    ['button#row (5)', 1230, 57],
+    ['button#row-open (5)', 1230, 57],
     ['button#entry-mark-paid-button (2)', 74, 24],
-    ['button#row (6)', 1230, 57],
+    ['button#row-open (6)', 1230, 57],
     ['button#entry-mark-paid-button (3)', 74, 24],
-    ['button#row (7)', 1230, 57],
+    ['button#row-open (7)', 1230, 57],
     ['button#entry-mark-paid-button (4)', 74, 24],
-    ['button#row (8)', 1230, 57],
+    ['button#row-open (8)', 1230, 57],
     ['button#entry-mark-paid-button (5)', 74, 24],
-    ['button#row (9)', 1230, 57],
+    ['button#row-open (9)', 1230, 57],
     ['button#entry-mark-paid-button (6)', 74, 24],
-    ['button#row (10)', 1230, 57],
+    ['button#row-open (10)', 1230, 57],
     ['button#entry-mark-paid-button (7)', 74, 24],
-    ['button#row (11)', 1230, 57],
+    ['button#row-open (11)', 1230, 57],
     ['button#entry-mark-paid-button (8)', 74, 24],
-    ['button#row (12)', 1230, 57],
+    ['button#row-open (12)', 1230, 57],
     ['button#entry-mark-paid-button (9)', 74, 24],
-    ['button#row (13)', 1230, 56],
-    ['button#row (14)', 1230, 56],
+    ['button#row-open (13)', 1230, 56],
+    ['button#row-open (14)', 1230, 56],
     ['button#entry-mark-received-button', 98, 24],
   ],
 }

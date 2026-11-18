@@ -180,7 +180,7 @@ const PITCH_SLACK = 0.5
 const measure = (rows: Locator): Promise<Measured[]> =>
   rows.evaluateAll((all) =>
     all.map((e) => ({
-      name: (e.querySelector('p')?.textContent ?? '').trim(),
+      name: (e.querySelector('[data-row-title]')?.textContent ?? '').trim(),
       kind: e.getAttribute('data-row-kind'),
       height: e.getBoundingClientRect().height - parseFloat(getComputedStyle(e).borderBottomWidth),
       metaLines: e.querySelectorAll('[data-testid="row-meta"]').length,
@@ -619,7 +619,9 @@ const RECURRING = 'Meralco'
 for (const gesture of GESTURES) {
   test(`rows still open their records and keep their actions: recurring row, ${gesture}`, async ({ page }) => {
     await openRecurring(page)
-    await trigger(page, recurringRow(page, RECURRING), gesture, 'row')
+    // STU-683: a click lands anywhere on the row; a key goes to the row's title, the one control that opens it.
+    const row = recurringRow(page, RECURRING)
+    await trigger(page, gesture === 'click' ? row : row.getByRole('button', { name: RECURRING, exact: true }), gesture, 'row')
     const form = recurringForm(page)
     await expect(form).toBeVisible()
     await expect(form.locator('[data-field="name"]')).toHaveValue(RECURRING)
