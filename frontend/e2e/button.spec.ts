@@ -776,13 +776,21 @@ type Baseline = Record<string, ProjectBaseline>
 
 const readBaseline = (): Baseline => (fs.existsSync(BASELINE) ? (JSON.parse(fs.readFileSync(BASELINE, 'utf8')) as Baseline) : {})
 
-/** Writes one entry of the baseline: a recording run uses one worker, so read-modify-write is safe. */
+/** The same record with its keys in sorted order. */
+const byKey = <T,>(entries: Record<string, T>): Record<string, T> =>
+  Object.fromEntries(Object.entries(entries).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+
+/**
+ * Writes one entry of the baseline: a recording run uses one worker, so read-modify-write is safe. Projects and
+ * entries are written in key order, so the file does not depend on the order the tests ran in, and an entry recorded
+ * again on its own lands where a full run would have put it.
+ */
 function record(project: string, update: (b: ProjectBaseline) => void): void {
   const all = readBaseline()
   const mine = all[project] ?? { layout: {}, effects: {} }
   update(mine)
-  all[project] = mine
-  fs.writeFileSync(BASELINE, `${JSON.stringify(all, null, 2)}\n`)
+  all[project] = { layout: byKey(mine.layout), effects: byKey(mine.effects) }
+  fs.writeFileSync(BASELINE, `${JSON.stringify(byKey(all), null, 2)}\n`)
 }
 
 /** The nth visible `button` or `a` in the scope with this accessible name. */
