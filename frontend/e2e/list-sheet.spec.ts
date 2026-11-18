@@ -323,7 +323,7 @@ test('rows keep an even pitch: many tags while saving', async ({ page }, testInf
   await page.route('**/api/v1/transactions/**', (route) => (route.request().method() === 'DELETE' ? undefined : route.fallback()))
   await row.click({ position: { x: 8, y: 8 } })
   await actionModal(page).getByRole('button', { name: 'Delete transaction' }).click()
-  await page.getByRole('button', { name: 'Delete transaction', exact: true }).click()
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Delete transaction', exact: true }).click()
   await expect(row.getByTestId('row-saving')).toHaveText('Deleting…')
   // The tags refit around the badge in the same frame: no resize of the line is needed.
   await checkTagLine(row, tags, testInfo.project.name, 'while deleting')

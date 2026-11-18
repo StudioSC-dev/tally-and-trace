@@ -487,7 +487,7 @@ async function scenarioI(browser) {
     await rowFor(page, 'BG I Delete me').first().click()
     await page.getByRole('heading', { name: 'Transaction actions' }).waitFor()
     await page.getByRole('button', { name: /^Delete/ }).first().click()
-    await page.getByRole('button', { name: 'Delete transaction', exact: true }).click()
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Delete transaction', exact: true }).click()
     await held.waitHits(1)
     const dimmed = page.locator('article[data-transaction-id][data-pending="delete"]')
     await h.check('i.row-dimmed', 'B', async () => {

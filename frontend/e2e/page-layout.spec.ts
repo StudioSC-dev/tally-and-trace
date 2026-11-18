@@ -343,7 +343,7 @@ test('excluded page features are unchanged: allocations tabs', async ({ page }) 
   const labels = (await tabs.allInnerTexts()).map((t) => t.trim())
   expect(labels, "the Allocations tabs keep main's labels and order").toEqual(BASE_ALLOCATION_TABS.map((t) => t.label))
   // The header action, read by name so the same check runs on main, where the header is not a <header>.
-  const action = page.locator('main').getByRole('button', { name: /^Add (Recurring Entry|Allocation)$/ })
+  const action = page.locator('main').getByRole('button', { name: /^Add (recurring entry|allocation)$/ })
   for (const [i, tab] of BASE_ALLOCATION_TABS.entries()) {
     await tabs.nth(i).click()
     const pressed = await tabs.evaluateAll((all) => all.map((e) => e.getAttribute('aria-pressed')))
