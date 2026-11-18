@@ -237,31 +237,72 @@ The schema is `AccountStatement`; unknown fields are refused. All figures are ma
 
 ### Transfers
 
-A transfer is one row carrying both accounts' sides, so:
+A transfer is one row carrying both accounts' sides. It is matched on each account's
+statement and never created twice, and the statement wins on it as on any row: the
+other account's balance follows whatever is written.
 
-- it is matched on each account's statement and never created twice;
-- it keeps both its dates whatever the line says (the other bank may print another day),
-  so it is only paired with a line when its own date is in the period;
-- a bank often prints a transfer out and its fee as two lines, while the app holds one
-  transfer whose fee is part of it. Before any other matching, a posted transfer out of
-  the account in the period, with a fee above 0, is matched to two lines: the one `debit`
-  line equal to its amount and the one `debit` line equal to its fee, both within one
-  day of the transfer's date. A transfer of 2,000.00 with a fee of 25.00 on 2026-07-10
-  matches a line of `2000.00` on 2026-07-10 and a line of `25.00` on 2026-07-11: the dry
-  run shows two `matched` actions with the same `row_id`, and the apply writes nothing
-  to the transfer. It is not paired, and falls to the usual matching, when there is more
-  than one line that could be the amount line or the fee line, when a line could belong
-  to another such transfer, when the amount equals the fee, when the fee line is dated
-  more than a day away, when fees are charged together in one line, or when the bank's
-  amount line differs from the transfer's amount. A transfer into the account is never
-  paired this way (the receiving bank charges no fee of the transfer's);
-- any change to it (its amount, posting or unposting it) is refused, since it would
-  change the other account too: "Row 41 is a transfer between accounts 7 and 9: changing
-  it here would change both; edit the transfer and run the dry run again";
-- a line that would be created while a transfer of the same kind and amount is dated off
-  the period names it in `possible_duplicate_of`, and the apply is refused: "Line 3 may be
-  transfer row 41, whose date keeps it off this period; change the transfer's date and run
-  the dry run again".
+- **Fee printed apart.** A bank often prints a transfer out and its fee as two lines,
+  while the app holds one transfer whose fee is part of it. Before any other matching, a
+  posted transfer out of the account in the period, with a fee above 0, is matched to two
+  lines: the one `debit` line equal to its amount and the one `debit` line equal to its
+  fee, both within one day of the transfer's date. A transfer of 2,000.00 with a fee of
+  25.00 on 2026-07-10 matches a line of `2000.00` on 2026-07-10 and a line of `25.00` on
+  2026-07-11: the dry run shows two `matched` actions with the same `row_id`, and the
+  apply writes nothing to the transfer. It is not paired, and falls to the usual
+  matching, when there is more than one line that could be the amount line or the fee
+  line, when a line could belong to another such transfer, when the amount equals the
+  fee, when the fee line is dated more than a day away, when fees are charged together in
+  one line, or when the bank's amount line differs from the transfer's amount. A transfer
+  into the account is never paired this way.
+- **Amount, out of the account.** The line is the amount plus the fee: the fee is kept
+  and the amount becomes the line less the fee. A line of `2030.00` against 2,000.00 plus
+  25.00 makes the amount 2,005.00, and the other account receives 2,005.00. A line below
+  the fee is refused: "Row 41: the statement's amount is less than its fee".
+- **Amount, into the account.** Between accounts in one currency the amount becomes the
+  line, so the account it left moves by the same; across currencies the received amount
+  becomes the line and the account it left is unchanged.
+- **Date.** A transfer has one date for both accounts. In the period it keeps its dates
+  whatever day the line prints, so two banks printing it a day apart both match it. A
+  transfer outside the period (in the period either side, or unposted) is paired like any
+  row and moved in (a `move`): it takes the line's `transaction_date`, so the other
+  account's side moves too, and keeps its `posting_date` (which places a card's cash
+  advance).
+- **Not on the statement.** A posted transfer in the period that no line matches is
+  unposted: it leaves both accounts.
+- Loan payments are transfers whose fee is the interest: from the funding account's
+  statement the principal is rewritten and the interest kept, under the loan's own rules
+  (a refusal from them is a 409).
+
+Refused (409), nothing written; the message names the row:
+
+- **The other account has reconciled it.** A change to a transfer that would change a
+  statement the other account has already reconciled: one holding the day the transfer
+  counts on there before the change, or after it for a re-date or a posting. "Row 41 is a
+  transfer with account 9, whose statement for 2026-07-01 to 2026-07-31 is reconciled:
+  changing it here would change that statement". For a card that day is a cash advance's
+  statement day (the later of its own day and its posting day) or a payment's own day,
+  and its statement is found by the card's current closing day: a statement reconciled
+  before the closing day changed may not be found. Since one date serves both accounts, a
+  transfer that falls in different periods on the two statements (for example 2026-07-31
+  on one and 2026-08-01 on the other) can be placed for only one of them: once the first
+  is reconciled, the second is refused here. Decide which date to keep. To keep the
+  first, reconcile the second account with the transfer in its statement for the period
+  holding the transfer's date (leave the line out of the other one). To keep the second, edit the transfer's date by hand, then reconcile both
+  statements again.
+- **A line may be the transfer.** Unposting a transfer when a line the dry run creates, of
+  the same kind, is dated within a day of it (for example two lines could be its fee, so
+  it was not paired): "Row 41 is a transfer and line 1 may be it; edit the transfer or
+  the statement and run the dry run again". Correct the transfer's amount or fee so it
+  matches the bank's lines, then run the dry run again.
+- **Amount without its fee.** Changing a transfer out of the account, with a fee, to a
+  line equal to its amount without the fee (the bank printed the fee more than a day
+  away): "Line 1 is transfer 41's amount without its fee 25.00; its fee line was not found
+  within a day of it". Correct the transfer's fee or date so the fee line pairs, then run
+  the dry run again.
+
+The card route (`POST /cards/{id}/statements/reconcile`) has none of these transfer rules
+and no guard: it changes a cash advance's amount (the line less the fee) and dates, and
+unposts it, as it always has.
 
 Unposting a row linked to a recurring entry (salary, a bill, an installment, a loan
 payment) is refused here, whatever the entry: a bank statement never gives a payment back.
