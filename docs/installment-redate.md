@@ -25,7 +25,8 @@ An update is refused (422, "This installment is charged on the statement close")
 only when it would take an already-normalised entry off the close: a different
 cadence, `anchor_day` or `day_rule`, or a `next_occurrence` off the close. A
 card's close day cannot change (409) while it has a card installment with
-payments left, active or paused.
+payments left, active or paused; `scripts/change_card_close_day.py` changes it
+for one card (docs/close-day-change.md).
 
 ## What it converts
 
