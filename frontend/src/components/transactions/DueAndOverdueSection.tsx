@@ -321,9 +321,9 @@ interface BatchResultView {
 }
 
 /**
- * Row actions are secondary buttons (docs/design-system.md, "Button"). Each keeps the height it had until STU-682
- * sizes buttons: an action that was outlined keeps its padding, and one that was filled had no border, so it takes
- * 2px less padding and a 24px floor.
+ * Row actions are secondary buttons (docs/design-system.md, "Button"). On a fine pointer each keeps the height it had
+ * before the Button migration: an action that was outlined keeps its padding, and one that was filled had no border,
+ * so it takes 2px less padding and a 24px floor. On a coarse pointer the 44px floor in index.css sizes them all.
  */
 const ROW_ACTION = 'px-2.5 py-1 text-xs'
 const WAS_FILLED_ROW_ACTION = 'min-h-6 px-2.5 py-0.5 text-xs'

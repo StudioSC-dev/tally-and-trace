@@ -52,7 +52,7 @@ export function Navigation() {
           {/* Logo + Desktop Nav Links */}
           <div className="flex items-center min-w-0">
             <div className="flex-shrink-0 flex items-center">
-              <Link to="/" className="flex items-center gap-2.5 text-ink transition-colors hover:text-body">
+              <Link to="/" className="tap-target flex items-center gap-2.5 text-ink transition-colors hover:text-body">
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center border border-line font-mono text-xs">
                   {symbol}
                 </span>
@@ -101,7 +101,7 @@ export function Navigation() {
             <button
               onClick={toggleTheme}
               aria-label="Toggle theme"
-              className="p-2 text-muted transition-colors duration-200 hover:text-ink"
+              className="tap-target flex items-center justify-center p-2 text-muted transition-colors duration-200 hover:text-ink"
             >
               {theme === 'dark' ? (
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
