@@ -116,15 +116,17 @@ interface Surface {
 const DASHBOARD: Surface = {
   name: 'dashboard',
   route: '/',
-  labels: [],
+  // STU-688: the leading panel's figure label and period heading, then its In, Out and Net rows.
+  labels: ['Available cash', 'Month to date'],
   captions: [
+    'Available cash',
+    'Month to date',
+    'In',
+    'Out',
+    'Net',
     'Opening',
     'Trough',
     'Close (60d)',
-    'Actual totals (Month to date)',
-    'Total income (MTD)',
-    'Total expenses (MTD)',
-    'Net flow (MTD)',
     'Today',
     'Net worth',
     'Projected',
@@ -311,14 +313,12 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
 
   test('period label is plain', async ({ page }) => {
     await open(page, '/')
-    const badge = page.locator('.badge', { hasText: /^Month to date$/i })
-    await expect.soft(badge, 'one period badge').toHaveCount(1)
-    expect.soft(await badge.innerText(), 'the badge reads Month to date').toBe('Month to date')
-    expect.soft(['normal', '0px'], 'badge letter-spacing').toContain(await badge.evaluate((e) => getComputedStyle(e).letterSpacing))
-    expect.soft(await badge.evaluate((e) => getComputedStyle(e).textTransform), 'badge text-transform').toBe('none')
-    const heading = page.getByRole('heading', { name: /^Actual totals/ })
-    expect.soft(await heading.innerText(), 'the totals heading').toBe('Actual totals (Month to date)')
+    // STU-688: the period's totals moved to the leading panel, headed by the period itself.
+    const heading = page.getByTestId('leading-figure').getByRole('heading', { name: /^Month to date$/i })
+    await expect.soft(heading, 'one period heading').toHaveCount(1)
+    expect.soft(await heading.innerText(), 'the period heading reads Month to date').toBe('Month to date')
     expect.soft(['normal', '0px'], 'heading letter-spacing').toContain(await heading.evaluate((e) => getComputedStyle(e).letterSpacing))
+    expect.soft(await heading.evaluate((e) => getComputedStyle(e).textTransform), 'heading text-transform').toBe('none')
     await shot(page, 'period-label')
   })
 
@@ -491,6 +491,7 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
     await open(page, '/')
     const cashflow = page.locator('[data-onboarding="cashflow-timeline"]')
     const snapshot = page.locator('[data-onboarding="financial-snapshot"]')
+    const leading = page.getByTestId('leading-figure')
     const tile = (name: string): Locator => page.getByTestId('quick-balance-tile').filter({ has: page.getByTestId('quick-balance-name').getByText(name, { exact: true }) })
     const payable = (name: string): Locator => page.getByTestId('payable-row').filter({ has: page.getByText(name, { exact: true }) })
     const upcoming = (index: number): Locator => page.getByTestId('other-upcoming-row').nth(index)
@@ -500,7 +501,8 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
       ['the BPI Payroll quick balance', tile('BPI Payroll'), ['Debit', 'BPI Payroll', '₱84,250.40']],
       ['the HSBC quick balance', tile('HSBC Red Mastercard'), ['Credit', 'HSBC Red Mastercard', 'Owed', '₱18,742.30']],
       ['the GCash quick balance', tile('GCash'), ['E-wallet', 'GCash', '₱3,415.75']],
-      ['the period totals', snapshot, ['month to date', 'Actual totals (Month to date)', 'Total income (MTD)', '₱33,500.00', 'Total expenses (MTD)', '₱51,821.20', 'Net flow (MTD)', '−₱18,321.20']],
+      // STU-688: the period totals sit under the leading figure as In, Out and Net.
+      ['the period totals', leading, ['Available cash', '₱343,230.90', 'Month to date', 'In', '₱33,500.00', 'Out', '₱51,821.20', 'Net', '−₱18,321.20']],
       ['the snapshot today and projection', snapshot, ['Today', 'Net worth', '₱329,764.35', 'Projected', 'Available cash', '₱343,230.90']],
       ['the Emergency fund top-up payable', payable('Emergency fund top-up'), ['Mar 8th, 2026', '₱10,000.00', 'Scheduled', 'Manual', 'from BPI Payroll', 'Overdue']],
       ['the HMO dependent add-on payable', payable('HMO dependent add-on'), ['Mar 20th, 2026', '₱1,450.00', 'Scheduled', 'Manual', 'from BPI Payroll', '8 days remaining']],
@@ -514,7 +516,7 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
     for (const [what, scope, facts] of lines) {
       for (const fact of facts) await expect.soft(scope, `${what} keeps "${fact}"`).toContainText(fact)
     }
-    await expect.soft(snapshot.locator('.badge'), 'the period badge keeps its period').toHaveText('Month to date')
+    await expect.soft(leading.getByRole('heading', { name: 'Month to date' }), 'the period heading keeps its period').toHaveText('Month to date')
     await expect.soft(page.getByTestId('payable-row'), 'every payable is still listed').toHaveCount(6)
     await expect.soft(page.getByTestId('other-upcoming-row'), 'both incoming payrolls are still listed').toHaveCount(2)
     await shot(page, 'facts-dashboard')
