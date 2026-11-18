@@ -9,6 +9,7 @@ import type { Locator, Page } from '@playwright/test'
 import loadConfig from 'tailwindcss/loadConfig.js'
 import resolveConfig from 'tailwindcss/resolveConfig.js'
 import { shot } from './support/shot'
+import { expandDue } from './support/transactions'
 import { calmHousehold, emptyHousehold, household, mockHousehold, SHARED_ACCOUNT_IDS, transactionsFor } from './support/fixtures/household'
 import type { HouseholdData } from './support/fixtures/household'
 import type { BudgetEntry, CashflowTimelineEvent, PaginatedResponse, Transaction } from '@tally-trace/shared'
@@ -291,6 +292,8 @@ test.describe('Columnar pad design tokens (STU-675)', () => {
       await expect(button).toBeVisible()
       expect.soft(await style(button, 'border-radius'), `a rendered ${variant} button radius`).toBe('4px')
     }
+    // STU-687: the Due card opens collapsed; its ruled rows show once it is expanded.
+    await expandDue(page)
     const row = page.locator('[data-testid="due-row"]:visible').first()
     await expect(row).toBeVisible()
     expect.soft(await style(row, 'border-radius'), 'a ruled list row is square').toBe('0px')

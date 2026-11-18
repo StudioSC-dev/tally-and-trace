@@ -26,6 +26,7 @@ import {
   dueTabBadge,
   freshFor,
   installmentPlanView,
+  isOverdueRow,
   mergeUpcoming,
   occurrenceCreditCheck,
   orderSubscriptionRows,
@@ -61,6 +62,7 @@ import type {
   DueMissedRow,
   DuePendingRow,
   DueRecurringRow,
+  DueSectionRow,
   DueStatementRow,
   NotPostedRow,
   RecurringAction,
@@ -178,6 +180,36 @@ const TABS: readonly TabSpec[] = [
   { id: 'subscriptions', label: 'Subscriptions', slug: 'subscriptions', badgeTestId: 'due-subscriptions-count', usesWindow: false },
   { id: 'installments', label: 'Installments', slug: 'installments', badgeTestId: 'due-installments-count', usesWindow: false },
 ]
+
+/** The tabs that can lead the collapsed banner, in the order they are tried. */
+type BannerTab = Extract<DueTab, 'due' | 'not_posted' | 'upcoming'>
+
+/** A Due and overdue row's name, as its row shows it. */
+const dueRowName = (row: DueSectionRow): string =>
+  row.kind === 'pending' ? (transactionDescription(row.transaction) ?? 'Pending transaction') : row.name
+
+/** The day a Due and overdue row is placed on. */
+const dueRowDay = (row: DueSectionRow): string => {
+  switch (row.kind) {
+    case 'pending':
+      return row.date
+    case 'statement':
+      return row.oldestDue
+    case 'missed':
+      return row.oldestEffective
+    default:
+      return row.view === 'limited' ? row.date : row.effectiveDate
+  }
+}
+
+/** The banner's one line: the lead tab's count, the state of its first row, then that row's name, cut to fit. */
+const bannerLine = (count: string, name: string, state: ReactNode): ReactNode => (
+  <p className="flex min-w-0 flex-1 items-center gap-2 whitespace-nowrap text-sm text-ink" data-testid="due-banner-text">
+    <span className="shrink-0 font-semibold" data-testid="due-banner-count">{count}</span>
+    {state}
+    <span className="min-w-0 truncate" data-testid="due-banner-item">{name}</span>
+  </p>
+)
 
 const addDays = (day: string, n: number): string => {
   const d = new Date(`${day}T00:00:00Z`)
@@ -331,7 +363,8 @@ const WAS_FILLED_ROW_ACTION = 'min-h-6 px-2.5 py-0.5 text-xs'
 
 export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransaction, onSeeScheduled, accountCurrencies }: Props) {
   const panelId = useId()
-  const [open, setOpen] = useState(true)
+  // Collapsed on every mount (STU-687): the card is a one-line banner until the reader expands it.
+  const [open, setOpen] = useState(false)
   // The selected tab: Due and overdue on every mount, never stored.
   const [tab, setTab] = useState<DueTab>('due')
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([])
@@ -667,6 +700,58 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     event.preventDefault()
     selectTab(nextTab.id)
     tabRefs.current[next]?.focus()
+  }
+
+  // The collapsed banner (STU-687). The first of Due and overdue, Not posted yet and Upcoming that lists anything
+  // leads it, with that tab's count and the row the tab lists first; expanding the card opens on that tab. With all
+  // three settled and empty, and nothing else to say, the section is not shown at all.
+  const bannerSettled = !badges.due.pending && !badges.not_posted.pending && !badges.upcoming.pending
+  const leadTab: BannerTab | null = !bannerSettled
+    ? null
+    : badges.due.count > 0 && rows.length > 0
+      ? 'due'
+      : badges.not_posted.count > 0 && notPosted.length > 0
+        ? 'not_posted'
+        : badges.upcoming.count > 0 && upcomingRows.length > 0
+          ? 'upcoming'
+          : null
+  const bannerError = Boolean(snapshotError) || windowState.failed || linkedFailed || upcomingFailed
+  // What the Due tab shows besides its rows: the review notice, today's lines, Post now and the page-open result.
+  const dueNote = reviewNotice?.text ?? todayLines[0]?.text ?? postNow ?? openPostedText
+  const sectionEmpty = bannerSettled && leadTab === null && !bannerError && dueNote === null && batchResult === null
+  const expand = () => {
+    if (!open && leadTab !== null) setTab(leadTab)
+    setOpen((prev) => !prev)
+  }
+  const banner = (): ReactNode => {
+    if (leadTab === 'due') {
+      const first = rows[0]
+      return bannerLine(
+        `${badges.due.count} due`,
+        dueRowName(first),
+        isOverdueRow(first) ? (
+          <StatusText tone="danger">Overdue</StatusText>
+        ) : dueRowDay(first) <= today ? (
+          <StatusText tone="warn">Due today</StatusText>
+        ) : null,
+      )
+    }
+    if (leadTab === 'not_posted') {
+      const first = notPosted[0]
+      return bannerLine(`${badges.not_posted.count} not posted yet`, transactionDescription(first.transaction) ?? 'Pending transaction', null)
+    }
+    if (leadTab === 'upcoming') {
+      const first = upcomingRows[0]
+      const name = first.kind === 'occurrence' ? first.occurrence.name : (transactionDescription(first.transaction) ?? 'Planned transaction')
+      return bannerLine(`${badges.upcoming.count} upcoming`, name, <span className="shrink-0 text-xs text-muted">{formatEntryDate(first.day)}</span>)
+    }
+    if (bannerError) {
+      return <p className="min-w-0 flex-1 truncate text-sm text-danger" role="alert" data-testid="due-banner-text">Could not load what is due.</p>
+    }
+    if (dueNote !== null) {
+      return <p className="min-w-0 flex-1 truncate text-sm text-ink" data-testid="due-banner-text">{dueNote}</p>
+    }
+    return <p className="min-w-0 flex-1 truncate text-sm text-muted" data-testid="due-banner-text">Checking what is due…</p>
   }
 
   const loadMore = () => setLoaded({ count: batchCount + 1, day: today })
@@ -1446,21 +1531,54 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     ),
   }
 
+  const payDialog = payCardId !== null && (
+    <CardPayDialog
+      key={payCardId}
+      cardId={payCardId}
+      onClose={() => {
+        setPayCardId(null)
+        setPayRestore(null)
+      }}
+      onPaid={onChanged}
+      background
+      {...(payRestore ? { restore: payRestore } : {})}
+    />
+  )
+
+  // Nothing due, waiting to post or coming up: no section, only the dialogs a finished action may still hold.
+  if (sectionEmpty) {
+    return (
+      <>
+        {payDialog}
+        {dialogs}
+      </>
+    )
+  }
+
   return (
-    <section className="card" data-testid="due-section" data-limited-rows={LIMITED_ROWS} aria-labelledby={titleId}>
+    <section
+      className="card"
+      data-testid="due-section"
+      data-state={open ? 'expanded' : 'collapsed'}
+      data-limited-rows={LIMITED_ROWS}
+      aria-labelledby={titleId}
+    >
       <h2 id={titleId} className="sr-only">Due and overdue</h2>
-      <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+      <div className="flex min-h-10 items-center gap-3 px-3 py-0.5 sm:px-4" data-testid="due-banner">
+        {banner()}
         <Button
           variant="secondary"
-          onClick={() => setOpen((prev) => !prev)}
+          onClick={expand}
           aria-expanded={open}
           aria-controls={TABS.map(({ id }) => tabPanelId(id)).join(' ')}
-          className={ROW_ACTION}
+          className={`${ROW_ACTION} shrink-0`}
           data-testid="due-section-toggle"
         >
           {open ? 'Hide' : 'Show'}
         </Button>
-        <Tabs aria-labelledby={titleId} className="flex min-w-[min(16rem,100%)] flex-1 flex-wrap gap-1 bg-sunken p-1">
+      </div>
+      {open && (
+        <Tabs aria-labelledby={titleId} className="flex flex-nowrap gap-1 overflow-x-auto border-t border-line bg-sunken p-1" data-testid="due-tabs">
           {TABS.map(({ id, label, slug, badgeTestId }, index) => {
             const selectedTab = tab === id
             const badge = badges[id]
@@ -1476,7 +1594,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
                 tabIndex={selectedTab ? 0 : -1}
                 onClick={() => selectTab(id)}
                 onKeyDown={(event) => onTabKey(event, index)}
-                className="flex min-w-0 flex-auto items-center justify-between gap-2 px-3 py-1.5 text-left text-sm focus-ring"
+                className="flex shrink-0 flex-auto items-center justify-between gap-2 whitespace-nowrap px-3 py-1.5 text-left text-sm focus-ring"
                 data-testid={`due-tab-${slug}`}
               >
                 <span>{label}</span>
@@ -1485,7 +1603,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
             )
           })}
         </Tabs>
-      </div>
+      )}
       {open && snapshotError && (
         <p className="border-t border-line px-4 py-3 text-sm text-danger" role="alert">Could not load what is due.</p>
       )}
@@ -1515,17 +1633,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
           </Button>
         </div>
       )}
-      {payCardId !== null && <CardPayDialog
-          key={payCardId}
-          cardId={payCardId}
-          onClose={() => {
-            setPayCardId(null)
-            setPayRestore(null)
-          }}
-          onPaid={onChanged}
-          background
-          {...(payRestore ? { restore: payRestore } : {})}
-        />}
+      {payDialog}
       {dialogs}
     </section>
   )

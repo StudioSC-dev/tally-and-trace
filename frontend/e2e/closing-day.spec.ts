@@ -27,6 +27,7 @@ import { landingStubs } from './support/landing'
 import { apiRoute, mockApi, queryRoute } from './support/mockApi'
 import type { ApiRoute } from './support/mockApi'
 import { signedIn } from './support/signedIn'
+import { expandDue } from './support/transactions'
 
 // STU-747 AC6 in the browser: a card with an open installment has its closing day changed in the account
 // form. The confirm step lists the installment's next charge before and after, Confirm sends the apply (not
@@ -165,6 +166,41 @@ const emptyDue: DashboardDue = {
   unposted: { items: [], total: 0, page: 1, page_size: 20, has_more: false },
 }
 
+/**
+ * STU-687: the Transactions Due card renders nothing when Due, Not posted yet and Upcoming are all empty, so one
+ * upcoming bill keeps the card (and its Installments tab) on the page.
+ */
+const dueWithOneUpcoming: DashboardDue = {
+  ...emptyDue,
+  upcoming_occurrences: {
+    items: [
+      {
+        view: 'full',
+        entry_id: 99,
+        name: 'Water bill',
+        occurrence_date: '2026-11-25',
+        effective_date: '2026-11-25',
+        entry_type: 'expense',
+        is_transfer: false,
+        kind: 'cash',
+        plan_kind: null,
+        amount: 650,
+        currency: 'PHP',
+        account_name: checking.name,
+        transfer_to_account_name: null,
+        capped: false,
+        can_mark_paid: true,
+        recordable: true,
+        auto_post: null,
+        block_reason: null,
+        can_review: false,
+      },
+    ],
+    total: 1,
+    auto_post_scheduled: true,
+  },
+}
+
 /** What the card's day and the installment's next charge are now: the apply changes both. */
 interface World {
   closeDay: number
@@ -197,7 +233,7 @@ const stubs = (world: World, withInstallment: boolean): ApiRoute[] => [
     auto_post_scheduled: true,
     today: TODAY,
   })),
-  apiRoute<DashboardDue>('GET', '/dashboard/due', emptyDue),
+  apiRoute<DashboardDue>('GET', '/dashboard/due', dueWithOneUpcoming),
   apiRoute<PaginatedResponse<Transaction>>('GET', '/transactions/', emptyPage<Transaction>()),
   apiRoute<ReceivedShare[]>('GET', '/shares/received', []),
   apiRoute<ReceivedHouseholdShare[]>('GET', '/shares/received/household', []),
@@ -283,6 +319,7 @@ for (const { width, height } of VIEWPORTS) {
 
       // The installment's next date shown in the app is on the new close.
       await page.goto('/transactions')
+      await expandDue(page)
       await page.getByTestId('due-tab-installments').click()
       const plan = page.locator(`[data-testid="due-row"][data-kind="installment"][data-source="budget_entry:${ENTRY_ID}"]`)
       await expect(plan).toBeVisible()

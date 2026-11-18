@@ -14,6 +14,7 @@ import type { Locator, Page } from '@playwright/test'
 import { household, householdViewRoutes, mockHousehold, wishlistRoutes } from './support/fixtures/household'
 import { addRoutes } from './support/mockApi'
 import { shot } from './support/shot'
+import { expandDue } from './support/transactions'
 
 // This spec lives in <repo>/frontend/e2e.
 const FRONTEND = fileURLToPath(new URL('..', import.meta.url))
@@ -77,6 +78,8 @@ async function open(page: Page, p: PageCase): Promise<void> {
   await page.goto(p.path)
   await expect(page.getByRole('heading', { level: 1, name: p.title })).toBeVisible({ timeout: 15_000 })
   await page.waitForLoadState('networkidle')
+  // STU-687: the Due card opens collapsed; it is expanded so its tabs and row actions are measured too.
+  if (p.key === 'transactions') await expandDue(page)
   await page.evaluate(() => document.fonts.ready)
   await page.mouse.move(0, 0)
 }
@@ -206,21 +209,23 @@ const DESKTOP_BASE: Record<PageKey, readonly (readonly [string, number, number])
     ['button "MS Mara Santos"', 164, 48],
     ['button "Add Transaction"', 138, 38],
     ['button#due-section-toggle', 47, 26],
-    ['tab#due-tab-due', 243.39, 32],
-    ['tab#due-tab-not-posted', 227.41, 32],
-    ['tab#due-tab-upcoming', 206.39, 32],
-    ['tab#due-tab-subscriptions', 221.41, 32],
-    ['tab#due-tab-installments', 216.41, 32],
+    // STU-687 (AC6): the Due tabs share one non-wrapping row, so each grows to fill it.
+    ['tab#due-tab-due', 261.59, 32],
+    ['tab#due-tab-not-posted', 245.61, 32],
+    ['tab#due-tab-upcoming', 224.59, 32],
+    ['tab#due-tab-subscriptions', 239.61, 32],
+    ['tab#due-tab-installments', 234.59, 32],
     ['button#due-mark-paid', 74, 26],
     ['button#row-change-date', 89, 26],
     ['button#due-pay', 41, 24],
     ['button#view-to-date', 79, 44],
     ['button#view-scheduled', 99, 44],
-    ['input[text]#transactions-search', 448, 40],
+    // STU-687 (AC4): search, the month picker and Filters share one toolbar row; the search fills what is left.
+    ['input[text]#transactions-search', 556, 40],
     ['button "View previous month"', 38, 30],
     ['button "View next month"', 38, 30],
     ['button "Spending breakdown"', 182, 38],
-    ['button "Show filters"', 125, 38],
+    ['button#transactions-filters-toggle', 91, 38],
     ['button#row', 1230, 57],
     ['button#row (2)', 1230, 57],
     ['button#row (3)', 1230, 57],

@@ -7,6 +7,7 @@ import { expect, test } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
 import { mockApi } from './support/mockApi'
 import { shot } from './support/shot'
+import { expandDue, openTransactionFilters } from './support/transactions'
 import { allUpcomingHousehold, household, mockHousehold } from './support/fixtures/household'
 import type { HouseholdData } from './support/fixtures/household'
 
@@ -137,8 +138,9 @@ const DASHBOARD: Surface = {
 const TRANSACTIONS: Surface = {
   name: 'transactions',
   route: '/transactions',
-  labels: ['Search transactions'],
-  captions: ['Search transactions'],
+  // STU-687: the search sits in the one-row toolbar with a visually hidden label, so no .label shows until Filters opens.
+  labels: [],
+  captions: [],
 }
 const ALLOCATIONS: Surface = { name: 'allocations', route: '/allocations?tab=recurring', labels: [], captions: [] }
 
@@ -285,6 +287,8 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
 
   test('counts read as numbers', async ({ page }) => {
     await open(page, '/transactions', allUpcomingHousehold)
+    // STU-687: the Due card opens collapsed; its tab counts show once it is expanded.
+    await expandDue(page)
     const ids = ['due-count', 'due-not-posted-count', 'due-upcoming-count', 'due-subscriptions-count', 'due-installments-count']
     for (const id of ids) {
       const badge = page.getByTestId(id)
@@ -325,7 +329,8 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
   const chrome = /•|→| — /
   const chromeSurfaces: { name: string; text: (page: Page) => Promise<string>; anchor: string }[] = [
     { name: 'dashboard', anchor: 'Cash-Flow Timeline', text: async (p) => (await open(p, '/'), p.locator('main').innerText()) },
-    { name: 'transactions', anchor: 'Date range:', text: async (p) => (await open(p, '/transactions'), p.locator('main').innerText()) },
+    // STU-687: the Date range line lives only inside the open Filters disclosure.
+    { name: 'transactions', anchor: 'Date range:', text: async (p) => (await open(p, '/transactions'), await openTransactionFilters(p), p.locator('main').innerText()) },
     { name: 'allocations', anchor: 'Recurring expense', text: async (p) => (await open(p, '/allocations?tab=recurring'), p.locator('main').innerText()) },
     { name: 'add transaction dialog', anchor: 'Transaction type', text: async (p) => (await openAddTransaction(p)).innerText() },
     { name: 'recurring entry dialog', anchor: 'Add Recurring Entry', text: async (p) => (await openRecurringEntry(p)).innerText() },
@@ -366,6 +371,7 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
     // The row dated on the page's today keeps its date and drops the "Today" label.
     const today = page.locator('article[role="button"]', { hasText: 'Puregold weekly groceries' })
     expect.soft(await today.innerText(), 'the row dated today').toContain('Mar 12th, 2026')
+    await openTransactionFilters(page)
     const range = page.getByText(/^Date range:/)
     expect.soft((await range.innerText()).replace(/\s+/g, ' '), 'the range keeps both endpoints').toBe('Date range: Mar 1st, 2026 to Mar 31st, 2026')
     await shot(page, 'date-facts')

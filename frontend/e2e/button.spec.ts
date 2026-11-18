@@ -7,6 +7,10 @@
 // The layout and behaviour baseline (`button.baseline.json`) is recorded once, on the PR base, before the buttons
 // change: `BUTTON_RECORD=1 pnpm exec playwright test button -g "preserves surrounding" --workers=1`. A recording run
 // only writes the baseline; it asserts nothing about the buttons.
+//
+// STU-687 reorders the Transactions page (a collapsed Due banner, one filter toolbar), so the entries for the surfaces
+// on /transactions were re-recorded at that change: only the page's visible button list and text moved; every
+// recorded request, dialog and row effect stayed the same.
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -16,6 +20,7 @@ import type { Account, Category, QuickBalances, Tag, WishlistItem } from '@tally
 import { addRoutes, apiRoute, mockApi } from './support/mockApi'
 import type { ApiMock, ApiRoute } from './support/mockApi'
 import { shot } from './support/shot'
+import { expandDue } from './support/transactions'
 import {
   accountSharesRoute,
   createAccountRoute,
@@ -125,7 +130,7 @@ async function openDialog(
   page: Page,
   route: string,
   heading: string,
-  trigger: (page: Page) => Locator,
+  trigger: (page: Page) => Locator | Promise<Locator>,
   title: string | RegExp,
   extra: ApiRoute[] = [],
 ): Promise<ApiMock> {
@@ -133,7 +138,7 @@ async function openDialog(
   // Tracked from before the click, so a lookup the dialog starts as it opens is counted until it finishes.
   const requests = trackRequests(page)
   try {
-    await trigger(page).click()
+    await (await trigger(page)).click()
     await expect(dialogOf(page).getByRole('heading', { name: title }).first()).toBeVisible()
     await untilStill(page, requests)
   } finally {
@@ -312,17 +317,23 @@ const PAGES: Surface[] = [
   {
     key: 'transactions',
     dialog: false,
-    open: (p) => openPage(p, '/transactions', 'Transactions'),
+    // STU-687: the Due card opens collapsed, so it is expanded to show its row actions; the list's controls are the
+    // view switch with Spending breakdown, then one toolbar row ending in Filters.
+    open: async (p) => {
+      const api = await openPage(p, '/transactions', 'Transactions')
+      await expandDue(p)
+      return api
+    },
     migrated: [
       'Add Transaction',
       'Hide',
       'Mark paid',
       'Change date',
       'Pay',
+      'Spending breakdown',
       'View previous month',
       'View next month',
-      'Spending breakdown',
-      'Show filters',
+      'Filters',
       'Previous',
       'Next',
     ],
@@ -450,19 +461,19 @@ const DIALOGS: Surface[] = [
   {
     key: 'due-mark-paid',
     dialog: true,
-    open: (p) => openDialog(p, '/transactions', 'Transactions', (q) => q.getByTestId('due-mark-paid').first(), /./),
+    open: (p) => openDialog(p, '/transactions', 'Transactions', async (q) => (await expandDue(q), q.getByTestId('due-mark-paid').first()), /./),
     migrated: ['Close', 'Mark paid', 'Cancel'],
   },
   {
     key: 'due-pay',
     dialog: true,
-    open: (p) => openDialog(p, '/transactions', 'Transactions', (q) => q.getByTestId('due-pay').first(), /./),
+    open: (p) => openDialog(p, '/transactions', 'Transactions', async (q) => (await expandDue(q), q.getByTestId('due-pay').first()), /./),
     migrated: ['Close', 'Pay', 'Cancel'],
   },
   {
     key: 'due-change-date',
     dialog: true,
-    open: (p) => openDialog(p, '/transactions', 'Transactions', (q) => q.getByTestId('row-change-date').first(), /./),
+    open: (p) => openDialog(p, '/transactions', 'Transactions', async (q) => (await expandDue(q), q.getByTestId('row-change-date').first()), /./),
     migrated: ['Close', 'Save'],
   },
   {
@@ -529,6 +540,7 @@ const DIALOGS: Surface[] = [
     dialog: true,
     open: async (p) => {
       const api = await openPage(p, '/transactions', 'Transactions', [], withInstallmentReview(household))
+      await expandDue(p)
       await p.getByRole('tab', { name: /^Installments/ }).click()
       await p.getByTestId('due-review').first().click()
       await expect(p.getByTestId('installment-review-submit')).toBeVisible()
@@ -840,6 +852,7 @@ const EXAMPLES: { variant: string; open: (page: Page) => Promise<Locator> }[] = 
     variant: 'secondary',
     open: async (p) => {
       await openPage(p, '/transactions', 'Transactions')
+      await expandDue(p)
       return p.getByTestId('due-mark-paid').first()
     },
   },
@@ -946,6 +959,8 @@ test.describe('AC3: row actions are secondary', () => {
   test('row actions are secondary: Due card Hide, Mark paid and Change date', async ({ page }) => {
     test.skip(RECORD, 'a recording run only writes the baseline')
     await openPage(page, '/transactions', 'Transactions')
+    // STU-687: the Due card opens collapsed; its row actions show once it is expanded.
+    await expandDue(page)
     for (const id of ['due-section-toggle', 'due-mark-paid', 'row-change-date']) {
       const all = page.getByTestId(id)
       expect(await all.count(), `the Due card shows ${id}`).toBeGreaterThan(0)
@@ -1255,13 +1270,14 @@ test.describe('AC8: button preserves native interaction semantics', () => {
   test('button preserves native interaction semantics: an enabled Button runs its handler once', async ({ page }) => {
     test.skip(RECORD, 'a recording run only writes the baseline')
     await openPage(page, '/transactions', 'Transactions')
-    const toggle = page.getByRole('button', { name: 'Show filters' })
+    // STU-687: one Filters button whose aria-expanded says whether the filters are open.
+    const toggle = page.getByRole('button', { name: 'Filters', exact: true })
     await expect(toggle).toHaveAttribute('data-variant', 'secondary')
     await toggle.click()
     await settle(page)
     // The handler flips the filters open; run twice, it would flip them shut again.
-    await expect(page.getByRole('button', { name: 'Hide filters' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Show filters' })).toHaveCount(0)
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await expect(page.getByTestId('transactions-filters')).toBeVisible()
     await shot(page, 'native-handler-once')
   })
 

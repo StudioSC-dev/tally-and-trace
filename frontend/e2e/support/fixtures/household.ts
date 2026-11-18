@@ -963,6 +963,42 @@ export const viewerEmptyHousehold: HouseholdData = build({
   allocations: [],
 })
 
+/**
+ * STU-687: the variant's transactions with nothing on the Due card's Due and overdue, Not posted yet or Upcoming tabs:
+ * no payable, card statement or upcoming item, and of the occurrences only the subscriptions stay. The list is the same.
+ */
+export const withNothingDue = (data: HouseholdData): HouseholdData =>
+  build({
+    accounts: data.accounts,
+    transactions: data.transactions,
+    entries: data.entries,
+    upcoming: [],
+    payables: [],
+    cardStatements: [],
+    occurrences: data.occurrences.filter((o) => o.plan_kind === 'subscription'),
+    categories: data.categories,
+    tags: data.tags,
+    allocations: data.allocations,
+  })
+
+/** STU-687: `withNothingDue` plus one occurrence on the Upcoming tab: the variant's first non-subscription occurrence. */
+export const withOnlyUpcoming = (data: HouseholdData): HouseholdData => {
+  const first = data.occurrences.find((o) => o.plan_kind !== 'subscription')
+  const empty = withNothingDue(data)
+  return first === undefined ? empty : build({
+    accounts: data.accounts,
+    transactions: data.transactions,
+    entries: data.entries,
+    upcoming: [],
+    payables: [],
+    cardStatements: [],
+    occurrences: [first, ...empty.occurrences],
+    categories: data.categories,
+    tags: data.tags,
+    allocations: data.allocations,
+  })
+}
+
 /** STU-692: the ids `withStatusStates` adds, for the specs that find its rows. */
 export const STATUS_STATE_IDS = {
   pendingTransaction: 9301,
@@ -1132,10 +1168,15 @@ function pageFor<T>(items: T[], query: URLSearchParams): PaginatedResponse<T> {
  * `GET /transactions/` as the pages ask it: `start_date` and `end_date` (inclusive, by Manila day), `order`
  * (newest first unless `asc`, by date then id as the API sorts), `limit` and `offset`. Sorted before it is paged.
  * The list's filters as the API applies them: `account_ids` (any leg on one of them), `transaction_types`, and
- * `entered_by=me` (the caller's own rows, which the API sends as the `full` view).
+ * `entered_by=me` (the caller's own rows, which the API sends as the `full` view), `search` (the description holds
+ * the text, any case) and `tag` (a row carrying that tag).
  */
 export function transactionsFor(data: HouseholdData, query: URLSearchParams): PaginatedResponse<Transaction> {
-  only(query, ['start_date', 'end_date', 'order', 'limit', 'offset', 'account_ids', 'transaction_types', 'entered_by', 'category_names'])
+  only(query, ['start_date', 'end_date', 'order', 'limit', 'offset', 'account_ids', 'transaction_types', 'entered_by', 'category_names', 'search', 'tag'])
+  const search = query.get('search')?.toLowerCase()
+  const tagId = query.get('tag') === null ? null : Number(query.get('tag'))
+  const describes = (t: Transaction): boolean => !search || ((t.view === 'limited' ? t.display_description : t.description) ?? '').toLowerCase().includes(search)
+  const tagged = (t: Transaction): boolean => tagId === null || (t.view !== 'limited' && t.tags.some((tag) => tag.id === tagId))
   const dayOf = (t: Transaction): string => (t.view === 'limited' ? t.date : t.transaction_date).slice(0, 10)
   const start = query.get('start_date')?.slice(0, 10)
   const end = query.get('end_date')?.slice(0, 10)
@@ -1157,7 +1198,9 @@ export function transactionsFor(data: HouseholdData, query: URLSearchParams): Pa
       (!accountIds.length || touches(t)) &&
       (!types.length || types.includes(t.transaction_type)) &&
       (!categoryNames.length || categoryNames.includes(categoryOf(t) ?? '')) &&
-      (enteredBy === null || t.view === 'full'),
+      (enteredBy === null || t.view === 'full') &&
+      describes(t) &&
+      tagged(t),
   )
   // The API's order: transaction_date, then id, both ascending for `asc` and both descending otherwise.
   const whenOf = (t: Transaction): string => (t.view === 'limited' ? t.date : t.transaction_date)
