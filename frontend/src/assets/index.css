@@ -123,6 +123,9 @@
   --radius-md: 6px; /* panels, list sheets */
   --radius-lg: 12px; /* dialogs */
 
+  /* Layout: the page container's maximum width (.page). */
+  --page-max: 80rem; /* 1280px */
+
   /* Elevation: dialogs only. Panels separate by tone and one rule. */
   --elev-dialog: 0 20px 40px -18px rgb(12 19 15 / .45);
 
@@ -361,6 +364,30 @@ body {
   .button-danger:hover:not(:disabled) {
     background-color: rgb(var(--danger));
     color: rgb(var(--paper));
+  }
+
+  /*
+    The page (docs/design-system.md, "Page"): every route's one container. The
+    max width is --page-max, the gutter is 12px on a phone and 24px from sm,
+    and top-level sections sit 32px apart. PageHeader is its first block: the
+    title on a 44px line, the page's controls grouped on the right; when they
+    wrap under the title they sit one section gap down.
+  */
+  .page {
+    @apply mx-auto w-full space-y-8 px-3 py-6 sm:px-6;
+    max-width: var(--page-max);
+  }
+
+  .page-header {
+    @apply flex flex-wrap items-center justify-between gap-x-4 gap-y-8;
+  }
+
+  .page-title {
+    @apply flex min-h-11 min-w-0 items-center;
+  }
+
+  .page-actions {
+    @apply flex flex-wrap items-center gap-2 sm:gap-3;
   }
 
   /*

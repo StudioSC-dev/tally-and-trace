@@ -18,8 +18,10 @@
  * on load; `mockHousehold(page, data)` signs in, freezes the clock on `HOUSEHOLD_TODAY` and
  * installs those routes.
  *
+ * `wishlistRoutes(data)` answers the Allocations Wishlist tab's calls with an empty wishlist.
+ *
  * `with*` helpers derive a variant for one state (a main account, one account's balance, zero-amount rows,
- * a zero forecast event, dollars, a long account history, long Due card lists); `cardStatements` answers the card's
+ * a zero forecast event, dollars, five currencies, a long account history, long Due card lists); `cardStatements` answers the card's
  * statements; the create factories (`createdAccount`, `createAccountRoute`,
  * `householdCreateRoutes`) answer the dialogs' saves.
  */
@@ -1121,6 +1123,12 @@ export const householdRoutes = (data: HouseholdData = household): ApiRoute[] => 
   apiRoute<HouseholdShares>('GET', '/tags/household/shares', { tag_id: householdTag.id, shares: [] }),
 ]
 
+/** The Allocations Wishlist tab's calls, for a household with nothing on its wishlist yet. */
+export const wishlistRoutes = (data: HouseholdData = household): ApiRoute[] => [
+  apiRoute<WishlistItem[]>('GET', '/wishlist/', []),
+  apiRoute<WishlistPlan>('GET', '/wishlist/plan', { monthly_disposable: data.snapshot.monthly_summary.monthly_disposable, savings_rate: 0, items: [] }),
+]
+
 /** A variant whose user has pinned the payroll account as their main account (the Forecast's "Main" scope). */
 export const withMainAccount = (data: HouseholdData): HouseholdData => ({ ...data, user: { ...data.user, main_account_id: payroll.id } })
 
@@ -1390,6 +1398,31 @@ export const withDollars = (data: HouseholdData): HouseholdData => {
           category_breakdown: { 'Dining out': dining },
         },
       ],
+    },
+  }
+}
+
+/**
+ * A variant in five currencies (PHP, USD, EUR, GBP, JPY): the dollar variant plus empty euro, pound and yen rows, so
+ * the dashboard's currency control has five choices.
+ */
+export const withFiveCurrencies = (data: HouseholdData): HouseholdData => {
+  const dollars = withDollars(data)
+  const extra = ['EUR', 'GBP', 'JPY'] as const
+  const { snapshot } = dollars
+  return {
+    ...dollars,
+    snapshot: {
+      ...snapshot,
+      currencies: [...snapshot.currencies, ...extra],
+      balances: { ...snapshot.balances, by_currency: [...snapshot.balances.by_currency, ...extra.map((currency) => ({ currency, total: 0, available_cash: 0 }))] },
+      monthly_summary: {
+        ...snapshot.monthly_summary,
+        by_currency: [
+          ...snapshot.monthly_summary.by_currency,
+          ...extra.map((currency) => ({ currency, monthly_income: 0, monthly_expenses: 0, moved_in: 0, moved_out: 0, monthly_disposable: 0 })),
+        ],
+      },
     },
   }
 }

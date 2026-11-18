@@ -22,6 +22,7 @@ import { useConfirm } from '../hooks/useConfirm'
 import { localToday } from '@tally-trace/shared'
 import { accountPickerGroups } from '@tally-trace/shared'
 import { PickerOptGroups } from '../components/PickerOptGroups'
+import { PageHeader } from '../components/PageHeader'
 import { DEFAULT_SWATCH_COLOR, displayColor, NO_COLOR, SWATCHES, swatchOf, tokenColor } from '../utils/palette'
 import { Button } from '../components/Button'
 
@@ -189,11 +190,9 @@ function SettingsPage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6 sm:px-6 lg:px-8 space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-ink">Settings</h1>
-        <p className="text-sm text-muted mt-1">Choose your cash-flow timeline's main account, manage categories and tags, and export your data.</p>
-      </div>
+    <div className="page">
+      <PageHeader title="Settings" />
+      <p className="text-sm text-muted">Choose your cash-flow timeline's main account, manage categories and tags, and export your data.</p>
 
       {/* Cash-flow timeline */}
       <section className="bg-surface border border-line" data-testid="timeline-settings">
