@@ -5,10 +5,13 @@ No database: rows are ``RowRecord`` values. Every figure is made up. The stateme
 period is 2026-07-01 .. 2026-07-31 (``window_start`` is the day before, 2026-06-30).
 """
 import random
+import re
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
+from pathlib import Path
+
 from pydantic import ValidationError
 
 from app.schemas.statement_reconcile import AccountStatement, BankStatement
@@ -300,3 +303,18 @@ def test_property_simulated_period_equals_statement():
         assert not any(c.field in ("transaction_date", "posting_date")
                        for a in diff.actions if a.row_id in transfers for c in a.changes), case
     assert kinds_seen == {"matched", "update", "move", "create", "unpost"}
+
+
+# --- the doc's example ---------------------------------------------------------------------
+
+DOC = Path(__file__).resolve().parents[3] / "docs" / "statement-reconcile.md"
+
+
+def test_the_docs_bank_example_passes_the_statement_schema():
+    blocks = [b for b in re.findall(r"```json\n(.*?)\n```", DOC.read_text(), re.S)
+              if '"period_start"' in b]
+    assert len(blocks) == 1, "the doc has no bank statement example"
+    st = AccountStatement.model_validate_json(blocks[0])
+    assert {x.kind for x in st.lines} == {"debit", "credit"}
+    assert st.header.opening_balance is not None
+    assert st.header.opening_balance + st.change == st.header.closing_balance

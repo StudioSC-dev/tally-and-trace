@@ -132,6 +132,110 @@ Each refusal writes nothing.
   reason names the row or line.
 - **The verify finds a gap.** Rolled back; the gap is reported.
 
+## A savings, checking or e-wallet statement
+
+A bank account's statement is reconciled the same way, through
+`POST /accounts/{account_id}/statements/reconcile`: the same dry run, fingerprint, apply,
+verify and `Idempotency-Key`, the same action kinds (`matched`, `update`, `move`,
+`create`, `unpost`; never `missing`) and the same matching rules. The script above is for
+cards only.
+
+- Code: `diff_account_statement` in `backend/app/services/statement_reconcile.py`, and
+  `load_account`, `verify_account` and `apply_account` in
+  `backend/app/services/statement_reconcile_apply.py`.
+- Tests: `backend/app/tests/test_statement_reconcile_account.py` (the JSON and the diff)
+  and `test_statement_reconcile_account_integration.py` (the endpoint).
+
+### The JSON
+
+The schema is `AccountStatement`; unknown fields are refused. All figures are made up.
+
+```json
+{
+  "header": {
+    "period_start": "2026-02-01",
+    "period_end": "2026-02-28",
+    "opening_balance": "25000.00",
+    "closing_balance": "48772.50"
+  },
+  "lines": [
+    {"line_no": 1, "transaction_date": "2026-02-05",
+     "description": "EXAMPLE POWER CO", "amount": "1200.00", "kind": "debit"},
+    {"line_no": 2, "transaction_date": "2026-02-15",
+     "description": "EXAMPLE PAYROLL", "amount": "30000.00", "kind": "credit"},
+    {"line_no": 3, "transaction_date": "2026-02-20",
+     "description": "TRANSFER TO SAVINGS", "amount": "5015.00", "kind": "debit"},
+    {"line_no": 4, "transaction_date": "2026-02-28",
+     "description": "SERVICE CHARGE", "amount": "12.50", "kind": "debit"}
+  ]
+}
+```
+
+- `header.period_start`, `header.period_end` (both included, the end not before the
+  start) and `header.closing_balance` are required. `opening_balance` is optional; when it
+  is given the header must add up: `opening_balance + credits - debits ==
+  closing_balance`, else the file is refused with the gap.
+- Lines have the same fields as a card's, in the account's currency. `kind` is `debit`
+  (money out of the account) or `credit` (money in); a card's `charge` and `payment` are
+  refused, and a card statement refuses `debit`.
+- A transfer between two of the user's accounts is a `debit` on the statement of the
+  account it left and a `credit` on the one it reached.
+
+### What differs from a card
+
+- **The period, not a cycle.** It must have ended (before Manila's today), else 422. Only a
+  savings, checking or e-wallet account: a card is refused (400) with a message naming
+  `POST /cards/{id}/statements/reconcile`, and a cash or loan account is refused (400).
+- **Placement by `transaction_date`.** A posted row is in the period when its own
+  `transaction_date` is, as the account's balance counts it; a `posting_date` never moves
+  it. Rows the statement may claim: the posted rows in the period of the same length
+  either side, and the unposted rows dated up to the end of the one after.
+- **Each row by its effect on this account**, as the balance history reads it: a debit or
+  credit on the account by its amount; a transfer out of it a `debit` of its amount plus
+  its fee; a transfer into it a `credit` of what it received (its received amount when the
+  currencies differ, else its amount).
+- **No header writes**: the dry run's `header` is always empty.
+
+### Transfers
+
+A transfer is one row carrying both accounts' sides, so:
+
+- it is matched on each account's statement and never created twice;
+- it keeps both its dates whatever the line says (the other bank may print another day),
+  so it is only paired with a line when its own date is in the period;
+- any change to it (its amount, posting or unposting it) is refused, since it would
+  change the other account too: "Row 41 is a transfer between accounts 7 and 9: changing
+  it here would change both; edit the transfer and run the dry run again";
+- a line that would be created while a transfer of the same kind and amount is dated off
+  the period names it in `possible_duplicate_of`, and the apply is refused: "Line 3 may be
+  transfer row 41, whose date keeps it off this period; change the transfer's date and run
+  the dry run again".
+
+Unposting a row linked to a recurring entry (salary, a bill, an installment, a loan
+payment) is refused as on a card.
+
+### Verify
+
+After the writes, inside the transaction, two checks; either failing rolls everything back
+with a 409 whose detail has the figures and the `gap`:
+
+1. The posted rows in the period, added to the opening balance (or, without one, the
+   closing balance less the lines' change), give the closing balance. Fields:
+   `app_change`, `statement_change`, `gap`.
+2. The account's balance at the end of `period_end` (its stored balance, the one the app
+   shows, less every posted row dated after) is the closing balance. Fields:
+   `app_closing_balance`, `statement_closing_balance`, `gap`. This fails when the app's
+   history before the period differs from the bank's opening, even if the period's rows
+   match.
+
+### Record
+
+Every posted row in the period is marked reconciled (an unposted row is cleared), and
+`account_statement_reconciliations` gets one row per account and `period_end`: the period,
+the opening (empty when not given) and closing balances, the period's `change` (credits
+less debits), the line count, who reconciled it and when. A later reconcile of a statement
+ending on the same day replaces it. The apply's answer returns it as `reconciliation`.
+
 ## Running the script
 
 The owner runs it in their own shell with the database URL exported there. Agents never
