@@ -372,3 +372,149 @@ def test_report_has_no_amounts(world):
     wrong = subprocess.run(args + ["--expect-db", "other_db"], env=env, capture_output=True,
                            text=True, timeout=300)
     assert wrong.returncode == 2 and wrong.stdout.startswith("refused:")
+
+
+# --- gap rows: billed between the old close and the new one -----------------------------------
+
+GAP_PLAN = "2468.13"
+
+
+def _gap_row(db, who, card, entry, day, occurrence, *, posted=True):
+    """A linked row the bank billed on ``day`` (posted that day) for ``occurrence``."""
+    txn = _txn(db, who, card, day, entry=entry, amount=GAP_PLAN, posted=posted,
+               occurrence=datetime.combine(occurrence, datetime.min.time()))
+    if posted:
+        db.execute(text("UPDATE transactions SET posting_date = :p WHERE id = :t"),
+                   {"p": datetime.combine(day, datetime.min.time()), "t": txn})
+        db.commit()
+    return txn
+
+
+@pytest.fixture
+def gap(sw_client, sw_db, sw_people, monkeypatch):
+    """Card closing on the 14th (due 25 days later), no printed or minimum dues.
+    Two open plans on the close (2 and 11 payments left from Jan 14), each with
+    one posted row dated and posted Nov 15 that stood for the Dec 14 occurrence.
+    The bank closed on the 15th: the rows are the first charges on the Nov 15
+    statement."""
+    pin_clock(monkeypatch, REF)
+    me = sw_people()
+    db = sw_db
+    card = _card(sw_client, me, 14, 25, "Gap card")
+    two = _entry(db, me, card, date(2027, 1, 14), payments=2)
+    eleven = _entry(db, me, card, date(2027, 1, 14), payments=11)
+    rows = {e: _gap_row(db, me, card, e, date(2026, 11, 15), date(2026, 12, 14))
+            for e in (two, eleven)}
+    r = sw_client.get(f"{API}/cards/{card}/statements", headers=me["headers"])
+    assert r.status_code == 200, r.text
+    return {"client": sw_client, "db": db, "me": me, "card": card, "two": two,
+            "eleven": eleven, "rows": rows}
+
+
+def test_gap_rows_keep_their_dates_and_move_the_schedule_earlier(gap):
+    from app.core.access import viewable_account_ids
+    from app.models.account import Account
+    from app.models.transaction import Transaction
+    from app.models.user import User
+    from app.services import statements_store
+    from app.services.close_day_change import _lines, _total, _view
+
+    db, card, rows = gap["db"], gap["card"], gap["rows"]
+    two, eleven = gap["two"], gap["eleven"]
+
+    def total():
+        db.expire_all()
+        account = db.get(Account, card)
+        return _total(_lines(db, account), _view(account, account.billing_cycle_start), TODAY)
+
+    total_before = total()
+    before = {e: _entry_state(db, e) for e in (two, eleven)}
+    snapshot = _snapshot(db, card)
+
+    refused = _run(card, 15, apply=False)
+    assert refused.status == "refused"
+    assert len(refused.reasons) == 1 and refused.reasons[0].startswith(
+        "past statements would change"), refused.reasons
+    assert {r.entry_id: r.status for r in refused.entries} == {
+        two: "converted", eleven: "converted"}
+    assert _snapshot(db, card) == snapshot
+
+    result = _run(card, 15, accept=True)
+    assert result.status == "changed", result.lines()
+    moved = sorted(rows.values())
+    assert [(s.old_close, s.new_close, s.moved_in, s.moved_out) for s in result.shifts] == [
+        (date(2026, 11, 14), date(2026, 11, 15), moved, [])]
+    lines = "\n".join(result.lines())
+    for entry, txn in rows.items():
+        assert f"entry {entry} card {card}: next 2027-01-14 -> 2026-12-15" in lines
+        assert f"txn {txn}: date kept, occurrence 2026-12-14 -> 2026-11-15" in lines
+    assert GAP_PLAN.split(".")[0] not in lines
+
+    for entry, txn in rows.items():
+        after = _entry_state(db, entry)
+        assert after["normalised"] and after["anchor"] == 15
+        assert after["next"] == date(2026, 12, 15)
+        assert after["counts"] == before[entry]["counts"]
+        assert after["counts"][2] == 1
+        assert after["rows"] == [(txn, date(2026, 11, 15), date(2026, 11, 15))]
+        assert after["linked"] == {(txn, date(2026, 11, 15))}
+        row = db.get(Transaction, txn)
+        assert row.posting_date.date() == date(2026, 11, 15) and row.is_posted
+    assert total() == total_before
+    db.expire_all()
+    account = db.get(Account, card)
+    got = statements_store.verify_card(
+        db, account, viewable_account_ids(db, db.get(User, account.user_id)), TODAY)
+    db.rollback()
+    assert got["rows_equal"] and got["summaries_equal"], got
+    r = gap["client"].get(f"{API}/cards/{card}/statements/2026-11-15",
+                          headers=gap["me"]["headers"])
+    assert r.status_code == 200, r.text
+    assert sorted(line["transaction_id"] for line in r.json()["lines"]) == moved
+
+
+def test_gap_schedule_bills_each_month_once(gap):
+    """The two-left plan charges on Dec 15 and Jan 15 after its Nov 15 charge:
+    no month skipped, none billed twice."""
+    from app.models.account import Account
+    from app.models.budget_entry import BudgetEntry
+    from app.services.forecast import _naive, capped_distinct_days
+    from app.services.installment_redate import _billed
+
+    db, card, two = gap["db"], gap["card"], gap["two"]
+    assert _run(card, 15, accept=True).status == "changed"
+    db.expire_all()
+    entry = db.get(BudgetEntry, two)
+    days = [d.date() for d in capped_distinct_days(entry, _naive(entry.next_occurrence),
+                                                   datetime(2028, 1, 1))]
+    assert days == [date(2026, 12, 15), date(2027, 1, 15)]
+    billed = _billed(db, db.get(Account, card), TODAY)
+    assert sorted(day for (eid, day), n in billed.items() if eid == two for _ in range(n)) == [
+        date(2026, 12, 15), date(2027, 1, 15)]
+    db.rollback()
+
+
+def test_gap_row_and_close_row_on_one_occurrence_refuses(gap):
+    """A row on the Nov 14 close maps to Nov 15, where the gap row lands too."""
+    db, me, card, two = gap["db"], gap["me"], gap["card"], gap["two"]
+    close_row = _txn(db, me, card, date(2026, 11, 14), entry=two, amount=GAP_PLAN)
+    _refused(gap, f"linked transactions {gap['rows'][two]} and {close_row} would both stand "
+                  "for the occurrence on 2026-11-15", card=card, accept=True)
+
+
+def test_gap_shift_onto_a_closed_statement_refuses(gap):
+    """A gap row billed Oct 15 for the Nov 14 occurrence would move the next
+    charge onto Nov 15, a statement closed on Nov 18."""
+    db, me, card = gap["db"], gap["me"], gap["card"]
+    entry = _entry(db, me, card, date(2026, 12, 14), payments=3)
+    _gap_row(db, me, card, entry, date(2026, 10, 15), date(2026, 11, 14))
+    _refused(gap, f"entry {entry}: its next occurrence would move to 2026-11-15, a statement "
+                  "that has already closed", card=card, accept=True)
+
+
+def test_pending_gap_row_refuses(gap):
+    db, me, card = gap["db"], gap["me"], gap["card"]
+    entry = _entry(db, me, card, date(2027, 1, 14), payments=3)
+    txn = _gap_row(db, me, card, entry, date(2026, 11, 15), date(2026, 12, 14), posted=False)
+    _refused(gap, f"entry {entry}: pending linked transaction {txn} falls between the old and "
+                  "the new close", card=card, accept=True)

@@ -45,7 +45,7 @@ nothing is.
 The report lists ids, dates and refusal reasons only, never an amount.
 """
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Dict, List, Optional, Tuple
@@ -290,8 +290,77 @@ def _plan_moves(db: Session, card: Account, old_view, new_view, new_day: int, to
     return plan_dues, plan_minimums
 
 
+def _billed_on(row) -> date:
+    """The day the bank billed ``row`` on, as if posted: the later of its own day
+    and its ``posting_date``'s Manila day (``statements.statement_day``)."""
+    return statement_day(SimpleNamespace(transaction_date=row.transaction_date,
+                                         is_posted=True, posting_date=row.posting_date),
+                         date.min)
+
+
+def _gap_plan(db: Session, entry_id: int, old_view, new_view, new_day: int, today: date,
+              reasons: List[str]) -> Optional[dict]:
+    """The re-date's ``kept`` and ``next_close`` for an entry with a gap row, None
+    for an entry without one, or ``{}`` with reasons added when refused.
+
+    A gap row is a linked row billed after the old close of a month and on or
+    before the new close of that month: a later close day puts it on that
+    month's statement, a month before the one its occurrence stood for. It
+    keeps its dates (the bank printed them); its occurrence becomes that
+    statement's close. The unpaid schedule moves earlier by the same number of
+    cycles: ``next_occurrence`` becomes the first close after the latest
+    linked occurrence, which must equal the same-month close of the old one
+    moved back by that shift."""
+    entry = db.get(BudgetEntry, entry_id)
+    rows = [db.get(Transaction, txn_id) for txn_id in _linked_ids(db, [entry_id])]
+    kept: Dict[int, date] = {}
+    occurrences: Dict[int, date] = {}
+    shifts = set()
+    refused = []
+    for row in rows:
+        billed = _billed_on(row)
+        landed = statement_close(new_view, billed)
+        if landed >= new_close(statement_close(old_view, billed), new_day):
+            # The redate's own mapping: the close of the statement its date is on.
+            occurrences[row.id] = statement_close(new_view, row.transaction_date.date())
+            continue
+        if not row.is_posted:
+            refused.append(f"entry {entry_id}: pending linked transaction {row.id} falls "
+                           "between the old and the new close; post it first")
+            continue
+        identity = (row.occurrence_date or row.transaction_date).date()
+        shifts.add(_month_index(statement_close(new_view, identity)) - _month_index(landed))
+        kept[row.id] = occurrences[row.id] = landed
+    if not kept and not refused:
+        return None
+    by_day: Dict[date, int] = {}
+    for txn_id, day in sorted(occurrences.items()):
+        if day in by_day:
+            refused.append(f"entry {entry_id}: linked transactions {by_day[day]} and {txn_id} "
+                           f"would both stand for the occurrence on {day}")
+        by_day.setdefault(day, txn_id)
+    if not refused:
+        next_close = statement_close(new_view, max(occurrences.values()) + timedelta(days=1))
+        same_month = new_close(statement_close(old_view, entry.next_occurrence.date()), new_day)
+        if len(shifts) != 1 or _month_index(same_month) - _month_index(next_close) not in shifts:
+            refused.append(f"entry {entry_id}: its unpaid schedule would not move by whole "
+                           f"cycles (next occurrence {entry.next_occurrence.date()} -> "
+                           f"{next_close})")
+        elif next_close < today:
+            refused.append(f"entry {entry_id}: its next occurrence would move to {next_close}, "
+                           "a statement that has already closed")
+    if refused:
+        reasons.extend(refused)
+        return {}
+    return {"kept": kept, "next_close": next_close}
+
+
+def _month_index(day: date) -> int:
+    return day.year * 12 + day.month
+
+
 def _same_month(entry: installment_redate.EntryResult, old_day: int, new_day: int,
-                reasons: List[str]) -> None:
+                reasons: List[str], shifted: bool = False) -> None:
     """Refuse a re-date that takes a date on an old close anywhere but the new
     close of the same month. The re-date maps a day to the close of the
     statement it is on under the new day; for a later day that is the same
@@ -307,7 +376,8 @@ def _same_month(entry: installment_redate.EntryResult, old_day: int, new_day: in
             reasons.append(f"entry {entry.entry_id}: {what} on {old} would move to {new}, not "
                            f"to {new_close(old, new_day)}, the new close of the same month")
 
-    check("its next occurrence", entry.old_next, entry.new_next)
+    if not shifted:  # a gap row moved the schedule earlier on purpose (``_gap_plan``)
+        check("its next occurrence", entry.old_next, entry.new_next)
     for row in entry.rows:
         check(f"linked transaction {row.txn_id}", row.old_date, row.new_date)
 
@@ -341,6 +411,8 @@ def _change(db: Session, result: ChangeResult, accept_history_shift: bool,
                                            reasons)
 
     moved = not reasons
+    gaps = {entry_id: _gap_plan(db, entry_id, old_view, new_view, new_day, today, reasons)
+            for entry_id in entry_ids}
 
     # --- write
     card.billing_cycle_start = new_day
@@ -353,12 +425,15 @@ def _change(db: Session, result: ChangeResult, accept_history_shift: bool,
                 row.statement_close = close
         db.flush()
     for entry_id in entry_ids:
-        entry_result = installment_redate.redate_one(db, entry_id, today)
+        shift = gaps.get(entry_id)
+        if shift == {}:  # refused by ``_gap_plan``; its reasons are listed
+            continue
+        entry_result = installment_redate.redate_one(db, entry_id, today, **(shift or {}))
         result.entries.append(entry_result)
         if entry_result.status == "refused":
             reasons.append(f"entry {entry_id}: {entry_result.reason}")
         elif entry_result.status == "converted":
-            _same_month(entry_result, old_day, new_day, reasons)
+            _same_month(entry_result, old_day, new_day, reasons, shifted=bool(shift))
 
     # --- after
     db.expire_all()
@@ -369,7 +444,7 @@ def _change(db: Session, result: ChangeResult, accept_history_shift: bool,
 
     for entry_id in entry_ids:
         entry = db.get(BudgetEntry, entry_id)
-        if not is_normalised_installment(entry, card) and not any(
+        if not is_normalised_installment(entry, card) and gaps.get(entry_id) != {} and not any(
                 r.entry_id == entry_id and r.status == "refused" for r in result.entries):
             reasons.append(f"entry {entry_id} is not on the new close")
     for model, kind in ((CardStatementDueOverride, "printed due"),

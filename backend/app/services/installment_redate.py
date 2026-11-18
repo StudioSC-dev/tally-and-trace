@@ -84,6 +84,8 @@ class RowChange:
     old_date: date
     new_date: date
     old_occurrence: Optional[date]
+    # Set when only the occurrence moves (a row kept on its date, ``kept``).
+    new_occurrence: Optional[date] = None
 
 
 @dataclass
@@ -108,6 +110,10 @@ class EntryResult:
                f"anchor {self.old_anchor} -> {self.new_anchor}"]
         for row in self.rows:
             occurrence = row.old_occurrence.isoformat() if row.old_occurrence else "none"
+            if row.new_occurrence is not None:
+                out.append(f"  txn {row.txn_id}: date kept, "
+                           f"occurrence {occurrence} -> {row.new_occurrence}")
+                continue
             out.append(f"  txn {row.txn_id}: date {row.old_date} -> {row.new_date}, "
                        f"occurrence {occurrence} -> {row.new_date}")
         return out
@@ -246,6 +252,16 @@ def _window_start(card: Account, close: date) -> datetime:
                                  due_overrides={}))["window_start"]
 
 
+def _months_back(card: Account, close: date, months: int) -> date:
+    """The card's close ``months`` calendar months before ``close``."""
+    index = close.year * 12 + close.month - 1 - months
+    return statement_close(card, date(index // 12, index % 12 + 1, 1))
+
+
+def _month_gap(later: date, earlier: date) -> int:
+    return (later.year * 12 + later.month) - (earlier.year * 12 + earlier.month)
+
+
 def _schedule_days(entry: BudgetEntry) -> List[date]:
     from app.services.forecast import _naive, capped_distinct_days
 
@@ -256,10 +272,25 @@ def _schedule_days(entry: BudgetEntry) -> List[date]:
 
 # --- one entry --------------------------------------------------------------------------------
 
-def _redate_entry(db: Session, entry_id: int, today: date) -> EntryResult:
+def _redate_entry(db: Session, entry_id: int, today: date, *,
+                  kept: Optional[Dict[int, date]] = None,
+                  next_close: Optional[date] = None) -> EntryResult:
     """Lock, check, map and write one entry inside the caller's savepoint.
 
-    Raises ``Refused`` (the caller rolls the savepoint back) for any refusal."""
+    Raises ``Refused`` (the caller rolls the savepoint back) for any refusal.
+
+    ``kept`` and ``next_close`` are the close-day change's path for a row the
+    bank billed on a statement a later close day moves it onto
+    (``services/close_day_change.py``): each row in ``kept`` keeps its
+    ``transaction_date`` and gets ``occurrence_date`` = the given close, which
+    must be the close of the statement it sits on; the entry's
+    ``next_occurrence`` becomes ``next_close``, its unpaid schedule moved that
+    many whole cycles earlier. The checks below then map each kept row's old
+    occurrence to its new one and each remaining occurrence by that shift, and
+    compare the forecast's billed months for this entry at each pair of old
+    and new window starts (the other entries' at the same starts). Without
+    them the conversion is unchanged."""
+    kept = kept or {}
     found = db.get(BudgetEntry, entry_id)
     if found is None:
         return EntryResult(entry_id, None, "skipped", "entry is gone")
@@ -294,15 +325,25 @@ def _redate_entry(db: Session, entry_id: int, today: date) -> EntryResult:
         if row.account_id != entry.account_id:
             raise Refused(f"linked transaction {row.id} is not on the installment's card")
     old_next = canon(entry.next_occurrence)
-    new_next_day = statement_close(card, old_next.date())
+    same_month_next = statement_close(card, old_next.date())
+    new_next_day = next_close or same_month_next
+    shift = _month_gap(same_month_next, new_next_day)
     plan: List[Tuple[Transaction, date]] = []
     seen: Dict[date, int] = {}
     for row in rows:
         identity = _day(row.occurrence_date or row.transaction_date)
-        close = statement_close(card, _day(row.transaction_date))
-        if statement_close(card, identity) != close:
-            raise Refused(f"linked transaction {row.id}'s occurrence and date are on "
-                          "different statements")
+        if row.id in kept:
+            close = kept[row.id]
+            if not row.is_posted:
+                raise Refused(f"pending linked transaction {row.id} would keep its date")
+            if _sits_on(card, row, today) != close:
+                raise Refused(f"linked transaction {row.id} is not on the statement closing "
+                              f"{close}")
+        else:
+            close = statement_close(card, _day(row.transaction_date))
+            if statement_close(card, identity) != close:
+                raise Refused(f"linked transaction {row.id}'s occurrence and date are on "
+                              "different statements")
         if close in seen:
             raise Refused(f"linked transactions {seen[close]} and {row.id} are on the same "
                           "statement")
@@ -323,19 +364,28 @@ def _redate_entry(db: Session, entry_id: int, today: date) -> EntryResult:
     # --- before
     through = today + timedelta(days=HELD_HORIZON_DAYS)
     old_days = _schedule_days(entry)
-    day_map = {day: statement_close(card, day) for day in old_days}
+    day_map = {day: _months_back(card, statement_close(card, day), shift) for day in old_days}
+    occurrence_map = {_day(row.occurrence_date or row.transaction_date): close
+                      for row, close in plan if row.id in kept}
     counts_before = (entry.max_occurrences, entry.occurrences_paid_offset, _paid(db, entry))
     held_before = _held(db, entry, through)
     linked_before = _linked(db, entry.id)
     boundaries = sorted({today, *(d for d in old_days if d >= today),
                          *(d for d in day_map.values() if d >= today)})
+    # With a shift, this entry's own billed months are compared at paired
+    # starts: today with today, each remaining old day with its new close.
+    pairs = sorted({(today, today), *((d, day_map[d]) for d in old_days
+                                      if d >= today or day_map[d] >= today)})
     billed_before = {start: _billed(db, card, start) for start in boundaries}
+    if shift:
+        billed_before.update({old: _billed(db, card, old) for old, _ in pairs
+                              if old not in billed_before})
     affected = {_sits_on(card, row, today) for row, _ in plan} | {
         _sits_on(card, row, today, close) for row, close in plan}
     balances_before = _statement_balances(db, card, affected, today=today)
 
     def mapped(day: date) -> date:
-        return day_map.get(day) or statement_close(card, day)
+        return occurrence_map.get(day) or day_map.get(day) or statement_close(card, day)
 
     def map_keys(counter_or_dict):
         if isinstance(counter_or_dict, Counter):
@@ -353,6 +403,13 @@ def _redate_entry(db: Session, entry_id: int, today: date) -> EntryResult:
     for row, close in plan:
         old_date = _day(row.transaction_date)
         old_occurrence = _day(row.occurrence_date) if row.occurrence_date else None
+        if row.id in kept:
+            if old_occurrence == close:
+                continue
+            row.occurrence_date = _on(row.occurrence_date or row.transaction_date, close)
+            row.updated_at = utc_now()
+            result.rows.append(RowChange(row.id, old_date, old_date, old_occurrence, close))
+            continue
         new_date = _on(row.transaction_date, close)
         if old_date == close and old_occurrence == close:
             continue
@@ -376,24 +433,39 @@ def _redate_entry(db: Session, entry_id: int, today: date) -> EntryResult:
         raise Refused("a possible duplicate would hold a different month")
     if _linked(db, entry.id) != {(txn_id, mapped(day)) for txn_id, day in linked_before}:
         raise Refused("its linked transactions would stand for different months")
-    for start in boundaries:
-        if _billed(db, card, start) != map_keys(billed_before[start]):
-            raise Refused(f"the forecast from {start.isoformat()} would bill different months")
+    if not shift:
+        for start in boundaries:
+            if _billed(db, card, start) != map_keys(billed_before[start]):
+                raise Refused(f"the forecast from {start.isoformat()} would bill different "
+                              "months")
+    else:
+        def own(counter: Counter, mine: bool) -> Counter:
+            return Counter({k: n for k, n in counter.items() if (k[0] == entry.id) == mine})
+
+        for start in boundaries:
+            if own(_billed(db, card, start), False) != own(billed_before[start], False):
+                raise Refused(f"the forecast from {start.isoformat()} would bill different "
+                              "months")
+        for old, new in pairs:
+            if own(_billed(db, card, new), True) != map_keys(own(billed_before[old], True)):
+                raise Refused(f"the forecast from {new.isoformat()} would bill different "
+                              "months")
     if _statement_balances(db, card, affected, today=today) != balances_before:
         raise Refused("a statement balance would change")
     return result
 
 
-def redate_one(db: Session, entry_id: int, today: date) -> EntryResult:
+def redate_one(db: Session, entry_id: int, today: date, **shift) -> EntryResult:
     """Convert one entry inside the caller's transaction, in a savepoint of its own.
 
     A refusal rolls the savepoint back and is returned as a ``refused`` result;
     any other error rolls it back and propagates. Nothing is committed: the
     caller ends the transaction (``run`` does after each entry; the close-day
-    change, ``services/close_day_change.py``, after the whole card)."""
+    change, ``services/close_day_change.py``, after the whole card). ``shift``
+    is ``_redate_entry``'s ``kept`` and ``next_close``, passed only when given."""
     savepoint = db.begin_nested()
     try:
-        result = _redate_entry(db, entry_id, today)
+        result = _redate_entry(db, entry_id, today, **shift)
     except Refused as exc:
         savepoint.rollback()
         db.expire_all()
