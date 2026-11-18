@@ -10,7 +10,8 @@
 //   h.step-announcement  AC1  a polite live region names the step on entry to each of the 8 steps
 //   i.regression         AC9  step order, copy, spotlight targets, Next/Back/Skip and completion
 //                             persistence are as on main 2d8eb26 (the expected values below were
-//                             taken from main's OnboardingFlow.tsx and this scenario passes there)
+//                             taken from main's OnboardingFlow.tsx and this scenario passes there),
+//                             except step 5, which STU-688 points at the leading figure
 //
 // Starts its own API and web app against a throwaway database (./_local_stack.cjs). Not wired into
 // CI. Run steps: ./README.md. WebKit needs `playwright install webkit`.
@@ -36,13 +37,14 @@ const VIEWPORT = { width: 1280, height: 1000 }
 const TALL_VIEWPORT = { width: 1280, height: 1300 }
 let stack
 
-// The tour on main 2d8eb26: step order, copy, spotlight target and the route each step opens.
+// The tour on main 2d8eb26: step order, copy, spotlight target and the route each step opens. Step 5 is
+// STU-688's: it points at the dashboard's leading figure, where the period's totals moved.
 const STEPS = [
   { title: 'Welcome to Your Dashboard', description: 'This is your home overview where you can see all your financial information at a glance.', target: 'nav-home', path: '/' },
   { title: 'Manage Your Accounts', description: 'Track all your accounts - cash, savings, checking, and credit cards - in one place.', target: 'nav-accounts', path: '/accounts' },
   { title: 'Record Transactions', description: 'Add and categorize your income and expenses to keep track of your spending.', target: 'nav-transactions', path: '/transactions' },
   { title: 'Set Financial Goals', description: 'Create budgets, savings goals, and track your progress toward financial milestones.', target: 'nav-allocations', path: '/allocations' },
-  { title: 'Financial Snapshot', description: 'View your total balance, income, expenses, and net flow for the selected period.', target: 'financial-snapshot', path: '/' },
+  { title: 'Available cash', description: 'See the cash you can spend now, with the money in, money out and net for the selected period.', target: 'leading-figure', path: '/' },
   { title: 'Budget Envelope Status', description: 'Monitor your spending against budget limits to stay on track with your financial goals.', target: 'budget-envelopes', path: '/' },
   { title: 'Upcoming Planned Expenses', description: 'See your scheduled payments and expenses to plan ahead and avoid surprises.', target: 'upcoming-expenses', path: '/' },
   { title: 'Spending breakdown', description: 'Open a breakdown of your posted spending by category for the dates shown, then pick a category to filter the list.', target: 'spending-breakdown', path: '/transactions' },

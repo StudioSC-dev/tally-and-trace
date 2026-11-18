@@ -370,7 +370,7 @@ export function Dashboard() {
       </PageHeader>
 
       {/* The leading figure: available cash, then the period's money in, out and net on ruled lines under it. */}
-      <section className="rounded-md border border-line bg-surface p-4 sm:p-6" aria-labelledby="leading-figure-label" data-testid="leading-figure">
+      <section className="rounded-md border border-line bg-surface p-4 sm:p-6" aria-labelledby="leading-figure-label" data-testid="leading-figure" data-onboarding="leading-figure">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-4" aria-busy={snapshotPhase === 'pending'}>
           <h2 id="leading-figure-label" className="label leading-5">Available cash</h2>
           {snapshotPhase === 'pending' ? (
