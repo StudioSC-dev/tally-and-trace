@@ -23,6 +23,21 @@ one card, in one transaction: all of it is written, or none of it.
   active or paused, whoever created it) is re-dated onto the new close, with the
   re-date's own mapping and checks: its `next_occurrence`, `anchor_day`, and each
   linked row's `transaction_date` and `occurrence_date`.
+- A **gap row** is a posted linked row the bank billed (the later of its own day
+  and its posting day) after the old close of a month and on or before the new
+  close of that month. A later close day puts it on that month's statement, one
+  cycle before the occurrence it stood for. The bank's statement wins:
+  - its `transaction_date` and `posting_date` are kept (the bank printed them);
+  - its `occurrence_date` becomes the close of the statement it now sits on;
+  - the entry's unpaid schedule moves earlier by the same number of cycles:
+    `next_occurrence` becomes the first new close after its latest linked
+    occurrence. `max_occurrences`, `occurrences_paid_offset`, the paid count and
+    the linked rows stay the same.
+
+  Rows on the old close keep the usual mapping. The re-date's checks map each
+  gap row's old occurrence to its new one and each remaining occurrence by the
+  shift; the forecast's billed months for that entry are compared at each old
+  day and its new close, and the other entries' at the same days.
 - Completed installments and their rows are not touched.
 
 ## Locks
@@ -46,6 +61,10 @@ Nothing is written, and every reason is printed, when:
 - a moved minimum due would land on a statement that has not closed yet;
 - any installment is refused by the re-date (for example a forced date in
   `payment_date_overrides`; see docs/installment-redate.md for the full list);
+- a gap row is not posted;
+- two linked rows of one entry would stand for the same occurrence;
+- a gap row's schedule would not move by whole cycles, or the moved
+  `next_occurrence` would be on a statement that has already closed;
 - an installment date on the old close would move anywhere but the new close of
   the same month. This is what a change to an earlier day does (a charge on the
   14th is past a close on the 13th), so such a change is refused while open
@@ -89,7 +108,8 @@ DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DBNAME \
   [--accept-history-shift] --apply
 ```
 
-The output lists ids, old and new dates, and refusal reasons. It never prints an
+The output lists ids, old and new dates, and refusal reasons; a gap row reads
+`txn N: date kept, occurrence OLD -> NEW`. It never prints an
 amount. A second run is refused: the card already closes on that day.
 Exit codes: 0 changed (in a dry run: would change), 3 refused (nothing written),
 1 an error (nothing written), 2 refused before connecting (the URL did not match
