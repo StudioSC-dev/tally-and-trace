@@ -328,7 +328,14 @@ def diff_statement(statement: BankStatement, view: AppStatementView,
     header = tuple(_header_diff(statement, view))
     if statement.header.close_date != view.close:
         return StatementDiff(digest, header)
+    return _row_diff(statement, view, cycle_rows, candidate_rows, payment_rows, digest, header)
 
+
+def _row_diff(statement, view: AppStatementView, cycle_rows: Sequence[RowRecord],
+              candidate_rows: Sequence[RowRecord], payment_rows: Sequence[RowRecord],
+              digest: str, header: Tuple[HeaderDiff, ...]) -> StatementDiff:
+    """The row actions, warnings and ``balanced`` of a statement whose window is
+    ``view``'s (matching rules 1 to 3, see the module docstring)."""
     def eligible(line: StatementLine, rank: int, row: RowRecord) -> bool:
         # A recurring candidate keeps its own day: it can only be posted where that,
         # with the statement's posting date, puts it.

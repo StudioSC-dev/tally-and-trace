@@ -280,26 +280,25 @@ def _midnight(day: Optional[date]) -> Optional[datetime]:
     return datetime.combine(day, time()) if day is not None else None
 
 
-def _lock(db: Session, user: User, card: Account, loaded: Loaded) -> Account:
-    """Take the apply's locks in ``core/locking.py`` order; the card, refreshed."""
+def _lock(db: Session, user: User, account: Account, loaded: Loaded, kind: "_Kind") -> Account:
+    """Take the apply's locks in ``core/locking.py`` order; the account, refreshed."""
     ids = sorted(loaded.rows)
     owners = {user.id} | {owner for (owner,) in db.query(Transaction.user_id)
                           .filter(Transaction.id.in_(ids))} if ids else {user.id}
     for owner in sorted(owners):
         locking.lock_owner_budgets(db, owner)
-    accounts = {card.id}
+    accounts = {account.id}
     for txn_id in ids:
         txn = locking.lock_transaction(db, txn_id)
         if txn is not None:
             accounts |= {txn.account_id, txn.transfer_from_account_id, txn.transfer_to_account_id}
     locked = locking.lock_accounts(db, accounts)
-    card = locked.get(card.id)
+    account = locked.get(account.id)
     # The caller's grants read afresh: they may have changed while this waited.
-    if card is None or role_map(db, user).get(card.id, NONE) not in MANAGE_ROLES:
+    if account is None or role_map(db, user).get(account.id, NONE) not in MANAGE_ROLES:
         raise HTTPException(status_code=404, detail="Account not found")
-    if card.account_type != AccountType.CREDIT:
-        raise HTTPException(status_code=400, detail="Only a credit card has available credit")
-    return card
+    kind.check_account(account)
+    return account
 
 
 def _row_update(txn: Transaction, action: sr.Action, line: StatementLine) -> dict:
@@ -357,44 +356,114 @@ class Applied:
     diff: sr.StatementDiff
     created: Dict[int, int]  # line_no -> new row id
     notes: List[str]
-    reconciliation: StatementReconciliation
+    reconciliation: object
+
+
+class _Kind:
+    """What reconciling one kind of account needs; the apply itself (``_apply``) is
+    shared. ``_Card`` is a credit card's statement."""
+    noun = "account"
+
+    def load(self, db: Session, user: User, account: Account, statement, fx) -> Loaded:
+        raise NotImplementedError
+
+    def diff(self, loaded: Loaded, statement) -> sr.StatementDiff:
+        raise NotImplementedError
+
+    def check_account(self, account: Account) -> None:
+        """Refuse an account of the wrong type (after the locks)."""
+
+    def check_view(self, loaded: Loaded, statement) -> None:
+        """Refuse a statement the app places elsewhere (before the fingerprint)."""
+
+    def write_header(self, db: Session, user: User, account: Account, loaded: Loaded,
+                     result: sr.StatementDiff) -> None:
+        """Store the header values the statement differs on."""
+
+    def check_row(self, txn: Transaction, action: sr.Action) -> None:
+        """Refuse an ``update``, ``move`` or ``unpost`` of ``txn`` beyond ``_row_update``'s."""
+
+    def check_create(self, action: sr.Action, loaded: Loaded) -> None:
+        """Refuse a ``create``."""
+
+    def verify(self, db: Session, user: User, account: Account, loaded: Loaded, statement,
+               fx) -> List[Transaction]:
+        raise NotImplementedError
+
+    def record(self, db: Session, user: User, account: Account, loaded: Loaded, statement):
+        raise NotImplementedError
+
+
+class _Card(_Kind):
+    noun = "card"
+
+    def load(self, db, user, account, statement, fx):
+        return load(db, user, account, statement, fx)
+
+    def diff(self, loaded, statement):
+        return diff(loaded, statement)
+
+    def check_account(self, account):
+        if account.account_type != AccountType.CREDIT:
+            raise HTTPException(status_code=400, detail="Only a credit card has available credit")
+
+    def check_view(self, loaded, statement):
+        if statement.header.close_date != loaded.view.close:
+            raise _refused(CLOSING_DAY.format(statement=statement.header.close_date.isoformat(),
+                                              app=loaded.view.close.isoformat()), status=422)
+
+    def write_header(self, db, user, account, loaded, result):
+        close = loaded.view.close
+        for header in result.header:
+            try:
+                if header.field == "due":
+                    store_due_override(db, account, close, header.statement, user.id)
+                elif header.field == "minimum_due":
+                    store_minimum(db, account, close, header.statement, user.id)
+            except HTTPException as exc:
+                raise _refused(f"The statement's {header.field} was refused: {exc.detail}",
+                               field=header.field)
+
+    def verify(self, db, user, account, loaded, statement, fx):
+        return verify(db, user, account, loaded.view.close, statement.line_balance, fx)
+
+    def record(self, db, user, account, loaded, statement):
+        return _record(db, user, account, loaded.view.close, statement)
+
+
+CARD = _Card()
 
 
 def apply(db: Session, user: User, card: Account, statement: BankStatement,
           fingerprint: str, fx) -> Applied:
     """Apply ``statement`` to ``card`` (see the module docstring). Uncommitted: the
     caller commits. Every refusal rolls the session back before it is raised."""
+    return _apply(CARD, db, user, card, statement, fingerprint, fx)
+
+
+def _apply(kind: _Kind, db: Session, user: User, account: Account, statement,
+           fingerprint: str, fx) -> Applied:
     from app.routers.transactions import add_transaction, apply_transaction_update
     from app.schemas.transaction import TransactionCreate, TransactionUpdate
 
     try:
-        first = load(db, user, card, statement, fx)
-        card = _lock(db, user, card, first)
+        first = kind.load(db, user, account, statement, fx)
+        account = _lock(db, user, account, first, kind)
         db.expire_all()  # every row read again, as the locks leave it
-        loaded = load(db, user, card, statement, fx)
-        result = diff(loaded, statement)
+        loaded = kind.load(db, user, account, statement, fx)
+        result = kind.diff(loaded, statement)
         if set(loaded.rows) - set(first.rows):
-            raise _refused("The card's rows changed while this ran; run the dry run again")
-        if statement.header.close_date != loaded.view.close:
-            raise _refused(CLOSING_DAY.format(statement=statement.header.close_date.isoformat(),
-                                              app=loaded.view.close.isoformat()), status=422)
+            raise _refused(f"The {kind.noun}'s rows changed while this ran; "
+                           "run the dry run again")
+        kind.check_view(loaded, statement)
         if result.fingerprint != fingerprint:
-            raise _refused("The statement or the card's rows changed since the dry run; "
+            raise _refused(f"The statement or the {kind.noun}'s rows changed since the dry run; "
                            "run the dry run again")
         if not result.balanced:
             raise _refused("The actions would not make this statement equal the bank's; "
                            "nothing was applied")
 
-        close = loaded.view.close
-        for header in result.header:
-            try:
-                if header.field == "due":
-                    store_due_override(db, card, close, header.statement, user.id)
-                elif header.field == "minimum_due":
-                    store_minimum(db, card, close, header.statement, user.id)
-            except HTTPException as exc:
-                raise _refused(f"The statement's {header.field} was refused: {exc.detail}",
-                               field=header.field)
+        kind.write_header(db, user, account, loaded, result)
 
         lines = {line.line_no: line for line in statement.lines}
         unposted: List[int] = []
@@ -404,6 +473,7 @@ def apply(db: Session, user: User, card: Account, statement: BankStatement,
             txn = loaded.rows[action.row_id]
             line = lines.get(action.line_no)
             try:
+                kind.check_row(txn, action)
                 fields = _row_update(txn, action, line)
                 apply_transaction_update(db, user, txn, TransactionUpdate(**fields))
             except HTTPException as exc:
@@ -422,22 +492,23 @@ def apply(db: Session, user: User, card: Account, statement: BankStatement,
         for action in sorted((a for a in result.actions if a.kind == "create"),
                              key=lambda a: a.line_no):
             new, line = action.new_row, lines[action.line_no]
+            kind.check_create(action, loaded)
             if action.possible_duplicate_of is not None:
                 notes.append(f"line {action.line_no}: may duplicate recurring row "
                              f"{action.possible_duplicate_of}, whose date keeps it off this "
                              "statement")
             try:
                 txn = add_transaction(db, user, TransactionCreate(
-                    account_id=card.id,
+                    account_id=account.id,
                     transaction_type=(TransactionType.CREDIT if new.kind == "credit"
                                       else TransactionType.DEBIT),
                     amount=float(new.amount),
-                    currency=card.currency,
+                    currency=account.currency,
                     transaction_date=_midnight(new.transaction_date),
                     posting_date=_midnight(new.posting_date),
                     is_posted=True,
                     description=new.description,
-                    **_original(line, card, notes),
+                    **_original(line, account, notes),
                 ))
                 db.flush()
             except HTTPException as exc:
@@ -450,12 +521,12 @@ def apply(db: Session, user: User, card: Account, statement: BankStatement,
 
         db.flush()
         db.expire_all()  # verify reads the rows as stored, not as the writes left them
-        on_statement = verify(db, user, card, close, statement.line_balance, fx)
+        on_statement = kind.verify(db, user, account, loaded, statement, fx)
         for txn in on_statement:
             txn.is_reconciled = True
         for txn_id in unposted:
             db.get(Transaction, txn_id).is_reconciled = False
-        reconciliation = _record(db, user, card, close, statement)
+        reconciliation = kind.record(db, user, account, loaded, statement)
         return Applied(result, created, notes, reconciliation)
     except BaseException:
         db.rollback()
