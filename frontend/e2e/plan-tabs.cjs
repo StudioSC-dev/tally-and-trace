@@ -620,14 +620,14 @@ async function bankSubscription(browser) {
     await page.locator('[data-testid^="kind-section-"]').first().waitFor()
     await settle(page)
     await page.locator(`[data-testid="kind-section-${section}"] article`).filter({ has: page.getByText(name, { exact: true }) }).click()
-    const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Update Recurring Entry' }) })
+    const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Update recurring entry' }) })
     // A form that does not open is a failed assertion; the caller ends the scenario on null.
     if (!(await dialogOpened(form, `(h) ${name} opened its edit form`))) return null
     await waitQuiet(page)
     return form
   }
   const save = async (form) => {
-    await form.getByRole('button', { name: 'Update Recurring Entry' }).click()
+    await form.getByRole('button', { name: 'Update recurring entry' }).click()
     await form.waitFor({ state: 'detached' })
     await settle(page)
   }

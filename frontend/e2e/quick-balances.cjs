@@ -10,7 +10,7 @@
 // GCash (e-wallet). With no pins the section shows the defaults, in slot order.
 //
 // Scenarios:
-//   (a) the section sits above the Cash-Flow Timeline, owner-shape tiles in slot order
+//   (a) the section sits above the Cash-flow timeline, owner-shape tiles in slot order
 //   (b) the card tile shows Due with its date, the Unbilled line, then Available with
 //       "shared with BDO Platinum Mastercard"; the other tiles show their balance
 //   (c) tapping a tile opens /accounts/<id>
@@ -166,9 +166,9 @@ async function openDashboard(page) {
 }
 const tileIds = async (page) => (await tiles(page).evaluateAll((els) => els.map((e) => Number(e.getAttribute('data-account-id')))))
 
-// (a) Above the Cash-Flow Timeline, in slot order.
+// (a) Above the Cash-flow timeline, in slot order.
 async function placement(browser) {
-  console.log('\n=== (a) the section sits above the Cash-Flow Timeline, owner-shape tiles in slot order')
+  console.log('\n=== (a) the section sits above the Cash-flow timeline, owner-shape tiles in slot order')
   const body = await quick(owner)
   check('(a) the API has no pins and the defaults in slot order', [body.pinned, body.tiles.map((t) => [t.account_id, t.slot])],
     [false, [[bank.id, 'debit'], [amex.id, 'credit'], [gcash.id, 'e_wallet']]])
@@ -181,7 +181,7 @@ async function placement(browser) {
     const timeline = document.querySelector('[data-onboarding="cashflow-timeline"]')
     return !!section && !!timeline && !!(section.compareDocumentPosition(timeline) & Node.DOCUMENT_POSITION_FOLLOWING)
   })
-  check('(a) the section comes before the Cash-Flow Timeline in the page', before, true)
+  check('(a) the section comes before the Cash-flow timeline in the page', before, true)
   check('(a) the heading', await text(page.locator('#quick-balances-heading')), 'Quick balances')
   await ctx.close()
 }

@@ -111,10 +111,10 @@ async function openBudgets(page) {
   await h.waitQuiet(page)
 }
 
-/** Opens Add Allocation on the Budgets tab and fills a monthly envelope; returns the submit button. */
+/** Opens Add allocation on the Budgets tab and fills a monthly envelope; returns the submit button. */
 async function fillEnvelope(page, u, name) {
-  await page.getByRole('button', { name: 'Add Allocation' }).click()
-  const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Create Budget Envelope' }) })
+  await page.getByRole('button', { name: 'Add allocation' }).click()
+  const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Create budget envelope' }) })
   await form.waitFor()
   await h.waitQuiet(page)
   await form.locator('select').first().selectOption(String(u.bank.id))
@@ -122,7 +122,7 @@ async function fillEnvelope(page, u, name) {
   await pick(form.locator('[data-field="category_ids"]'), 'Utilities')
   // The spending limit is the form's last number input.
   await form.locator('input[type="number"]').last().fill('1000')
-  return form.getByRole('button', { name: 'Create Budget Envelope' })
+  return form.getByRole('button', { name: 'Create budget envelope' })
 }
 
 /** Shown names equal the API's first `n` names (as a set). */

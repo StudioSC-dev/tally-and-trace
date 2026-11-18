@@ -112,7 +112,7 @@ const dueCard = (page) => page.locator(tid('due-and-overdue'))
 
 async function openTransactions(page) {
   await page.goto(`${stack.webUrl}/transactions`)
-  await page.getByRole('button', { name: 'Add Transaction' }).first().waitFor()
+  await page.getByRole('button', { name: 'Add transaction' }).first().waitFor()
 }
 
 const formOf = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: /^(Create|Update) Transaction$/ }) })
@@ -120,7 +120,7 @@ const dueRows = (page) => page.locator(tid('due-row'))
 
 /** Fills the Create dialog with an expense; returns the form. */
 async function fillCreate(page, { accountName, amount, description }) {
-  await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+  await page.getByRole('button', { name: 'Add transaction' }).first().click()
   const form = formOf(page)
   await form.waitFor()
   await form.locator('input[placeholder="Add notes about this transaction"]').fill(description)
@@ -132,7 +132,7 @@ async function fillCreate(page, { accountName, amount, description }) {
 
 /** Clicks Create and waits for the "Saved" toast: the outbox drained. */
 async function submitAndWaitSaved(page, form) {
-  await form.getByRole('button', { name: 'Create Transaction', exact: true }).click()
+  await form.getByRole('button', { name: 'Add transaction', exact: true }).click()
   await page.locator(`${tid('save-toast')}[data-state="saved"]`).first().waitFor({ timeout: 15000 })
 }
 
@@ -168,7 +168,7 @@ async function scenarioA(browser) {
     await h.check('a.tags-read-only-with-add-dialog', 'B', async () => {
       if (seen.some((r) => pathOf(r.url) === '/tags')) return 'opening Transactions sent GET /tags'
       const opened = await record(page, async () => {
-        await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+        await page.getByRole('button', { name: 'Add transaction' }).first().click()
         await page.locator('[data-testid="tag-picker"]').waitFor()
       })
       const tags = opened.filter((r) => pathOf(r.url) === '/tags')
@@ -390,7 +390,7 @@ async function scenarioC3(browser) {
     page.on('request', (r) => { if (isPageOpenPost(r)) stalePosts++ })
     const seen = await record(page, async () => {
       await page.goto(`${stack.webUrl}/transactions`)
-      await page.getByRole('button', { name: 'Add Transaction' }).first().waitFor()
+      await page.getByRole('button', { name: 'Add transaction' }).first().waitFor()
       await h.sleep(1500)
     })
     await h.check('c3.due-read', 'S', async () => seen.some((r) => isDue(r.url)) || `no /dashboard/due request: ${show(seen)}`)
@@ -459,7 +459,7 @@ async function scenarioE(browser, { fallback }) {
     // The row source is held; a save elsewhere on the page invalidates it.
     g = await h.gate(page, getOf(fallback ? isUnpostedWindow : isDue))
     const form = await fillCreate(page, { accountName: seeded.checking.name, amount: 15, description: `DR ${name} Snack` })
-    await form.getByRole('button', { name: 'Create Transaction', exact: true }).click()
+    await form.getByRole('button', { name: 'Add transaction', exact: true }).click()
     await h.check(`${name}.refetch-held`, 'S', async () => (await g.waitHits(1, 10000)) || 'the save sent no refetch of the row source')
     await h.sleep(500)
     await h.check(`${name}.post-disabled`, 'B', async () => (await post.isDisabled()) || 'Post is enabled while the row source refetches')
@@ -516,7 +516,7 @@ async function scenarioF(browser, { fallback }) {
     // The sources are held; a save elsewhere on the page invalidates them.
     g = await h.gate(page, getOf(fallback ? isOccurrences : isDue))
     const form = await fillCreate(page, { accountName: seeded.checking.name, amount: 15, description: `DR ${name} Snack` })
-    await form.getByRole('button', { name: 'Create Transaction', exact: true }).click()
+    await form.getByRole('button', { name: 'Add transaction', exact: true }).click()
     await h.check(`${name}.refetch-held`, 'S', async () => (await g.waitHits(1, 10000)) || 'the save sent no refetch of the source')
     await h.sleep(500)
     if (!fallback) await h.check(`${name}.post-now-disabled`, 'B', async () => (await postNow.isDisabled()) || 'Post now is enabled while /dashboard/due refetches')
@@ -550,7 +550,7 @@ async function scenarioG(browser) {
       for (const n of [1, 2, 3]) {
         const form = await fillCreate(page, { accountName: seeded.checking.name, amount: 10 + n, description: `DR G ${width} ${n}` })
         // The pending toasts of the earlier saves may sit over the button at a narrow width: dispatch the click.
-        await form.getByRole('button', { name: 'Create Transaction', exact: true }).dispatchEvent('click')
+        await form.getByRole('button', { name: 'Add transaction', exact: true }).dispatchEvent('click')
         await form.waitFor({ state: 'hidden' })
       }
       await page.locator(tid('toast-stack')).waitFor()

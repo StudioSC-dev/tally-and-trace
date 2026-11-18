@@ -504,7 +504,7 @@ export function RecurringEntryFormModal({
         <div className="flex items-start justify-between mb-4">
           <div className="space-y-1">
             <h2 className="text-xl font-semibold text-ink">
-              Add Recurring Entry
+              Add recurring entry
             </h2>
             <p className="text-sm text-muted">
               Project upcoming income or expenses so they feed into your budgets automatically.
@@ -928,7 +928,7 @@ export function RecurringEntryFormModal({
               type="submit"
               className="flex-1 min-h-10 py-1.5 px-4 text-base"
             >
-              {editingBudgetEntry ? 'Update Recurring Entry' : 'Save Recurring Entry'}
+              {editingBudgetEntry ? 'Update recurring entry' : 'Save recurring entry'}
             </Button>
             <Button
               variant="quiet"
@@ -943,7 +943,7 @@ export function RecurringEntryFormModal({
                 onClick={() => handleDelete(editingBudgetEntry)}
                 className="min-h-10 py-1.5 px-4 text-base sm:w-auto"
               >
-                Delete Recurring Entry
+                Delete recurring entry
               </Button>
             )}
           </div>

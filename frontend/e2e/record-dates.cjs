@@ -22,7 +22,7 @@
 //   (f) loan payment: min/max on the date; the panel's error line; no loan-payment request
 //   (j) recurring entries (STU-427): next occurrence up to today + 5 years, end date up to
 //       today + 30 years.
-//       j.recurring-bounds: the Add Recurring Entry form's two date inputs carry their own
+//       j.recurring-bounds: the Add recurring entry form's two date inputs carry their own
 //         min and max; each bound is refused inline (the browser's check, then the client
 //         check with native validation off) with no POST; in-range dates save
 //       j.recurring-legacy-dates: an entry stored with both dates out of range opens with
@@ -184,8 +184,8 @@ const formModal = (page, heading) =>
 
 async function openAddForm(page) {
   await page.goto(`${stack.webUrl}/transactions`)
-  await page.getByRole('button', { name: 'Add Transaction' }).first().click()
-  const modal = formModal(page, 'Create Transaction')
+  await page.getByRole('button', { name: 'Add transaction' }).first().click()
+  const modal = formModal(page, 'Add transaction')
   await modal.waitFor()
   await waitQuiet(page)
   return modal
@@ -212,7 +212,7 @@ async function addNative(browser) {
   const attempt = async (day, key, label) => {
     await input.fill(day)
     mark()
-    await modal.getByRole('button', { name: 'Create Transaction', exact: true }).click()
+    await modal.getByRole('button', { name: 'Add transaction', exact: true }).click()
     await page.waitForTimeout(2000)
     const v = await validity(input)
     check(`(a) ${label}: the browser flags it`, key === 'under' ? v.under : v.over, true)
@@ -231,7 +231,7 @@ async function addNative(browser) {
   await posted.check()
   mark()
   const saved = page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname.replace(/\/$/, '').endsWith('/transactions'))
-  await modal.getByRole('button', { name: 'Create Transaction', exact: true }).click()
+  await modal.getByRole('button', { name: 'Add transaction', exact: true }).click()
   check('(a) control: today saves', [200, 201].includes((await saved).status()), true)
   await ctx.close()
 }
@@ -247,7 +247,7 @@ async function addClient(browser) {
   await disableNative(input)
   await input.fill(TOO_EARLY)
   mark()
-  await modal.getByRole('button', { name: 'Create Transaction', exact: true }).click()
+  await modal.getByRole('button', { name: 'Add transaction', exact: true }).click()
   await page.waitForTimeout(2000)
   const error = modal.locator('[data-testid="record-date-error"]')
   check('(b) the message sits under the date input', await text(error), MESSAGE)
@@ -276,15 +276,15 @@ async function edit(browser) {
   await waitQuiet(page)
   await rows(page, 'Edit me').first().click()
   await waitQuiet(page)
-  await page.getByRole('button', { name: 'Edit Transaction', exact: true }).click()
-  const modal = formModal(page, 'Edit Transaction')
+  await page.getByRole('button', { name: 'Edit transaction', exact: true }).click()
+  const modal = formModal(page, 'Edit transaction')
   await modal.waitFor()
   await waitQuiet(page)
   const input = dateInput(modal)
   check('(c) the edit form\'s date input carries min and max', await bounds(input), ['2000-01-01', MAX])
   await input.fill(TOO_EARLY)
   mark()
-  await modal.getByRole('button', { name: 'Update Transaction', exact: true }).click()
+  await modal.getByRole('button', { name: 'Save changes', exact: true }).click()
   await page.waitForTimeout(2000)
   // The browser's own message, shown inline (STU-410). The input's value is not read
   // here: Playwright's fill does not reach this form's React state, so the re-render
@@ -296,7 +296,7 @@ async function edit(browser) {
   await disableNative(input)
   await input.fill(TOO_EARLY)
   mark()
-  await modal.getByRole('button', { name: 'Update Transaction', exact: true }).click()
+  await modal.getByRole('button', { name: 'Save changes', exact: true }).click()
   await page.waitForTimeout(2000)
   const error = modal.locator('[data-testid="record-date-error"]')
   check('(c) client: the inline message', await text(error), MESSAGE)
@@ -330,13 +330,13 @@ async function editZones(browser, scenarios) {
     await waitQuiet(page)
     await rows(page, description).first().click()
     await waitQuiet(page)
-    await page.getByRole('button', { name: 'Edit Transaction', exact: true }).click()
-    const modal = formModal(page, 'Edit Transaction')
+    await page.getByRole('button', { name: 'Edit transaction', exact: true }).click()
+    const modal = formModal(page, 'Edit transaction')
     await modal.waitFor()
     await waitQuiet(page)
     check(`h.edit-prefill-zones ${label}: the edit form pre-fills ${day}`, await dateInput(modal).inputValue(), day)
     mark()
-    await modal.getByRole('button', { name: 'Update Transaction', exact: true }).click()
+    await modal.getByRole('button', { name: 'Save changes', exact: true }).click()
     await page.waitForTimeout(2500)
     check(`i.edit-save-keeps-date ${label}: one PUT`, sent('PUT', `/transactions/${seeded.id}`), 1)
     const saved = await read(seeded.id)
@@ -367,8 +367,8 @@ async function editZones(browser, scenarios) {
     await waitQuiet(page)
     await rows(page, 'Naive wire').first().click()
     await waitQuiet(page)
-    await page.getByRole('button', { name: 'Edit Transaction', exact: true }).click()
-    const modal = formModal(page, 'Edit Transaction')
+    await page.getByRole('button', { name: 'Edit transaction', exact: true }).click()
+    const modal = formModal(page, 'Edit transaction')
     await modal.waitFor()
     await waitQuiet(page)
     check(`h.edit-prefill-zones ${label}, naive wire value: pre-fills ${day}`, await dateInput(modal).inputValue(), day)
@@ -482,7 +482,7 @@ async function openRecurring(browser) {
   const opened = await newPage(browser)
   await uiLogin(opened.page, owner)
   await opened.page.goto(`${stack.webUrl}/allocations`)
-  await opened.page.getByRole('button', { name: 'Add Recurring Entry' }).waitFor()
+  await opened.page.getByRole('button', { name: 'Add recurring entry' }).waitFor()
   await waitQuiet(opened.page)
   return opened
 }
@@ -505,10 +505,10 @@ async function refusedDate(page, form, sent, mark, { scenario, key, input, value
 // j.recurring-bounds: both dates, both bounds, on the Add form.
 async function recurringBounds(browser) {
   const scenario = 'j.recurring-bounds'
-  console.log(`\n=== (${scenario}) Add Recurring Entry: each date's min and max, refused inline with no request`)
+  console.log(`\n=== (${scenario}) Add recurring entry: each date's min and max, refused inline with no request`)
   const { ctx, page, sent, mark } = await openRecurring(browser)
-  await page.getByRole('button', { name: 'Add Recurring Entry' }).click()
-  const form = recurringForm(page, 'Save Recurring Entry')
+  await page.getByRole('button', { name: 'Add recurring entry' }).click()
+  const form = recurringForm(page, 'Save recurring entry')
   await form.waitFor()
   await waitQuiet(page)
   await recurringField(form, 'name').fill('Bounded gym')
@@ -521,7 +521,7 @@ async function recurringBounds(browser) {
   check(`${scenario}: the next occurrence carries min and max`, await bounds(next), ['2000-01-01T00:00', `${MAX}T23:59`])
   check(`${scenario}: the end date carries min and max`, await bounds(end), ['2000-01-01T00:00', `${END_MAX}T23:59`])
 
-  const common = { scenario, button: 'Save Recurring Entry', method: 'POST', path: '/budget-entries' }
+  const common = { scenario, button: 'Save recurring entry', method: 'POST', path: '/budget-entries' }
   const tooLateEnd = addDays(END_MAX, 1)
   for (const [key, input, value, flag, message] of [
     ['next_occurrence', next, '1999-12-31T23:59', 'under', MESSAGE],
@@ -546,7 +546,7 @@ async function recurringBounds(browser) {
   await end.fill(`${END_MAX}T23:59`)
   mark()
   const saved = page.waitForResponse(isEntryWrite('POST'))
-  await form.getByRole('button', { name: 'Save Recurring Entry', exact: true }).click()
+  await form.getByRole('button', { name: 'Save recurring entry', exact: true }).click()
   const response = await saved
   check(`${scenario}: control: the last allowed dates save`, response.status(), 201)
   const body = await response.json().catch(() => ({}))
@@ -572,7 +572,7 @@ async function recurringLegacyDates(browser) {
   const openEdit = async () => {
     await page.goto(`${stack.webUrl}/allocations`)
     await page.locator('article').filter({ has: page.getByText('Legacy laundry', { exact: true }) }).first().click()
-    const form = recurringForm(page, 'Update Recurring Entry')
+    const form = recurringForm(page, 'Update recurring entry')
     await form.waitFor()
     await waitQuiet(page)
     return form
@@ -580,7 +580,7 @@ async function recurringLegacyDates(browser) {
   const update = async (form) => {
     mark()
     const saved = page.waitForResponse(isEntryWrite('PUT', entry.id))
-    await form.getByRole('button', { name: 'Update Recurring Entry', exact: true }).click()
+    await form.getByRole('button', { name: 'Update recurring entry', exact: true }).click()
     return (await saved).status()
   }
 
@@ -601,7 +601,7 @@ async function recurringLegacyDates(browser) {
   const next2 = recurringField(form, 'next_occurrence')
   await refusedDate(page, form, sent, mark, {
     scenario, key: 'end_date', input: end2, value: `${addDays(END_MAX, 1)}T00:00`, flag: 'over', message: END_MESSAGE,
-    button: 'Update Recurring Entry', method: 'PUT', path: `/budget-entries/${entry.id}`,
+    button: 'Update recurring entry', method: 'PUT', path: `/budget-entries/${entry.id}`,
   })
   check(`${scenario}: the next occurrence, untouched, still has no min or max`, await bounds(next2), [null, null])
   await end2.fill(`${addDays(TODAY, 30)}T00:00`)
@@ -613,7 +613,7 @@ async function recurringLegacyDates(browser) {
   const next3 = recurringField(form, 'next_occurrence')
   await refusedDate(page, form, sent, mark, {
     scenario, key: 'next_occurrence', input: next3, value: '1999-12-12T00:00', flag: 'under', message: MESSAGE,
-    button: 'Update Recurring Entry', method: 'PUT', path: `/budget-entries/${entry.id}`,
+    button: 'Update recurring entry', method: 'PUT', path: `/budget-entries/${entry.id}`,
   })
   await ctx.close()
 }

@@ -59,7 +59,7 @@ function HouseholdPage() {
   return (
     <div className="page">
       <PageHeader
-        title={current ? (current.is_self ? 'Your Household' : `${current.sharer_name}'s Household`) : 'Household'}
+        title={current ? (current.is_self ? 'Your household' : `${current.sharer_name}'s household`) : 'Household'}
         titleTestId="household-title"
         placeholder={
           viewsPhase === 'pending' ? (
@@ -84,7 +84,7 @@ function HouseholdPage() {
             >
               {views.map((view) => (
                 <option key={view.sharer_id} value={view.sharer_id}>
-                  {view.is_self ? 'Your Household' : `${view.sharer_name}'s Household`}
+                  {view.is_self ? 'Your household' : `${view.sharer_name}'s household`}
                 </option>
               ))}
             </select>

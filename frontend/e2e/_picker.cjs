@@ -1,6 +1,6 @@
 // Shared helper for the account and category chip pickers (GroupedPicker). A picker with
 // more than 8 options shows a quick row and a toggle; the rest of its chips are only in
-// the DOM once the toggle has opened the full list. A compact field (the Add Transaction
+// the DOM once the toggle has opened the full list. A compact field (the Add transaction
 // dialog) with a value is one line until its Change button opens its panel of rows (each
 // row a button; a recent option is listed twice, in Recent and in its group, and `pick`
 // clicks the first). `pick` hides both.
