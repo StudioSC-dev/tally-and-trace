@@ -10,7 +10,7 @@
 #
 # Environment:
 #   E2E_PORT          the port every server here uses (default 4317, as in playwright.config.ts)
-#   STU771_BASE       the revision the PR is measured against (default origin/main)
+#   STU771_BASE       the branch the PR is measured against, at its merge base with HEAD (default origin/main)
 #   STU771_PR_BODY    the PR description AC5 reads (default <repo>/.pr-body.md)
 #   STU771_WORK       where logs, reports and the base worktree go (default a new temporary directory)
 #   GH_TOKEN          for ac4 only, if `gh` is not otherwise signed in
@@ -29,7 +29,8 @@ mkdir -p "$WORK" || exit 2
 LIB="$FRONTEND/scripts/stu-771/lib.mjs"
 PW="$FRONTEND/node_modules/.bin/playwright"
 HEAD_SHA="$(git -C "$REPO" rev-parse HEAD)"
-BASE_SHA="$(git -C "$REPO" rev-parse "$BASE_REF")" || exit 2
+# The PR is compared with the point it branched from, so commits that land on the base later are not counted as its own.
+BASE_SHA="$(git -C "$REPO" merge-base "$BASE_REF" HEAD)" || exit 2
 BASE_TREE="$WORK/base"
 export E2E_PORT="$PORT"
 
@@ -58,7 +59,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-log "STU-771 verification: head $HEAD_SHA, base $BASE_REF $BASE_SHA, host $(hostname), E2E_PORT $PORT, work $WORK"
+log "STU-771 verification: head $HEAD_SHA, base $BASE_REF (merge base $BASE_SHA, tip $(git -C "$REPO" rev-parse "$BASE_REF")), host $(hostname), E2E_PORT $PORT, work $WORK"
 if [ -n "$(git -C "$REPO" status --porcelain --untracked-files=no)" ]; then
   log "the working tree has uncommitted changes, so results would not be the PR head's; commit or stash them first"
   exit 2
