@@ -27,6 +27,7 @@ import { SegmentedControl } from '../components/SegmentedControl'
 import { Button } from '../components/Button'
 import { fullCardChargeKeys, isLimitedEvent, isOtherUpcoming, loggedDays, localToday, statusFromDate, upcomingItemAmount } from '@tally-trace/shared'
 import type { LimitedEvent, Payable, Settlement } from '@tally-trace/shared'
+import { Icon } from '../components/Icon'
 
 const MAX_PAYABLES_SHOWN = 6
 const MAX_OTHER_UPCOMING_SHOWN = 4
@@ -254,39 +255,28 @@ export function Dashboard() {
     if (status === 'danger') {
       return (
         <span role="img" aria-label={label} title={label} data-testid="payable-status" className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-danger text-danger">
-          <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-            <polygon points="10,1 18,6 18,14 10,19 2,14 2,6" />
-            <rect x="9" y="7" width="2" height="5" fill="white" rx="1" />
-            <rect x="9" y="13" width="2" height="2" fill="white" rx="1" />
-          </svg>
+          <Icon name="overdue" />
         </span>
       )
     }
     if (status === 'autopay') {
       return (
         <span role="img" aria-label={label} title={label} data-testid="payable-status" className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-ok text-paper">
-          <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M16.704 5.29a1 1 0 00-1.408-1.42l-6.32 6.263-2.272-2.26a1 1 0 10-1.408 1.419l2.976 2.958a1 1 0 001.408 0l7.024-6.96z" clipRule="evenodd" />
-          </svg>
+          <Icon name="check" />
         </span>
       )
     }
     if (status === 'manual') {
       return (
         <span role="img" aria-label={label} title={label} data-testid="payable-status" className="inline-flex h-8 w-8 items-center justify-center rounded-full text-warn">
-          <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M10.894 2.553c-.346-.598-1.442-.598-1.788 0l-7 12.092c-.339.586.086 1.355.894 1.355h14c.808 0 1.233-.769.894-1.355l-7-12.092z" />
-            <path d="M9 13h2v2H9v-2zm0-6h2v5H9V7z" fill="white" />
-          </svg>
+          <Icon name="warning" />
         </span>
       )
     }
     // Statements, loan payments, planned transactions, shared items and rows that name no settlement: a neutral mark, not the manual warning.
     return (
       <span role="img" aria-label={label} title={label} data-testid="payable-status" className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-line text-muted">
-        <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-          <path d="M10 2a8 8 0 100 16 8 8 0 000-16zm1 12H9V9h2v5zm0-6H9V6h2v2z" />
-        </svg>
+        <Icon name="info" />
       </span>
     )
   }
@@ -329,10 +319,8 @@ export function Dashboard() {
     return (
       <div className="flex items-center justify-center min-h-96">
         <div className="text-center">
-          <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-8 h-8 text-danger" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
-            </svg>
+          <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-danger">
+            <Icon name="warning" />
           </div>
           <h3 className="text-lg font-semibold text-ink mb-2">Error Loading Data</h3>
           <p className="text-body mb-4">There was an issue loading your financial data.</p>

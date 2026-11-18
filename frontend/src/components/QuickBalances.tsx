@@ -7,6 +7,7 @@ import { useCurrency } from '../hooks/useCurrency'
 import { formatSigned } from '../utils/amount'
 import { Skeleton } from './Loading'
 import { Button } from './Button'
+import { Icon } from './Icon'
 
 const TONE: Record<TileLine['tone'], string> = {
   normal: 'text-ink',
@@ -187,13 +188,13 @@ function PinEditor({ tiles, pinned, onDone }: { tiles: QuickBalanceTile[]; pinne
                 <p className="text-sm font-medium text-ink truncate" data-testid="quick-balance-edit-name">{name}</p>
               </div>
               <Button variant="secondary" data-testid={`quick-balance-move-earlier-${id}`} aria-label={`Move ${name} earlier`} disabled={index === 0} onClick={() => move(index, 'earlier')} className={ICON_ACTION}>
-                <span aria-hidden="true">‹</span>
+                <Icon name="caret-left" />
               </Button>
               <Button variant="secondary" data-testid={`quick-balance-move-later-${id}`} aria-label={`Move ${name} later`} disabled={index === draft.length - 1} onClick={() => move(index, 'later')} className={ICON_ACTION}>
-                <span aria-hidden="true">›</span>
+                <Icon name="caret-right" />
               </Button>
               <Button variant="secondary" data-testid={`quick-balance-remove-${id}`} aria-label={`Remove ${name}`} onClick={() => setDraft((ids) => ids.filter((x) => x !== id))} className={ICON_ACTION}>
-                <span aria-hidden="true">✕</span>
+                <Icon name="close" />
               </Button>
             </li>
           )

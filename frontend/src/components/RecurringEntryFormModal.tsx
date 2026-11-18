@@ -40,6 +40,7 @@ import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 import { TagPicker } from './TagPicker'
 import { SegmentedControl } from './SegmentedControl'
 import { Button } from './Button'
+import { Icon } from './Icon'
 
 const toLocalDateTimeInput = (value: Date | string) => {
   const date = typeof value === 'string' ? new Date(value) : value
@@ -515,9 +516,7 @@ export function RecurringEntryFormModal({
             className="text-muted hover:text-body transition-colors duration-200"
             aria-label="Close allocation modal"
           >
-            <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <Icon name="close" />
           </button>
         </div>
 
@@ -866,13 +865,7 @@ export function RecurringEntryFormModal({
                     }
                     className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold transition-colors duration-200 ${ subscriptionForm.is_active ? 'text-ink hover:bg-sunken' : 'bg-sunken text-body hover:bg-sunken' }`}
                   >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      {subscriptionForm.is_active ? (
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6M5 5h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z" />
-                      ) : (
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5l10 7-10 7V5z" />
-                      )}
-                    </svg>
+                    <Icon name={subscriptionForm.is_active ? 'pause' : 'play'} />
                     <span>{subscriptionForm.is_active ? 'Active' : 'Paused'}</span>
                   </button>
                 </div>

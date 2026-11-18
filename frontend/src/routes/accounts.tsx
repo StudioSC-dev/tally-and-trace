@@ -30,6 +30,7 @@ import { useConfirm } from '../hooks/useConfirm'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 import { withSelection } from '../utils/selection'
 import { Button, buttonClass } from '../components/Button'
+import { Icon } from '../components/Icon'
 
 export const Route = createFileRoute('/accounts')({
   component: AccountsPage,
@@ -930,9 +931,7 @@ export function AccountsPage() {
                 className="text-muted hover:text-body transition-colors duration-200"
                 aria-label="Close account actions modal"
               >
-                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <Icon name="close" />
               </button>
             </div>
 
@@ -1042,9 +1041,7 @@ export function AccountsPage() {
                 onClick={() => openEditFromModal(actionAccount)}
                 className="flex min-h-11 py-2.5"
               >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                </svg>
+                <Icon name="edit" />
                 Edit account
               </Button>
               )}
@@ -1064,9 +1061,7 @@ export function AccountsPage() {
                 onClick={() => handleDelete(actionAccount.id)}
                 className="flex min-h-11 py-2.5 sm:col-span-2"
               >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
+                <Icon name="delete" />
                 Delete account
               </Button>
               )}
@@ -1101,10 +1096,9 @@ export function AccountsPage() {
                   setSaveError(null)
                 }}
                 className="text-muted hover:text-body transition-colors duration-200 w-full sm:w-auto"
+                aria-label="Close account modal"
               >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <Icon name="close" />
               </button>
             </div>
             
@@ -1150,12 +1144,12 @@ export function AccountsPage() {
                   className="select-field focus-ring"
                   disabled={editingAccount?.account_type === 'loan'}
                 >
-                  <option value="checking">🏦 Checking</option>
-                  <option value="savings">💰 Savings</option>
-                  <option value="credit">💳 Credit Card</option>
-                  <option value="cash">💵 Cash</option>
-                  <option value="e_wallet">📱 E-Wallet</option>
-                  <option value="loan">🏠 Loan</option>
+                  <option value="checking">Checking</option>
+                  <option value="savings">Savings</option>
+                  <option value="credit">Credit Card</option>
+                  <option value="cash">Cash</option>
+                  <option value="e_wallet">E-Wallet</option>
+                  <option value="loan">Loan</option>
                 </select>
                 {editingAccount?.account_type === 'loan' && (
                   <p className="mt-1 text-xs text-muted">A loan account keeps its type.</p>
@@ -1259,14 +1253,7 @@ export function AccountsPage() {
                       onClick={() => setShowCreditSettings((prev) => !prev)}
                       className="inline-flex items-center gap-1 text-xs font-semibold text-ink hover:text-ink"
                     >
-                      <svg
-                        className={`h-4 w-4 transition-transform duration-200 ${showCreditSettings ? 'rotate-180' : ''}`}
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
+                      <Icon name={showCreditSettings ? 'caret-up' : 'caret-down'} />
                       {showCreditSettings ? 'Hide details' : 'Show details'}
                     </button>
                   </div>

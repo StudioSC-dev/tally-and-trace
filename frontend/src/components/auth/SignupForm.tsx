@@ -3,6 +3,7 @@ import React, { useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { Link } from '@tanstack/react-router'
 import { Button } from '../Button'
+import { Icon } from '../Icon'
 
 type ValidationError = {
   type: string
@@ -134,10 +135,8 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
     <div className="min-h-screen flex items-center justify-center bg-paper py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
         <div>
-          <div className="mx-auto h-16 w-16 flex items-center justify-center">
-            <svg className="h-8 w-8 text-paper" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
-            </svg>
+          <div className="mx-auto h-16 w-16 flex items-center justify-center text-paper">
+            <Icon name="sign-up" />
           </div>
           <h1 className="mt-4 text-center text-2xl font-bold text-ink tracking-tight">
             Tally &amp; Trace
@@ -157,10 +156,8 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
           <form className="space-y-5" onSubmit={handleSubmit}>
             {error && (
               <div className="border border-line p-4">
-                <div className="flex">
-                  <svg className="h-5 w-5 text-danger flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                  </svg>
+                <div className="flex text-danger">
+                  <Icon name="error" />
                   <div className="ml-3">
                     <p className="text-sm text-danger">{error}</p>
                   </div>
@@ -249,16 +246,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-body focus:outline-none"
                   aria-label={showPassword ? "Hide password" : "Show password"}
                 >
-                  {showPassword ? (
-                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                    </svg>
-                  ) : (
-                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                    </svg>
-                  )}
+                  <Icon name={showPassword ? 'hide' : 'show'} />
                 </button>
               </div>
               {formData.password && (
@@ -266,23 +254,23 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
                   <p className="text-xs text-body font-medium">Password requirements:</p>
                   <ul className="text-xs space-y-1">
                     <li className={`flex items-center ${passwordRequirements.minLength ? 'text-ok' : 'text-muted'}`}>
-                      <span className="mr-2">{passwordRequirements.minLength ? '✓' : '○'}</span>
+                      <span className="mr-2 inline-flex"><Icon name={passwordRequirements.minLength ? 'check' : 'requirement-unmet'} /></span>
                       At least 8 characters
                     </li>
                     <li className={`flex items-center ${passwordRequirements.hasUpperCase ? 'text-ok' : 'text-muted'}`}>
-                      <span className="mr-2">{passwordRequirements.hasUpperCase ? '✓' : '○'}</span>
+                      <span className="mr-2 inline-flex"><Icon name={passwordRequirements.hasUpperCase ? 'check' : 'requirement-unmet'} /></span>
                       One uppercase letter
                     </li>
                     <li className={`flex items-center ${passwordRequirements.hasLowerCase ? 'text-ok' : 'text-muted'}`}>
-                      <span className="mr-2">{passwordRequirements.hasLowerCase ? '✓' : '○'}</span>
+                      <span className="mr-2 inline-flex"><Icon name={passwordRequirements.hasLowerCase ? 'check' : 'requirement-unmet'} /></span>
                       One lowercase letter
                     </li>
                     <li className={`flex items-center ${passwordRequirements.hasNumber ? 'text-ok' : 'text-muted'}`}>
-                      <span className="mr-2">{passwordRequirements.hasNumber ? '✓' : '○'}</span>
+                      <span className="mr-2 inline-flex"><Icon name={passwordRequirements.hasNumber ? 'check' : 'requirement-unmet'} /></span>
                       One number
                     </li>
                     <li className={`flex items-center ${passwordRequirements.hasSpecialChar ? 'text-ok' : 'text-muted'}`}>
-                      <span className="mr-2">{passwordRequirements.hasSpecialChar ? '✓' : '○'}</span>
+                      <span className="mr-2 inline-flex"><Icon name={passwordRequirements.hasSpecialChar ? 'check' : 'requirement-unmet'} /></span>
                       One special character (!@#$%^&*().-_+=)
                     </li>
                   </ul>
@@ -310,16 +298,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-body focus:outline-none"
                   aria-label={showConfirmPassword ? "Hide password" : "Show password"}
                 >
-                  {showConfirmPassword ? (
-                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                    </svg>
-                  ) : (
-                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                    </svg>
-                  )}
+                  <Icon name={showConfirmPassword ? 'hide' : 'show'} />
                 </button>
               </div>
               {formData.confirmPassword && formData.password !== formData.confirmPassword && (

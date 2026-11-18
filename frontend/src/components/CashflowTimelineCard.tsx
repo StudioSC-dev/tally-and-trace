@@ -5,6 +5,7 @@ import type { CurrencyCode } from '../utils/currency'
 import { ShortfallBanner } from './ShortfallBanner'
 import { RunningBalanceChart } from './RunningBalanceChart'
 import { Skeleton } from './Loading'
+import { Icon } from './Icon'
 
 /** `currency` is null until the caller knows which currency to read the timeline in. */
 export function CashflowTimelineCard({ tag, currency }: { tag?: number; currency: CurrencyCode | null }) {
@@ -57,10 +58,13 @@ export function CashflowTimelineCard({ tag, currency }: { tag?: number; currency
             <RunningBalanceChart timeline={{ window_start: data.window_start, window_end: data.window_end, ...row }} format={format} height={150} compact />
 
             {shortfalls.length > 0 && (
-              <p className="text-xs text-warn">
-                ⚠ {shortfalls.length} funding shortfall{shortfalls.length === 1 ? '' : 's'}: a bill can't be covered from its funding account.{' '}
-                <Link to="/forecast" className="underline">See details</Link>
-              </p>
+              <div className="flex items-start gap-2 text-xs text-warn">
+                <Icon name="warning" />
+                <p>
+                  {shortfalls.length} funding shortfall{shortfalls.length === 1 ? '' : 's'}: a bill can't be covered from its funding account.{' '}
+                  <Link to="/forecast" className="underline">See details</Link>
+                </p>
+              </div>
             )}
 
             <dl className="grid grid-cols-3 gap-2 text-center">

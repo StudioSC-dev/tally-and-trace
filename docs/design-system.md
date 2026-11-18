@@ -169,6 +169,21 @@ Fields have no box. They are written on a ruled line (an underline in `line-stro
 - **Set:** Phosphor (MIT), Regular weight, 20px, `currentColor`. It replaces every
   inline SVG, emoji and text glyph.
 - **Why:** its even, slightly squared strokes match Plex.
+- **One path:** `Icon` (`frontend/src/components/Icon.tsx`) is the only importer of
+  `@phosphor-icons/react`. It maps a semantic name (`warning`, `close`, `check`, `home`,
+  `edit`, ...) to one Phosphor icon, imported on its own. Weight, size and colour are
+  fixed inside it, with no caller override: an icon takes its colour from its parent's
+  text colour.
+- **Accessibility:** every icon is `aria-hidden="true"`. An icon-only button or link
+  carries its own `aria-label`; an icon next to a word adds nothing to its name.
+- **No emoji or glyph icons:** no emoji, and no text character standing in for an icon
+  (`⚠ ✕ ✓ ○ × ‹ › ▾ ↗`). A `<select>` option cannot hold an icon, so its label is plain
+  words. A separator that reads "to" (a transfer's accounts, a date range) is the word
+  "to".
+- **Navigation:** the top bar and the tab bar use the same icon for a page. The active
+  page differs by colour only, never by a different weight or shape.
+- **Exempt:** the charts (`RunningBalanceChart` and the spending breakdown's donut), which
+  draw their own SVG, and the favicon.
 
 ## Motion
 
@@ -256,7 +271,7 @@ The shared components later tickets add. Each is marked planned until its ticket
 | `ListSheet` and `Row` | landed (STU-681) | one leaf sheet with ruled rows, figures on one right edge (see below) |
 | `StatusText` | planned | status as a dot and a word |
 | `EmptyState` | planned | an empty list's message and its one action |
-| `Icon` | planned | Phosphor Regular at 20px, `currentColor` |
+| `Icon` | built | Phosphor Regular at 20px, `currentColor`: `frontend/src/components/Icon.tsx`, the one icon path (see Icons) |
 
 ## Layout concept
 
