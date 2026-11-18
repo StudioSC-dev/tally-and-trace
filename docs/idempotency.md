@@ -15,6 +15,7 @@ that save. The routes that honour it are listed in `OUTBOX_ENDPOINTS` (`core/ide
 | `POST /cards/{id}/payments` | pay a card (one transfer) |
 | `POST /cards/{id}/statements/reconcile` | reconcile a card statement (an apply) |
 | `POST /cards/{id}/closing-day` | change a card's closing day (an apply; a dry run writes nothing and stores nothing) |
+| `POST /accounts/{id}/statements/reconcile` | reconcile a savings, checking or e-wallet statement (an apply) |
 | `POST /budget-entries/` | add a recurring entry |
 | `POST /budget-entries/{id}/materialize` | Mark paid, Charged (Due card Record) |
 | `POST /budget-entries/{id}/materialize-due` | Post N due |

@@ -88,6 +88,75 @@ class BankStatement(BaseModel):
         return self
 
 
+# --- A savings, checking or e-wallet statement (STU-753) ---------------------------------
+#
+# The same line fields as a card's, in the account's currency, with the kinds a bank
+# prints: a ``debit`` takes money out of the account and a ``credit`` puts money in.
+# A transfer between two of the user's accounts is a ``debit`` on the statement of the
+# account it left and a ``credit`` on the one it reached. The header is the period
+# (``period_start`` through ``period_end``, both included) and its balances; when
+# ``opening_balance`` is given it must add up:
+# ``opening_balance + credits - debits == closing_balance``.
+
+AccountLineKind = Literal["debit", "credit"]
+
+
+class AccountStatementHeader(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    period_start: date
+    period_end: date
+    closing_balance: Money
+    opening_balance: Optional[Money] = None
+
+    @model_validator(mode="after")
+    def _period(self):
+        if self.period_end < self.period_start:
+            raise ValueError("period_end is before period_start")
+        return self
+
+
+class AccountStatementLine(StatementLine):
+    kind: AccountLineKind
+
+
+class AccountStatement(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    header: AccountStatementHeader
+    lines: List[AccountStatementLine]
+
+    def total(self, kind: AccountLineKind) -> Decimal:
+        return sum((line.amount for line in self.lines if line.kind == kind), Decimal("0"))
+
+    @property
+    def line_balance(self) -> Decimal:
+        """Debits less credits: what the period took from the account (the diff's
+        ``line_balance`` counts a debit as it counts a card's charge)."""
+        return self.total("debit") - self.total("credit")
+
+    @property
+    def change(self) -> Decimal:
+        """Credits less debits: what the period added to the account's balance."""
+        return -self.line_balance
+
+    @model_validator(mode="after")
+    def _check(self):
+        numbers = [line.line_no for line in self.lines]
+        repeated = sorted({n for n in numbers if numbers.count(n) > 1})
+        if repeated:
+            raise ValueError(f"line_no must be unique; repeated: {repeated}")
+        header = self.header
+        if header.opening_balance is not None:
+            computed = header.opening_balance + self.change
+            if computed != header.closing_balance:
+                raise ValueError(
+                    "header does not add up: opening_balance + credits - debits"
+                    f" = {computed}, closing_balance = {header.closing_balance},"
+                    f" gap {header.closing_balance - computed}")
+        return self
+
+
 # --- POST /cards/{account_id}/statements/reconcile (STU-749) ----------------------------
 
 Fingerprint = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -169,3 +238,38 @@ class ReconcileOut(BaseModel):
     warnings: List[DiffWarningOut]
     notes: List[str] = []
     reconciliation: Optional[ReconciliationOut] = None
+
+
+# --- POST /accounts/{account_id}/statements/reconcile (STU-753) -------------------------
+
+
+class AccountReconcileRequest(ReconcileRequest):
+    """A savings, checking or e-wallet statement's dry run or apply."""
+    statement: AccountStatement
+
+
+class AccountNewRowOut(NewRowOut):
+    kind: AccountLineKind
+
+
+class AccountActionOut(ActionOut):
+    kind: Literal["matched", "update", "move", "create", "unpost"]
+    new_row: Optional[AccountNewRowOut] = None
+
+
+class AccountReconciliationOut(BaseModel):
+    period_start: date
+    period_end: date
+    opening_balance: Optional[Decimal] = None
+    closing_balance: Decimal
+    change: Decimal
+    line_count: int
+    reconciled_at: datetime
+    reconciled_by_actor: Optional[int] = None
+
+
+class AccountReconcileOut(ReconcileOut):
+    """As ``ReconcileOut``; ``header`` is always empty (a bank account's header has
+    nothing the app stores)."""
+    actions: List[AccountActionOut]
+    reconciliation: Optional[AccountReconciliationOut] = None

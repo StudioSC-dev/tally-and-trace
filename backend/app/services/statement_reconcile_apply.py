@@ -67,6 +67,42 @@ rolled back and the gap returned (409).
 On success every line item on the statement is marked ``is_reconciled`` (an
 unposted row is cleared), and ``statement_reconciliations`` gets one row per card
 and close.
+
+A savings, checking or e-wallet statement (STU-753)
+---------------------------------------------------
+``POST /accounts/{account_id}/statements/reconcile`` (``routers/accounts.py``) runs
+the same apply (``_apply`` with ``ACCOUNT``) over the account's rows; what differs:
+
+- Which statement: the period the header gives, ``period_start`` through
+  ``period_end``; it must have ended (before Manila's today). Only a savings,
+  checking or e-wallet account (400 otherwise; a card's names the card route).
+- Rows (``load_account``): every row touching the account, whoever entered them
+  (as ``GET /accounts/{id}/balance`` reads them), each by its effect on this
+  account (``account_side``): a debit or credit on it by its amount; a transfer out
+  of it a ``debit`` of ``amount + transfer_fee`` and a transfer into it a
+  ``credit`` of ``received_amount`` (else ``amount``), as ``transfer_sides``
+  gives them. A pending debit or credit with a foreign face is put in the
+  account's currency as a card's is (``statements.normalise_lines``). A posted row
+  is placed by its own ``transaction_date``: cycle rows are the posted rows in the
+  period; candidates the posted rows in the period of the same length either side
+  and the unposted rows dated on or before the end of the one after.
+- A transfer is one row on both accounts' statements. It is matched like any row
+  and keeps its dates (``RowRecord.keeps_dates``); any write to it (its amount,
+  posting or unposting it) is refused (``TRANSFER_CHANGE``), since it would change
+  the other account too, and so is a ``create`` whose possible duplicate is a
+  transfer (``TRANSFER_DUPLICATE``): the line is most likely that transfer, dated
+  off the period. A row linked to a recurring entry is refused unposting
+  (``LINKED_UNPOST``), as on a card.
+- No header writes.
+- Verify (``verify_account``): after the writes, the posted rows in the period
+  must add up to the statement's change (``opening_balance`` plus them is the
+  ``closing_balance``), and the account's balance at the end of ``period_end``
+  (``balance_at``: its stored balance less every posted row dated after) must
+  equal the ``closing_balance``. Otherwise the apply is rolled back and the gap
+  returned (409).
+- On success the period's posted rows are marked ``is_reconciled`` (an unposted
+  row is cleared) and ``account_statement_reconciliations`` gets one row per
+  account and ``period_end``.
 """
 from __future__ import annotations
 
@@ -77,6 +113,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from fastapi import HTTPException
 from pydantic import ValidationError
+from sqlalchemy import or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
@@ -89,10 +126,12 @@ from app.core.time import manila_day, manila_midnight, manila_today
 from app.models.account import Account, AccountType
 from app.models.card_statement_due_override import CardStatementDueOverride
 from app.models.card_statement_minimum import CardStatementMinimum
-from app.models.statement_reconciliation import StatementReconciliation
-from app.models.transaction import Transaction, TransactionType
+from app.models.statement_reconciliation import (
+    AccountStatementReconciliation, StatementReconciliation,
+)
+from app.models.transaction import Transaction, TransactionType, transfer_sides
 from app.models.user import CurrencyType, User
-from app.schemas.statement_reconcile import BankStatement, StatementLine
+from app.schemas.statement_reconcile import AccountStatement, BankStatement, StatementLine
 from app.services import statement_reconcile as sr
 from app.services.statements import (
     _card_rows, _split_card_rows, due_in_order, iter_cycles_from, load_due_overrides,
@@ -105,6 +144,15 @@ CLOSING_DAY = ("This statement closes on {statement}, but this card's cycle clos
 # A statement closing at most this many days from one of the card's closes is that
 # statement with the closing day moved (refused as such); farther, it is not the card's.
 NEAR_CLOSE_DAYS = 7
+ACCOUNT_TYPES = (AccountType.SAVINGS, AccountType.CHECKING, AccountType.E_WALLET)
+CARD_ROUTE = ("This is a credit card: reconcile its statement with "
+              "POST /cards/{account}/statements/reconcile")
+NOT_A_BANK_ACCOUNT = "Only a savings, checking or e-wallet account's statement is reconciled here"
+TRANSFER_CHANGE = ("Row {row} is a transfer between accounts {source} and {destination}: "
+                   "changing it here would change both; edit the transfer and run the dry "
+                   "run again")
+TRANSFER_DUPLICATE = ("Line {line} may be transfer row {row}, whose date keeps it off this "
+                      "period; change the transfer's date and run the dry run again")
 LINKED_UNPOST = ("Row {row} is linked to a recurring entry: unposting it here would leave "
                  "the entry's paid count and schedule as they are")
 
@@ -280,26 +328,25 @@ def _midnight(day: Optional[date]) -> Optional[datetime]:
     return datetime.combine(day, time()) if day is not None else None
 
 
-def _lock(db: Session, user: User, card: Account, loaded: Loaded) -> Account:
-    """Take the apply's locks in ``core/locking.py`` order; the card, refreshed."""
+def _lock(db: Session, user: User, account: Account, loaded: Loaded, kind: "_Kind") -> Account:
+    """Take the apply's locks in ``core/locking.py`` order; the account, refreshed."""
     ids = sorted(loaded.rows)
     owners = {user.id} | {owner for (owner,) in db.query(Transaction.user_id)
                           .filter(Transaction.id.in_(ids))} if ids else {user.id}
     for owner in sorted(owners):
         locking.lock_owner_budgets(db, owner)
-    accounts = {card.id}
+    accounts = {account.id}
     for txn_id in ids:
         txn = locking.lock_transaction(db, txn_id)
         if txn is not None:
             accounts |= {txn.account_id, txn.transfer_from_account_id, txn.transfer_to_account_id}
     locked = locking.lock_accounts(db, accounts)
-    card = locked.get(card.id)
+    account = locked.get(account.id)
     # The caller's grants read afresh: they may have changed while this waited.
-    if card is None or role_map(db, user).get(card.id, NONE) not in MANAGE_ROLES:
+    if account is None or role_map(db, user).get(account.id, NONE) not in MANAGE_ROLES:
         raise HTTPException(status_code=404, detail="Account not found")
-    if card.account_type != AccountType.CREDIT:
-        raise HTTPException(status_code=400, detail="Only a credit card has available credit")
-    return card
+    kind.check_account(account)
+    return account
 
 
 def _row_update(txn: Transaction, action: sr.Action, line: StatementLine) -> dict:
@@ -357,44 +404,114 @@ class Applied:
     diff: sr.StatementDiff
     created: Dict[int, int]  # line_no -> new row id
     notes: List[str]
-    reconciliation: StatementReconciliation
+    reconciliation: object
+
+
+class _Kind:
+    """What reconciling one kind of account needs; the apply itself (``_apply``) is
+    shared. ``_Card`` is a credit card's statement."""
+    noun = "account"
+
+    def load(self, db: Session, user: User, account: Account, statement, fx) -> Loaded:
+        raise NotImplementedError
+
+    def diff(self, loaded: Loaded, statement) -> sr.StatementDiff:
+        raise NotImplementedError
+
+    def check_account(self, account: Account) -> None:
+        """Refuse an account of the wrong type (after the locks)."""
+
+    def check_view(self, loaded: Loaded, statement) -> None:
+        """Refuse a statement the app places elsewhere (before the fingerprint)."""
+
+    def write_header(self, db: Session, user: User, account: Account, loaded: Loaded,
+                     result: sr.StatementDiff) -> None:
+        """Store the header values the statement differs on."""
+
+    def check_row(self, txn: Transaction, action: sr.Action) -> None:
+        """Refuse an ``update``, ``move`` or ``unpost`` of ``txn`` beyond ``_row_update``'s."""
+
+    def check_create(self, action: sr.Action, loaded: Loaded) -> None:
+        """Refuse a ``create``."""
+
+    def verify(self, db: Session, user: User, account: Account, loaded: Loaded, statement,
+               fx) -> List[Transaction]:
+        raise NotImplementedError
+
+    def record(self, db: Session, user: User, account: Account, loaded: Loaded, statement):
+        raise NotImplementedError
+
+
+class _Card(_Kind):
+    noun = "card"
+
+    def load(self, db, user, account, statement, fx):
+        return load(db, user, account, statement, fx)
+
+    def diff(self, loaded, statement):
+        return diff(loaded, statement)
+
+    def check_account(self, account):
+        if account.account_type != AccountType.CREDIT:
+            raise HTTPException(status_code=400, detail="Only a credit card has available credit")
+
+    def check_view(self, loaded, statement):
+        if statement.header.close_date != loaded.view.close:
+            raise _refused(CLOSING_DAY.format(statement=statement.header.close_date.isoformat(),
+                                              app=loaded.view.close.isoformat()), status=422)
+
+    def write_header(self, db, user, account, loaded, result):
+        close = loaded.view.close
+        for header in result.header:
+            try:
+                if header.field == "due":
+                    store_due_override(db, account, close, header.statement, user.id)
+                elif header.field == "minimum_due":
+                    store_minimum(db, account, close, header.statement, user.id)
+            except HTTPException as exc:
+                raise _refused(f"The statement's {header.field} was refused: {exc.detail}",
+                               field=header.field)
+
+    def verify(self, db, user, account, loaded, statement, fx):
+        return verify(db, user, account, loaded.view.close, statement.line_balance, fx)
+
+    def record(self, db, user, account, loaded, statement):
+        return _record(db, user, account, loaded.view.close, statement)
+
+
+CARD = _Card()
 
 
 def apply(db: Session, user: User, card: Account, statement: BankStatement,
           fingerprint: str, fx) -> Applied:
     """Apply ``statement`` to ``card`` (see the module docstring). Uncommitted: the
     caller commits. Every refusal rolls the session back before it is raised."""
+    return _apply(CARD, db, user, card, statement, fingerprint, fx)
+
+
+def _apply(kind: _Kind, db: Session, user: User, account: Account, statement,
+           fingerprint: str, fx) -> Applied:
     from app.routers.transactions import add_transaction, apply_transaction_update
     from app.schemas.transaction import TransactionCreate, TransactionUpdate
 
     try:
-        first = load(db, user, card, statement, fx)
-        card = _lock(db, user, card, first)
+        first = kind.load(db, user, account, statement, fx)
+        account = _lock(db, user, account, first, kind)
         db.expire_all()  # every row read again, as the locks leave it
-        loaded = load(db, user, card, statement, fx)
-        result = diff(loaded, statement)
+        loaded = kind.load(db, user, account, statement, fx)
+        result = kind.diff(loaded, statement)
         if set(loaded.rows) - set(first.rows):
-            raise _refused("The card's rows changed while this ran; run the dry run again")
-        if statement.header.close_date != loaded.view.close:
-            raise _refused(CLOSING_DAY.format(statement=statement.header.close_date.isoformat(),
-                                              app=loaded.view.close.isoformat()), status=422)
+            raise _refused(f"The {kind.noun}'s rows changed while this ran; "
+                           "run the dry run again")
+        kind.check_view(loaded, statement)
         if result.fingerprint != fingerprint:
-            raise _refused("The statement or the card's rows changed since the dry run; "
+            raise _refused(f"The statement or the {kind.noun}'s rows changed since the dry run; "
                            "run the dry run again")
         if not result.balanced:
             raise _refused("The actions would not make this statement equal the bank's; "
                            "nothing was applied")
 
-        close = loaded.view.close
-        for header in result.header:
-            try:
-                if header.field == "due":
-                    store_due_override(db, card, close, header.statement, user.id)
-                elif header.field == "minimum_due":
-                    store_minimum(db, card, close, header.statement, user.id)
-            except HTTPException as exc:
-                raise _refused(f"The statement's {header.field} was refused: {exc.detail}",
-                               field=header.field)
+        kind.write_header(db, user, account, loaded, result)
 
         lines = {line.line_no: line for line in statement.lines}
         unposted: List[int] = []
@@ -404,6 +521,7 @@ def apply(db: Session, user: User, card: Account, statement: BankStatement,
             txn = loaded.rows[action.row_id]
             line = lines.get(action.line_no)
             try:
+                kind.check_row(txn, action)
                 fields = _row_update(txn, action, line)
                 apply_transaction_update(db, user, txn, TransactionUpdate(**fields))
             except HTTPException as exc:
@@ -422,22 +540,23 @@ def apply(db: Session, user: User, card: Account, statement: BankStatement,
         for action in sorted((a for a in result.actions if a.kind == "create"),
                              key=lambda a: a.line_no):
             new, line = action.new_row, lines[action.line_no]
+            kind.check_create(action, loaded)
             if action.possible_duplicate_of is not None:
                 notes.append(f"line {action.line_no}: may duplicate recurring row "
                              f"{action.possible_duplicate_of}, whose date keeps it off this "
                              "statement")
             try:
                 txn = add_transaction(db, user, TransactionCreate(
-                    account_id=card.id,
+                    account_id=account.id,
                     transaction_type=(TransactionType.CREDIT if new.kind == "credit"
                                       else TransactionType.DEBIT),
                     amount=float(new.amount),
-                    currency=card.currency,
+                    currency=account.currency,
                     transaction_date=_midnight(new.transaction_date),
                     posting_date=_midnight(new.posting_date),
                     is_posted=True,
                     description=new.description,
-                    **_original(line, card, notes),
+                    **_original(line, account, notes),
                 ))
                 db.flush()
             except HTTPException as exc:
@@ -450,12 +569,12 @@ def apply(db: Session, user: User, card: Account, statement: BankStatement,
 
         db.flush()
         db.expire_all()  # verify reads the rows as stored, not as the writes left them
-        on_statement = verify(db, user, card, close, statement.line_balance, fx)
+        on_statement = kind.verify(db, user, account, loaded, statement, fx)
         for txn in on_statement:
             txn.is_reconciled = True
         for txn_id in unposted:
             db.get(Transaction, txn_id).is_reconciled = False
-        reconciliation = _record(db, user, card, close, statement)
+        reconciliation = kind.record(db, user, account, loaded, statement)
         return Applied(result, created, notes, reconciliation)
     except BaseException:
         db.rollback()
@@ -507,6 +626,226 @@ def reconciled_closes(db: Session, card_id: int) -> Dict[date, datetime]:
     return {close: at for close, at in db.query(
         StatementReconciliation.statement_close, StatementReconciliation.reconciled_at)
         .filter(StatementReconciliation.card_id == card_id)}
+
+
+# --- a savings, checking or e-wallet statement (STU-753) ---------------------------------
+
+def check_bank_account(account: Account) -> None:
+    """400 unless ``account`` is a savings, checking or e-wallet account; a card's
+    refusal names the card route."""
+    if account.account_type == AccountType.CREDIT:
+        raise HTTPException(status_code=400, detail=CARD_ROUTE.format(account=account.id))
+    if account.account_type not in ACCOUNT_TYPES:
+        raise HTTPException(status_code=400, detail=NOT_A_BANK_ACCOUNT)
+
+
+def account_view(statement: AccountStatement) -> sr.AppStatementView:
+    """The statement's period as the diff reads it; 422 unless it has ended."""
+    header = statement.header
+    if header.period_end >= manila_today():
+        raise HTTPException(status_code=422, detail="This statement's period has not ended")
+    return sr.AppStatementView(close=header.period_end,
+                               window_start=header.period_start - timedelta(days=1),
+                               placement="transaction_date")
+
+
+def _touching(account_id: int):
+    """Every row that can move the account, as ``GET /accounts/{id}/balance`` reads them."""
+    return or_(Transaction.account_id == account_id,
+               Transaction.transfer_from_account_id == account_id,
+               Transaction.transfer_to_account_id == account_id)
+
+
+def account_side(txn: Transaction, account_id: int) -> Optional[Tuple[str, Decimal]]:
+    """``(kind, amount)``: the row's effect on the account, a ``debit`` (money out) or
+    a ``credit`` (money in) by its stored figure; None when it does not move it. The
+    rule of ``GET /accounts/{id}/balance``: a transfer by its own side
+    (``transfer_sides``), any other row by its ``account_id``."""
+    if txn.transaction_type == TransactionType.TRANSFER:
+        out, received = transfer_sides(txn)
+        if txn.transfer_from_account_id == account_id:
+            return "debit", out
+        if txn.transfer_to_account_id == account_id:
+            return "credit", received
+        return None
+    if txn.account_id != account_id:
+        return None
+    amount = Decimal(str(txn.amount))
+    return ("credit", amount) if txn.transaction_type == TransactionType.CREDIT else ("debit", amount)
+
+
+def _effect(txn: Transaction, account_id: int) -> Decimal:
+    side = account_side(txn, account_id)
+    if side is None:
+        return Decimal("0")
+    return side[1] if side[0] == "credit" else -side[1]
+
+
+def load_account(db: Session, user: User, account: Account, statement: AccountStatement,
+                 fx) -> Loaded:
+    """The account's rows for ``statement`` (see the module docstring)."""
+    view = account_view(statement)
+    span = view.close - view.window_start
+    after, through = view.window_start - span, view.close + span
+    txns = db.query(Transaction).filter(_touching(account.id)).all()
+    plain = [t for t in txns if t.transaction_type != TransactionType.TRANSFER
+             and t.account_id == account.id]
+    kept, amount_of, _, _ = normalise_lines(db, account, plain, fx)
+    kept_ids = {t.id for t in kept}
+    out = Loaded(view, [], [], [])
+    for txn in txns:
+        transfer = txn.transaction_type == TransactionType.TRANSFER
+        side = account_side(txn, account.id)
+        if side is None or (not transfer and txn.id not in kept_ids):
+            continue
+        kind, amount = side if transfer else (side[0], amount_of(txn))
+        own = txn.transaction_date.date()
+        posted = bool(txn.is_posted)
+        record = sr.RowRecord(
+            id=txn.id, kind=kind, amount=amount, transaction_date=own,
+            posting_date=manila_day(txn.posting_date) if txn.posting_date else None,
+            is_posted=posted, updated_at=txn.updated_at, budget_entry_id=txn.budget_entry_id,
+            keeps_dates=transfer)
+        if posted:
+            if view.window_start < own <= view.close:
+                out.cycle.append(record)
+            elif after < own <= through:
+                out.candidates.append(record)
+            else:
+                continue
+        elif own <= through:
+            out.candidates.append(record)
+        else:
+            continue
+        out.rows[txn.id] = txn
+    return out
+
+
+def diff_account(loaded: Loaded, statement: AccountStatement) -> sr.StatementDiff:
+    """``diff_account_statement`` over ``loaded`` (read through the module)."""
+    return sr.diff_account_statement(statement, loaded.view, loaded.cycle, loaded.candidates)
+
+
+def balance_at(db: Session, account: Account, day: date) -> Decimal:
+    """The account's balance at the end of ``day``: its stored balance (what the app
+    shows as its balance, kept by every write path) less the effect of every posted
+    row dated after ``day``, whoever entered it."""
+    later = db.query(Transaction).filter(
+        _touching(account.id), Transaction.is_posted.is_(True),
+        Transaction.transaction_date >= _midnight(day + timedelta(days=1))).all()
+    stored = Decimal(str(account.balance or 0)).quantize(Decimal("0.01"))
+    return stored - sum((_effect(t, account.id) for t in later), Decimal("0"))
+
+
+def verify_account(db: Session, account: Account, statement: AccountStatement
+                   ) -> List[Transaction]:
+    """The posted rows in the statement's period, after checking they add up to its
+    change and that the account's balance at ``period_end`` is its closing balance;
+    a 409 with the gap otherwise. Reads the flushed, uncommitted rows."""
+    header = statement.header
+    rows = db.query(Transaction).filter(
+        _touching(account.id), Transaction.is_posted.is_(True),
+        Transaction.transaction_date >= _midnight(header.period_start),
+        Transaction.transaction_date < _midnight(header.period_end + timedelta(days=1)),
+    ).order_by(Transaction.id).all()
+    change = sum((_effect(t, account.id) for t in rows), Decimal("0"))
+    opening = (header.opening_balance if header.opening_balance is not None
+               else header.closing_balance - statement.change)
+    if opening + change != header.closing_balance:
+        raise _refused("After the actions the app's rows in the period do not equal the "
+                       "bank's; nothing was applied", app_change=str(change),
+                       statement_change=str(header.closing_balance - opening),
+                       gap=str(opening + change - header.closing_balance))
+    closing = balance_at(db, account, header.period_end)
+    if closing != header.closing_balance:
+        raise _refused(f"After the actions the app's balance at the end of "
+                       f"{header.period_end.isoformat()} does not equal the statement's "
+                       "closing balance; nothing was applied",
+                       app_closing_balance=str(closing),
+                       statement_closing_balance=str(header.closing_balance),
+                       gap=str(closing - header.closing_balance))
+    return rows
+
+
+def _record_account(db: Session, user: User, account: Account,
+                    statement: AccountStatement) -> AccountStatementReconciliation:
+    header = statement.header
+    values = {"account_id": account.id, "period_start": header.period_start,
+              "period_end": header.period_end, "opening_balance": header.opening_balance,
+              "closing_balance": header.closing_balance, "change": statement.change,
+              "line_count": len(statement.lines), "reconciled_by_actor": user.id}
+    upsert = pg_insert(AccountStatementReconciliation).values(**values)
+    db.execute(upsert.on_conflict_do_update(
+        constraint="uq_account_statement_reconciliations_account_end",
+        set_={**{key: upsert.excluded[key] for key in values
+                 if key not in ("account_id", "period_end")},
+              "reconciled_at": func.now()}))
+    db.flush()
+    return (db.query(AccountStatementReconciliation)
+            .filter(AccountStatementReconciliation.account_id == account.id,
+                    AccountStatementReconciliation.period_end == header.period_end)
+            .populate_existing().one())
+
+
+class _BankAccount(_Kind):
+    noun = "account"
+
+    def load(self, db, user, account, statement, fx):
+        return load_account(db, user, account, statement, fx)
+
+    def diff(self, loaded, statement):
+        return diff_account(loaded, statement)
+
+    def check_account(self, account):
+        check_bank_account(account)
+
+    def check_row(self, txn, action):
+        if txn.transaction_type == TransactionType.TRANSFER:
+            raise _refused(TRANSFER_CHANGE.format(
+                row=txn.id, source=txn.transfer_from_account_id,
+                destination=txn.transfer_to_account_id), row_id=txn.id, line_no=action.line_no)
+
+    def check_create(self, action, loaded):
+        duplicate = loaded.rows.get(action.possible_duplicate_of)
+        if duplicate is not None and duplicate.transaction_type == TransactionType.TRANSFER:
+            raise _refused(TRANSFER_DUPLICATE.format(line=action.line_no, row=duplicate.id),
+                           line_no=action.line_no, row_id=duplicate.id)
+
+    def verify(self, db, user, account, loaded, statement, fx):
+        return verify_account(db, account, statement)
+
+    def record(self, db, user, account, loaded, statement):
+        return _record_account(db, user, account, statement)
+
+
+ACCOUNT = _BankAccount()
+
+
+def apply_account(db: Session, user: User, account: Account, statement: AccountStatement,
+                  fingerprint: str, fx) -> Applied:
+    """Apply ``statement`` to a savings, checking or e-wallet ``account`` (see the
+    module docstring). Uncommitted: the caller commits. Every refusal rolls the
+    session back before it is raised."""
+    return _apply(ACCOUNT, db, user, account, statement, fingerprint, fx)
+
+
+def account_as_out(result: sr.StatementDiff, *, dry_run: bool,
+                   created: Optional[Dict[int, int]] = None, notes: Sequence[str] = (),
+                   reconciliation: Optional[AccountStatementReconciliation] = None) -> dict:
+    """The ``AccountReconcileOut`` body."""
+    body = as_out(result, dry_run=dry_run, created=created, notes=notes)
+    if reconciliation is not None:
+        body["reconciliation"] = {
+            "period_start": reconciliation.period_start,
+            "period_end": reconciliation.period_end,
+            "opening_balance": reconciliation.opening_balance,
+            "closing_balance": reconciliation.closing_balance,
+            "change": reconciliation.change,
+            "line_count": reconciliation.line_count,
+            "reconciled_at": reconciliation.reconciled_at,
+            "reconciled_by_actor": reconciliation.reconciled_by_actor,
+        }
+    return body
 
 
 def as_out(result: sr.StatementDiff, *, dry_run: bool, created: Optional[Dict[int, int]] = None,
