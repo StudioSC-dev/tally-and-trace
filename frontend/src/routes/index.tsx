@@ -11,6 +11,7 @@ import { estimateText, estimateTitle } from '../utils/fx'
 import type { EstimateLabels } from '../utils/fx'
 import { BudgetUsageBar } from '../components/BudgetUsageBar'
 import { CurrencyControl } from '../components/CurrencyControl'
+import { PageHeader } from '../components/PageHeader'
 import { useSelectedCurrency } from '../hooks/useSelectedCurrency'
 import { useManilaDay } from '../hooks/useManilaDay'
 import { FxNotice } from '../components/FxNotice'
@@ -354,27 +355,20 @@ export function Dashboard() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 py-8 space-y-8">
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-ink">Dashboard</h1>
-          <p className="text-sm text-muted mt-1">Your financial overview</p>
-        </div>
-        <TagFilter value={selectedTag} onChange={setSelectedTag} />
-        <CurrencyControl currencies={snapshot?.currencies} value={currency} onChange={setCurrency} />
-        <div className="flex flex-col gap-1">
-          <SegmentedControl
-            className="flex max-w-full space-x-1 overflow-x-auto bg-sunken p-1"
-            aria-label="Period for actual totals"
-            options={(['week', 'month', 'year'] as const).map((period) => ({ value: period, label: period }))}
-            value={selectedPeriod}
-            onChange={setSelectedPeriod}
-            segmentClassName="px-4 py-1.5 text-sm capitalize"
-          />
-          <p className="text-xs text-muted" data-testid="period-note">Period applies to actual totals, not the projection.</p>
-        </div>
-      </div>
+    <div className="page">
+      {/* The title, then its filters grouped on the right; on a phone the filters take the next row. */}
+      <PageHeader title="Dashboard" stackOnPhone>
+        <TagFilter value={selectedTag} onChange={setSelectedTag} className="min-w-0 flex-1 sm:flex-none" compact />
+        <CurrencyControl currencies={snapshot?.currencies} value={currency} onChange={setCurrency} segmentClassName="px-1.5 py-1.5 text-sm sm:px-4" compactOnPhone />
+        <SegmentedControl
+          className="flex shrink-0 bg-sunken p-1 sm:space-x-1"
+          aria-label="Period for actual totals"
+          options={(['week', 'month', 'year'] as const).map((period) => ({ value: period, label: period }))}
+          value={selectedPeriod}
+          onChange={setSelectedPeriod}
+          segmentClassName="px-1.5 py-1.5 text-sm capitalize sm:px-4"
+        />
+      </PageHeader>
 
       <FxNotice fx={snapshot?.fx} />
 

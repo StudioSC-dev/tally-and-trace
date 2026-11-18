@@ -13,6 +13,7 @@ import { ShortfallBanner } from '../components/ShortfallBanner'
 import { useGetForecastTimelineQuery } from '../store/api'
 import { RunningBalanceChart } from '../components/RunningBalanceChart'
 import { TagFilter } from '../components/TagFilter'
+import { PageHeader } from '../components/PageHeader'
 import { SegmentedControl } from '../components/SegmentedControl'
 
 import { overflowPullsFrom, timelineEventAccountLabel, timelineEventAmount, timelineEventName } from '@tally-trace/shared'
@@ -107,14 +108,8 @@ function ForecastPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 py-8 space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-ink">Cash-Flow Timeline</h1>
-          <p className="text-sm text-muted mt-1">
-            Running balance walked in date order. It surfaces the trough before payday, not just the month-end total.
-          </p>
-        </div>
+    <div className="page">
+      <PageHeader title="Cash-Flow Timeline">
         <TagFilter value={selectedTag} onChange={setSelectedTag} />
         {pinnedId !== null && !pinLost ? (
           <SegmentedControl
@@ -130,7 +125,7 @@ function ForecastPage() {
             segmentClassName="px-4 py-1.5 text-sm"
           />
         ) : (
-          <Link to="/settings" className="text-sm text-muted hover:text-ink hover:underline self-start sm:self-center">
+          <Link to="/settings" className="text-sm text-muted hover:text-ink hover:underline">
             Pin a main account in Settings
           </Link>
         )}
@@ -143,7 +138,10 @@ function ForecastPage() {
           onChange={setDays}
           segmentClassName="px-4 py-1.5 text-sm"
         />
-      </div>
+      </PageHeader>
+      <p className="text-sm text-muted">
+        Running balance walked in date order. It surfaces the trough before payday, not just the month-end total.
+      </p>
 
       {pinLost && (
         <p className="text-sm text-muted" role="status" data-testid="main-account-lost">

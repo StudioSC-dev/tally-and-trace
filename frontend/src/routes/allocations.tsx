@@ -59,6 +59,7 @@ import { RecurringEntryFormModal } from '../components/RecurringEntryFormModal'
 import { EntryCreditWarningRow, KindCreditLines } from '../components/AllocationsCredit'
 import type { KindCreditState } from '../components/AllocationsCredit'
 import { ListSheet } from '../components/ListSheet'
+import { PageHeader } from '../components/PageHeader'
 import { Row } from '../components/Row'
 import { TagFilter } from '../components/TagFilter'
 import { MarkPaidDialog } from '../components/MarkPaidDialog'
@@ -1751,10 +1752,8 @@ export function AllocationsPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-3 py-6 sm:px-4 lg:px-6 space-y-6">
-      <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-        <h1 className="text-3xl font-bold text-ink">Allocations</h1>
+    <div className="page">
+      <PageHeader title="Allocations">
         {activeTab !== 'wishlist' && (
           <button
               onClick={openCreateModal}
@@ -1763,7 +1762,7 @@ export function AllocationsPage() {
               {activeTab === 'subscriptions' ? 'Add Recurring Entry' : 'Add Allocation'}
           </button>
         )}
-      </div>
+      </PageHeader>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border border-line p-2 bg-surface">
           <nav className="flex flex-wrap gap-1">
             {[
@@ -1788,7 +1787,6 @@ export function AllocationsPage() {
             Switch tabs to view recurring subscriptions, monthly budgets, savings envelopes, or your wishlist.
           </p>
                 </div>
-      </div>
 
       {activeTab === 'subscriptions' && (
         <div>

@@ -1,4 +1,5 @@
 import { LoadingLine, Skeleton } from '../components/Loading'
+import { PageHeader } from '../components/PageHeader'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { queryPhase } from '@tally-trace/shared'
@@ -56,27 +57,23 @@ function HouseholdPage() {
     views?.find((view) => view.sharer_id === sharer) ?? views?.find((view) => !view.is_self) ?? views?.[0]
 
   return (
-    <div className="max-w-5xl mx-auto px-3 py-6 sm:px-4 lg:px-6 space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <Link to="/accounts" className="text-sm text-muted hover:text-ink" data-testid="household-back">
-            &larr; Accounts
-          </Link>
-          {viewsPhase === 'pending' ? (
+    <div className="page">
+      <PageHeader
+        title={current ? (current.is_self ? 'Your Household' : `${current.sharer_name}'s Household`) : 'Household'}
+        titleTestId="household-title"
+        placeholder={
+          viewsPhase === 'pending' ? (
             <div data-testid="household-title-pending">
               <Skeleton className="h-8 w-56" />
             </div>
-          ) : (
-            <h1 className="text-2xl font-bold text-ink" data-testid="household-title">
-              {current ? (current.is_self ? 'Your Household' : `${current.sharer_name}'s Household`) : 'Household'}
-            </h1>
-          )}
-          <p className="text-sm text-muted">
-            The accounts and records tagged Household, read-only.
-          </p>
-        </div>
+          ) : undefined
+        }
+      >
+        <Link to="/accounts" className="text-sm text-muted hover:text-ink" data-testid="household-back">
+          &larr; Accounts
+        </Link>
         {views && views.length > 1 && (
-          <div>
+          <div className="flex items-center gap-2">
             <label className="label" htmlFor="household-sharer">Household</label>
             <select
               id="household-sharer"
@@ -93,7 +90,10 @@ function HouseholdPage() {
             </select>
           </div>
         )}
-      </div>
+      </PageHeader>
+      <p className="text-sm text-muted">
+        The accounts and records tagged Household, read-only.
+      </p>
 
       {isLoading && <LoadingLine>Loading...</LoadingLine>}
       {error && (
@@ -110,7 +110,7 @@ function HouseholdPage() {
                 key={id}
                 selected={tab === id}
                 onClick={() => setTab(id)}
-                className="flex-1 px-3 py-1.5 text-sm"
+                className="flex-1 px-2 py-1.5 text-sm sm:px-3"
                 data-testid={`household-tab-${id}`}
               >
                 {label}
