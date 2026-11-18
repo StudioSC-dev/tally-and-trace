@@ -617,6 +617,8 @@ interface Control {
   selection: boolean
   /** A selection control's look, which the migration must leave alone. */
   look: string
+  /** Whether STU-682's 44px coarse-pointer floor applies to it (`.button`, `.seg`, `.tap-target`). Not in the baseline. */
+  floored?: boolean
 }
 
 /** Every visible `button` and `a` in the scope, in document order. */
@@ -635,6 +637,7 @@ const controlsIn = (scope: Locator): Promise<Control[]> =>
             variant: e.getAttribute('data-variant'),
             selection: isSelection,
             look: isSelection ? [cs.backgroundColor, cs.color, cs.fontWeight, cs.boxShadow, cs.borderTopColor, cs.borderRadius].join(' | ') : '',
+            floored: e.matches('.button, .seg, .tap-target'),
           }
         }),
     SELECTION,
@@ -1084,10 +1087,13 @@ test.describe('AC6: button migration preserves surrounding behavior and layout',
       expect(controls.map((c) => c.name), 'every button and link keeps its accessible name, in order').toEqual(base.controls.map((c) => c.name))
       const migrated = controls.flatMap((c, i) => (c.variant === null ? [] : [{ c, b: base.controls[i] }]))
       expect(migrated.map(({ c }) => `${c.name}: ${c.icons}`), 'migrated controls keep their icons').toEqual(migrated.map(({ b }) => `${b.name}: ${b.icons}`))
-      const heights = migrated.map(({ c, b }) => ({ name: c.name, base: b.height, now: c.height }))
+      // STU-682: on a coarse pointer (the phone project) a control under the 44px floor is at least 44px tall, so its
+      // base height there is floored at 44; desktop keeps every base height exactly.
+      const floor = (h: number, c: Control | undefined): number => (project === 'phone' && c?.floored ? Math.max(h, 44) : h)
+      const heights = migrated.map(({ c, b }) => ({ name: c.name, base: floor(b.height, c), now: c.height }))
       expect(heights.filter((h) => Math.abs(h.now - h.base) > 1), 'migrated controls more than 1px off their base height').toEqual([])
       const selectionNow = controls.filter((c) => c.selection).map((c) => `${c.name}: ${c.look}, ${c.height}px`)
-      const selectionBase = base.controls.filter((c) => c.selection).map((c) => `${c.name}: ${c.look}, ${c.height}px`)
+      const selectionBase = base.controls.flatMap((c, i) => (c.selection ? [`${c.name}: ${c.look}, ${floor(c.height, controls[i])}px`] : []))
       expect(selectionNow, 'selection controls and tabs are untouched').toEqual(selectionBase)
       expect(text, 'labels and status text are untouched').toBe(base.text)
     })

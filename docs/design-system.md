@@ -50,7 +50,10 @@ spine across the top and a red pencil that comes out only when something is in t
 7. **Motion answers an action.** There is no entrance choreography, and
    `prefers-reduced-motion` reduces every duration to 1ms.
 8. **One icon set per app** and no emoji (ban 3).
-9. **Touch targets** are at least 44px on coarse pointers.
+9. **Touch targets** are at least 44px tall and wide on coarse pointers, `@media (pointer: coarse)`
+   in `index.css`. `Button`, segments and tabs, the pager, fields and `.tap-target` (a link used as an
+   action, an icon button) carry it; a ListSheet row keeps its pitch. Links inside a sentence are exempt.
+   The Playwright `phone` project (`hasTouch`) matches the condition; `desktop` does not.
 10. **One face, self-hosted via `@fontsource`,** with ₱ (U+20B1) and true tabular
     figures verified in a browser: IBM Plex Sans (see Type).
 
