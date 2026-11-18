@@ -75,7 +75,7 @@ the same apply (``_apply`` with ``ACCOUNT``) over the account's rows; what diffe
 
 - Which statement: the period the header gives, ``period_start`` through
   ``period_end``; it must have ended (before Manila's today). Only a savings,
-  checking or e-wallet account (400 otherwise; a card's names the card route).
+  checking, e-wallet or cash account (400 otherwise; a card's names the card route).
 - Rows (``load_account``): every row touching the account, whoever entered them
   (as ``GET /accounts/{id}/balance`` reads them), each by its effect on this
   account (``account_side``): a debit or credit on it by its amount; a transfer out
@@ -144,10 +144,12 @@ CLOSING_DAY = ("This statement closes on {statement}, but this card's cycle clos
 # A statement closing at most this many days from one of the card's closes is that
 # statement with the closing day moved (refused as such); farther, it is not the card's.
 NEAR_CLOSE_DAYS = 7
-ACCOUNT_TYPES = (AccountType.SAVINGS, AccountType.CHECKING, AccountType.E_WALLET)
+ACCOUNT_TYPES = (AccountType.SAVINGS, AccountType.CHECKING, AccountType.E_WALLET,
+                 AccountType.CASH)
 CARD_ROUTE = ("This is a credit card: reconcile its statement with "
               "POST /cards/{account}/statements/reconcile")
-NOT_A_BANK_ACCOUNT = "Only a savings, checking or e-wallet account's statement is reconciled here"
+NOT_A_BANK_ACCOUNT = ("Only a savings, checking, e-wallet or cash account's statement is "
+                      "reconciled here")
 TRANSFER_CHANGE = ("Row {row} is a transfer between accounts {source} and {destination}: "
                    "changing it here would change both; edit the transfer and run the dry "
                    "run again")
@@ -631,8 +633,8 @@ def reconciled_closes(db: Session, card_id: int) -> Dict[date, datetime]:
 # --- a savings, checking or e-wallet statement (STU-753) ---------------------------------
 
 def check_bank_account(account: Account) -> None:
-    """400 unless ``account`` is a savings, checking or e-wallet account; a card's
-    refusal names the card route."""
+    """400 unless ``account`` is a savings, checking, e-wallet or cash account; a
+    card's refusal names the card route."""
     if account.account_type == AccountType.CREDIT:
         raise HTTPException(status_code=400, detail=CARD_ROUTE.format(account=account.id))
     if account.account_type not in ACCOUNT_TYPES:
