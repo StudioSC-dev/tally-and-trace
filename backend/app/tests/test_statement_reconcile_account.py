@@ -58,7 +58,7 @@ def row(rid, when, amount, kind="debit", posting=None, posted=True, entry=None,
         transfer=False, updated=STAMP, fee=None) -> RowRecord:
     return RowRecord(id=rid, kind=kind, amount=D(amount), transaction_date=when,
                      posting_date=posting, is_posted=posted, updated_at=updated,
-                     budget_entry_id=entry, keeps_dates=transfer,
+                     budget_entry_id=entry, keeps_posting_date=transfer,
                      fee=None if fee is None else D(fee))
 
 
@@ -190,23 +190,38 @@ def test_recurring_row_keeps_its_transaction_date():
         "credit", D("30000.00"), day(7, 16), None, "Salary"), 6),)
 
 
-def test_a_transfer_keeps_its_dates_and_is_matched():
+def test_a_transfer_in_the_period_keeps_its_dates_whatever_day_the_line_prints():
     st = statement([line(1, day(7, 11), "5000.00", posting=day(7, 12))])
-    diff = run(st, [row(7, day(7, 10), "5000.00", transfer=True)])
+    diff = run(st, [row(7, day(7, 10), "5000.00", posting=day(7, 9), transfer=True)])
     assert diff.balanced and diff.actions == (Action("matched", 1, 7),)
 
 
-def test_a_transfer_off_the_period_is_not_pulled_onto_it():
+def test_an_unposted_transfer_moved_in_takes_the_lines_date_and_keeps_its_posting_date():
+    st = statement([line(1, day(7, 11), "5000.00", posting=day(7, 12))])
+    diff = run(st, (), [row(7, day(7, 10), "5000.00", posting=day(7, 9), posted=False,
+                            transfer=True)])
+    assert diff.actions == (Action("move", 1, 7, (
+        FieldChange("transaction_date", day(7, 10), day(7, 11)),
+        FieldChange("is_posted", False, True))),)
+
+
+def test_a_transfer_off_the_period_is_moved_onto_it():
     st = statement([line(1, day(7, 31), "5000.00")])
     transfer = row(7, day(8, 1), "5000.00", "debit", transfer=True)
     diff = run(st, (), [transfer])
     assert diff.balanced
-    assert diff.actions == (Action("create", 1, None, (), NewRow(
-        "debit", D("5000.00"), day(7, 31), None, "Line 1"), 7),)
+    assert diff.actions == (Action("move", 1, 7, (
+        FieldChange("transaction_date", day(8, 1), day(7, 31)),)),)
+
+
+def test_a_recurring_transfer_keeps_both_its_dates():
+    st = statement([line(1, day(7, 11), "5000.00", posting=day(7, 12))])
+    diff = run(st, [row(7, day(7, 10), "5000.00", entry=5, transfer=True)])
+    assert diff.actions == (Action("matched", 1, 7),)
 
 
 def test_a_transfer_differing_in_amount_is_an_update_of_the_amount_only():
-    st = statement([line(1, day(7, 11), "5015.00")])
+    st = statement([line(1, day(7, 10), "5015.00")])
     diff = run(st, [row(7, day(7, 10), "5000.00", transfer=True)])
     assert diff.actions == (
         Action("update", 1, 7, (FieldChange("amount", D("5000.00"), D("5015.00")),)),)
@@ -361,10 +376,13 @@ def test_property_simulated_period_equals_statement():
             [x.line_no for x in st.lines], case
         acted = {a.row_id for a in diff.actions}
         assert all(r.id in acted for r in cycle), case
-        # A transfer is never given a date.
-        transfers = {r.id for r in (*cycle, *candidates) if r.keeps_dates}
-        assert not any(c.field in ("transaction_date", "posting_date")
+        # A transfer keeps its posting date, and its transaction date in the period.
+        transfers = {r.id for r in (*cycle, *candidates) if r.keeps_posting_date}
+        in_period = {r.id for r in cycle if r.keeps_posting_date}
+        assert not any(c.field == "posting_date"
                        for a in diff.actions if a.row_id in transfers for c in a.changes), case
+        assert not any(c.field == "transaction_date"
+                       for a in diff.actions if a.row_id in in_period for c in a.changes), case
     assert kinds_seen == {"matched", "update", "move", "create", "unpost"}
 
 

@@ -80,11 +80,12 @@ differences:
 - Rows and lines are ``debit`` (money out) or ``credit`` (money in); a debit counts
   like a charge in ``line_balance``, so the statement's line balance is debits less
   credits. There are no payments and no header diff.
-- A transfer between two accounts is one row carrying both sides, each placed by the
-  same date; its ``RowRecord`` has ``keeps_dates``. It keeps both its dates whatever
-  the line says (the other account's statement may print another day), so, like a
-  recurring candidate, it is paired only where its own date lands, and a ``create``
-  that it was left out for names it in ``possible_duplicate_of``.
+- A transfer between two accounts is one row carrying both sides, each placed by its
+  one ``transaction_date``; its ``RowRecord`` has ``keeps_posting_date`` (STU-774). It
+  is paired like any row. In the period it keeps both its dates whatever day the line
+  prints (the other account's statement may print another); moved in from outside the
+  period it takes the line's ``transaction_date`` (so the other account's side moves
+  with it) and keeps its ``posting_date``, which places a card's cash advance.
 - The fee pairing, before rule 1 (STU-774): the source side of a transfer with a fee
   (its ``RowRecord.fee``, set only on a bank account's statement) is one row whose
   amount is the transfer's amount plus its fee, while a bank may print the fee as a
@@ -124,8 +125,9 @@ class RowRecord:
     is_posted: bool
     updated_at: Optional[datetime]
     budget_entry_id: Optional[int] = None
-    # One side of a transfer on a bank account's statement: its dates are kept.
-    keeps_dates: bool = False
+    # One side of a transfer on a bank account's statement: it keeps its posting date,
+    # and its transaction date unless it is moved in from outside the period.
+    keeps_posting_date: bool = False
     # The source side of a transfer on a bank account's statement: the fee inside
     # ``amount`` (``amount`` is the transfer's amount plus it), for the fee pairing.
     fee: Optional[Decimal] = None
@@ -336,8 +338,11 @@ def _lands(view: AppStatementView, transaction_date: date, posting_date: Optiona
 def _target_dates(view: AppStatementView, line: StatementLine, rank: int, row: RowRecord
                   ) -> Tuple[date, Optional[date]]:
     """The dates ``row`` takes when paired with ``line`` (see the module docstring)."""
-    if row.keeps_dates:
-        return row.transaction_date, row.posting_date
+    if row.keeps_posting_date:
+        # In the period its day is kept (the other account's line may print another);
+        # moved in, it takes the line's.
+        kept = row.budget_entry_id is not None or rank == CYCLE
+        return (row.transaction_date if kept else line.transaction_date), row.posting_date
     if row.budget_entry_id is None:
         return line.transaction_date, line.posting_date
     own = row.transaction_date
@@ -385,9 +390,8 @@ def _check_rows(cycle_rows, candidate_rows, payment_rows) -> None:
 
 
 def _keeps_day(row: RowRecord) -> bool:
-    """A row that keeps its own transaction date: linked to a recurring entry, or a
-    transfer side that keeps both dates."""
-    return row.budget_entry_id is not None or row.keeps_dates
+    """A row that keeps its own transaction date: one linked to a recurring entry."""
+    return row.budget_entry_id is not None
 
 
 def _sort_key(action: Action):

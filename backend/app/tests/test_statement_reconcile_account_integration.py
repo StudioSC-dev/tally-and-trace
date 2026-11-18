@@ -367,9 +367,11 @@ def test_a_transfer_and_its_fee_printed_apart_are_matched_to_the_one_row(w):
         Decimal("44985.00"), Decimal("-5015.00"), 2)
 
 
-def test_an_ambiguous_fee_line_is_not_paired_and_is_refused_as_before(w):
-    """Two lines could be the fee: the transfer falls to the usual rules, which would
-    change it, so the apply is refused as any change to a transfer is."""
+def test_an_ambiguous_fee_line_refuses_the_unpost_of_the_transfer(w):
+    """Two lines could be the fee: the transfer is not paired, the usual rules would
+    unpost it and create its lines as plain debits (the savings account would lose what
+    it received), so the unpost is refused: a line the diff creates is within a day of
+    it. Nothing is written."""
     transfer = _transfer(w, "2027-02-10", 5000, fee=15)
     charge = _row(w, "2027-02-10", 15, account=w["checking"], description="Bank charge")
     statement = _statement([
@@ -380,10 +382,156 @@ def test_an_ambiguous_fee_line_is_not_paired_and_is_refused_as_before(w):
         ("create", 1, None), ("matched", 2, charge), ("create", 3, None),
         ("unpost", None, transfer)]
     before = _snapshot(w)
+    balances = (_balance(w, w["checking"]), _balance(w, w["savings"]))
     r = _post(w, statement, False, dry["fingerprint"], account=w["checking"])
     assert r.status_code == 409, r.text
-    assert r.json()["detail"]["message"].startswith(f"Row {transfer} is a transfer")
+    assert r.json()["detail"]["message"] == (
+        f"Row {transfer} is a transfer and line 1 may be it; edit the transfer or the "
+        "statement and run the dry run again")
     assert _snapshot(w) == before
+    assert (_balance(w, w["checking"]), _balance(w, w["savings"])) == balances == (
+        Decimal("44970"), Decimal("25000"))
+
+
+def test_an_amount_line_without_the_transfers_fee_is_refused(w):
+    """The bank printed the fee more than a day away: the amount line would be read as
+    amount plus fee (4,985 to savings), so the update is refused."""
+    transfer = _transfer(w, "2027-02-10", 5000, fee=15)
+    statement = _statement([_line(1, "2027-02-10", "5000.00"), _line(2, "2027-02-12", "15.00")])
+    dry = _dry(w, statement, account=w["checking"])
+    assert _kinds(dry) == [("update", 1), ("create", 2)]
+    before = _snapshot(w)
+    r = _post(w, statement, False, dry["fingerprint"], account=w["checking"])
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["message"] == (
+        f"Line 1 is transfer {transfer}'s amount without its fee 15.00; its fee line was not "
+        "found within a day of it")
+    assert _snapshot(w) == before
+    assert _balance(w, w["savings"]) == Decimal("25000")
+
+
+# --- STU-774: the statement wins on a transfer; the other account follows ---------------------
+
+def test_a_destination_line_changes_the_amount_and_the_source_follows(w):
+    transfer = _transfer(w, "2027-02-10", 5000, fee=15)
+    statement = _statement([_line(1, "2027-02-10", "4990.00", kind="credit")],
+                           opening=Decimal("20000.00"))
+    body = _apply(w, statement, account=w["savings"])
+    assert _kinds(body) == [("update", 1)]
+    row = _txn(w, transfer)
+    assert (row["amount"], row["transfer_fee"], row["received_amount"]) == (4990, 15, None)
+    assert _balance(w, w["savings"]) == Decimal("24990") == _history_at_end(w, w["savings"])
+    assert _balance(w, w["checking"]) == Decimal("44995")  # 50,000 less 4,990 and the fee
+
+
+def test_a_destination_line_across_currencies_changes_the_received_amount_only(w):
+    usd = sw_post(w["client"], w["me"], "/accounts/", {
+        "name": "Dollars", "account_type": "savings", "currency": "USD", "balance": 1_000})["id"]
+    transfer = sw_post(w["client"], w["me"], "/transactions/", {
+        "account_id": usd, "transaction_type": "transfer", "amount": 100,
+        "received_amount": 5_600, "transfer_from_account_id": usd,
+        "transfer_to_account_id": w["savings"], "description": "From dollars",
+        "transaction_date": "2027-02-10T00:00:00", "is_posted": True})["id"]
+    statement = _statement([_line(1, "2027-02-10", "5550.00", kind="credit")],
+                           opening=Decimal("20000.00"))
+    body = _apply(w, statement, account=w["savings"])
+    assert _kinds(body) == [("update", 1)]
+    row = _txn(w, transfer)
+    assert (row["amount"], row["received_amount"]) == (100, 5550)
+    assert _balance(w, w["savings"]) == Decimal("25550")
+    assert _balance(w, usd) == Decimal("900")
+
+
+def test_a_source_line_changes_the_amount_and_keeps_the_fee(w):
+    transfer = _transfer(w, "2027-02-10", 5000, fee=15)
+    body = _apply(w, _statement([_line(1, "2027-02-10", "5020.00")]), account=w["checking"])
+    assert _kinds(body) == [("update", 1)]
+    row = _txn(w, transfer)
+    assert (row["amount"], row["transfer_fee"]) == (5005, 15)
+    assert _balance(w, w["checking"]) == Decimal("44980") == _history_at_end(w, w["checking"])
+    assert _balance(w, w["savings"]) == Decimal("25005")
+
+
+def test_a_source_line_below_the_fee_is_refused(w):
+    transfer = _transfer(w, "2027-02-10", 5000, fee=15)
+    statement = _statement([_line(1, "2027-02-10", "10.00")])
+    dry = _dry(w, statement, account=w["checking"])
+    assert _kinds(dry) == [("update", 1)]
+    before = _snapshot(w)
+    r = _post(w, statement, False, dry["fingerprint"], account=w["checking"])
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["message"] == (
+        f"Row {transfer}: the statement's amount is less than its fee")
+    assert _snapshot(w) == before
+
+
+def test_a_transfer_missing_from_the_statement_is_unposted_and_the_other_account_follows(w):
+    """No line is near it (the 5,000.00 line is ten days later), so the unpost is not
+    the ambiguous case: the transfer is unposted and the line created."""
+    transfer = _transfer(w, "2027-02-10", 5000, fee=15)
+    body = _apply(w, _statement([_line(1, "2027-02-20", "5000.00")]), account=w["checking"])
+    assert _kinds(body) == [("create", 1), ("unpost", None)]
+    assert _txn(w, transfer)["is_posted"] is False
+    assert _balance(w, w["checking"]) == Decimal("45000") == _history_at_end(w, w["checking"])
+    assert _balance(w, w["savings"]) == Decimal("20000")
+
+
+def test_a_transfer_dated_before_the_period_is_moved_in_and_keeps_its_posting_date(w):
+    transfer = sw_post(w["client"], w["me"], "/transactions/", {
+        "account_id": w["checking"], "transaction_type": "transfer", "amount": 5000,
+        "transfer_from_account_id": w["checking"], "transfer_to_account_id": w["savings"],
+        "description": "To savings", "transaction_date": "2027-01-29T00:00:00",
+        "posting_date": "2027-01-30T00:00:00", "is_posted": True})["id"]
+    statement = _statement([_line(1, "2027-02-01", "5000.00")])
+    dry = _dry(w, statement, account=w["checking"])
+    (move,) = dry["actions"]
+    assert (move["kind"], move["row_id"], [c["field"] for c in move["changes"]]) == (
+        "move", transfer, ["transaction_date"])
+    _apply(w, statement, account=w["checking"])
+    row = _txn(w, transfer)
+    assert row["transaction_date"].startswith("2027-02-01")
+    assert row["posting_date"].startswith("2027-01-30")
+    assert _balance(w, w["checking"]) == Decimal("45000") == _history_at_end(w, w["checking"])
+    assert _balance(w, w["savings"]) == Decimal("25000")
+
+
+def test_a_transfer_printed_a_day_apart_reconciles_on_both_accounts(w):
+    """Each bank prints the transfer on another day, both in the period: neither apply
+    writes a date, so the second is not refused by the first's reconciliation."""
+    transfer = sw_post(w["client"], w["me"], "/transactions/", {
+        "account_id": w["checking"], "transaction_type": "transfer", "amount": 5000,
+        "transfer_from_account_id": w["checking"], "transfer_to_account_id": w["savings"],
+        "description": "To savings", "transaction_date": "2027-02-10T00:00:00",
+        "posting_date": "2027-02-10T00:00:00", "is_posted": True})["id"]
+    checking = _apply(w, _statement([_line(1, "2027-02-11", "5000.00")]),
+                      account=w["checking"])
+    savings = _apply(w, _statement([_line(1, "2027-02-09", "5000.00", kind="credit")],
+                                   opening=Decimal("20000.00")), account=w["savings"])
+    assert _kinds(checking) == _kinds(savings) == [("matched", 1)]
+    row = _txn(w, transfer)
+    assert row["transaction_date"].startswith("2027-02-10")
+    assert row["posting_date"].startswith("2027-02-10")
+    assert row["is_reconciled"] is True
+    assert len(_reconciliations(w, w["checking"])) == len(_reconciliations(w, w["savings"])) == 1
+
+
+def test_a_loan_payment_seen_from_the_funding_account_is_rewritten_by_the_loan_rules(w):
+    """A loan payment is a transfer whose fee is the interest: a differing line on the
+    funding account's statement changes its principal, the interest kept."""
+    loan = sw_post(w["client"], w["me"], "/accounts/", {
+        "name": "Loan", "account_type": "loan", "balance": -100_000, "loan_kind": "auto",
+        "loan_annual_rate": 10, "loan_term_months": 24, "loan_payment_amount": 4_615,
+        "loan_first_payment_date": "2027-02-04", "payment_account_id": w["checking"]})["id"]
+    r = w["client"].post(f"{API}/accounts/{loan}/loan-payment", headers=w["me"]["headers"], json={
+        "principal": 4_000, "interest": 615, "transaction_date": "2027-02-04T00:00:00"})
+    assert r.status_code == 200, r.text
+    payment = r.json()["id"]
+    body = _apply(w, _statement([_line(1, "2027-02-04", "4700.00")]), account=w["checking"])
+    assert _kinds(body) == [("update", 1)]
+    row = _txn(w, payment)
+    assert (row["amount"], row["transfer_fee"]) == (4085, 615)
+    assert _balance(w, w["checking"]) == Decimal("45300")
+    assert _balance(w, loan) == Decimal("-95915")
 
 
 # --- STU-774: a transfer the other account has reconciled is never changed --------------------
@@ -448,44 +596,22 @@ def test_a_cash_advance_on_a_reconciled_card_statement_is_refused(w):
     assert _kinds(dry) == [("update", 1)]
 
 
-def test_a_change_to_a_transfer_is_refused(w):
-    transfer = _transfer(w, "2027-02-10", 5000)
-    statement = _statement([_line(1, "2027-02-10", "4990.00", kind="credit")],
-                           opening=Decimal("20000.00"))
-    dry = _dry(w, statement, account=w["savings"])
-    assert _kinds(dry) == [("update", 1)]
-    before = _snapshot(w)
-    r = _post(w, statement, False, dry["fingerprint"], account=w["savings"])
-    assert r.status_code == 409, r.text
-    detail = r.json()["detail"]
-    assert detail["message"].startswith(
-        f"Row {transfer} is a transfer between accounts {w['checking']} and {w['savings']}")
-    assert _snapshot(w) == before
+def test_a_move_of_a_transfer_the_other_account_reconciled_is_refused(w):
+    transfer = _transfer(w, "2027-01-30", 5000)
+    _apply(w, _statement([_line(1, "2027-01-30", "5000.00", kind="credit")],
+                         opening=Decimal("20000.00"), start="2027-01-01", end="2027-01-31"),
+           account=w["savings"])
+    dry = _refused_as_reconciled(w, _statement([_line(1, "2027-02-01", "5000.00")]), transfer,
+                                 w["savings"], "for 2027-01-01 to 2027-01-31")
+    assert _kinds(dry) == [("move", 1)]
 
 
-def test_unposting_a_transfer_is_refused(w):
-    transfer = _transfer(w, "2027-02-10", 5000)
-    statement = _statement([])
-    dry = _dry(w, statement, account=w["checking"])
-    assert _kinds(dry) == [("unpost", None)]
-    before = _snapshot(w)
-    r = _post(w, statement, False, dry["fingerprint"], account=w["checking"])
-    assert r.status_code == 409, r.text
-    assert f"Row {transfer} is a transfer" in r.json()["detail"]["message"]
-    assert _snapshot(w) == before
-
-
-def test_a_line_that_may_be_a_transfer_off_the_period_is_not_created(w):
+def test_a_redate_into_a_period_the_other_account_reconciled_is_refused(w):
     transfer = _transfer(w, "2027-03-01", 5000)
-    statement = _statement([_line(1, "2027-02-28", "5000.00")])
-    dry = _dry(w, statement, account=w["checking"])
-    (create,) = dry["actions"]
-    assert (create["kind"], create["possible_duplicate_of"]) == ("create", transfer)
-    before = _snapshot(w)
-    r = _post(w, statement, False, dry["fingerprint"], account=w["checking"])
-    assert r.status_code == 409, r.text
-    assert f"may be transfer row {transfer}" in r.json()["detail"]["message"]
-    assert _snapshot(w) == before
+    _reconcile_savings_february(w, transfer_line=False)
+    dry = _refused_as_reconciled(w, _statement([_line(1, "2027-02-28", "5000.00")]), transfer,
+                                 w["savings"], "for 2027-02-01 to 2027-02-28")
+    assert _kinds(dry) == [("move", 1)]
 
 
 # --- AC3: a failed verify rolls everything back -----------------------------------------------
