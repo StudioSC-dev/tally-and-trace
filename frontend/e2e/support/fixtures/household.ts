@@ -21,7 +21,7 @@
  * `wishlistRoutes(data)` answers the Allocations Wishlist tab's calls with an empty wishlist.
  *
  * `with*` helpers derive a variant for one state (a main account, one account's balance, zero-amount rows,
- * a zero forecast event, dollars, five currencies, a long account history, long Due card lists); `cardStatements` answers the card's
+ * a zero forecast event, dollars, five currencies, a long account history, long Due card lists, a funding shortfall); `cardStatements` answers the card's
  * statements; the create factories (`createdAccount`, `createAccountRoute`,
  * `householdCreateRoutes`) answer the dialogs' saves.
  */
@@ -32,6 +32,7 @@ import type {
   AccountPermissions,
   AccountShare,
   AccountShares,
+  AccountShortfall,
   Allocation,
   BudgetEntry,
   BudgetEntryInput,
@@ -40,6 +41,7 @@ import type {
   CardStatementDue,
   CardStatements,
   CashflowTimeline,
+  CashflowShortfall,
   CashflowTimelineEvent,
   Category,
   DashboardDue,
@@ -1798,3 +1800,33 @@ export const savedEntry = (data: HouseholdData, id: number, name: string, amount
   return entry(name, 'expense', amount, data.today, account, { id })
 }
 export const savedAllocation = alloc
+
+/** The bill `withShortfalls` cannot cover: the rent on 1 April, which leaves the payroll account short. */
+export const SHORTFALL_BILL = { date: '2026-04-01', name: 'Rent', short: 4200 } as const
+
+/**
+ * A variant whose cash-flow timeline dips below zero in pesos: one shortfall point on the rent's day and the payroll
+ * account short for it, so the dashboard shows the solvency banner and the funding-shortfall line. Only the timeline
+ * changes.
+ */
+export const withShortfalls = (data: HouseholdData): HouseholdData => {
+  const shortfall: CashflowShortfall = { date: SHORTFALL_BILL.date, name: SHORTFALL_BILL.name, balance_after: -SHORTFALL_BILL.short, currency: 'PHP' }
+  const accountShortfall: AccountShortfall = {
+    currency: 'PHP',
+    date: SHORTFALL_BILL.date,
+    name: SHORTFALL_BILL.name,
+    account_id: payroll.id,
+    account_name: payroll.name,
+    short_amount: SHORTFALL_BILL.short,
+    overflow_used: 0,
+  }
+  const short = { shortfall: true, lowest_balance: -SHORTFALL_BILL.short, trough_date: SHORTFALL_BILL.date, shortfalls: [shortfall], account_shortfalls: [accountShortfall] }
+  const { timeline } = data
+  return {
+    ...data,
+    timeline: { ...timeline, ...short, by_currency: timeline.by_currency.map((row) => (row.currency === 'PHP' ? { ...row, ...short } : row)) },
+  }
+}
+
+/** The wishlist with a shop link on the laptop, so its row shows the external Link. */
+export const householdWishlistWithLink: WishlistItem[] = householdWishlist.map((i) => (i.id === 801 ? { ...i, url: 'https://shop.example.com/work-laptop' } : i))
