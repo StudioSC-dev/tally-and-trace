@@ -135,7 +135,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
     <div className="min-h-screen flex items-center justify-center bg-paper py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
         <div>
-          <div className="mx-auto h-16 w-16 flex items-center justify-center text-paper">
+          <div className="mx-auto h-16 w-16 flex items-center justify-center text-ink">
             <Icon name="sign-up" />
           </div>
           <h1 className="mt-4 text-center text-2xl font-bold text-ink tracking-tight">
