@@ -79,7 +79,7 @@ export function HouseholdShares() {
   const handleRemove = async (share: HouseholdShare) => {
     const name = share.display_name ?? 'this person'
     const accepted = await askConfirm({
-      title: 'Stop sharing your Household?',
+      title: 'Stop sharing your household?',
       message: `Stop sharing your Household with ${name}? They lose sight of your Household accounts and records straight away.`,
       confirmLabel: 'Stop sharing',
     })
@@ -115,7 +115,7 @@ export function HouseholdShares() {
       {data && (
         <div className="p-4 sm:p-6 space-y-6">
           <div>
-            <h3 className="text-sm font-semibold text-body">People who can see your Household</h3>
+            <h3 className="text-sm font-semibold text-body">People who can see your household</h3>
             <ul className="mt-2 divide-y divide-line border border-line" data-testid="household-share-list">
               {data.shares.map((share) => (
                 <li

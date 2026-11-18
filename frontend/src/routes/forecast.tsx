@@ -109,7 +109,7 @@ function ForecastPage() {
 
   return (
     <div className="page">
-      <PageHeader title="Cash-Flow Timeline">
+      <PageHeader title="Cash-flow timeline">
         <TagFilter value={selectedTag} onChange={setSelectedTag} />
         {pinnedId !== null && !pinLost ? (
           <SegmentedControl

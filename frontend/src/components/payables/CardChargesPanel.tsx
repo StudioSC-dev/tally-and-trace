@@ -78,7 +78,7 @@ export function CardChargesPanel({ cards }: Props) {
   return (
     <div className="bg-surface border border-line" data-testid="card-charges">
       <div className="p-4 sm:p-6 border-b border-line">
-        <h2 className="text-lg font-semibold text-ink">Card Charges</h2>
+        <h2 className="text-lg font-semibold text-ink">Card charges</h2>
         <p className="text-sm text-muted">Charges on your cards in the next 30 days. They are paid through each card's statement.</p>
       </div>
       <div className="divide-y divide-line">

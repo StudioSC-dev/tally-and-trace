@@ -180,12 +180,12 @@ async function scenarioB(browser) {
   // demo-login
   const demo = await signInPage(browser, { login: json(422, { detail: EMAIL_422 }) })
   try {
-    await demo.page.getByRole('button', { name: 'Sign in as Demo User' }).click()
+    await demo.page.getByRole('button', { name: 'Sign in as demo user' }).click()
     await h.check('b.demo-422', 'B', async () => {
       if (!(await shows(demo.page, EMAIL_422_TEXT))) return 'no readable line on demo-login'
       const crash = noCrash(demo)
       if (crash !== true) return crash
-      return (await demo.page.getByRole('button', { name: 'Sign in as Demo Partner' }).isEnabled()) || 'demo buttons stay disabled'
+      return (await demo.page.getByRole('button', { name: 'Sign in as demo partner' }).isEnabled()) || 'demo buttons stay disabled'
     })
   } finally {
     await demo.ctx.close()
@@ -237,7 +237,7 @@ async function scenarioD(browser) {
       if (!(await shows(ctx.page, 'Input should be a valid string'))) return `no message; page: ${(await bodyText(ctx.page)).slice(0, 200)}`
       const crash = noCrash(ctx)
       if (crash !== true) return crash
-      return (await ctx.page.getByRole('button', { name: 'Go to Login' }).isVisible()) || 'no way back to the sign-in page'
+      return (await ctx.page.getByRole('button', { name: 'Go to login' }).isVisible()) || 'no way back to the sign-in page'
     })
   } finally {
     await ctx.ctx.close()
@@ -294,7 +294,7 @@ async function scenarioG(browser) {
 
   const demo = await signInPage(browser, { login: json(400, { detail: reason }) })
   try {
-    await demo.page.getByRole('button', { name: 'Sign in as Demo User' }).click()
+    await demo.page.getByRole('button', { name: 'Sign in as demo user' }).click()
     await h.check('g.string-demo', 'B', async () => (await shows(demo.page, reason)) && noCrash(demo))
   } finally { await demo.ctx.close() }
 
@@ -370,7 +370,7 @@ async function scenarioI(browser) {
 
   const demo = await signInPage(browser, signedIn)
   try {
-    await demo.page.getByRole('button', { name: 'Sign in as Demo Partner' }).click()
+    await demo.page.getByRole('button', { name: 'Sign in as demo partner' }).click()
     await h.check('i.demo-navigates', 'G', async () => {
       await demo.page.waitForURL((u) => u.pathname === '/', { timeout: 10000 })
       const sent = demo.calls.login === 1
@@ -401,8 +401,8 @@ async function scenarioI(browser) {
   const verify = await verifyPage(browser, { 'verify-email': json(200, { message: 'Verified' }) })
   try {
     await h.check('i.verify-confirms', 'G', async () => {
-      if (!(await shows(verify.page, 'Email Verified!'))) return 'no confirmation'
-      await verify.page.getByRole('button', { name: 'Continue Now' }).click()
+      if (!(await shows(verify.page, 'Email verified!'))) return 'no confirmation'
+      await verify.page.getByRole('button', { name: 'Continue now' }).click()
       // '/' sends a signed-out visitor on to /login; leaving /verify-email is the navigation.
       await verify.page.waitForURL((u) => u.pathname !== '/verify-email', { timeout: 10000 })
       return true
@@ -440,7 +440,7 @@ async function scenarioJ(browser) {
   const demo = await signInPage(browser, mocks)
   try {
     await sendResend(demo.page)
-    await demo.page.getByRole('button', { name: 'Sign in as Demo User' }).click()
+    await demo.page.getByRole('button', { name: 'Sign in as demo user' }).click()
     await h.check('j.cleared-on-demo-login', 'B', async () => {
       if (!(await shows(demo.page, 'Email not verified'))) return 'no new "Email not verified"'
       return (await gone(demo.page)) || 'the old resend message sits beside the new error'

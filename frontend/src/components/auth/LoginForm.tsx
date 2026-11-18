@@ -309,7 +309,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
                 disabled={isLoading}
                 className="w-full"
               >
-                Sign in as Demo User
+                Sign in as demo user
               </Button>
               <Button
                 variant="secondary"
@@ -317,7 +317,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
                 disabled={isLoading}
                 className="w-full"
               >
-                Sign in as Demo Partner
+                Sign in as demo partner
               </Button>
             </div>
           </div>

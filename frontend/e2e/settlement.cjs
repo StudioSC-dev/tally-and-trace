@@ -159,15 +159,15 @@ async function openAllocations(page) {
 const section = (page, key) => page.locator(`[data-testid="kind-section-${key}"]`)
 const cardNamed = (page, key, name) => section(page, key).locator('article').filter({ has: page.getByText(name, { exact: true }) })
 const formClose = (page) => page.getByLabel('Close allocation modal')
-const editForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Update Recurring Entry' }) })
-const addForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Save Recurring Entry' }) })
+const editForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Update recurring entry' }) })
+const addForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Save recurring entry' }) })
 const confirmDialog = (page) => page.locator('[data-testid="confirm-dialog"]')
 
 /** Opens an entry's edit form from the Allocations page. */
 async function openEdit(page, key, name) {
   await cardNamed(page, key, name).click()
   await formClose(page).waitFor()
-  await editForm(page).getByRole('button', { name: 'Update Recurring Entry' }).waitFor()
+  await editForm(page).getByRole('button', { name: 'Update recurring entry' }).waitFor()
 }
 async function openLoan(page, name) {
   await page.goto(`${stack.webUrl}/accounts`)
@@ -249,14 +249,14 @@ async function toggles(browser) {
 
   // The new-entry form defaults to Manual, and an entry saved so is Manual.
   await openAllocations(page)
-  await page.getByRole('button', { name: 'Add Recurring Entry' }).click()
+  await page.getByRole('button', { name: 'Add recurring entry' }).click()
   await formClose(page).waitFor()
   const add = addForm(page)
   await add.locator('select').filter({ has: page.locator('option', { hasText: 'Select account' }) }).selectOption({ label: 'B Checking' })
   check('(b) the new-entry form defaults to Manual', await add.getByTestId('recurring-settlement').inputValue(), 'manual')
   await add.locator('input[type="text"]').first().fill('B Water')
   await add.locator('input[type="number"]').first().fill('300')
-  await add.getByRole('button', { name: 'Save Recurring Entry' }).click()
+  await add.getByRole('button', { name: 'Save recurring entry' }).click()
   await formClose(page).waitFor({ state: 'detached' })
   await settle(page)
   const water = (await entriesOf(u)).find((e) => e.name === 'B Water')
@@ -266,7 +266,7 @@ async function toggles(browser) {
   await openEdit(page, 'cash', 'B Rent')
   await editForm(page).getByTestId('recurring-settlement').selectOption('autopay')
   const before = calls.length
-  await editForm(page).getByRole('button', { name: 'Update Recurring Entry' }).click()
+  await editForm(page).getByRole('button', { name: 'Update recurring entry' }).click()
   await formClose(page).waitFor({ state: 'detached' })
   await settle(page)
   const on = calls.slice(before).filter((c) => c.method === 'POST' && c.what === 'auto-post')
@@ -278,7 +278,7 @@ async function toggles(browser) {
   await openEdit(page, 'cash', 'B Rent')
   check('(b) the form reopens on Autopay', await editForm(page).getByTestId('recurring-settlement').inputValue(), 'autopay')
   await editForm(page).getByTestId('recurring-settlement').selectOption('manual')
-  await editForm(page).getByRole('button', { name: 'Update Recurring Entry' }).click()
+  await editForm(page).getByRole('button', { name: 'Update recurring entry' }).click()
   await formClose(page).waitFor({ state: 'detached' })
   await settle(page)
   check('(b) back to Manual in the API', await settlementOf(u, rent.id), 'manual')
@@ -287,14 +287,14 @@ async function toggles(browser) {
 
   // A new entry created as Autopay: the toggle follows the create.
   await openAllocations(page)
-  await page.getByRole('button', { name: 'Add Recurring Entry' }).click()
+  await page.getByRole('button', { name: 'Add recurring entry' }).click()
   await formClose(page).waitFor()
   const add2 = addForm(page)
   await add2.locator('select').filter({ has: page.locator('option', { hasText: 'Select account' }) }).selectOption({ label: 'B Checking' })
   await add2.locator('input[type="text"]').first().fill('B Internet')
   await add2.locator('input[type="number"]').first().fill('1200')
   await add2.getByTestId('recurring-settlement').selectOption('autopay')
-  await add2.getByRole('button', { name: 'Save Recurring Entry' }).click()
+  await add2.getByRole('button', { name: 'Save recurring entry' }).click()
   // The form's default date is today, so one payment is already due and is confirmed first.
   await confirmDialog(page).waitFor()
   check('(b) a new entry dated today asks before posting its one due payment', (await confirmDialog(page).locator('[data-testid="confirm-dialog-message"]').textContent())?.trim(), 'This will post 1 missed payment, dated on its own day.')
@@ -345,7 +345,7 @@ async function catchUp(browser) {
   await openAllocations(page)
   await openEdit(page, 'cash', 'C Water')
   await editForm(page).getByTestId('recurring-settlement').selectOption('autopay')
-  await editForm(page).getByRole('button', { name: 'Update Recurring Entry' }).click()
+  await editForm(page).getByRole('button', { name: 'Update recurring entry' }).click()
   await confirmDialog(page).waitFor()
   check('(c) the dialog shows the count', (await confirmDialog(page).locator('[data-testid="confirm-dialog-message"]').textContent())?.trim(), 'This will post 3 missed payments, each dated on its own day.')
   check('(c) nothing is posted before Confirm', [(await entryRows(u, water.id)).length, await settlementOf(u, water.id)], [0, 'manual'])
@@ -390,7 +390,7 @@ async function cancel(browser) {
   await openAllocations(page)
   await openEdit(page, 'cash', 'D Water')
   await editForm(page).getByTestId('recurring-settlement').selectOption('autopay')
-  await editForm(page).getByRole('button', { name: 'Update Recurring Entry' }).click()
+  await editForm(page).getByRole('button', { name: 'Update recurring entry' }).click()
   await confirmDialog(page).waitFor()
   const before = calls.length
   await confirmDialog(page).locator('[data-testid="confirm-dialog-cancel"]').click()

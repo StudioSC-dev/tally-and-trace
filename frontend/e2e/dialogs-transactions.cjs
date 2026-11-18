@@ -59,21 +59,21 @@ async function openTransactions(browser) {
   const log = h.logRequests(page)
   await h.uiLogin(page, stack, owner)
   await page.goto(`${stack.webUrl}/transactions`)
-  await page.getByRole('button', { name: 'Add Transaction' }).first().waitFor()
+  await page.getByRole('button', { name: 'Add transaction' }).first().waitFor()
   await h.waitQuiet(page)
   return { ctx, page, native, log }
 }
 
 async function openAddForm(page) {
-  await page.getByRole('button', { name: 'Add Transaction' }).first().click()
-  const modal = formModal(page, 'Create Transaction')
+  await page.getByRole('button', { name: 'Add transaction' }).first().click()
+  const modal = formModal(page, 'Add transaction')
   await modal.waitFor()
   await h.waitQuiet(page)
   return modal
 }
 
 const submit = async (page, modal) => {
-  await modal.getByRole('button', { name: 'Create Transaction', exact: true }).click()
+  await modal.getByRole('button', { name: 'Add transaction', exact: true }).click()
   await page.waitForTimeout(300)
   await h.waitQuiet(page)
 }
@@ -105,7 +105,7 @@ async function checkFieldError(page, modal, prefix, key, wantText, focusTarget) 
 }
 
 const rowFor = (page, description) => page.locator('article[role="button"]').filter({ hasText: description }).first()
-const actionModal = (page) => formModal(page, 'Transaction Actions')
+const actionModal = (page) => formModal(page, 'Transaction actions')
 const toast = (page) => page.locator('[data-testid="toast"]')
 
 const seedTransaction = (description, extra = {}) =>
@@ -137,7 +137,7 @@ async function fillValid(modal, description) {
 
 // (a) An empty description (the browser's required check, shown inline), then no account.
 async function scenarioA(browser) {
-  console.log('\n=== (a) Add Transaction: an empty description, then no account selected, shown inline')
+  console.log('\n=== (a) Add transaction: an empty description, then no account selected, shown inline')
   const { ctx, page, native, log } = await openTransactions(browser)
   try {
     const modal = await openAddForm(page)
@@ -215,7 +215,7 @@ async function scenarioA(browser) {
 // (b) The amount fields: zero and empty when posted, zero when planned, and the amount
 // received on a posted transfer between currencies left empty.
 async function scenarioB(browser) {
-  console.log('\n=== (b) Add Transaction: the amount checks, shown inline')
+  console.log('\n=== (b) Add transaction: the amount checks, shown inline')
   const { ctx, page, native, log } = await openTransactions(browser)
   try {
     const modal = await openAddForm(page)
@@ -314,7 +314,7 @@ const waitSaveToast = (page, description, state, ms = 10000) =>
 // (c) A refused save (STU-605: saves run in the background): the form closes, a failed toast
 // carries the server's reason, and its Edit reopens the form with the input and the reason.
 async function scenarioC(browser) {
-  console.log('\n=== (c) Add Transaction: a refused save comes back as a failed toast; Edit reopens the form with the reason')
+  console.log('\n=== (c) Add transaction: a refused save comes back as a failed toast; Edit reopens the form with the reason')
   const { ctx, page, native } = await openTransactions(browser)
   let fail = null
   try {
@@ -362,7 +362,7 @@ async function scenarioD(browser) {
   let fail = null
   try {
     const modal = await openActions(page, row.description)
-    const opener = modal.getByRole('button', { name: 'Delete Transaction', exact: true })
+    const opener = modal.getByRole('button', { name: 'Delete transaction', exact: true })
     fail = await h.failWith(page, isRow('DELETE', row.id), 500, { times: 1 })
     await opener.click()
     await h.check('d.shown', 'B', async () =>
@@ -596,13 +596,13 @@ async function scenarioI(browser) {
   const { ctx, page, native } = await openTransactions(browser)
   try {
     const actions = await openActions(page, 'Dialog I edit')
-    await actions.getByRole('button', { name: 'Edit Transaction', exact: true }).click()
-    const modal = formModal(page, 'Edit Transaction')
+    await actions.getByRole('button', { name: 'Edit transaction', exact: true }).click()
+    const modal = formModal(page, 'Edit transaction')
     await modal.waitFor()
     await h.waitQuiet(page)
     await modal.getByRole('checkbox', { name: 'Mark as posted' }).check()
     await control(modal, 'amount').fill('560')
-    await modal.getByRole('button', { name: 'Update Transaction', exact: true }).click()
+    await modal.getByRole('button', { name: 'Save changes', exact: true }).click()
     await page.waitForTimeout(300)
     await h.waitQuiet(page)
     await h.check('i.stored-usd', 'G', async () => {
@@ -626,11 +626,11 @@ async function scenarioI(browser) {
       is_posted: false,
     })
     await page.reload()
-    await page.getByRole('button', { name: 'Add Transaction' }).first().waitFor()
+    await page.getByRole('button', { name: 'Add transaction' }).first().waitFor()
     await h.waitQuiet(page)
     const bareActions = await openActions(page, 'Dialog I bare')
-    await bareActions.getByRole('button', { name: 'Edit Transaction', exact: true }).click()
-    const bare = formModal(page, 'Edit Transaction')
+    await bareActions.getByRole('button', { name: 'Edit transaction', exact: true }).click()
+    const bare = formModal(page, 'Edit transaction')
     await bare.waitFor()
     await h.waitQuiet(page)
     const sent = []
@@ -642,7 +642,7 @@ async function scenarioI(browser) {
     await control(bare, 'projected_amount').fill('')
     await bare.getByRole('checkbox', { name: 'Mark as posted' }).check()
     await control(bare, 'amount').fill('560')
-    await bare.getByRole('button', { name: 'Update Transaction', exact: true }).click()
+    await bare.getByRole('button', { name: 'Save changes', exact: true }).click()
     await page.waitForTimeout(300)
     await h.waitQuiet(page)
     await h.check('i.bare-edit-keeps-usd', 'G', async () => {

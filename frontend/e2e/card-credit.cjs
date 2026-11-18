@@ -270,7 +270,7 @@ async function ruleForm(browser) {
   }
   const save = async () => {
     const saved = page.waitForResponse((r) => r.request().method() === 'PUT' && new URL(r.url()).pathname.endsWith(`/accounts/${cardB.id}`))
-    await page.getByRole('button', { name: 'Update Account', exact: true }).click()
+    await page.getByRole('button', { name: 'Update account', exact: true }).click()
     const res = await saved
     await page.locator('[data-testid="minimum-due-preset"]').waitFor({ state: 'detached' })
     return res
