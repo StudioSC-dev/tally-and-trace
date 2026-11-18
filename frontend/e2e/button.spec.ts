@@ -1054,7 +1054,7 @@ test.describe('AC6: button migration preserves surrounding behavior and layout',
     await surface('allocations-recurring').open(page)
     const add = page.getByRole('button', { name: 'Add Recurring Entry', exact: true })
     const { width, content } = await add.evaluate((e) => {
-      const box = e.closest('.max-w-7xl') as HTMLElement
+      const box = e.closest('.page') as HTMLElement
       const cs = getComputedStyle(box)
       return { width: e.getBoundingClientRect().width, content: box.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) }
     })
