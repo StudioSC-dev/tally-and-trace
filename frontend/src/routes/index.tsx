@@ -370,7 +370,7 @@ export function Dashboard() {
       </PageHeader>
 
       {/* The leading figure: available cash, then the period's money in, out and net on ruled lines under it. */}
-      <section className="rounded-md border border-line bg-surface p-4 sm:p-6" aria-labelledby="leading-figure-label" data-testid="leading-figure" data-onboarding="leading-figure">
+      <section className="rounded-md border border-line bg-surface p-6" aria-labelledby="leading-figure-label" data-testid="leading-figure" data-onboarding="leading-figure">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-4" aria-busy={snapshotPhase === 'pending'}>
           <h2 id="leading-figure-label" className="label leading-5">Available cash</h2>
           {snapshotPhase === 'pending' ? (
@@ -391,7 +391,7 @@ export function Dashboard() {
               { id: 'expenses', label: 'Out', value: format(periodExpenses), color: amountClass('out') },
               { id: 'net-flow', label: 'Net', value: format(periodNet), color: periodNet >= 0 ? 'text-ok' : 'text-danger' },
             ].map(({ id, label, value, color }) => (
-              <div key={id} className="flex min-h-11 items-center justify-between gap-4 py-2" data-testid="period-row">
+              <div key={id} className="flex min-h-16 items-center justify-between gap-4 sm:min-h-14" data-testid="period-row">
                 <dt className="text-sm text-muted">{label}</dt>
                 {totalsPending ? (
                   <dd data-testid={`period-${id}-pending`}><Skeleton className="h-6 w-24" /></dd>

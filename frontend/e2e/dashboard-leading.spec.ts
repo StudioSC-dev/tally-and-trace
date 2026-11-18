@@ -89,6 +89,22 @@ test('leading figure is in the first viewport', async ({ page }, testInfo) => {
   await viewportShot(page, 'first-viewport')
 })
 
+/** docs/design-system.md, Spacing: "Panel padding: 24"; "Rows are 56px (desktop) and 64px (phone) between rules." */
+const PANEL_PADDING = '24px'
+const ROW_HEIGHT: Record<string, number> = { desktop: 56, phone: 64 }
+
+test('the leading panel uses the documented spacing', async ({ page }, testInfo) => {
+  await open(page)
+  const padding = await leading(page).evaluate((e) => {
+    const s = getComputedStyle(e)
+    return [s.paddingTop, s.paddingRight, s.paddingBottom, s.paddingLeft]
+  })
+  expect(padding, 'the leading panel pads 24px on every side').toEqual([PANEL_PADDING, PANEL_PADDING, PANEL_PADDING, PANEL_PADDING])
+  const heights = await leading(page).getByTestId('period-row').evaluateAll((rows) => rows.map((r) => r.getBoundingClientRect().height))
+  expect(heights, `In, Out and Net are ${ROW_HEIGHT[testInfo.project.name]}px ruled rows`).toEqual([1, 2, 3].map(() => ROW_HEIGHT[testInfo.project.name]))
+  await shot(page, 'spacing')
+})
+
 // ─── AC2 ────────────────────────────────────────────────────────────────────────────────────────
 
 test('the leading figure is the largest text', async ({ page }) => {
