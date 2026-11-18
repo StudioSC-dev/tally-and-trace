@@ -407,15 +407,17 @@ def _refuse_cycle_identity_change(db: Session, data: dict, account: Account) -> 
         raise HTTPException(
             status_code=409,
             detail="This card has installments charged on its statement close with payments "
-                   "left; its closing day can't change until they are paid off")
+                   "left; change its closing day with POST /cards/{account_id}/closing-day, "
+                   "which moves them with it")
     overrides = load_due_overrides(db, [account.id])[account.id]
     if not overrides:
         return
     if close_moved:
         raise HTTPException(
             status_code=409,
-            detail="This card has statement due dates entered from its statements; clear them "
-                   "before changing its closing day")
+            detail="This card has statement due dates entered from its statements; change its "
+                   "closing day with POST /cards/{account_id}/closing-day, which moves them "
+                   "with it")
     if due_override_conflicts(merged, overrides):
         raise HTTPException(
             status_code=409,
