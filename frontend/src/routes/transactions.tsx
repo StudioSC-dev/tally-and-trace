@@ -2748,7 +2748,7 @@ export function TransactionsPage() {
         }
         badges={
           pendingKind !== undefined ? (
-            <span className="inline-flex items-center gap-1 text-xs font-semibold text-muted" data-testid="row-saving">
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-muted" data-testid="row-saving">
               <Spinner size="xs" />
               {pendingKind === 'delete' ? 'Deleting…' : 'Saving…'}
             </span>
@@ -2792,7 +2792,7 @@ export function TransactionsPage() {
           </>
         }
         badges={
-          <span className="inline-flex items-center gap-1 text-xs font-semibold text-muted">
+          <span className="inline-flex items-center gap-1 text-xs font-medium text-muted">
             {row.state === 'saving' ? (
               <>
                 <Spinner size="xs" />

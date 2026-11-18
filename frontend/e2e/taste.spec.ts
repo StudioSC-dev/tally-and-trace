@@ -142,23 +142,28 @@ for (const scheme of ['light', 'dark'] as const) {
 
 // ─── AC4 ────────────────────────────────────────────────────────────────────────────────────────
 
-for (const scheme of ['light', 'dark'] as const) {
-  test(`custom swatch is neutral until chosen: ${scheme}`, async ({ page }) => {
-    await open(page, '/settings', page.getByRole('button', { name: 'Add tag', exact: true }), household, scheme)
-    await page.getByRole('button', { name: 'Add tag', exact: true }).click()
-    const picker = page.getByLabel(/custom/i)
-    await expect(picker, 'the custom swatch has an accessible name with "custom"').toHaveCount(1)
-    const swatch = page.getByTestId('custom-swatch')
-    const look = () => swatch.evaluate((e) => {
-      const s = getComputedStyle(e)
-      return { bg: s.backgroundColor, width: s.borderTopWidth, color: s.borderTopColor, style: s.borderTopStyle }
+for (const dialog of [
+  { name: 'tag', open: 'Add tag' },
+  { name: 'category', open: 'Add category' },
+] as const) {
+  for (const scheme of ['light', 'dark'] as const) {
+    test(`custom swatch is neutral until chosen: ${dialog.name} ${scheme}`, async ({ page }) => {
+      await open(page, '/settings', page.getByRole('button', { name: dialog.open, exact: true }), household, scheme)
+      await page.getByRole('button', { name: dialog.open, exact: true }).click()
+      const picker = page.getByLabel(/custom/i)
+      await expect(picker, 'the custom swatch has an accessible name with "custom"').toHaveCount(1)
+      const swatch = page.getByTestId('custom-swatch')
+      const look = () => swatch.evaluate((e) => {
+        const s = getComputedStyle(e)
+        return { bg: s.backgroundColor, width: s.borderTopWidth, color: s.borderTopColor, style: s.borderTopStyle }
+      })
+      expect(await look(), 'no custom colour: transparent, a 1px line-strong border').toEqual({ bg: 'rgba(0, 0, 0, 0)', width: '1px', color: LINE_STRONG[scheme], style: 'solid' })
+      await viewportShot(page, `swatch-empty-${dialog.name}-${scheme}`)
+      await picker.fill('#123456')
+      expect((await look()).bg, 'a chosen custom colour fills the swatch').toBe('rgb(18, 52, 86)')
+      await viewportShot(page, `swatch-chosen-${dialog.name}-${scheme}`)
     })
-    expect(await look(), 'no custom colour: transparent, a 1px line-strong border').toEqual({ bg: 'rgba(0, 0, 0, 0)', width: '1px', color: LINE_STRONG[scheme], style: 'solid' })
-    await viewportShot(page, `swatch-empty-${scheme}`)
-    await picker.fill('#123456')
-    expect((await look()).bg, 'a chosen custom colour fills the swatch').toBe('rgb(18, 52, 86)')
-    await viewportShot(page, `swatch-chosen-${scheme}`)
-  })
+  }
 }
 
 // ─── AC5 ────────────────────────────────────────────────────────────────────────────────────────
