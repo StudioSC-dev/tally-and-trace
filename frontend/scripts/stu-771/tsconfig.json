@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.e2e.json",
+  "include": ["*.ts", "../../e2e/**/*.ts", "../../playwright.config.ts"],
+  "exclude": ["../../e2e/fixtures/bad-mock.ts"]
+}

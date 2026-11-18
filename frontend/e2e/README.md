@@ -3,6 +3,28 @@
 The `*.spec.ts` files are a Playwright suite run by `pnpm test:e2e`, against a
 mocked API, with Chromium and the desktop and phone projects.
 
+The suite serves the app from a production build (STU-771). Playwright's
+`webServer` runs `vite build --minify false` once into
+`node_modules/.e2e-dist/$E2E_PORT`, then serves that directory with
+`vite preview --port $E2E_PORT --strictPort` (`E2E_PORT` defaults to 4317), so
+no page waits for the dev server to transform its modules. The build never
+goes to the shared `dist/`, so another build (`pnpm build`, or a run on another
+port) cannot replace the files a running preview serves, which would load a
+page with no stylesheet. The build is not minified, so the suite covers an
+unminified production build, not the minified output that ships; the CSS keeps
+the tokens as written (`100ms`, not `.1s`), as the dev server served them. A
+failed build stops the run before any test, and a
+port already in use fails it: Playwright never attaches to a server it did
+not start, and preview never moves to another port. The `/api` proxy in
+`vite.config.ts` applies to preview as to the dev server; the specs fake
+`/api/v1` in the browser, so nothing reaches it.
+
+There is no dev-server mode: the configuration always builds and previews.
+To debug a spec, run it headed or step through it against the same build,
+for example `pnpm exec playwright test e2e/nav.spec.ts --project=desktop --headed`
+or `--debug`. To look at a page on the dev server, run `pnpm dev` and open it
+by hand.
+
 The standalone `*.cjs` scripts are unchanged and still run by hand against a local
 API. They are not part of `pnpm build`, the lint, or CI. Run them by hand when you
 change the auth or session code.
