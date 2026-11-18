@@ -53,8 +53,7 @@ const DANGER = 'rgb(174, 42, 32)'
 /** The old green action fill (`ok`, #2A6440) that AC2 bans on actions. */
 const OLD_GREEN = 'rgb(42, 100, 64)'
 const TRANSPARENT = 'rgba(0, 0, 0, 0)'
-/** The page-header primary's limits (AC6): at least 90% of the content width on a phone, at most 260px on a desktop. */
-const HEADER_MIN_SHARE = 0.9
+/** The page-header primary's desktop limit (AC6): at most 260px wide. */
 const HEADER_MAX_PX = 260
 
 /** Selection controls, owned by STU-679: AC2 skips them and AC6 checks they are untouched. */
@@ -1052,17 +1051,26 @@ test.describe('AC6: button migration preserves surrounding behavior and layout',
   test('button migration preserves surrounding behavior and layout: the page-header primary width', async ({ page }, testInfo) => {
     test.skip(RECORD, 'a recording run only writes the baseline')
     await surface('allocations-recurring').open(page)
-    const add = page.getByRole('button', { name: 'Add Recurring Entry', exact: true })
-    const { width, content } = await add.evaluate((e) => {
-      const box = e.closest('.page') as HTMLElement
-      const cs = getComputedStyle(box)
-      return { width: e.getBoundingClientRect().width, content: box.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) }
+    // AC6 as amended for STU-685: the primary sits in PageHeader, stays inside the page content, and nothing scrolls sideways.
+    const header = page.getByTestId('page-header')
+    await expect(header.getByRole('button', { name: 'Add Recurring Entry', exact: true })).toHaveCount(1)
+    const add = header.getByRole('button', { name: 'Add Recurring Entry', exact: true })
+    const m = await add.evaluate((e) => {
+      const root = e.closest('.page') as HTMLElement
+      const head = e.closest('[data-testid="page-header"]') as HTMLElement
+      const r = e.getBoundingClientRect()
+      return {
+        width: r.width,
+        right: r.right,
+        contentRight: root.getBoundingClientRect().right - parseFloat(getComputedStyle(root).paddingRight),
+        header: { scroll: head.scrollWidth, client: head.clientWidth },
+        doc: { scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth },
+      }
     })
-    if (testInfo.project.name === 'phone') {
-      expect(width / content, 'Add Recurring Entry: share of the content width on a phone').toBeGreaterThanOrEqual(HEADER_MIN_SHARE)
-    } else {
-      expect(width, 'Add Recurring Entry: width on a desktop').toBeLessThanOrEqual(HEADER_MAX_PX)
-    }
+    expect(m.right, `Add Recurring Entry ends inside the page content (right ${m.right}, content right ${m.contentRight})`).toBeLessThanOrEqual(m.contentRight)
+    expect(m.header.scroll, 'the page header does not overflow sideways').toBeLessThanOrEqual(m.header.client)
+    expect(m.doc.scroll, 'the document does not overflow sideways').toBeLessThanOrEqual(m.doc.client)
+    if (testInfo.project.name === 'desktop') expect(m.width, 'Add Recurring Entry: width on a desktop').toBeLessThanOrEqual(HEADER_MAX_PX)
     await shot(page, 'header-primary')
   })
 })
