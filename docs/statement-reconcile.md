@@ -183,9 +183,13 @@ The schema is `AccountStatement`; unknown fields are refused. All figures are ma
 
 ### What differs from a card
 
-- **The period, not a cycle.** It must have ended (before Manila's today), else 422. Only a
-  savings, checking or e-wallet account: a card is refused (400) with a message naming
-  `POST /cards/{id}/statements/reconcile`, and a cash or loan account is refused (400).
+- **The period, not a cycle.** It must have ended (before Manila's today), else 422.
+- **Which accounts.** A savings, checking, e-wallet or cash account; a cash account is read
+  exactly as a savings account (a `debit` takes money out, a `credit` puts it in, and the
+  balances are what the app shows). A card is refused (400) with a message naming
+  `POST /cards/{id}/statements/reconcile`. A loan account is still refused (400): its
+  balance is the negative of what is owed and a payment lowers it by the principal only,
+  so what a loan statement's lines and balances mean is not settled yet.
 - **Placement by `transaction_date`.** A posted row is in the period when its own
   `transaction_date` is, as the account's balance counts it; a `posting_date` never moves
   it. Rows the statement may claim: the posted rows in the period of the same length
