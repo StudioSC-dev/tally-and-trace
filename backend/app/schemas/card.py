@@ -68,6 +68,9 @@ class CardStatementSummaryOut(BaseModel):
     owed: float
     line_count: int
     incomplete: bool
+    # Reconciled with the bank's statement (STU-749), and when (absent when not).
+    reconciled: bool = False
+    reconciled_at: Optional[datetime] = None
     # Full view only (owner, admin, editor).
     balance: Optional[float] = None
     clear_through: Optional[float] = None

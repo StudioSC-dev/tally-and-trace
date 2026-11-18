@@ -322,7 +322,14 @@ def test_apply_reconciles_the_statement(busy):
 
     listed = _statements(w)[CLOSE]
     assert listed["balance"] == 2560.0 and listed["line_count"] == 6
+    assert listed["reconciled"] is True and listed["reconciled_at"]
+    others = [s for close, s in _statements(w).items() if close != CLOSE]
+    # The routes drop null fields: an unreconciled statement has no ``reconciled_at``.
+    assert others and all(s["reconciled"] is False and "reconciled_at" not in s
+                          for s in others)
     detail = _detail(w)
+    assert detail["statement"]["reconciled"] is True
+    assert detail["statement"]["reconciled_at"] == listed["reconciled_at"]
     assert sum(Decimal(str(line["amount"])) for line in detail["lines"]) == Decimal("2560")
     for line in detail["lines"]:
         assert _txn(w, line["transaction_id"])["is_reconciled"] is True
@@ -495,7 +502,8 @@ def test_header_only_differences_are_applied(w):
     assert {h["field"] for h in body["header"]} == {"due", "minimum_due"}
     assert _kinds(body) == [("matched", 1)]
     detail = _detail(w)["statement"]
-    assert (detail["due_date"], detail["due_overridden"]) == ("2027-03-16", True)
+    assert (detail["due_date"], detail["due_overridden"], detail["reconciled"]) == (
+        "2027-03-16", True, True)
     r = w["client"].get(f"{API}/cards/{w['card']}/credit", headers=w["me"]["headers"])
     (feb,) = [s for s in r.json()["statements"] if s["close_date"] == CLOSE]
     assert (feb["minimum_due"]["amount"], feb["minimum_due"]["source"]) == (75.0, "statement")

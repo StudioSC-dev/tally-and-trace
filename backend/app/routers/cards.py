@@ -226,7 +226,8 @@ def _statement_rows(db: Session, user: User, card: Account, fx: Optional[FxRates
     return [s for s in summaries if s["window_start"].date() < today]
 
 
-def _summary_out(statement: dict, limited: bool) -> dict:
+def _summary_out(statement: dict, limited: bool,
+                 reconciled: Dict[date, datetime]) -> dict:
     close = statement["close"].date()
     out = {
         "close_date": close,
@@ -239,6 +240,8 @@ def _summary_out(statement: dict, limited: bool) -> dict:
         "owed": _amount(statement["owed"]),
         "line_count": statement["line_count"],
         "incomplete": statement["incomplete"],
+        "reconciled": close in reconciled,
+        "reconciled_at": reconciled.get(close),
     }
     if not limited:
         out.update({key: _amount(statement[key]) for key in (
@@ -277,8 +280,9 @@ def list_card_statements(
     rows = [s for s in _statement_rows(db, current_user, card, fx)
             if (from_ is None or s["close"].date() >= from_)
             and (to is None or s["close"].date() <= to)]
+    reconciled = reconcile.reconciled_closes(db, card.id)
     return {**_card_head(card, limited),
-            "statements": [_summary_out(s, limited) for s in rows]}
+            "statements": [_summary_out(s, limited, reconciled) for s in rows]}
 
 
 @router.get("/{account_id}/statements/{close_date}", response_model=CardStatementDetailOut,
@@ -323,7 +327,9 @@ def get_card_statement(
             if posted is not None and posted != txn.transaction_date.date():
                 item["posted_date"] = posted
         lines.append(item)
-    body = {**_card_head(card, limited), "statement": _summary_out(statement, limited),
+    body = {**_card_head(card, limited),
+            "statement": _summary_out(statement, limited,
+                                      reconcile.reconciled_closes(db, card.id)),
             "lines": lines}
     if not limited:
         body["unconverted_lines"] = [{
