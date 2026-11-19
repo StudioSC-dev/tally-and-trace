@@ -140,10 +140,10 @@ const cardNamed = (page, key, name) =>
 const editForm = (page) => page.getByLabel('Close allocation modal')
 const settle = async (page) => { await page.waitForLoadState('networkidle'); await page.waitForTimeout(500) }
 
-/** The text after "Next " in a card. */
+/** The text after "Next " in a card, without the relative day that follows it after " · " (STU-689). */
 async function nextOf(card) {
   const text = await card.getByText(/^Next /).first().innerText()
-  return text.replace(/^Next /, '').trim()
+  return text.replace(/^Next /, '').replace(/ · .*$/, '').trim()
 }
 
 /** One owner with a subscription, an installment, a cash expense, a bill and an income. */

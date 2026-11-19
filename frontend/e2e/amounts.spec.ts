@@ -73,8 +73,11 @@ async function openRecurring(page: Page, data: HouseholdData = household): Promi
 }
 
 const amountOf = (rows: Locator): Locator => rows.locator('p.text-lg.font-bold')
-const expenseRows = (scope: Locator): Locator => scope.locator('article').filter({ hasText: /[Ee]xpense/ })
-const incomeRows = (scope: Locator): Locator => scope.locator('article').filter({ hasText: /[Ii]ncome/ })
+// STU-689: a recurring row no longer repeats its type under a heading that says it, so the Recurring tab's rows are told
+// apart by their section: "Income & transfers" holds the income, the four expense kinds hold the expenses.
+const EXPENSE_SECTIONS = ['subscription', 'installment', 'cash', 'bill'].map((k) => `[data-testid="kind-section-${k}"] article`).join(', ')
+const expenseRows = (scope: Locator): Locator => scope.locator('article').filter({ hasText: /[Ee]xpense/ }).or(scope.locator(EXPENSE_SECTIONS))
+const incomeRows = (scope: Locator): Locator => scope.locator('article').filter({ hasText: /[Ii]ncome/ }).or(scope.locator('[data-testid="kind-section-other"] article'))
 
 /** A viewport screenshot (for overlays), saved under `shot()`'s naming. */
 async function viewportShot(page: Page, name: string): Promise<void> {
@@ -362,7 +365,7 @@ test.describe('amount classes', () => {
     const main = await openRecurring(page)
     const full = main.locator('article:not([data-row-kind="limited-entry"])')
     for (const [kind, cls] of [['Income', 'amount-in'], ['Expense', 'amount-out']] as const) {
-      const amounts = amountOf(full.filter({ hasText: new RegExp(`Recurring ${kind.toLowerCase()}`) }))
+      const amounts = amountOf(kind === 'Income' ? incomeRows(main).and(full) : expenseRows(main).and(full))
       const count = await amounts.count()
       expect(count, `the full renderer lists recurring ${kind} entries`).toBeGreaterThan(0)
       expect(await semanticOf(amounts), `every full recurring ${kind} amount`).toEqual(same(count, cls))

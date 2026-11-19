@@ -22,6 +22,7 @@ import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneratio
 import { useManilaDay } from '../hooks/useManilaDay'
 import { useToday } from '../hooks/useToday'
 import { useAuth } from '../contexts/AuthContext'
+import { chunkFacts, createdByLabel, isSharedAccount, viewerDisplayName } from '../utils/createdBy'
 import { currentSessionGeneration } from '../store/baseQuery'
 import type { AppDispatch, RootState } from '../store'
 import { newOutboxId, outboxActions } from '../store/outbox'
@@ -2681,6 +2682,7 @@ export function TransactionsPage() {
     )
   }
 
+  const viewerName = viewerDisplayName(user)
   const renderTransactionRow = (transaction: Transaction) => {
     const {
       accountLabel,
@@ -2704,7 +2706,6 @@ export function TransactionsPage() {
           ? formatEntryDate(postedDay)
           : 'Invalid date'
         : null
-    const typeLabel = TRANSACTION_TYPE_LABELS[transaction.transaction_type]
     // An unposted row reads on the gutter tone; the sheet's rule stays its only line.
     const cardStateClasses = transaction.is_posted ? '' : 'bg-sunken'
     const description = transactionDescription(transaction)?.trim() || 'Untitled transaction'
@@ -2717,6 +2718,52 @@ export function TransactionsPage() {
     }
     const hasOriginal = !isLimited(transaction) && transaction.original_amount != null && transaction.original_currency
 
+    // Each fact once: the date, the account (with who entered it, when that is worth saying) and the category (with the
+    // type and a transfer's fee) lead as three items; the rest (schedule, projected, original, posted, reconciled) follow.
+    const sharedAccount =
+      !isLimited(transaction) &&
+      [transaction.account_id, transaction.transfer_from_account_id, transaction.transfer_to_account_id].some(
+        (id) => id != null && isSharedAccount(accounts.find((a) => a.id === id)),
+      )
+    const by = createdByLabel(transaction.created_by, viewerName, sharedAccount || isLimited(transaction))
+    const accountText = transaction.transaction_type === 'transfer' ? `${sourceLabel} to ${destinationLabel}` : accountLabel
+    const categoryText = transaction.transaction_type === 'transfer' ? categoryName || 'Transfer' : categoryName || 'Uncategorized'
+    const typeText = TRANSACTION_TYPE_LABELS[transaction.transaction_type]
+    const metaLines = chunkFacts([
+      <span key="date">{exactDate}</span>,
+      <span key="account">
+        {accountText}
+        {by && (
+          <>
+            {' · '}
+            <span data-testid="created-by">{by}</span>
+          </>
+        )}
+      </span>,
+      <span key="category">
+        {categoryText}
+        {categoryText !== typeText && (
+          <>
+            {' · '}
+            <span className="font-medium text-muted">{typeText}</span>
+          </>
+        )}
+        {transferFeeLabel && (
+          <>
+            {' · '}
+            <span className="text-warn">Fee {transferFeeLabel}</span>
+          </>
+        )}
+      </span>,
+      scheduleLabel && <span key="schedule" className="text-ink">{scheduleLabel}</span>,
+      projectedLabel && !transaction.is_posted && <span key="projected" className="text-ink">Projected {projectedLabel}</span>,
+      hasOriginal && (
+        <span key="original">Original {formatCurrency(transaction.original_amount ?? 0, transaction.original_currency as CurrencyCode)}</span>
+      ),
+      postedDate && postedDate !== exactDate && <span key="posted">Posted {postedDate}</span>,
+      !isLimited(transaction) && transaction.is_reconciled && <span key="reconciled" className="font-semibold text-ok">Reconciled</span>,
+    ])
+
     return (
       <Row
         key={transaction.id}
@@ -2728,31 +2775,10 @@ export function TransactionsPage() {
         openDisabled={!actionable}
         title={description}
         status={<StatusText tone={ROW_STATUS_TONES[status]} data-testid="transaction-status">{STATUS_LABELS[status]}</StatusText>}
-        meta={
-          <>
-            <span>{exactDate}</span>
-            <span>
-              {transaction.transaction_type === 'transfer'
-                ? `${sourceLabel} to ${destinationLabel}`
-                : accountLabel}
-            </span>
-            <span>
-              {transaction.transaction_type === 'transfer'
-                ? categoryName || 'Transfer'
-                : categoryName || 'Uncategorized'}
-            </span>
-            <span className="font-medium text-muted">{typeLabel}</span>
-            {transaction.created_by && <span data-testid="created-by">by {transaction.created_by}</span>}
-            {scheduleLabel && <span className="text-ink">{scheduleLabel}</span>}
-            {transferFeeLabel && <span className="text-warn">Fee {transferFeeLabel}</span>}
-            {projectedLabel && !transaction.is_posted && <span className="text-ink">Projected {projectedLabel}</span>}
-            {hasOriginal && (
-              <span>Original {formatCurrency(transaction.original_amount ?? 0, transaction.original_currency as CurrencyCode)}</span>
-            )}
-            {postedDate && <span>Posted {postedDate}</span>}
-            {!isLimited(transaction) && transaction.is_reconciled && <span className="font-semibold text-ok">Reconciled</span>}
-          </>
-        }
+        meta={<>{metaLines[0]}</>}
+        details={metaLines.slice(1).map((line, i) => (
+          <p key={i} className="space-x-3 text-muted">{line}</p>
+        ))}
         badges={
           pendingKind !== undefined ? (
             <span className="inline-flex items-center gap-1 text-xs font-medium text-muted" data-testid="row-saving">

@@ -1990,6 +1990,25 @@ export const withUnpostedRide = (data: HouseholdData): HouseholdData => ({
   transactions: data.transactions.map((t) => (t.view !== 'limited' && t.description === 'Grab to Makati' ? { ...t, is_posted: false } : t)),
 })
 
+/**
+ * STU-689: the one creator-and-sharing combination the busy month lacks. Jun's name is on a row of Mara's own,
+ * unshared payroll account (a share that has since ended), in Transactions and on the Recurring tab. The other three
+ * combinations are in `household`: Mara's rows on her own accounts, Mara's rows on the joint account (`Yaya salary`,
+ * `Palengke run`), and Jun's rows on it (`Palengke, Marikina market`, the limited entries).
+ */
+export const CREATOR_COMBOS = { transaction: 'Passport renewal fee', entry: 'Storage unit rental' } as const
+export const withCreatorCombos = (data: HouseholdData): HouseholdData => ({
+  ...data,
+  transactions: [
+    tx('2026-03-11', CREATOR_COMBOS.transaction, 1200, payroll, 24, 'debit', { created_by: 'Jun R.' }),
+    ...data.transactions,
+  ],
+  entries: [
+    ...data.entries,
+    entry(CREATOR_COMBOS.entry, 'expense', 2200, '2026-04-12', payroll, { anchor_day: 12, kind: 'cash', settlement: 'manual', created_by: 'Jun R.' }),
+  ],
+})
+
 /** The loan the loan variant adds: a Pag-IBIG housing loan Mara pays from payroll. */
 export const housingLoan: Account = acct({
   id: 17,

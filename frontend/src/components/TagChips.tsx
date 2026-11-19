@@ -10,14 +10,14 @@ export function TagChip({ tag, measure = false }: { tag: TagRef; measure?: boole
   const hook = measure ? undefined : 'tag-chip'
   return swatch !== null ? (
     <span
-      className="inline-flex items-center rounded-full px-2 py-0.5 text-xs text-ink"
+      className="inline-flex items-center rounded-sm px-2 py-0.5 text-xs text-ink"
       style={{ backgroundColor: tokenColor(`swatch-${swatch}`) }}
       data-testid={hook}
     >
       {tag.name}
     </span>
   ) : (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-sunken px-2 py-0.5 text-xs text-body" data-testid={hook}>
+    <span className="inline-flex items-center gap-1.5 rounded-sm bg-sunken px-2 py-0.5 text-xs text-body" data-testid={hook}>
       <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: displayColor(tag.color, NO_COLOR) }} />
       {tag.name}
     </span>

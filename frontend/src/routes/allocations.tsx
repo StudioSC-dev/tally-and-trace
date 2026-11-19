@@ -54,6 +54,7 @@ import { BudgetUsageBar } from '../components/BudgetUsageBar'
 import { amountClass, formatAmount } from '../utils/amount'
 import type { AmountKind } from '../utils/amount'
 import { formatCadenceLabel, formatScheduleLabel } from '../utils/recurringEntry'
+import { chunkFacts, createdByLabel, isSharedAccount, viewerDisplayName } from '../utils/createdBy'
 import { WishlistPanel } from '../components/WishlistPanel'
 import { RecurringEntryFormModal } from '../components/RecurringEntryFormModal'
 import { EntryCreditWarningRow, KindCreditLines } from '../components/AllocationsCredit'
@@ -1372,19 +1373,18 @@ export function AllocationsPage() {
   // A Limited entry shows only its allowlisted fields; a hidden account is a neutral name
   // with no id, so nothing here links into it. It is read-only: its flags decide whether a
   // delete is offered.
+  const viewerName = viewerDisplayName(user)
   const renderLimitedEntryCard = (entry: LimitedBudgetEntry) => {
-    // A limited entry has no opener, so its facts wrap onto a second line instead of being cut.
-    const facts = [
+    // A limited entry has no opener, so its facts wrap onto further lines instead of being cut. It is someone
+    // else's entry on a shared account, so it names its creator.
+    const limitedBy = createdByLabel(entry.created_by, viewerName, true)
+    const factLines = chunkFacts([
       entry.account && <span key="account">Account: {entry.account.name}</span>,
       entry.counterpart && <span key="counterpart">Transfer to: {entry.counterpart.name}</span>,
       entry.category_name && <span key="category">Category: {entry.category_name}</span>,
       entry.end_date && <span key="ends">Ends {formatFullDate(entry.end_date)}</span>,
-      entry.created_by && (
-        <span key="by" data-testid="created-by">
-          by {entry.created_by}
-        </span>
-      ),
-    ].filter(Boolean)
+      limitedBy && <span key="by" data-testid="created-by">{limitedBy}</span>,
+    ])
     return (
       <Row
         key={entry.id}
@@ -1400,7 +1400,7 @@ export function AllocationsPage() {
           </>
         }
         details={[
-          facts.length > 0 && <p className="space-x-3 text-muted">{facts}</p>,
+          ...factLines.map((line, i) => <p key={i} className="space-x-3 text-muted">{line}</p>),
           entry.permissions.can_delete && (
             <button
               type="button"
@@ -1472,6 +1472,47 @@ export function AllocationsPage() {
 
     const canDeleteOnly = !canEdit && entry.permissions.can_delete
 
+    // Each fact once, in priority order, three to a line; the first line is the row's meta. The entry's type is left
+    // out when its group's heading already says it: every group but "Income & transfers" and "Shared with you" is expenses.
+    const group = entry.kind ?? 'other'
+    const typeLabel =
+      group === 'other'
+        ? entry.entry_type === 'expense' && !transferTo && 'Recurring expense'
+        : entry.entry_type === 'income' && 'Recurring income'
+    const sharedAccount = [entry.account_id, entry.transfer_to_account_id].some(
+      (id) => id != null && isSharedAccount(accountsById.get(id)),
+    )
+    const by = createdByLabel(entry.created_by, viewerName, sharedAccount)
+    const metaLines = chunkFacts([
+      typeLabel && <span key="type">{typeLabel}</span>,
+      // The cadence once, with how it settles (and that it is paused) in the same item, then when it falls next, then where.
+      <span key="schedule">{[cadenceLabel, settlementLabel(entry.settlement), !entry.is_active && 'Paused'].filter(Boolean).join(' · ')}</span>,
+      <span key="next" className="text-ink">Next {formatFullDate(entry.next_occurrence)} · {formatRelativeDate(entry.next_occurrence)}</span>,
+      account && (
+        <span key="account">
+          Account: {account.name}
+          {by && (
+            <>
+              {' · '}
+              <span data-testid="created-by">{by}</span>
+            </>
+          )}
+        </span>
+      ),
+      transferTo && <span key="transfer">Transfer to: {transferTo.name}</span>,
+      categoryName && <span key="category">Category: {categoryName}</span>,
+      allocation && <span key="envelope">Envelope: {allocation.name}</span>,
+      entry.lead_time_days > 0 && (
+        <span key="reminder" className="text-ink">
+          Reminder {entry.lead_time_days} day{entry.lead_time_days === 1 ? '' : 's'} ahead
+        </span>
+      ),
+      endLabel !== 'Indefinite' && <span key="end">{endLabel}</span>,
+      remaining !== null && remaining > 0 && <span key="left" className="text-ink">{remaining} left</span>,
+      by && !account && <span key="by" data-testid="created-by">{by}</span>,
+    ])
+
+
     return (
       <Row
         key={entry.id}
@@ -1480,29 +1521,9 @@ export function AllocationsPage() {
         title={entry.name}
         tags={entry.tags}
         status={remaining === 0 ? <StatusText tone="ok" data-testid="installment-paid">Fully paid</StatusText> : undefined}
-        meta={
-          <>
-            <span>{entry.entry_type === 'income' ? 'Recurring income' : 'Recurring expense'}</span>
-            <span>{cadenceLabel}</span>
-            <span>{settlementLabel(entry.settlement)}</span>
-            {!entry.is_active && <span>Paused</span>}
-            <span className="text-ink">Next {formatFullDate(entry.next_occurrence)}</span>
-            <span>{formatRelativeDate(entry.next_occurrence)}</span>
-            {entry.lead_time_days > 0 && (
-              <span className="text-ink">
-                Reminder {entry.lead_time_days} day{entry.lead_time_days === 1 ? '' : 's'} ahead
-              </span>
-            )}
-            {account && <span>Account: {account.name}</span>}
-            {transferTo && <span>Transfer to: {transferTo.name}</span>}
-            {categoryName && <span>Category: {categoryName}</span>}
-            {entry.created_by && <span data-testid="created-by">by {entry.created_by}</span>}
-            {allocation && <span>Envelope: {allocation.name}</span>}
-            <span>{endLabel}</span>
-            {remaining !== null && remaining > 0 && <span className="text-ink">{remaining} left</span>}
-          </>
-        }
+        meta={<>{metaLines[0]}</>}
         details={[
+          ...metaLines.slice(1).map((line, i) => <p key={`meta-${i}`} className="space-x-3 text-muted">{line}</p>),
           entry.description && <p>{entry.description}</p>,
           creditWarning && <EntryCreditWarningRow warning={creditWarning} />,
           showAutoPost && (
