@@ -634,6 +634,17 @@ export function TransactionsPage() {
     ]
   )
 
+  // A filter set inside the Filters panel (the search and the month show in the toolbar itself): while one is on and the
+  // panel is closed, the active-filter row under the toolbar offers Reset filters. The open panel has its own.
+  const hasPanelFilters =
+    selectedAccountIds.length > 0 ||
+    selectedCategoryNames.length > 0 ||
+    filterUncategorized ||
+    enteredBy !== 'everyone' ||
+    selectedTypes.length > 0 ||
+    selectedTag !== undefined ||
+    (isScheduled ? scheduledFrom !== '' || scheduledThrough !== '' : isCustomRange)
+
   const dateRangeSummary = useMemo(() => {
     if (isScheduled) {
       const scheduled = scheduledRange(partitionDay, scheduledFrom, scheduledThrough)
@@ -2714,16 +2725,8 @@ export function TransactionsPage() {
         data-pending={pendingKind}
         data-highlighted={highlightedId === transaction.id ? 'true' : undefined}
         className={`${actionable ? 'hover:bg-sunken cursor-pointer' : 'cursor-default'} ${pendingKind === 'delete' ? 'opacity-50' : ''} ${highlightedId === transaction.id ? 'ring-2 ring-inset ring-ink' : ''} ${cardStateClasses}`}
-        onClick={open}
-        role="button"
-        tabIndex={0}
-        aria-disabled={actionable ? undefined : 'true'}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault()
-            open()
-          }
-        }}
+        onOpen={open}
+        openDisabled={!actionable}
         title={description}
         status={<StatusText tone={ROW_STATUS_TONES[status]} data-testid="transaction-status">{STATUS_LABELS[status]}</StatusText>}
         meta={
@@ -2884,40 +2887,53 @@ export function TransactionsPage() {
         accountCurrencies={accountCurrencies}
       />
 
-      {/* Search and Filters */}
-      <div ref={listCardRef} className="card p-4 sm:p-6 space-y-4" data-testid="transactions-list-card">
-        <SegmentedControl
-          className="flex flex-wrap items-center gap-2"
-          aria-label="List view"
-          options={[
-            { value: 'to_date', label: 'To date', testId: 'view-to-date' },
-            { value: 'scheduled', label: 'Scheduled', testId: 'view-scheduled' },
-          ]}
-          value={isScheduled ? 'scheduled' : 'to_date'}
-          onChange={showView}
-          segmentClassName="min-h-11 px-4 py-2 text-sm focus-ring"
-        />
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="w-full lg:max-w-md">
-            <label className="label">Search transactions</label>
-            <div className="relative" data-busy-passthrough-box>
+      {/* The list's controls (STU-687): the view switch, then one toolbar row of search, month and Filters. The other
+          filters open under it. */}
+      <div ref={listCardRef} className="card space-y-2 p-1.5 sm:p-2" data-testid="transactions-list-card">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+          <div className="flex items-center justify-between gap-2">
+            <SegmentedControl
+              className="flex items-center gap-2"
+              aria-label="List view"
+              options={[
+                { value: 'to_date', label: 'To date', testId: 'view-to-date' },
+                { value: 'scheduled', label: 'Scheduled', testId: 'view-scheduled' },
+              ]}
+              value={isScheduled ? 'scheduled' : 'to_date'}
+              onChange={showView}
+              segmentClassName="min-h-11 px-4 py-2 text-sm focus-ring"
+            />
+            {!isScheduled && (
+            <Button
+              variant="secondary"
+              onClick={() => setIsBreakdownOpen(true)}
+              data-onboarding="spending-breakdown"
+              className="px-2.5"
+            >
+              <Icon name="spending-breakdown" />
+              <span className="sr-only sm:not-sr-only">Spending breakdown</span>
+            </Button>
+            )}
+          </div>
+          <div className="flex min-w-0 flex-1 items-center gap-2" data-testid="transactions-toolbar">
+            <label htmlFor="transactions-search" className="sr-only">Search transactions</label>
+            <div className="relative min-w-0 flex-1" data-busy-passthrough-box>
               <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-muted">
                 <Icon name="search" />
               </div>
               <input
+                id="transactions-search"
                 type="text"
                 data-busy-passthrough
                 data-testid="transactions-search"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="input-field pl-10 focus-ring"
-                placeholder="Search by description..."
+                placeholder="Search"
               />
             </div>
-          </div>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
             {!isScheduled && (
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-1" data-testid="transactions-month">
               <Button
                 variant="secondary"
                 onClick={() => handleMonthChange('prev')}
@@ -2926,7 +2942,7 @@ export function TransactionsPage() {
               >
                 <Icon name="caret-left" />
               </Button>
-              <span className="text-sm font-semibold text-ink">{currentMonthLabel}</span>
+              <span className="whitespace-nowrap px-1 text-sm font-semibold text-ink">{currentMonthLabel}</span>
               <Button
                 variant="secondary"
                 onClick={() => handleMonthChange('next')}
@@ -2938,52 +2954,22 @@ export function TransactionsPage() {
               </Button>
             </div>
             )}
-            {!isScheduled && (
-            <Button
-              variant="secondary"
-              onClick={() => setIsBreakdownOpen(true)}
-              data-onboarding="spending-breakdown"
-              className="px-2.5"
-            >
-              <Icon name="spending-breakdown" />
-              Spending breakdown
-            </Button>
-            )}
             <Button
               variant="secondary"
               onClick={() => setShowFilters((prev) => !prev)}
-              className="px-2.5"
+              aria-expanded={showFilters}
+              // The panel mounts only while it is open, so the button names it only then.
+              aria-controls={showFilters ? 'transactions-filters' : undefined}
+              className="shrink-0 px-2.5"
+              data-testid="transactions-filters-toggle"
             >
               <Icon name="filter" />
-              {showFilters ? 'Hide filters' : 'Show filters'}
+              <span className="sr-only sm:not-sr-only">Filters</span>
             </Button>
           </div>
         </div>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-sm font-medium text-body">Date range: {dateRangeSummary}</p>
-            <p className="text-xs text-muted">
-              {isScheduled
-                ? scheduledFrom !== '' || scheduledThrough !== ''
-                  ? 'Custom range selected'
-                  : 'From tomorrow, through a year ahead'
-                : isCustomRange
-                  ? 'Custom range selected'
-                  : 'Automatically showing whole-month activity'}
-            </p>
-          </div>
-          {hasActiveFilters && (
-            <Button
-              variant="secondary"
-              onClick={resetFilters}
-              className="self-start sm:self-auto"
-            >
-              Reset filters
-            </Button>
-          )}
-        </div>
-        {(selectedCategoryNames.length > 0 || filterUncategorized || enteredBy === 'me') && (
-          <div className="flex flex-wrap gap-2" aria-label="Active filters">
+        {(selectedCategoryNames.length > 0 || filterUncategorized || enteredBy === 'me' || (hasPanelFilters && !showFilters)) && (
+          <div className="flex flex-wrap items-center gap-2 px-1 pb-1" aria-label="Active filters">
             {!isDrilledUncategorized && selectedCategoryNames.map((name) => (
               <Button
                 variant="secondary"
@@ -3021,10 +3007,38 @@ export function TransactionsPage() {
                 <Icon name="close" />
               </Button>
             )}
+            {hasPanelFilters && !showFilters && (
+              <Button variant="secondary" onClick={resetFilters}>
+                Reset filters
+              </Button>
+            )}
           </div>
         )}
         {showFilters && (
-          <div className="space-y-6">
+          <div id="transactions-filters" className="space-y-6 border-t border-line px-2 pb-2 pt-4 sm:px-4" data-testid="transactions-filters">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-medium text-body">Date range: {dateRangeSummary}</p>
+                <p className="text-xs text-muted">
+                  {isScheduled
+                    ? scheduledFrom !== '' || scheduledThrough !== ''
+                      ? 'Custom range selected'
+                      : 'From tomorrow, through a year ahead'
+                    : isCustomRange
+                      ? 'Custom range selected'
+                      : 'Automatically showing whole-month activity'}
+                </p>
+              </div>
+              {hasActiveFilters && (
+                <Button
+                  variant="secondary"
+                  onClick={resetFilters}
+                  className="self-start sm:self-auto"
+                >
+                  Reset filters
+                </Button>
+              )}
+            </div>
             <div>
               <h3 id="filter-accounts-heading" className="text-sm font-semibold text-body">Accounts</h3>
               <div className="mt-2">
@@ -3167,8 +3181,9 @@ export function TransactionsPage() {
             ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
-                <label className="label">Custom start date</label>
+                <label className="label" htmlFor="transactions-custom-start">Custom start date</label>
                 <input
+                  id="transactions-custom-start"
                   type="date"
                   value={startDate}
                   onChange={(e) => handleCustomStartDateChange(e.target.value)}
@@ -3177,8 +3192,9 @@ export function TransactionsPage() {
                 />
               </div>
               <div>
-                <label className="label">Custom end date</label>
+                <label className="label" htmlFor="transactions-custom-end">Custom end date</label>
                 <input
+                  id="transactions-custom-end"
                   type="date"
                   value={endDate}
                   onChange={(e) => handleCustomEndDateChange(e.target.value)}

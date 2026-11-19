@@ -494,7 +494,7 @@ async function pendingForeignFace(browser) {
   check('(f) its section amount is the face, $80.00', [dueRetained[0]?.text.includes('$80.00'), dueRetained[0]?.text.includes('4,700')], [true, false])
 
   // Explicit range that holds the seeded rows even on the 1st or 2nd of a month, when they fall in the previous one.
-  await page.getByRole('button', { name: 'Show filters' }).click()
+  await page.getByRole('button', { name: 'Filters', exact: true }).click()
   const startInput = page.locator('xpath=//label[normalize-space()="Custom start date"]/following-sibling::input')
   // The screen loader blocks input while a request is in flight: wait for it before the fill.
   await waitQuiet(page)

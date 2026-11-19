@@ -14,6 +14,7 @@ import type { Locator, Page } from '@playwright/test'
 import { household, householdViewRoutes, mockHousehold, wishlistRoutes } from './support/fixtures/household'
 import { addRoutes } from './support/mockApi'
 import { shot } from './support/shot'
+import { expandDue } from './support/transactions'
 
 // This spec lives in <repo>/frontend/e2e.
 const FRONTEND = fileURLToPath(new URL('..', import.meta.url))
@@ -77,6 +78,8 @@ async function open(page: Page, p: PageCase): Promise<void> {
   await page.goto(p.path)
   await expect(page.getByRole('heading', { level: 1, name: p.title })).toBeVisible({ timeout: 15_000 })
   await page.waitForLoadState('networkidle')
+  // STU-687: the Due card opens collapsed; it is expanded so its tabs and row actions are measured too.
+  if (p.key === 'transactions') await expandDue(page)
   await page.evaluate(() => document.fonts.ready)
   await page.mouse.move(0, 0)
 }
@@ -90,7 +93,8 @@ async function scrollThrough(page: Page): Promise<void> {
 
 /**
  * Every visible tap target on the page, in document order, including those below the first screen. A checkbox or
- * radio is measured by its label when the label holds it (the label is what a finger hits). An element hidden from
+ * radio is measured by its label when the label holds it (the label is what a finger hits), and a row's title
+ * (`.row-open`, STU-683), whose `::after` stretches its hit area over the row, by that area, the row it fills. An element hidden from
  * view (`display: none`, `visibility: hidden`, a screen-reader-only clip) is skipped. The identity is the element's
  * test id, or its role and accessible name, with a count for repeats.
  */
@@ -107,7 +111,8 @@ const targetsOn = (page: Page): Promise<Target[]> =>
     for (const e of Array.from(document.querySelectorAll(selector))) {
       const toggle = e instanceof HTMLInputElement && (e.type === 'checkbox' || e.type === 'radio')
       const label = toggle ? e.closest('label') : null
-      const area: Element = label ?? e
+      const stretched = e instanceof HTMLElement && e.matches('.row-open') ? e.offsetParent : null
+      const area: Element = label ?? stretched ?? e
       if (!area.checkVisibility({ checkVisibilityCSS: true }) || area.getClientRects().length === 0) continue
       const box = area.getBoundingClientRect()
       const cs = getComputedStyle(area)
@@ -207,40 +212,42 @@ const DESKTOP_BASE: Record<PageKey, readonly (readonly [string, number, number])
     // 136 (was 138 at bf2f991): STU-710's sentence-case text is narrower, not a sizing change.
     ['button "Add transaction"', 136, 38],
     ['button#due-section-toggle', 47, 26],
-    ['tab#due-tab-due', 243.39, 32],
-    ['tab#due-tab-not-posted', 227.41, 32],
-    ['tab#due-tab-upcoming', 206.39, 32],
-    ['tab#due-tab-subscriptions', 221.41, 32],
-    ['tab#due-tab-installments', 216.41, 32],
+    // STU-687 (AC6): the Due tabs share one non-wrapping row, so each grows to fill it.
+    ['tab#due-tab-due', 261.59, 32],
+    ['tab#due-tab-not-posted', 245.61, 32],
+    ['tab#due-tab-upcoming', 224.59, 32],
+    ['tab#due-tab-subscriptions', 239.61, 32],
+    ['tab#due-tab-installments', 234.59, 32],
     ['button#due-mark-paid', 74, 26],
     ['button#row-change-date', 89, 26],
     ['button#due-pay', 41, 24],
     ['button#view-to-date', 79, 44],
     ['button#view-scheduled', 99, 44],
-    ['input[text]#transactions-search', 448, 40],
+    // STU-687 (AC4): search, the month picker and Filters share one toolbar row; the search fills what is left.
+    ['input[text]#transactions-search', 556, 40],
     ['button "View previous month"', 38, 30],
     ['button "View next month"', 38, 30],
     ['button "Spending breakdown"', 182, 38],
-    ['button "Show filters"', 125, 38],
-    ['button#row', 1230, 57],
-    ['button#row (2)', 1230, 57],
-    ['button#row (3)', 1230, 57],
-    ['button#row (4)', 1230, 57],
-    ['button#row (5)', 1230, 57],
-    ['button#row (6)', 1230, 57],
-    ['button#row (7)', 1230, 57],
-    ['button#row (8)', 1230, 57],
-    ['button#row (9)', 1230, 57],
-    ['button#row (10)', 1230, 57],
-    ['button#row (11)', 1230, 57],
-    ['button#row (12)', 1230, 57],
-    ['button#row (13)', 1230, 57],
-    ['button#row (14)', 1230, 57],
-    ['button#row (15)', 1230, 57],
-    ['button#row (16)', 1230, 57],
-    ['button#row (17)', 1230, 57],
-    ['button#row (18)', 1230, 57],
-    ['button#row (19)', 1230, 56],
+    ['button#transactions-filters-toggle', 91, 38],
+    ['button#row-open', 1230, 57],
+    ['button#row-open (2)', 1230, 57],
+    ['button#row-open (3)', 1230, 57],
+    ['button#row-open (4)', 1230, 57],
+    ['button#row-open (5)', 1230, 57],
+    ['button#row-open (6)', 1230, 57],
+    ['button#row-open (7)', 1230, 57],
+    ['button#row-open (8)', 1230, 57],
+    ['button#row-open (9)', 1230, 57],
+    ['button#row-open (10)', 1230, 57],
+    ['button#row-open (11)', 1230, 57],
+    ['button#row-open (12)', 1230, 57],
+    ['button#row-open (13)', 1230, 57],
+    ['button#row-open (14)', 1230, 57],
+    ['button#row-open (15)', 1230, 57],
+    ['button#row-open (16)', 1230, 57],
+    ['button#row-open (17)', 1230, 57],
+    ['button#row-open (18)', 1230, 57],
+    ['button#row-open (19)', 1230, 56],
     ['button "Previous"', 89, 38],
     ['button "1"', 32, 32],
     ['button "Next"', 64, 38],
@@ -263,33 +270,33 @@ const DESKTOP_BASE: Record<PageKey, readonly (readonly [string, number, number])
     ['button "Wishlist"', 84, 36],
     ['input[search]#recurring-search', 1232, 44],
     ['select#tag-filter', 113, 40],
-    ['button#row', 1230, 57],
+    ['button#row-open', 1230, 57],
     ['button#entry-charged-button', 66, 24],
     ['button#entry-posted-button', 60, 24],
-    ['button#row (2)', 1230, 57],
+    ['button#row-open (2)', 1230, 57],
     ['button#entry-charged-button (2)', 66, 24],
     ['button#entry-posted-button (2)', 60, 24],
-    ['button#row (3)', 1230, 56],
-    ['button#row (4)', 1230, 57],
+    ['button#row-open (3)', 1230, 56],
+    ['button#row-open (4)', 1230, 57],
     ['button#entry-mark-paid-button', 74, 24],
-    ['button#row (5)', 1230, 57],
+    ['button#row-open (5)', 1230, 57],
     ['button#entry-mark-paid-button (2)', 74, 24],
-    ['button#row (6)', 1230, 57],
+    ['button#row-open (6)', 1230, 57],
     ['button#entry-mark-paid-button (3)', 74, 24],
-    ['button#row (7)', 1230, 57],
+    ['button#row-open (7)', 1230, 57],
     ['button#entry-mark-paid-button (4)', 74, 24],
-    ['button#row (8)', 1230, 57],
+    ['button#row-open (8)', 1230, 57],
     ['button#entry-mark-paid-button (5)', 74, 24],
-    ['button#row (9)', 1230, 57],
+    ['button#row-open (9)', 1230, 57],
     ['button#entry-mark-paid-button (6)', 74, 24],
-    ['button#row (10)', 1230, 57],
+    ['button#row-open (10)', 1230, 57],
     ['button#entry-mark-paid-button (7)', 74, 24],
-    ['button#row (11)', 1230, 57],
+    ['button#row-open (11)', 1230, 57],
     ['button#entry-mark-paid-button (8)', 74, 24],
-    ['button#row (12)', 1230, 57],
+    ['button#row-open (12)', 1230, 57],
     ['button#entry-mark-paid-button (9)', 74, 24],
-    ['button#row (13)', 1230, 56],
-    ['button#row (14)', 1230, 56],
+    ['button#row-open (13)', 1230, 56],
+    ['button#row-open (14)', 1230, 56],
     ['button#entry-mark-received-button', 98, 24],
   ],
 }

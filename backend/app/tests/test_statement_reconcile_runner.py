@@ -251,7 +251,35 @@ def test_an_actor_without_the_role_is_refused(w, tmp_path):
     assert _snapshot(w) == before
 
 
-def test_an_unposted_installment_row_is_refused_and_nothing_is_written(w):
+def test_an_earlier_installment_payment_is_refused_and_nothing_is_written(w):
+    """Only an installment's latest payment can be given back (STU-761): unposting an
+    earlier one is noted in the dry run and refused by the apply, nothing written."""
+    entry = sw_post(w["client"], w["me"], "/budget-entries/", {
+        "name": "Laptop", "entry_type": "expense", "amount": 1500, "cadence": "monthly",
+        "next_occurrence": "2026-02-10T00:00:00", "account_id": w["card"],
+        "end_mode": "after_occurrences", "max_occurrences": 6})["id"]
+    linked = []
+    for _ in range(2):  # 2026-02-24, then 2026-03-24 (on the statement after)
+        r = w["client"].post(f"{API}/budget-entries/{entry}/materialize", json={},
+                             headers=w["me"]["headers"])
+        assert r.status_code == 201, r.text
+        linked.append(r.json()["id"])
+    _row(w, "2026-02-01", 100)
+    _statements(w)
+    statement = _statement([_line(1, "2026-02-01", "100.00")], close=CLOSE)
+    before = _snapshot(w)
+    outcome = _run(w, statement, apply=True)
+    assert outcome.code == 3, outcome.lines
+    out = "\n".join(outcome.lines)
+    assert f"note: row {linked[0]}: unposting it is refused" in out
+    assert f"Row {linked[0]} is a payment of installment {entry} but not its latest one" in out
+    assert f"row_id: {linked[0]}" in out and "nothing was written" in out
+    assert _snapshot(w) == before
+    assert _txn(w, linked[0])["is_posted"] is True
+
+
+def test_the_latest_installment_payment_is_given_back(w):
+    """The dry run notes the payment given back, and the apply does it (STU-761)."""
     entry = sw_post(w["client"], w["me"], "/budget-entries/", {
         "name": "Laptop", "entry_type": "expense", "amount": 1500, "cadence": "monthly",
         "next_occurrence": "2026-02-10T00:00:00", "account_id": w["card"],
@@ -263,14 +291,15 @@ def test_an_unposted_installment_row_is_refused_and_nothing_is_written(w):
     _row(w, "2026-02-01", 100)
     _statements(w)
     statement = _statement([_line(1, "2026-02-01", "100.00")], close=CLOSE)
-    before = _snapshot(w)
+    note = (f"note: row {linked}: unposted and unlinked from installment {entry}; its payment "
+            "due 2026-02-24 is given back (6 left, the next due 2026-02-24)")
+    dry = _run(w, statement, apply=False)
+    assert dry.code == 0 and note in dry.lines, dry.lines
     outcome = _run(w, statement, apply=True)
-    assert outcome.code == 3, outcome.lines
-    out = "\n".join(outcome.lines)
-    assert f"Row {linked} is linked to a recurring entry" in out
-    assert f"row_id: {linked}" in out and "nothing was written" in out
-    assert _snapshot(w) == before
-    assert _txn(w, linked)["is_posted"] is True
+    assert outcome.code == 0, outcome.lines
+    assert outcome.lines.count(note) == 2  # the dry run's, then the apply's
+    row = _txn(w, linked)
+    assert (row["is_posted"], row.get("budget_entry_id")) == (False, None)
 
 
 def test_a_wrong_expected_database_is_refused_before_connecting(w, tmp_path):

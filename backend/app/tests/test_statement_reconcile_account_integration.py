@@ -508,17 +508,38 @@ def test_a_card_is_sent_to_the_card_route(w):
     assert f"POST /cards/{card}/statements/reconcile" in r.json()["detail"]
 
 
-@pytest.mark.parametrize("account_type", ["cash", "loan"])
-def test_other_account_types_are_refused(w, account_type):
-    extra = {"loan_kind": "auto", "loan_annual_rate": 10, "loan_term_months": 24,
-             "loan_payment_amount": 4_615, "loan_first_payment_date": "2027-01-04",
-             "payment_account_id": w["checking"]} if account_type == "loan" else {}
-    other = sw_post(w["client"], w["me"], "/accounts/", {
-        "name": "Other", "account_type": account_type,
-        "balance": -100_000 if account_type == "loan" else 0, **extra})["id"]
-    r = _post(w, _statement([]), True, account=other)
+def test_a_loan_account_is_refused(w):
+    loan = sw_post(w["client"], w["me"], "/accounts/", {
+        "name": "Loan", "account_type": "loan", "balance": -100_000, "loan_kind": "auto",
+        "loan_annual_rate": 10, "loan_term_months": 24, "loan_payment_amount": 4_615,
+        "loan_first_payment_date": "2027-01-04", "payment_account_id": w["checking"]})["id"]
+    r = _post(w, _statement([]), True, account=loan)
     assert r.status_code == 400, r.text
-    assert "savings, checking or e-wallet" in r.json()["detail"]
+    assert "savings, checking, e-wallet or cash" in r.json()["detail"]
+
+
+def test_a_cash_account_reconciles(w):
+    """STU-774: a cash account is reconciled as a savings account is: dry run, apply and
+    verify, its balance and the record as the statement says."""
+    cash = sw_post(w["client"], w["me"], "/accounts/", {
+        "name": "Cash", "account_type": "cash", "balance": 2_000})["id"]
+    kept = _row(w, "2027-02-03", 150, account=cash)
+    stray = _row(w, "2027-02-10", 40, account=cash)
+    statement = _statement([
+        _line(1, "2027-02-03", "150.00"),
+        _line(2, "2027-02-14", "500.00", kind="credit", description="Allowance")],
+        opening=Decimal("2000.00"))
+    dry = _dry(w, statement, account=cash)
+    assert dry["balanced"] is True
+    assert _kinds(dry) == [("matched", 1), ("create", 2), ("unpost", None)]
+    assert _balance(w, cash) == Decimal("1810")  # the dry run wrote nothing
+    body = _apply(w, statement, account=cash)
+    assert _kinds(body) == [("matched", 1), ("create", 2), ("unpost", None)]
+    assert Decimal(body["reconciliation"]["closing_balance"]) == Decimal("2350.00")
+    assert _balance(w, cash) == Decimal("2350") == _history_at_end(w, cash)
+    assert _txn(w, kept)["is_reconciled"] is True
+    assert _txn(w, stray)["is_posted"] is False
+    assert _reconciliations(w, cash)[0][3:6] == (Decimal("2350.00"), Decimal("350.00"), 2)
 
 
 def test_an_e_wallet_reconciles(w):

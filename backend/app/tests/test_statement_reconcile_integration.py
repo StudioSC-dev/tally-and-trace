@@ -449,29 +449,260 @@ def test_an_admin_reconciles(w):
     assert _txn(w, txn)["amount"] == 120.0
 
 
-# --- AC7: an installment-linked row -----------------------------------------------------------
+# --- AC7: a row linked to a recurring entry (STU-761) -----------------------------------------
 
-def test_unposting_an_installment_row_is_refused(w):
-    """Unposting a row linked to a recurring entry has no write path that moves the
-    entry's paid count and schedule back (reported, STU-749): the apply is refused
-    with that reason and writes nothing."""
-    entry = sw_post(w["client"], w["me"], "/budget-entries/", {
+def _entry_post(w, **body):
+    return sw_post(w["client"], w["me"], "/budget-entries/", {
         "name": "Laptop", "entry_type": "expense", "amount": 1500, "cadence": "monthly",
-        "next_occurrence": "2027-02-10T00:00:00", "account_id": w["card"],
-        "end_mode": "after_occurrences", "max_occurrences": 6})["id"]
+        "account_id": w["card"], **body})["id"]
+
+
+def _installment(w, next_occurrence, count, **extra):
+    """A card installment: its occurrences fall on the card's close (the 24th)."""
+    return _entry_post(w, next_occurrence=f"{next_occurrence}T00:00:00",
+                       end_mode="after_occurrences", max_occurrences=count, **extra)
+
+
+def _pay(w, entry):
+    """Mark paid: the entry's next occurrence recorded as a posted row."""
     r = w["client"].post(f"{API}/budget-entries/{entry}/materialize", json={},
                          headers=w["me"]["headers"])
     assert r.status_code == 201, r.text
-    linked = r.json()["id"]
+    return r.json()["id"]
+
+
+def _entry(w, entry):
+    """The entry's stored ``(max_occurrences, next_occurrence day, is_active,
+    auto_post_enabled, installment_reviewed_at)``."""
+    db = w["db"]
+    db.rollback()
+    row = db.execute(text(
+        "SELECT max_occurrences, next_occurrence, is_active, auto_post_enabled, "
+        "installment_reviewed_at FROM budget_entries WHERE id = :e"), {"e": entry}).first()
+    db.rollback()
+    return (row[0], row[1].date(), row[2], row[3], row[4])
+
+
+def _paid(w, entry):
+    """The paid count the app shows (``forecast.occurrences_paid``)."""
+    from app.models.budget_entry import BudgetEntry
+    from app.services.forecast import occurrences_paid
+
+    db = w["db"]
+    db.rollback()
+    paid = occurrences_paid(db, [db.get(BudgetEntry, entry)])[entry]
+    db.rollback()
+    return paid
+
+
+def _link(w, txn):
+    db = w["db"]
+    db.rollback()
+    row = db.execute(text("SELECT is_posted, budget_entry_id, occurrence_date "
+                          "FROM transactions WHERE id = :i"), {"i": txn}).first()
+    db.rollback()
+    return tuple(row)
+
+
+def _auto_post_on(w, entry):
+    db = w["db"]
+    db.rollback()
+    db.execute(text("UPDATE budget_entries SET auto_post_enabled = true, "
+                    "installment_reviewed_at = now() WHERE id = :e"), {"e": entry})
+    db.commit()
+
+
+def test_unposting_the_latest_installment_payment_gives_it_back(w):
+    """AC1: the latest recorded payment of a capped installment, unposted by the
+    statement, is unlinked and given back: one more payment left, the schedule due
+    on that occurrence again, auto-post off."""
+    from app.models.budget_entry import BudgetEntry
+    from app.services import posting
+
+    entry = _installment(w, "2027-02-10", 6)
+    paid_row = _pay(w, entry)
+    _auto_post_on(w, entry)
+    kept = _row(w, "2027-02-01", 100)
+    _statements(w)
+    assert _entry(w, entry)[:4] == (5, date(2027, 3, 24), True, True)
+    assert _entry(w, entry)[4] is not None
+    assert _paid(w, entry) == 1
+
+    statement = _statement([_line(1, "2027-02-01", "100.00")])
+    before = _snapshot(w)
+    dry = _dry(w, statement)
+    assert _snapshot(w) == before
+    assert ("unpost", None) in _kinds(dry)
+    assert dry["notes"] == [
+        f"row {paid_row}: unposted and unlinked from installment {entry}; its payment due "
+        "2027-02-24 is given back (6 left, the next due 2027-02-24); auto-post is turned off"]
+
+    body = _apply(w, statement)
+    assert body["notes"] == dry["notes"]
+    assert _link(w, paid_row) == (False, None, None)
+    assert _txn(w, paid_row)["is_reconciled"] is False
+    assert _txn(w, kept)["is_reconciled"] is True
+    assert _entry(w, entry) == (6, date(2027, 2, 24), True, False, None)
+    assert _paid(w, entry) == 0
+    db = w["db"]
+    db.rollback()
+    due = posting.due_walk(db, db.get(BudgetEntry, entry), REF.date())
+    db.rollback()
+    assert [d.date() for d in due] == [date(2027, 2, 24)]
+
+
+def test_unposting_the_last_payment_makes_a_completed_installment_active(w):
+    """AC1: a completed installment (its last payment recorded) is active again."""
+    entry = _installment(w, "2027-02-10", 1)
+    paid_row = _pay(w, entry)
     _row(w, "2027-02-01", 100)
     _statements(w)
-    statement = _statement([_line(1, "2027-02-01", "100.00")])
+    assert _entry(w, entry)[:3] == (0, date(2027, 2, 24), False)
+    assert _paid(w, entry) == 1
+    dry = _dry(w, _statement([_line(1, "2027-02-01", "100.00")]))
+    assert dry["notes"] == [
+        f"row {paid_row}: unposted and unlinked from installment {entry}; its payment due "
+        "2027-02-24 is given back (1 left, the next due 2027-02-24); the completed "
+        "installment is active again"]
+    _apply(w, _statement([_line(1, "2027-02-01", "100.00")]))
+    assert _link(w, paid_row) == (False, None, None)
+    assert _entry(w, entry) == (1, date(2027, 2, 24), True, False, None)
+    assert _paid(w, entry) == 0
+
+
+def test_giving_back_a_payment_leaves_budgets_balance_and_statements_right(w):
+    """AC4: after the apply the budget, the card balance and the stored statements
+    are right, and ``verify_card`` passes."""
+    from app.models.allocation import Allocation
+
+    savings = sw_post(w["client"], w["me"], "/accounts/", {
+        "name": "Savings", "account_type": "savings", "balance": 10_000})["id"]
+    budget = sw_post(w["client"], w["me"], "/allocations/", {
+        "account_id": savings, "name": "Gadgets", "allocation_type": "budget",
+        "target_amount": 5_000, "period_frequency": "quarterly",
+        "period_start": "2027-01-01T00:00:00", "period_end": "2027-04-01T00:00:00"})["id"]
+    entry = _installment(w, "2027-02-10", 6, allocation_id=budget)
+    _pay(w, entry)
+    _row(w, "2027-02-01", 100)
+    _statements(w)
+    db = w["db"]
+    db.rollback()
+    assert Decimal(db.get(Allocation, budget).current_amount) == Decimal("1500")
+    db.rollback()
+    assert _balance(w) == Decimal("-1600")
+    assert _stored(w, date(2027, 2, 24)) == (Decimal("1600"), 2)
+
+    _apply(w, _statement([_line(1, "2027-02-01", "100.00")]))
+    db.rollback()
+    assert Decimal(db.get(Allocation, budget).current_amount) == Decimal("0")
+    db.rollback()
+    assert _balance(w) == Decimal("-100")
+    assert _stored(w, date(2027, 2, 24)) == (Decimal("100"), 1)
+    _verify_store(w)
+
+
+def test_unposting_an_earlier_installment_payment_is_refused(w):
+    """AC2: a payment that is not the installment's latest is refused, nothing written."""
+    entry = _installment(w, "2027-01-10", 6)
+    january = _pay(w, entry)
+    february = _pay(w, entry)
+    _row(w, "2027-01-10", 100)
+    _statements(w)
+    statement = _statement([_line(1, "2027-01-10", "100.00")], close="2027-01-24")
     dry = _dry(w, statement)
     assert ("unpost", None) in _kinds(dry)
+    reason = (f"Row {january} is a payment of installment {entry} but not its latest one: "
+              "only the latest payment can be given back here; handle this row by hand and "
+              "run the dry run again")
+    assert dry["notes"] == [f"row {january}: unposting it is refused: {reason}"]
     before = _snapshot(w)
     r = _post(w, statement, False, dry["fingerprint"])
     assert r.status_code == 409, r.text
-    assert f"Row {linked} is linked to a recurring entry" in r.json()["detail"]["message"]
+    assert r.json()["detail"]["message"] == reason
+    assert r.json()["detail"]["row_id"] == january
+    assert _snapshot(w) == before
+    assert _link(w, february)[:2] == (True, entry)
+
+
+def test_unposting_a_row_linked_to_an_installment_by_hand_is_refused(w):
+    """A row linked by hand (no ``occurrence_date``) never used up a payment: refused."""
+    entry = _installment(w, "2027-02-10", 6)
+    by_hand = _row(w, "2027-02-15", 1500, budget_entry_id=entry)
+    _row(w, "2027-02-01", 100)
+    _statements(w)
+    assert _link(w, by_hand) == (True, entry, None)
+    statement = _statement([_line(1, "2027-02-01", "100.00")])
+    dry = _dry(w, statement)
+    before = _snapshot(w)
+    r = _post(w, statement, False, dry["fingerprint"])
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["message"] == (
+        f"Row {by_hand} was linked to installment {entry} by hand, not recorded as one of "
+        "its payments: handle this row by hand and run the dry run again")
+    assert _snapshot(w) == before
+
+
+def test_unposting_a_row_of_an_uncapped_recurring_entry_unlinks_it(w):
+    """AC3: a row of an uncapped recurring entry is unposted and unlinked; the
+    entry's schedule is untouched."""
+    entry = _entry_post(w, name="Streaming", amount=500,
+                        next_occurrence="2027-02-10T00:00:00")
+    linked = _pay(w, entry)
+    _row(w, "2027-02-01", 100)
+    _statements(w)
+    schedule = _entry(w, entry)
+    assert schedule[:3] == (None, date(2027, 3, 10), True)
+    dry = _dry(w, _statement([_line(1, "2027-02-01", "100.00")]))
+    assert dry["notes"] == [f"row {linked}: unposted and unlinked from recurring entry "
+                            f"{entry}; its schedule is unchanged"]
+    _apply(w, _statement([_line(1, "2027-02-01", "100.00")]))
+    assert _link(w, linked) == (False, None, None)
+    assert _entry(w, entry) == schedule
+    assert _balance(w) == Decimal("-100")
+    _verify_store(w)
+
+
+def test_unposting_a_row_of_a_recurring_transfer_is_refused(w):
+    """A recurring transfer cannot be funded from a card, so a card's line item is
+    linked to one only by hand: a cash advance linked to a recurring transfer. Its
+    unpost is refused, nothing written."""
+    savings = sw_post(w["client"], w["me"], "/accounts/", {
+        "name": "Savings", "account_type": "savings", "balance": 0})["id"]
+    entry = _entry_post(w, name="Saving", amount=500, account_id=w["checking"],
+                        transfer_to_account_id=savings, next_occurrence="2027-02-10T00:00:00")
+    linked = _row(w, "2027-02-10", 500, kind="transfer", transfer_from_account_id=w["card"],
+                  transfer_to_account_id=w["checking"], budget_entry_id=entry)
+    _row(w, "2027-02-01", 100)
+    _statements(w)
+    assert _link(w, linked)[:2] == (True, entry)
+    statement = _statement([_line(1, "2027-02-01", "100.00")])
+    dry = _dry(w, statement)
+    assert [a["row_id"] for a in dry["actions"] if a["kind"] == "unpost"] == [linked]
+    reason = (f"Row {linked} is linked to a recurring entry: unposting it here would leave "
+              "the entry's paid count and schedule as they are")
+    assert dry["notes"] == [f"row {linked}: unposting it is refused: {reason}"]
+    before = _snapshot(w)
+    r = _post(w, statement, False, dry["fingerprint"])
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["message"] == reason
+    assert _snapshot(w) == before
+
+
+def test_an_installment_changed_since_the_dry_run_is_refused(w):
+    """The fingerprint covers what a linked unpost does: auto-post turned on after
+    the dry run changes the outcome's figures, so the apply is refused."""
+    entry = _installment(w, "2027-02-10", 6)
+    _pay(w, entry)
+    _row(w, "2027-02-01", 100)
+    _statements(w)
+    statement = _statement([_line(1, "2027-02-01", "100.00")])
+    fingerprint = _dry(w, statement)["fingerprint"]
+    _auto_post_on(w, entry)
+    assert _dry(w, statement)["fingerprint"] != fingerprint
+    before = _snapshot(w)
+    r = _post(w, statement, False, fingerprint)
+    assert r.status_code == 409, r.text
+    assert "changed since the dry run" in r.json()["detail"]["message"]
     assert _snapshot(w) == before
 
 

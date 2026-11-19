@@ -21,6 +21,7 @@ import type { HouseholdData } from './support/fixtures/household'
 import { addRoutes } from './support/mockApi'
 import type { ApiMock, ApiRoute } from './support/mockApi'
 import { shot } from './support/shot'
+import { expandDue } from './support/transactions'
 
 // Token values from docs/design-system.md, as computed rgb().
 const ACCENT = { light: 'rgb(34, 72, 58)', dark: 'rgb(147, 205, 169)' }
@@ -350,8 +351,8 @@ for (const scheme of SCHEMES) {
 
 /** Buttons a mouse click focuses without moving focus elsewhere. */
 const CLICKED = [
-  // Its label turns from Show to Hide filters on the click.
-  { name: 'Transactions filter toggle', url: '/transactions', heading: 'Transactions', button: (p: Page) => p.getByRole('button', { name: /^(Show|Hide) filters$/ }) },
+  // STU-687: one Filters button; the click flips its aria-expanded.
+  { name: 'Transactions filter toggle', url: '/transactions', heading: 'Transactions', button: (p: Page) => p.getByRole('button', { name: 'Filters', exact: true }) },
   { name: 'Allocations tab', url: '/allocations?tab=recurring', heading: 'Allocations', button: (p: Page) => p.getByRole('button', { name: 'Budgets', exact: true }) },
 ] as const
 
@@ -386,11 +387,14 @@ test('every control shows a keyboard focus ring: no .focus-ring:focus rule', asy
   await shot(page, 'focus-ring-stylesheet')
 })
 
-/** The rows at a list sheet's corners, where a sheet that clipped would cut a focused row's ring. */
+/**
+ * The rows at a list sheet's corners, where a sheet that clipped would cut a focused row's ring. `focus` is what takes
+ * focus there: the row's title, which is the row's control (STU-683).
+ */
 const SHEET_ROWS = [
-  { name: 'first transaction row', url: '/transactions', heading: 'Transactions', which: 'first' },
-  { name: 'last transaction row', url: '/transactions', heading: 'Transactions', which: 'last' },
-  { name: 'first recurring row', url: '/allocations?tab=recurring', heading: 'Allocations', which: 'first' },
+  { name: 'first transaction row', url: '/transactions', heading: 'Transactions', which: 'first', focus: 'title' },
+  { name: 'last transaction row', url: '/transactions', heading: 'Transactions', which: 'last', focus: 'title' },
+  { name: 'first recurring row', url: '/allocations?tab=recurring', heading: 'Allocations', which: 'first', focus: 'title' },
 ] as const
 
 for (const c of SHEET_ROWS) {
@@ -399,10 +403,13 @@ for (const c of SHEET_ROWS) {
     const rows = page.getByTestId('list-sheet').first().getByTestId('row')
     const row = c.which === 'first' ? rows.first() : rows.last()
     await expect(row).toBeVisible()
-    await row.focus()
-    // The ring's outer edge (outline-offset plus outline-width past the row), against every ancestor that clips. The
-    // check is geometry, not an engine's overflow-clip-margin: WebKit has none, so a clipping sheet cut the ring there.
-    const ring = await row.evaluate((e) => {
+    const target = c.focus === 'title' ? row.locator('button[data-row-title]') : row
+    await target.focus()
+    await expect(target).toBeFocused()
+    // The ring's outer edge (outline-offset plus outline-width past the focused control), against every ancestor that
+    // clips. The check is geometry, not an engine's overflow-clip-margin: WebKit has none, so a clipping sheet cut the
+    // ring there.
+    const ring = await target.evaluate((e) => {
       const s = getComputedStyle(e)
       const r = e.getBoundingClientRect()
       const reach = parseFloat(s.outlineOffset) + parseFloat(s.outlineWidth)
@@ -609,6 +616,8 @@ const STATES = [
     heading: 'Transactions',
     colour: OK,
     find: (p: Page) => p.locator(`[data-testid="due-row"][data-source="transaction:${STATUS_STATE_IDS.chargedTransaction}"]`).getByTestId('due-pending-state'),
+    // STU-687: the Due card opens collapsed; its rows show once it is expanded.
+    expandDue: true,
   },
   {
     state: 'Auto-post on',
@@ -688,6 +697,7 @@ function contrast(a: string, b: string): number {
 for (const s of STATES) {
   test(`status is a dot and a word: ${s.state}`, async ({ page }) => {
     await open(page, s.url, s.heading, { data: withStatusStates(household) })
+    if ('expandDue' in s && s.expandDue) await expandDue(page)
     const el = s.find(page)
     await expect(el).toBeVisible()
     await el.scrollIntoViewIfNeeded()
@@ -748,6 +758,7 @@ for (const r of STATUS_ROUTES) {
 for (const s of STATES) {
   test(`no filled status boxes: ${s.state}`, async ({ page }) => {
     await open(page, s.url, s.heading, { data: withStatusStates(household) })
+    if ('expandDue' in s && s.expandDue) await expandDue(page)
     const el = s.find(page)
     await expect(el).toBeVisible()
     const st = await statusOf(el)

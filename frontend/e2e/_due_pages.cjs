@@ -243,6 +243,9 @@ async function expectDueTab(page, which) {
   if (dueCheck === null) throw new Error('openDueTab: call useDueCheck(check) first')
   // The card renders every tab it has at once; the count is read once the card is there.
   await page.locator('[data-testid="due-section"]').waitFor({ timeout: 15000 }).catch(() => {})
+  // STU-687: the card opens collapsed, as a one-line banner with no tabs; expand it first.
+  const collapsed = page.locator('[data-testid="due-section-toggle"][aria-expanded="false"]')
+  if (await collapsed.count()) await collapsed.click()
   const seen = tabsSeen.get(page) ?? new Set()
   tabsSeen.set(page, seen)
   const found = await page.locator(`[data-testid="${tab}"]`).count()

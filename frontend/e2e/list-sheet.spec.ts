@@ -180,7 +180,7 @@ const PITCH_SLACK = 0.5
 const measure = (rows: Locator): Promise<Measured[]> =>
   rows.evaluateAll((all) =>
     all.map((e) => ({
-      name: (e.querySelector('p')?.textContent ?? '').trim(),
+      name: (e.querySelector('[data-row-title]')?.textContent ?? '').trim(),
       kind: e.getAttribute('data-row-kind'),
       height: e.getBoundingClientRect().height - parseFloat(getComputedStyle(e).borderBottomWidth),
       metaLines: e.querySelectorAll('[data-testid="row-meta"]').length,
@@ -585,7 +585,8 @@ for (const gesture of ['click', 'Enter'] as const) {
     const row = txRow(page, TX)
     const id = Number(await row.getAttribute('data-transaction-id'))
     expect(household.transactions.find((t) => t.id === id && t.view !== 'limited' && t.description === TX), 'the row is the fixture record').toBeTruthy()
-    await trigger(page, row, gesture, 'row')
+    // The title is the row's control (STU-683): a click lands anywhere on the row, a key goes to the title.
+    await trigger(page, gesture === 'click' ? row : row.getByRole('button', { name: TX, exact: true }), gesture, 'row')
     const modal = actionModal(page)
     await expect(modal).toBeVisible()
     expect(await modal.locator('h2 + p').textContent(), 'the details dialog names the row it opened from').toBe(TX)
@@ -619,7 +620,9 @@ const RECURRING = 'Meralco'
 for (const gesture of GESTURES) {
   test(`rows still open their records and keep their actions: recurring row, ${gesture}`, async ({ page }) => {
     await openRecurring(page)
-    await trigger(page, recurringRow(page, RECURRING), gesture, 'row')
+    // STU-683: a click lands anywhere on the row; a key goes to the row's title, the one control that opens it.
+    const row = recurringRow(page, RECURRING)
+    await trigger(page, gesture === 'click' ? row : row.getByRole('button', { name: RECURRING, exact: true }), gesture, 'row')
     const form = recurringForm(page)
     await expect(form).toBeVisible()
     await expect(form.locator('[data-field="name"]')).toHaveValue(RECURRING)

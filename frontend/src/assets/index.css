@@ -549,6 +549,35 @@ body {
   }
 
   /*
+    A row that opens its record (Row's `onOpen`): the title is the one control
+    that opens it, and its hit area stretches over the row, so a click anywhere
+    else on the row opens the record too. The row's own controls sit above that
+    area (positioned, later in the row), so each one does only its own job.
+    Nothing is drawn: the area is empty and clear.
+  */
+  .row-open::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+  }
+
+  :where(.row-opener) :where(button, a, input, select, textarea, summary):not(.row-open) {
+    position: relative;
+  }
+
+  /*
+    The tag line is positioned too (its ruler measures inside it), which would lift
+    its chips above the area: it lets the pointer through, and only its "+N" takes it.
+  */
+  :where(.row-opener) .row-tags {
+    pointer-events: none;
+  }
+
+  :where(.row-opener) .row-tags :where(button) {
+    pointer-events: auto;
+  }
+
+  /*
     The selection rule (docs/design-system.md, "Selection rule"): selection is
     not an action, so a selected tab or segment is never filled like the primary
     button. Selected is a leaf background, ink 600 and a 2px spine rule

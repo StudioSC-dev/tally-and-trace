@@ -196,8 +196,9 @@ async function openTransactions(page) {
 }
 /** Sets a custom range through the page's date inputs (the end first, so the range is never inverted). */
 async function setRange(page, start, end) {
-  const toggle = page.getByRole('button', { name: 'Show filters' })
-  if (await toggle.count()) await toggle.click()
+  // STU-687: one Filters button with aria-expanded opens the filters under the toolbar.
+  const toggle = page.getByRole('button', { name: 'Filters', exact: true })
+  if ((await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click()
   const startInput = page.locator('xpath=//label[normalize-space()="Custom start date"]/following-sibling::input')
   const endInput = page.locator('xpath=//label[normalize-space()="Custom end date"]/following-sibling::input')
   // The screen loader blocks input while a request is in flight: wait for it before each fill.
@@ -215,7 +216,7 @@ async function setRange(page, start, end) {
  */
 const lists = async (page) => {
   const main = await page.evaluate(() => {
-    const nameOf = (a) => a.querySelector('p.text-base')?.textContent.trim() ?? ''
+    const nameOf = (a) => a.querySelector('[data-row-title]')?.textContent.trim() ?? ''
     return [...document.querySelectorAll('article')].filter((a) => !a.closest('[data-testid="due-section"]')).map(nameOf)
   })
   return { main, upcoming: (await readTab(page, 'upcoming')).map((r) => r.name) }
@@ -545,7 +546,7 @@ async function filters(browser) {
   check('(g) unfiltered: all three occurrences', await names(), ['G Gym', 'G Rent', 'G Salary'])
   const base = await tabsSnapshot(page)
   check('(g) the planned row is in Upcoming', base.upcoming.filter((r) => r[2] === 'G Planned').length, 1)
-  await page.getByRole('button', { name: 'Show filters' }).click()
+  await page.getByRole('button', { name: 'Filters', exact: true }).click()
   await waitQuiet(page)
   const reset = async () => {
     await page.getByRole('button', { name: 'Reset filters' }).click()

@@ -70,7 +70,7 @@ const repeatControl = (modal, key) => fields(modal).locator(`[data-field="${key}
 const linkLabel = (modal) => modal.getByText('Recurring entry (optional)', { exact: true })
 // The link select is the dialog's one select whose first option ("None") has an empty value.
 const linkSelect = (modal) => modal.locator('select:has(> option[value=""])')
-const rowFor = (page, description) => page.locator('article[role="button"]').filter({ hasText: description }).first()
+const rowFor = (page, description) => page.locator('article[data-transaction-id]').filter({ hasText: description }).first()
 const isApiPost = (r) => r.method() === 'POST' && r.url().includes('/api/v1/')
 /** Picks the link select's option whose text starts with `name`. */
 async function pickLink(modal, name) {

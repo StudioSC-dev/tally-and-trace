@@ -384,7 +384,7 @@ async function scenario6(browser) {
     })
     await h.check('6.creates', 'S', async () => creates.length === 3 || `${creates.length} POST(s)`)
     // An edit that moves the row to another account.
-    await page.locator('article[role="button"]').filter({ hasText: 'Picker refused' }).first().click()
+    await page.locator('article[data-transaction-id]').filter({ hasText: 'Picker refused' }).first().click()
     const actions = formModal(page, 'Transaction actions')
     await actions.waitFor()
     await h.waitQuiet(page)
@@ -622,7 +622,7 @@ const listRequests = (page) => {
 }
 const filterGroup = (page, key) => page.locator(`[data-field="${key}"]`)
 const filtersTab = async (page) => {
-  await page.getByRole('button', { name: 'Show filters' }).click()
+  await page.getByRole('button', { name: 'Filters', exact: true }).click()
   await h.waitQuiet(page)
   await filterGroup(page, 'filter_accounts').waitFor()
 }

@@ -66,7 +66,7 @@ const fields = (modal) => modal.locator('[data-testid="repeat-fields"]')
 const repeatControl = (modal, key) => fields(modal).locator(`[data-field="${key}"]`)
 const preview = (modal) => fields(modal).locator('[data-testid="schedule-preview"]')
 const linkSelect = (modal) => modal.locator('select:has(> option[value=""])')
-const rowsFor = (page, description) => page.locator('article[role="button"]').filter({ hasText: description })
+const rowsFor = (page, description) => page.locator('article[data-transaction-id]').filter({ hasText: description })
 const rowFor = (page, description) => rowsFor(page, description).first()
 // Sign-in and token refreshes are not the dialog's writes.
 const isApiWrite = (r) => r.method() !== 'GET' && r.method() !== 'OPTIONS' && r.url().includes('/api/v1/') && !r.url().includes('/api/v1/auth/')
