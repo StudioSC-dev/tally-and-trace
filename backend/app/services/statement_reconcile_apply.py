@@ -93,13 +93,24 @@ the same apply (``_apply`` with ``ACCOUNT``) over the account's rows; what diffe
   is placed by its own ``transaction_date``: cycle rows are the posted rows in the
   period; candidates the posted rows in the period of the same length either side
   and the unposted rows dated on or before the end of the one after.
-- A transfer is one row on both accounts' statements. It is matched like any row
-  and keeps its dates (``RowRecord.keeps_dates``); any write to it (its amount,
-  posting or unposting it) is refused (``TRANSFER_CHANGE``), since it would change
-  the other account too, and so is a ``create`` whose possible duplicate is a
-  transfer (``TRANSFER_DUPLICATE``): the line is most likely that transfer, dated
-  off the period. A row linked to a recurring entry is refused unposting
-  (``LINKED_UNPOST``): the un-record a card's unpost does is not done here.
+- A transfer is one row on both accounts' statements (STU-774): the statement wins
+  on it as on any row, and the other account's balance follows. ``_row_update``
+  writes this account's side: out of it, ``amount`` is the line less the fee (kept;
+  409 below it); into it, ``amount`` is the line between accounts in one currency,
+  else ``received_amount``. In the period it keeps its dates; moved in from outside
+  it, it takes the line's ``transaction_date`` (one date: both sides move) and keeps
+  ``posting_date``. Refused (409) before anything is written:
+  a write that would change a statement the other account has reconciled
+  (``check_transfer_reconciled``; a card's by its current closing day); unposting a
+  transfer when a line the diff creates, of its kind, is within a day of it
+  (``TRANSFER_UNPOST_NEAR``: the line may be it); and changing a transfer out of the
+  account with a fee to a line equal to its amount without the fee
+  (``TRANSFER_FEE_APART``: the bank printed the fee apart). A transfer out of the
+  account carries its fee (``RowRecord.fee``), so a posted one may be matched to an
+  amount line and a fee line (the fee pairing, ``statement_reconcile``), which writes
+  nothing. A row linked to a recurring entry is refused unposting (``LINKED_UNPOST``):
+  the un-record a card's unpost does is not done here. The card route has none of these
+  transfer rules.
 - No header writes.
 - Verify (``verify_account``): after the writes, the posted rows in the period
   must add up to the statement's change (``opening_balance`` plus them is the
@@ -116,6 +127,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field, replace
+from types import SimpleNamespace
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -161,11 +173,12 @@ CARD_ROUTE = ("This is a credit card: reconcile its statement with "
               "POST /cards/{account}/statements/reconcile")
 NOT_A_BANK_ACCOUNT = ("Only a savings, checking, e-wallet or cash account's statement is "
                       "reconciled here")
-TRANSFER_CHANGE = ("Row {row} is a transfer between accounts {source} and {destination}: "
-                   "changing it here would change both; edit the transfer and run the dry "
-                   "run again")
-TRANSFER_DUPLICATE = ("Line {line} may be transfer row {row}, whose date keeps it off this "
-                      "period; change the transfer's date and run the dry run again")
+TRANSFER_RECONCILED = ("Row {row} is a transfer with account {other}, whose statement {statement} "
+                       "is reconciled: changing it here would change that statement")
+TRANSFER_UNPOST_NEAR = ("Row {row} is a transfer and line {line} may be it; edit the transfer "
+                        "or the statement and run the dry run again")
+TRANSFER_FEE_APART = ("Line {line} is transfer {row}'s amount without its fee {fee}; its fee "
+                      "line was not found within a day of it")
 LINKED_UNPOST = ("Row {row} is linked to a recurring entry: unposting it here would leave "
                  "the entry's paid count and schedule as they are")
 NOT_LATEST = ("Row {row} is a payment of installment {entry} but not its latest one: only "
@@ -473,17 +486,28 @@ def _lock(db: Session, user: User, account: Account, loaded: Loaded, kind: "_Kin
     return account
 
 
-def _row_update(txn: Transaction, action: sr.Action, line: StatementLine) -> dict:
-    """The ``TransactionUpdate`` fields of an ``update``, ``move`` or ``unpost``."""
+def _row_update(db: Session, account: Account, txn: Transaction, action: sr.Action,
+                line: StatementLine) -> dict:
+    """The ``TransactionUpdate`` fields of an ``update``, ``move`` or ``unpost`` on
+    ``account``'s statement. A transfer's amount is written on ``account``'s side: out
+    of it, ``amount`` is the line less the fee; into it, ``amount`` is the line between
+    accounts in one currency, else ``received_amount``."""
     if action.kind == "unpost":
         if txn.budget_entry_id is not None:
             raise _refused(LINKED_UNPOST.format(row=txn.id), row_id=txn.id)
         return {"is_posted": False}
     fields: dict = {}
     transfer = txn.transaction_type == TransactionType.TRANSFER
-    fee = Decimal(str(txn.transfer_fee or 0)) if transfer else Decimal("0")
+    into = transfer and txn.transfer_from_account_id != account.id
+    fee = Decimal(str(txn.transfer_fee or 0)) if transfer and not into else Decimal("0")
     for change in action.changes:
-        if change.field == "amount":
+        if change.field == "amount" and into:
+            source = db.get(Account, txn.transfer_from_account_id)
+            if txn.received_amount is not None or source.currency != account.currency:
+                fields["received_amount"] = float(change.after)
+            else:
+                fields["amount"] = float(change.after)
+        elif change.field == "amount":
             amount = change.after - fee
             if amount < 0:
                 raise _refused(f"Row {txn.id}: the statement's amount is less than its fee",
@@ -552,11 +576,10 @@ class _Kind:
                      result: sr.StatementDiff) -> None:
         """Store the header values the statement differs on."""
 
-    def check_row(self, txn: Transaction, action: sr.Action) -> None:
-        """Refuse an ``update``, ``move`` or ``unpost`` of ``txn`` beyond ``_row_update``'s."""
-
-    def check_create(self, action: sr.Action, loaded: Loaded) -> None:
-        """Refuse a ``create``."""
+    def check_row(self, db: Session, account: Account, txn: Transaction, action: sr.Action,
+                  result: sr.StatementDiff) -> None:
+        """Refuse an ``update``, ``move`` or ``unpost`` of ``txn`` beyond ``_row_update``'s
+        (after the locks; ``result`` is the diff being applied)."""
 
     def unpost_linked(self, db: Session, loaded: Loaded, txn: Transaction) -> dict:
         """The ``TransactionUpdate`` fields that unpost ``txn``, a row linked to a
@@ -676,13 +699,13 @@ def _apply(kind: _Kind, db: Session, user: User, account: Account, statement,
             txn = loaded.rows[action.row_id]
             line = lines.get(action.line_no)
             try:
-                kind.check_row(txn, action)
+                kind.check_row(db, account, txn, action, result)
                 if action.kind == "unpost" and txn.budget_entry_id is not None:
                     note = unpost_note(loaded, txn)
                     fields = kind.unpost_linked(db, loaded, txn)
                     notes.append(note)
                 else:
-                    fields = _row_update(txn, action, line)
+                    fields = _row_update(db, account, txn, action, line)
                 apply_transaction_update(db, user, txn, TransactionUpdate(**fields))
             except HTTPException as exc:
                 if isinstance(exc.detail, dict):
@@ -699,7 +722,6 @@ def _apply(kind: _Kind, db: Session, user: User, account: Account, statement,
         for action in sorted((a for a in result.actions if a.kind == "create"),
                              key=lambda a: a.line_no):
             new, line = action.new_row, lines[action.line_no]
-            kind.check_create(action, loaded)
             if action.possible_duplicate_of is not None:
                 notes.append(f"line {action.line_no}: may duplicate recurring row "
                              f"{action.possible_duplicate_of}, whose date keeps it off this "
@@ -860,11 +882,13 @@ def load_account(db: Session, user: User, account: Account, statement: AccountSt
         kind, amount = side if transfer else (side[0], amount_of(txn))
         own = txn.transaction_date.date()
         posted = bool(txn.is_posted)
+        source = transfer and txn.transfer_from_account_id == account.id
         record = sr.RowRecord(
             id=txn.id, kind=kind, amount=amount, transaction_date=own,
             posting_date=manila_day(txn.posting_date) if txn.posting_date else None,
             is_posted=posted, updated_at=txn.updated_at, budget_entry_id=txn.budget_entry_id,
-            keeps_dates=transfer)
+            keeps_posting_date=transfer,
+            fee=Decimal(str(txn.transfer_fee or 0)) if source else None)
         if posted:
             if view.window_start < own <= view.close:
                 out.cycle.append(record)
@@ -946,6 +970,58 @@ def _record_account(db: Session, user: User, account: Account,
             .populate_existing().one())
 
 
+def _day_on(other: Account, txn: Transaction, when: datetime) -> date:
+    """The day a posted transfer dated ``when`` counts on ``other``: a card's
+    ``statement_day`` for a cash advance out of it, else its own day."""
+    if other.account_type == AccountType.CREDIT and txn.transfer_from_account_id == other.id:
+        return statement_day(SimpleNamespace(transaction_date=when, is_posted=True,
+                                             posting_date=txn.posting_date), manila_today())
+    return when.date()
+
+
+def _reconciled_on(db: Session, other: Account, day: date) -> Optional[str]:
+    """``other``'s reconciled statement holding ``day``, named; None when there is none.
+    A card's is found by its current closing day (``statement_close``)."""
+    if other.account_type == AccountType.CREDIT:
+        close = statement_close(other, day)
+        if close is not None and close in reconciled_closes(db, other.id):
+            return f"closing {close.isoformat()}"
+        return None
+    found = (db.query(AccountStatementReconciliation)
+             .filter(AccountStatementReconciliation.account_id == other.id,
+                     AccountStatementReconciliation.period_start <= day,
+                     AccountStatementReconciliation.period_end >= day).first())
+    return (f"for {found.period_start.isoformat()} to {found.period_end.isoformat()}"
+            if found is not None else None)
+
+
+def check_transfer_reconciled(db: Session, account: Account, txn: Transaction,
+                              action: sr.Action) -> None:
+    """409 when a write to transfer ``txn`` would change a statement its other account
+    has reconciled: one holding the day it counts on there before the write (when
+    posted) or after it (when the write posts or re-dates it)."""
+    if txn.transaction_type != TransactionType.TRANSFER:
+        return
+    other_id = (txn.transfer_to_account_id if txn.transfer_from_account_id == account.id
+                else txn.transfer_from_account_id)
+    other = db.get(Account, other_id) if other_id and other_id != account.id else None
+    if other is None:
+        return
+    days = []
+    if txn.is_posted:
+        days.append(_day_on(other, txn, txn.transaction_date))
+    new_date = next((c.after for c in action.changes if c.field == "transaction_date"), None)
+    if action.kind != "unpost" and (new_date is not None or not txn.is_posted):
+        days.append(_day_on(other, txn, _midnight(new_date) if new_date is not None
+                            else txn.transaction_date))
+    for day in days:
+        statement = _reconciled_on(db, other, day)
+        if statement is not None:
+            raise _refused(TRANSFER_RECONCILED.format(row=txn.id, other=other.id,
+                                                      statement=statement),
+                           row_id=txn.id, line_no=action.line_no, account_id=other.id)
+
+
 class _BankAccount(_Kind):
     noun = "account"
 
@@ -958,17 +1034,27 @@ class _BankAccount(_Kind):
     def check_account(self, account):
         check_bank_account(account)
 
-    def check_row(self, txn, action):
-        if txn.transaction_type == TransactionType.TRANSFER:
-            raise _refused(TRANSFER_CHANGE.format(
-                row=txn.id, source=txn.transfer_from_account_id,
-                destination=txn.transfer_to_account_id), row_id=txn.id, line_no=action.line_no)
-
-    def check_create(self, action, loaded):
-        duplicate = loaded.rows.get(action.possible_duplicate_of)
-        if duplicate is not None and duplicate.transaction_type == TransactionType.TRANSFER:
-            raise _refused(TRANSFER_DUPLICATE.format(line=action.line_no, row=duplicate.id),
-                           line_no=action.line_no, row_id=duplicate.id)
+    def check_row(self, db, account, txn, action, result):
+        check_transfer_reconciled(db, account, txn, action)
+        if txn.transaction_type != TransactionType.TRANSFER:
+            return
+        if action.kind == "unpost":
+            kind = account_side(txn, account.id)[0]
+            own = txn.transaction_date.date()
+            near = sorted(a.line_no for a in result.actions
+                          if a.kind == "create" and a.new_row.kind == kind
+                          and abs((a.new_row.transaction_date - own).days) <= 1)
+            if near:
+                raise _refused(TRANSFER_UNPOST_NEAR.format(row=txn.id, line=near[0]),
+                               row_id=txn.id, line_no=near[0])
+            return
+        fee = Decimal(str(txn.transfer_fee or 0))
+        amount = next((c.after for c in action.changes if c.field == "amount"), None)
+        if (txn.transfer_from_account_id == account.id and fee > 0 and amount is not None
+                and amount == Decimal(str(txn.amount))):
+            raise _refused(TRANSFER_FEE_APART.format(line=action.line_no, row=txn.id,
+                                                     fee=f"{fee:.2f}"),
+                           row_id=txn.id, line_no=action.line_no)
 
     def verify(self, db, user, account, loaded, statement, fx):
         return verify_account(db, account, statement)
