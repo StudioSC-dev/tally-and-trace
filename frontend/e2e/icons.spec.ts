@@ -210,7 +210,7 @@ const SURFACES: Surface[] = [
     page: false,
     open: async (p) => {
       await openPage(p, '/transactions', 'Transactions')
-      await p.getByRole('button', { name: 'Show filters' }).click()
+      await p.getByRole('button', { name: 'Filters', exact: true }).click()
       await p.getByRole('group', { name: 'Entered by' }).getByRole('button', { name: 'Only mine' }).click()
       await p.getByRole('button', { name: /^All \d+ categories/ }).click()
       await expect(p.getByRole('button', { name: 'Remove the Only mine filter' })).toBeVisible()
@@ -668,7 +668,7 @@ test.describe('AC7: icon replacement preserves existing behaviour', () => {
     await expect(month).toHaveText('February 2026')
     await page.getByRole('button', { name: 'View next month' }).click()
     await expect(month).toHaveText('March 2026')
-    await page.getByRole('button', { name: 'Show filters' }).click()
+    await page.getByRole('button', { name: 'Filters', exact: true }).click()
     await page.getByRole('group', { name: 'Entered by' }).getByRole('button', { name: 'Only mine' }).click()
     const chip = page.getByRole('button', { name: 'Remove the Only mine filter' })
     await expect(chip).toBeVisible()
@@ -694,7 +694,7 @@ test.describe('AC7: icon replacement preserves existing behaviour', () => {
     await viewportShot(page, 'picker-selected')
     await dialogOf(page).getByRole('button', { name: 'Cancel', exact: true }).click()
 
-    await page.getByRole('button', { name: 'Show filters' }).click()
+    await page.getByRole('button', { name: 'Filters', exact: true }).click()
     const toggle = page.locator('[data-picker-toggle]').first()
     await expect(toggle).toHaveAttribute('aria-expanded', 'false')
     await expect(toggle.locator('svg[data-icon="caret-down"]')).toHaveCount(1)
