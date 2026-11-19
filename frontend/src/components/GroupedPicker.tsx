@@ -11,6 +11,7 @@ import {
 } from '@tally-trace/shared'
 import type { Account, Category, PickerGroup, PickerId, PickerOption } from '@tally-trace/shared'
 import { Segment } from './SegmentedControl'
+import { Icon } from './Icon'
 
 /** A fixed chip ahead of the options, such as "Uncategorized" or "All accounts". */
 export interface PickerLeadingChip {
@@ -79,7 +80,7 @@ function uniqueById(options: readonly PickerOption[]): PickerOption[] {
   return options.filter((o) => !seen.has(o.id) && seen.add(o.id) !== undefined)
 }
 
-/** A full-width row in the compact panel; the ✓ sits in the right padding. */
+/** A full-width row in the compact panel; the check mark sits in the right padding. */
 const rowClass = (italic = false): string =>
   `focus-ring relative block w-full min-h-11 py-3 pl-3 pr-9 text-left text-sm break-words disabled:opacity-50${italic ? ' italic' : ''}`
 
@@ -263,7 +264,7 @@ export function GroupedPicker(props: GroupedPickerProps) {
       >
         {option.label}
         {option.hint !== undefined && <span className="ml-2 text-xs font-normal text-muted">({option.hint})</span>}
-        {isSelected && <span aria-hidden="true" data-picker-check="" className="absolute right-3 top-3">✓</span>}
+        {isSelected && <span data-picker-check="" className="absolute right-3 top-3"><Icon name="check" /></span>}
       </Segment>
     )
   }
@@ -287,7 +288,7 @@ export function GroupedPicker(props: GroupedPickerProps) {
           className={rowClass(l.italic)}
         >
           {l.label}
-          {l.selected && <span aria-hidden="true" data-picker-check="" className="absolute right-3 top-3">✓</span>}
+          {l.selected && <span data-picker-check="" className="absolute right-3 top-3"><Icon name="check" /></span>}
         </Segment>
       ))
     : []
@@ -522,10 +523,10 @@ export function GroupedPicker(props: GroupedPickerProps) {
           aria-controls={panelId}
           aria-describedby={describedBy}
           onClick={() => (open ? collapse() : setExpanded(true))}
-          className={`${CHIP} border border-line text-body hover:bg-sunken`}
+          className={`${CHIP} gap-1 border border-line text-body hover:bg-sunken`}
         >
           {open ? 'Show fewer' : `All ${options.length} ${noun.many}`}
-          <span aria-hidden="true" className="ml-1">{open ? '▴' : '▾'}</span>
+          <Icon name={open ? 'caret-up' : 'caret-down'} />
         </button>
       )}
       {!flat && !open && props.mode === 'multi' && nSelected > 0 && (

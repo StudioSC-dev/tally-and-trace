@@ -9,6 +9,7 @@ import { outboxActions } from '../store/outbox'
 import { OUTBOX_FORMS } from '../store/outboxForms'
 import { Spinner } from './Loading'
 import { Button } from './Button'
+import { Icon } from './Icon'
 
 // The in-app toast stack. Two sources share it:
 // - `useToast(message)` (STU-410): one message at a time, for an outcome with no dialog or form
@@ -286,7 +287,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                       aria-label="Dismiss"
                       data-testid="save-toast-dismiss"
                     >
-                      ×
+                      <Icon name="close" />
                     </button>
                   )}
                 </div>

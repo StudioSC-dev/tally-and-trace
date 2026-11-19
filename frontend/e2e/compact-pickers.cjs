@@ -255,7 +255,7 @@ async function scenario2(browser) {
       const got = await acct.evaluate((el) => {
         const rows = [...el.querySelectorAll('[data-picker-option]')]
         return {
-          selectedWithMark: rows.filter((b) => b.dataset.selected === 'true' && b.querySelector('[data-picker-check]')?.textContent === '✓').length,
+          selectedWithMark: rows.filter((b) => b.dataset.selected === 'true' && b.querySelector('[data-picker-check] svg[viewBox="0 0 256 256"]') !== null).length,
           selected: rows.filter((b) => b.dataset.selected === 'true').length,
           markOnOthers: rows.filter((b) => b.dataset.selected !== 'true' && b.querySelector('[data-picker-check]')).length,
         }

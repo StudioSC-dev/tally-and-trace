@@ -11,6 +11,7 @@ import type { Account, AccountShare, ShareRole, UserMatch } from '../store/api'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 import { useConfirm } from '../hooks/useConfirm'
 import { Button } from './Button'
+import { Icon } from './Icon'
 
 const ROLE_LABELS: Record<ShareRole, string> = {
   viewer: 'Viewer',
@@ -168,9 +169,7 @@ export function ShareDialog({ account, onClose }: { account: Account; onClose: (
               className="text-muted hover:text-body transition-colors duration-200"
               aria-label="Close share dialog"
             >
-              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              <Icon name="close" />
             </button>
           </div>
 
