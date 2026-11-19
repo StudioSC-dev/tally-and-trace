@@ -339,7 +339,7 @@ export function Dashboard() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
             </svg>
           </div>
-          <h3 className="text-lg font-semibold text-ink mb-2">Error Loading Data</h3>
+          <h3 className="text-lg font-semibold text-ink mb-2">Error loading data</h3>
           <p className="text-body mb-4">There was an issue loading your financial data.</p>
           <div className="text-sm text-muted space-y-1">
             {snapshotQuery.isError && <p>Balances and projection: {getErrorDetail(snapshotError) ?? 'Failed to load'}</p>}
@@ -423,7 +423,7 @@ export function Dashboard() {
         <div className="p-4 sm:p-6 border-b border-line">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-ink">Financial Snapshot</h2>
+              <h2 className="text-lg font-semibold text-ink">Financial snapshot</h2>
               <p className="text-sm text-muted">The projection runs from today to month end.</p>
             </div>
           </div>
@@ -521,7 +521,7 @@ export function Dashboard() {
           <div className="p-4 sm:p-6 border-b border-line">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-ink">Budget Envelope Status</h2>
+                <h2 className="text-lg font-semibold text-ink">Budget envelope status</h2>
                 <p className="text-sm text-muted">Current month spending against your envelope limits.</p>
               </div>
               {envelopesPending ? (
@@ -566,7 +566,7 @@ export function Dashboard() {
           <div className="p-4 sm:p-6 border-b border-line">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-ink">Upcoming Payables</h2>
+                <h2 className="text-lg font-semibold text-ink">Upcoming payables</h2>
                 <p className="text-sm text-muted">Cash going out in the next 30 days: bills, card statements and loan payments.</p>
               </div>
               {payablesPending ? (

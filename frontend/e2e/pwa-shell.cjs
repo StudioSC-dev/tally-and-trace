@@ -257,7 +257,7 @@ async function tour(browser, name, width, height) {
         || `controls ${JSON.stringify(g.controls)} outside the ${g.vw}x${g.vh} viewport`)
       if (step < total) await controls.getByRole('button', { name: 'Next' }).click()
     }
-    await controls.getByRole('button', { name: 'Get Started' }).click()
+    await controls.getByRole('button', { name: 'Get started' }).click()
     await h.check(`onboarding.${name}.completes`, 'B', async () => {
       await overlay.waitFor({ state: 'detached', timeout: 15000 })
       return true

@@ -149,9 +149,9 @@ test.describe('tokens-only sweep (STU-691)', () => {
     trigger: (p: Page) => Locator
   }
   const DIALOGS: DialogPage[] = [
-    { name: 'accounts', route: '/accounts', trigger: (p) => p.getByRole('button', { name: 'Add Account', exact: true }) },
-    { name: 'transactions', route: '/transactions', trigger: (p) => p.getByRole('button', { name: 'Add Transaction' }).first() },
-    { name: 'allocations', route: '/allocations', trigger: (p) => p.getByRole('button', { name: 'Add Recurring Entry' }) },
+    { name: 'accounts', route: '/accounts', trigger: (p) => p.getByRole('button', { name: 'Add account', exact: true }) },
+    { name: 'transactions', route: '/transactions', trigger: (p) => p.getByRole('button', { name: 'Add transaction' }).first() },
+    { name: 'allocations', route: '/allocations', trigger: (p) => p.getByRole('button', { name: 'Add recurring entry' }) },
     { name: 'settings categories', route: '/settings', trigger: (p) => p.getByRole('button', { name: 'Add category', exact: true }) },
     { name: 'settings tags', route: '/settings', trigger: (p) => p.getByRole('button', { name: 'Add tag', exact: true }) },
   ]

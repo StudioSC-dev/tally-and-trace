@@ -23,7 +23,9 @@
  * `with*` helpers derive a variant for one state (a main account, one account's balance, zero-amount rows,
  * a zero forecast event, dollars, five currencies, a long account history, long Due card lists); `cardStatements` answers the card's
  * statements; the create factories (`createdAccount`, `createAccountRoute`,
- * `householdCreateRoutes`) answer the dialogs' saves.
+ * `householdCreateRoutes`) answer the dialogs' saves. `withUnpostedRide` leaves one row not posted yet,
+ * `withLoan` adds a housing loan (its schedule answered by `loanScheduleRoute`), and `withOnboarding` makes Mara
+ * a first-run user, so the onboarding tour starts.
  */
 import type { Page } from '@playwright/test'
 import type {
@@ -63,6 +65,7 @@ import type {
   InstallmentReview,
   InstallmentReviewResult,
   LimitedBudgetEntry,
+  LoanSchedule,
   MinimumDuePreset,
   PaginatedResponse,
   Payable,
@@ -1547,7 +1550,7 @@ export const householdViewRoutes = (data: HouseholdData = household): ApiRoute[]
 }
 
 /**
- * The account Mara fills in on Add Account in the selection specs: every field moved off its default (a savings
+ * The account Mara fills in on Add account in the selection specs: every field moved off its default (a savings
  * account in dollars, a spending wallet, one tag, a balance and a note), so a later change to one control can be
  * checked against the rest.
  */
@@ -1582,7 +1585,7 @@ export const createAccountRoute = (created: Account[]): ApiRoute =>
   sequenceRoute<Account>('POST', '/accounts/', created.map((body) => ({ body, status: 201 })))
 
 /**
- * The creates the Add Transaction, Add Recurring Entry and allocation dialogs send, answered with a record built
+ * The creates the Add transaction, Add recurring entry and allocation dialogs send, answered with a record built
  * from the variant's own accounts (201). The specs read what was sent from the mock's captured bodies.
  */
 export const householdCreateRoutes = (data: HouseholdData): ApiRoute[] => {
@@ -1855,7 +1858,7 @@ export const householdSaveRoutes = (data: HouseholdData): ApiRoute[] => [
   }),
   ...data.allocations.map((a) => apiRoute<Allocation>('PUT', `/allocations/${a.id}`, a)),
   apiRoute<QuickBalances>('PUT', '/dashboard/quick-balances', data.quickBalances),
-  // Add Transaction with a repeat or an installment: the first payment and its recurring entry, on the card.
+  // Add transaction with a repeat or an installment: the first payment and its recurring entry, on the card.
   apiRoute<RepeatingCreated>('POST', '/transactions/repeating', { transaction: tx(data.today, 'New installment', 2000, card, 0), entry: entry('New installment', 'expense', 2000, data.today, card) }, 201),
   apiRoute<Category>('POST', '/categories/', { id: 90, name: 'New category', is_expense: true, kind: 'expense', is_active: true, created_at: `${data.today}T09:00:00Z` }, 201),
   apiRoute<Tag>('POST', '/tags/', { id: 90, name: 'New tag', color: '#5B7553', is_system: false, created_at: `${data.today}T09:00:00Z` }, 201),
@@ -1967,3 +1970,56 @@ export const savedEntry = (data: HouseholdData, id: number, name: string, amount
   return entry(name, 'expense', amount, data.today, account, { id })
 }
 export const savedAllocation = alloc
+
+/** A variant where "Grab to Makati" is not posted yet, so its action dialog offers Mark as posted. */
+export const withUnpostedRide = (data: HouseholdData): HouseholdData => ({
+  ...data,
+  transactions: data.transactions.map((t) => (t.view !== 'limited' && t.description === 'Grab to Makati' ? { ...t, is_posted: false } : t)),
+})
+
+/** The loan the loan variant adds: a Pag-IBIG housing loan Mara pays from payroll. */
+export const housingLoan: Account = acct({
+  id: 17,
+  name: 'Pag-IBIG housing loan',
+  account_type: 'loan',
+  balance: -1180000,
+  payment_account_id: payroll.id,
+  loan_kind: 'home',
+  loan_annual_rate: 6.5,
+  loan_term_months: 240,
+  loan_payment_amount: 9850,
+  loan_first_payment_date: '2024-04-15',
+  loan_amortization: 'reduce_term',
+})
+
+/** A variant that also holds a housing loan, so Accounts lists a loan and its action dialog shows the loan panel. */
+export const withLoan = (data: HouseholdData): HouseholdData => ({ ...data, accounts: [...data.accounts, housingLoan] })
+
+/** `GET /accounts/17/loan-schedule` for the loan variant: 23 payments made and the next three due on the 15th. */
+export const loanScheduleRoute = (): ApiRoute =>
+  apiRoute<LoanSchedule>('GET', `/accounts/${housingLoan.id}/loan-schedule`, {
+    view: 'full',
+    account_id: housingLoan.id,
+    name: housingLoan.name,
+    loan_kind: 'home',
+    amortization: 'reduce_term',
+    owed: 1180000,
+    annual_rate: 6.5,
+    payment_amount: 9850,
+    term_months: 240,
+    first_payment_date: '2024-04-15',
+    payments_made: 23,
+    payments_left: 217,
+    next_due_date: '2026-03-15',
+    proposed_split: { principal: 3460, interest: 6390 },
+    settlement: null,
+    payments: [],
+    upcoming: [
+      { number: 24, due_date: '2026-03-15', effective_date: '2026-03-15', payment: 9850, principal: 3460, interest: 6390, balance_after: 1176540 },
+      { number: 25, due_date: '2026-04-15', effective_date: '2026-04-15', payment: 9850, principal: 3479, interest: 6371, balance_after: 1173061 },
+      { number: 26, due_date: '2026-05-15', effective_date: '2026-05-15', payment: 9850, principal: 3498, interest: 6352, balance_after: 1169563 },
+    ],
+  })
+
+/** A variant whose user has not finished onboarding, so the app opens the onboarding tour. */
+export const withOnboarding = (data: HouseholdData): HouseholdData => ({ ...data, user: { ...data.user, onboarding_completed: false } })

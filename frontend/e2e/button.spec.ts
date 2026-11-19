@@ -64,6 +64,11 @@ const OLD_GREEN = 'rgb(42, 100, 64)'
 const TRANSPARENT = 'rgba(0, 0, 0, 0)'
 /** The page-header primary's desktop limit (AC6): at most 260px wide. */
 const HEADER_MAX_PX = 260
+/**
+ * The Allocations tab bar's helper line, which STU-686 removed (its AC6). The baseline was recorded before that and
+ * still holds it, so the layout check drops it from the base text; everything else must match as recorded.
+ */
+const REMOVED_ALLOCATIONS_HELP = 'Switch tabs to view recurring subscriptions, monthly budgets, savings envelopes, or your wishlist.'
 
 /** Selection controls, owned by STU-679: AC2 skips them and AC6 checks they are untouched. */
 const SELECTION = '[role="tab"], [aria-pressed], [aria-current], [role="switch"]'
@@ -149,7 +154,7 @@ async function openDialog(
 
 const transactionRow = (page: Page, description: string): Locator => page.locator('article[data-transaction-id]').filter({ hasText: description }).first()
 
-/** The account Add Account saves in the native-semantics tests, answered by the fixture's create route. */
+/** The account Add account saves in the native-semantics tests, answered by the fixture's create route. */
 const createdAccounts: Account[] = [createdAccount(household, 90, { ...newAccountInput, tag_ids: [...newAccountInput.tag_ids] })]
 
 /** One place the tests look at: a page, or a dialog opened from one. */
@@ -288,7 +293,7 @@ const UPDATED_CATEGORY = savedRow({ ...household, categories: household.categori
 const newTag: Tag = { id: 90, name: SAVED_NAME, color: '#2563eb', is_system: false, created_at: `${household.today}T09:00:00Z` }
 const SAVED_TAG = savedRow({ ...household, tags: [...household.tags, newTag] }, SAVED_NAME)
 const UPDATED_TAG = savedRow({ ...household, tags: household.tags.map((t) => (t.name === TRIP_TAG ? { ...t, name: SAVED_NAME } : t)) }, SAVED_NAME)
-/** The account AC6's Create Account saves: only the name is filled, so the rest is the form's defaults. */
+/** The account AC6's Create account saves: only the name is filled, so the rest is the form's defaults. */
 const formAccount = createdAccount(household, 91, { name: newAccountInput.name, account_type: 'checking', balance: 0, description: '', currency: 'PHP', is_spending_wallet: false, is_active: true, tag_ids: [] })
 const SAVED_ACCOUNT = savedRow({ ...household, accounts: [...household.accounts, formAccount] }, newAccountInput.name)
 const newWish: WishlistItem = { id: 803, user_id: household.user.id, name: 'Standing desk', estimated_cost: 12000, currency: 'PHP', priority: 'medium', is_purchased: false, created_at: `${household.today}T09:00:00Z` }
@@ -325,7 +330,7 @@ const PAGES: Surface[] = [
       return api
     },
     migrated: [
-      'Add Transaction',
+      'Add transaction',
       'Hide due items',
       'Mark paid',
       'Change date',
@@ -346,9 +351,9 @@ const PAGES: Surface[] = [
       await expect(p.getByRole('button', { name: 'Recurring', exact: true })).toHaveAttribute('aria-pressed', 'true')
       return api
     },
-    migrated: ['Add Recurring Entry', 'Charged', 'Posted', 'Charged', 'Posted', ...Array<string>(9).fill('Mark paid'), 'Mark received'],
+    migrated: ['Add recurring entry', 'Charged', 'Posted', 'Charged', 'Posted', ...Array<string>(9).fill('Mark paid'), 'Mark received'],
   },
-  { key: 'accounts', dialog: false, open: (p) => openPage(p, '/accounts', 'Accounts'), migrated: ['Add Account'] },
+  { key: 'accounts', dialog: false, open: (p) => openPage(p, '/accounts', 'Accounts'), migrated: ['Add account'] },
   {
     key: 'settings',
     dialog: false,
@@ -413,10 +418,10 @@ const DIALOGS: Surface[] = [
   {
     key: 'transaction-create',
     dialog: true,
-    open: (p) => openDialog(p, '/transactions', 'Transactions', (q) => q.getByRole('button', { name: 'Add Transaction', exact: true }).first(), 'Create Transaction'),
-    migrated: ['Create Transaction', 'Save and add another', 'Cancel'],
-    fill: { 'Create Transaction': fillTransaction, 'Save and add another': fillTransaction },
-    saved: { 'Create Transaction': SAVED_TRANSACTION, 'Save and add another': SAVED_TRANSACTION },
+    open: (p) => openDialog(p, '/transactions', 'Transactions', (q) => q.getByRole('button', { name: 'Add transaction', exact: true }).first(), 'Add transaction'),
+    migrated: ['Add transaction', 'Save and add another', 'Cancel'],
+    fill: { 'Add transaction': fillTransaction, 'Save and add another': fillTransaction },
+    saved: { 'Add transaction': SAVED_TRANSACTION, 'Save and add another': SAVED_TRANSACTION },
   },
   {
     key: 'transaction-create-installment',
@@ -430,22 +435,22 @@ const DIALOGS: Surface[] = [
       await settle(p)
       return api
     },
-    migrated: ['Change', 'Create Transaction', 'Save and add another', 'Cancel'],
-    fill: { 'Create Transaction': fillInstallment, 'Save and add another': fillInstallment },
-    saved: { 'Create Transaction': SAVED_INSTALLMENT, 'Save and add another': SAVED_INSTALLMENT },
+    migrated: ['Change', 'Add transaction', 'Save and add another', 'Cancel'],
+    fill: { 'Add transaction': fillInstallment, 'Save and add another': fillInstallment },
+    saved: { 'Add transaction': SAVED_INSTALLMENT, 'Save and add another': SAVED_INSTALLMENT },
   },
   {
     key: 'transaction-actions',
     dialog: true,
-    open: (p) => openDialog(p, '/transactions', 'Transactions', (q) => transactionRow(q, ROW_TRANSACTION), 'Transaction Actions'),
-    migrated: ['Upload receipt', 'Mark as not posted', 'Edit Transaction', 'Delete Transaction'],
+    open: (p) => openDialog(p, '/transactions', 'Transactions', (q) => transactionRow(q, ROW_TRANSACTION), 'Transaction actions'),
+    migrated: ['Upload receipt', 'Mark as not posted', 'Edit transaction', 'Delete transaction'],
   },
   {
     key: 'transaction-delete-confirm',
     dialog: true,
     open: async (p) => {
-      const api = await openDialog(p, '/transactions', 'Transactions', (q) => transactionRow(q, ROW_TRANSACTION), 'Transaction Actions')
-      await dialogOf(p).getByRole('button', { name: 'Delete Transaction' }).click()
+      const api = await openDialog(p, '/transactions', 'Transactions', (q) => transactionRow(q, ROW_TRANSACTION), 'Transaction actions')
+      await dialogOf(p).getByRole('button', { name: 'Delete transaction' }).click()
       await expect(p.getByRole('alertdialog')).toBeVisible()
       await settle(p)
       return api
@@ -479,10 +484,10 @@ const DIALOGS: Surface[] = [
   {
     key: 'recurring-create',
     dialog: true,
-    open: (p) => openDialog(p, '/allocations', 'Allocations', (q) => q.getByRole('button', { name: 'Add Recurring Entry', exact: true }), 'Add Recurring Entry'),
-    migrated: ['Save Recurring Entry', 'Cancel'],
-    fill: { 'Save Recurring Entry': fillRecurring },
-    saved: { 'Save Recurring Entry': SAVED_ENTRY },
+    open: (p) => openDialog(p, '/allocations', 'Allocations', (q) => q.getByRole('button', { name: 'Add recurring entry', exact: true }), 'Add recurring entry'),
+    migrated: ['Save recurring entry', 'Cancel'],
+    fill: { 'Save recurring entry': fillRecurring },
+    saved: { 'Save recurring entry': SAVED_ENTRY },
   },
   {
     key: 'recurring-charged',
@@ -493,10 +498,10 @@ const DIALOGS: Surface[] = [
   {
     key: 'account-create',
     dialog: true,
-    open: (p) => openDialog(p, '/accounts', 'Accounts', (q) => q.getByRole('button', { name: 'Add Account', exact: true }), 'Create Account', [createAccountRoute([formAccount])]),
-    migrated: ['Create Account', 'Cancel'],
-    fill: { 'Create Account': fillAccount },
-    saved: { 'Create Account': SAVED_ACCOUNT },
+    open: (p) => openDialog(p, '/accounts', 'Accounts', (q) => q.getByRole('button', { name: 'Add account', exact: true }), 'Create account', [createAccountRoute([formAccount])]),
+    migrated: ['Create account', 'Cancel'],
+    fill: { 'Create account': fillAccount },
+    saved: { 'Create account': SAVED_ACCOUNT },
   },
   {
     key: 'account-actions',
@@ -592,10 +597,10 @@ const DIALOGS: Surface[] = [
   {
     key: 'allocation-create',
     dialog: true,
-    open: (p) => openDialog(p, '/allocations?tab=budgets', 'Allocations', (q) => q.getByRole('button', { name: 'Add Allocation', exact: true }), 'Create Budget Envelope'),
-    migrated: ['Create Budget Envelope', 'Cancel'],
-    fill: { 'Create Budget Envelope': fillAllocation },
-    saved: { 'Create Budget Envelope': SAVED_ALLOCATION },
+    open: (p) => openDialog(p, '/allocations?tab=budgets', 'Allocations', (q) => q.getByRole('button', { name: 'Add allocation', exact: true }), 'Create budget envelope'),
+    migrated: ['Create budget envelope', 'Cancel'],
+    fill: { 'Create budget envelope': fillAllocation },
+    saved: { 'Create budget envelope': SAVED_ALLOCATION },
   },
   {
     key: 'allocation-actions',
@@ -845,7 +850,7 @@ const EXAMPLES: { variant: string; open: (page: Page) => Promise<Locator> }[] = 
     variant: 'primary',
     open: async (p) => {
       await openPage(p, '/transactions', 'Transactions')
-      return p.getByRole('button', { name: 'Add Transaction', exact: true }).first()
+      return p.getByRole('button', { name: 'Add transaction', exact: true }).first()
     },
   },
   {
@@ -878,7 +883,7 @@ const example = (variant: string): ((page: Page) => Promise<Locator>) => {
 }
 
 test.describe('AC1: button variants match the system', () => {
-  test('button variants match the system: primary (Add Transaction)', async ({ page }) => {
+  test('button variants match the system: primary (Add transaction)', async ({ page }) => {
     test.skip(RECORD, 'a recording run only writes the baseline')
     const add = await example('primary')(page)
     await expect(add).toHaveAttribute('data-variant', 'primary')
@@ -1110,7 +1115,7 @@ test.describe('AC6: button migration preserves surrounding behavior and layout',
       const selectionNow = controls.filter((c) => c.selection).map((c) => `${c.name}: ${c.look}, ${c.height}px`)
       const selectionBase = base.controls.flatMap((c, i) => (c.selection ? [`${c.name}: ${c.look}, ${floor(c.height, controls[i])}px`] : []))
       expect(selectionNow, 'selection controls and tabs are untouched').toEqual(selectionBase)
-      expect(text, 'labels and status text are untouched').toBe(base.text)
+      expect(text, 'labels and status text are untouched').toBe(base.text.replace(REMOVED_ALLOCATIONS_HELP, ''))
     })
 
     for (const c of migratedCases(s)) {
@@ -1144,8 +1149,8 @@ test.describe('AC6: button migration preserves surrounding behavior and layout',
     await surface('allocations-recurring').open(page)
     // AC6 as amended for STU-685: the primary sits in PageHeader on the title's row, inside the page content, and nothing scrolls sideways.
     const header = page.getByTestId('page-header')
-    await expect(header.getByRole('button', { name: 'Add Recurring Entry', exact: true })).toHaveCount(1)
-    const add = header.getByRole('button', { name: 'Add Recurring Entry', exact: true })
+    await expect(header.getByRole('button', { name: 'Add recurring entry', exact: true })).toHaveCount(1)
+    const add = header.getByRole('button', { name: 'Add recurring entry', exact: true })
     const m = await add.evaluate((e) => {
       const root = e.closest('.page') as HTMLElement
       const head = e.closest('[data-testid="page-header"]') as HTMLElement
@@ -1166,13 +1171,13 @@ test.describe('AC6: button migration preserves surrounding behavior and layout',
       }
     })
     // It fits beside "Allocations" on both projects, so it sits on the title's row: its centre y lies within the h1.
-    expect(m.centreY, `Add Recurring Entry's centre y (${m.centreY}) is at or below the title's top (${m.title.top})`).toBeGreaterThanOrEqual(m.title.top)
-    expect(m.centreY, `Add Recurring Entry's centre y (${m.centreY}) is at or above the title's bottom (${m.title.bottom})`).toBeLessThanOrEqual(m.title.bottom)
-    expect(m.left, `Add Recurring Entry starts inside the page content (left ${m.left}, content left ${m.contentLeft})`).toBeGreaterThanOrEqual(m.contentLeft)
-    expect(m.right, `Add Recurring Entry ends inside the page content (right ${m.right}, content right ${m.contentRight})`).toBeLessThanOrEqual(m.contentRight)
+    expect(m.centreY, `Add recurring entry's centre y (${m.centreY}) is at or below the title's top (${m.title.top})`).toBeGreaterThanOrEqual(m.title.top)
+    expect(m.centreY, `Add recurring entry's centre y (${m.centreY}) is at or above the title's bottom (${m.title.bottom})`).toBeLessThanOrEqual(m.title.bottom)
+    expect(m.left, `Add recurring entry starts inside the page content (left ${m.left}, content left ${m.contentLeft})`).toBeGreaterThanOrEqual(m.contentLeft)
+    expect(m.right, `Add recurring entry ends inside the page content (right ${m.right}, content right ${m.contentRight})`).toBeLessThanOrEqual(m.contentRight)
     expect(m.header.scroll, 'the page header does not overflow sideways').toBeLessThanOrEqual(m.header.client)
     expect(m.doc.scroll, 'the document does not overflow sideways').toBeLessThanOrEqual(m.doc.client)
-    if (testInfo.project.name === 'desktop') expect(m.width, 'Add Recurring Entry: width on a desktop').toBeLessThanOrEqual(HEADER_MAX_PX)
+    if (testInfo.project.name === 'desktop') expect(m.width, 'Add recurring entry: width on a desktop').toBeLessThanOrEqual(HEADER_MAX_PX)
     await shot(page, 'header-primary')
   })
 })
@@ -1232,7 +1237,7 @@ test.describe('AC8: button preserves native interaction semantics', () => {
     })
   const submits = (page: Page): Promise<number> => page.evaluate(() => (window as unknown as { __submits: number }).__submits)
   const openCreateAccount = (page: Page): Promise<ApiMock> =>
-    openDialog(page, '/accounts', 'Accounts', (q) => q.getByRole('button', { name: 'Add Account', exact: true }), 'Create Account', [createAccountRoute(createdAccounts)])
+    openDialog(page, '/accounts', 'Accounts', (q) => q.getByRole('button', { name: 'Add account', exact: true }), 'Create account', [createAccountRoute(createdAccounts)])
 
   test('button preserves native interaction semantics: an omitted type is a button and does not submit', async ({ page }) => {
     test.skip(RECORD, 'a recording run only writes the baseline')
@@ -1244,7 +1249,7 @@ test.describe('AC8: button preserves native interaction semantics', () => {
     expect(await cancel.evaluate((e) => (e as HTMLButtonElement).form !== null), 'Cancel sits inside the account form').toBe(true)
     await dialogOf(page).getByPlaceholder('Enter account name').fill(newAccountInput.name)
     await cancel.click()
-    await expect(page.getByRole('heading', { name: 'Create Account' })).toBeHidden()
+    await expect(page.getByRole('heading', { name: 'Create account' })).toBeHidden()
     await settle(page)
     expect(await submits(page), 'form submits from Cancel').toBe(0)
     expect(api.count('POST', '/accounts/'), 'accounts saved by Cancel').toBe(0)
@@ -1255,7 +1260,7 @@ test.describe('AC8: button preserves native interaction semantics', () => {
     test.skip(RECORD, 'a recording run only writes the baseline')
     const api = await openCreateAccount(page)
     await countSubmits(page)
-    const create = dialogOf(page).getByRole('button', { name: 'Create Account', exact: true })
+    const create = dialogOf(page).getByRole('button', { name: 'Create account', exact: true })
     await expect(create).toHaveAttribute('data-variant', 'primary')
     await expect(create).toHaveAttribute('type', 'submit')
     await dialogOf(page).getByPlaceholder('Enter account name').fill(newAccountInput.name)
@@ -1298,7 +1303,7 @@ test.describe('AC8: button preserves native interaction semantics', () => {
     // A disabled submit Button: neither a click nor Enter in the form submits.
     const created = await openCreateAccount(page)
     await countSubmits(page)
-    const create = dialogOf(page).getByRole('button', { name: 'Create Account', exact: true })
+    const create = dialogOf(page).getByRole('button', { name: 'Create account', exact: true })
     await dialogOf(page).getByPlaceholder('Enter account name').fill(newAccountInput.name)
     await create.evaluate((e) => {
       (e as HTMLButtonElement).disabled = true

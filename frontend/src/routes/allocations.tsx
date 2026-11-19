@@ -444,10 +444,10 @@ export function AllocationsPage() {
     [categories]
   )
   const submitButtonLabel = editingAllocation
-    ? 'Update Allocation'
+    ? 'Update allocation'
     : allocationForm.allocation_type === 'budget'
-    ? 'Create Budget Envelope'
-    : 'Create Savings Tracker'
+    ? 'Create budget envelope'
+    : 'Create savings tracker'
   const accountsById = useMemo(() => {
     const map = new Map<number, Account>()
     accounts.forEach((account) => map.set(account.id, account))
@@ -1785,12 +1785,11 @@ export function AllocationsPage() {
               onClick={openCreateModal}
             className="w-full sm:w-auto justify-center"
           >
-              {activeTab === 'subscriptions' ? 'Add Recurring Entry' : 'Add Allocation'}
+              {activeTab === 'subscriptions' ? 'Add recurring entry' : 'Add allocation'}
           </Button>
         )}
       </PageHeader>
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border border-line p-2 bg-surface">
-          <nav className="flex flex-wrap gap-1">
+          <nav className="grid grid-cols-4 gap-1 sm:flex">
             {[
               { value: 'subscriptions' as const, label: 'Recurring' },
               { value: 'budgets' as const, label: 'Budgets' },
@@ -1802,17 +1801,13 @@ export function AllocationsPage() {
                   key={tab.value}
                   selected={activeTab === tab.value}
                   onClick={() => setActiveTab(tab.value)}
-                  className="px-4 py-2 text-sm"
+                  className="min-w-0 whitespace-nowrap px-1 py-2 text-sm sm:px-4"
                 >
                   {tab.label}
                   </Segment>
               )
             })}
           </nav>
-          <p className="text-xs sm:text-sm text-muted">
-            Switch tabs to view recurring subscriptions, monthly budgets, savings envelopes, or your wishlist.
-          </p>
-                </div>
 
       {activeTab === 'subscriptions' && (
         <div>
@@ -1836,7 +1831,7 @@ export function AllocationsPage() {
 
       {activeTab === 'budgets' &&
         renderAllocationSection(
-          'Budget Envelopes',
+          'Budget envelopes',
           'Monthly spending buckets that align with your categories and keep cash flow on track.',
           budgetEnvelopes,
           'No budget envelopes yet. Create one to keep monthly spending in check.',
@@ -1845,7 +1840,7 @@ export function AllocationsPage() {
 
       {activeTab === 'savings' &&
         renderAllocationSection(
-          'Savings & Investment Targets',
+          'Savings & investment targets',
           'Longer-term goals and rainy-day funds that should steadily grow over time.',
           savingsAndGoals,
           'No savings or goal envelopes yet. Create one to start building your future plans.',
@@ -2073,10 +2068,10 @@ export function AllocationsPage() {
               <div className="space-y-1">
                 <h2 className="text-xl font-semibold text-ink">
                   {editingAllocation
-                    ? 'Edit Allocation'
+                    ? 'Edit allocation'
                     : activeTab === 'budgets'
-                    ? 'Create Budget Envelope'
-                    : 'Create Savings Tracker'}
+                    ? 'Create budget envelope'
+                    : 'Create savings tracker'}
             </h2>
                 <p className="text-sm text-muted">
                   {activeTab === 'budgets'

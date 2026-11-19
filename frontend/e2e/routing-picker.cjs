@@ -81,7 +81,7 @@ async function scenarioA(browser) {
     })
     await h.check('a.saves', 'B', async () => {
       const saved = page.waitForResponse((r) => r.request().method() === 'PUT' && new URL(r.url()).pathname.endsWith(`/accounts/${card.id}`))
-      await page.getByRole('button', { name: 'Update Account', exact: true }).click()
+      await page.getByRole('button', { name: 'Update account', exact: true }).click()
       const res = await saved
       if (res.status() !== 200) return `PUT ${res.status()}`
       const stored = await client.get(first.token, `/accounts/${card.id}`)

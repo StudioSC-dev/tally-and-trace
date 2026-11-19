@@ -251,9 +251,9 @@ for (const h of HOVER_TARGETS) {
 
 test('reduced motion stops motion: button, dialog panel and selection rule', async ({ page }) => {
   await open(page, '/transactions', 'Transactions', { reducedMotion: 'reduce' })
-  const add = page.getByRole('button', { name: 'Add Transaction', exact: true }).first()
+  const add = page.getByRole('button', { name: 'Add transaction', exact: true }).first()
   await expect(add).toBeVisible()
-  expect(await longestTransition(add), 'Add Transaction button transition-duration (s)').toBeLessThanOrEqual(0.001)
+  expect(await longestTransition(add), 'Add transaction button transition-duration (s)').toBeLessThanOrEqual(0.001)
   const selection = page.locator('.seg.is-selected').first()
   await expect(selection).toBeVisible()
   expect(await longestTransition(selection), 'selection rule transition-duration (s)').toBeLessThanOrEqual(0.001)
@@ -432,7 +432,7 @@ const EMPTY_STATES = [
     data: noAccountsHousehold,
     extra: [],
     sentence: 'No accounts yet. Start by adding your first account.',
-    dialog: 'Create Account',
+    dialog: 'Create account',
   },
   {
     state: 'Budgets',
@@ -441,7 +441,7 @@ const EMPTY_STATES = [
     data: noEnvelopesHousehold,
     extra: [],
     sentence: 'No budget envelopes yet. Create one to keep monthly spending in check.',
-    dialog: 'Create Budget Envelope',
+    dialog: 'Create budget envelope',
   },
   {
     state: 'Savings',
@@ -450,7 +450,7 @@ const EMPTY_STATES = [
     data: noEnvelopesHousehold,
     extra: [],
     sentence: 'No savings or goal envelopes yet. Create one to start building your future plans.',
-    dialog: 'Create Savings Tracker',
+    dialog: 'Create savings tracker',
   },
   {
     state: 'Recurring',
@@ -459,7 +459,7 @@ const EMPTY_STATES = [
     data: emptyHousehold,
     extra: [],
     sentence: 'No recurring entries yet. Add your regular income, bills and subscriptions to stay ahead.',
-    dialog: 'Add Recurring Entry',
+    dialog: 'Add recurring entry',
   },
   {
     state: 'Wishlist',

@@ -1,4 +1,4 @@
-// Browser checks for the compact pickers in the Add Transaction dialog (STU-580): an
+// Browser checks for the compact pickers in the Add transaction dialog (STU-580): an
 // Account, Destination Account or Category with a value is one line (the choice and a
 // Change button); without a value the field is its open panel. Change opens a panel under
 // the line: a search box, any leading option ("Uncategorized"), a Recent group, then the
@@ -52,7 +52,7 @@ let stack, client, user
 const LONG = 'Cpk Very Long Account Name That Cannot Possibly Fit On One Line Of A Phone Screen'
 const NAMES = ['Cpk Alpha Savings Account', 'Cpk Bravo Checking Account', 'Cpk Charlie Cash Wallet', 'Cpk Delta Checking Account', 'Cpk Echo Savings Account', 'Cpk Foxtrot Cash Wallet', 'Cpk Golf Savings Account', 'Cpk Hotel Checking Account']
 
-const formModal = (page) => page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: 'Create Transaction', exact: true }) })
+const formModal = (page) => page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: 'Add transaction', exact: true }) })
 const control = (modal, key) => modal.locator(`[data-field="${key}"]`)
 const changeOf = (group) => group.locator('[data-picker-change]')
 const panelOf = (group) => group.locator('[data-picker-panel]')
@@ -102,9 +102,9 @@ async function openAddForm(browser, contextOptions = {}) {
   })
   await h.uiLogin(page, stack, user)
   await page.goto(`${stack.webUrl}/transactions`)
-  await page.getByRole('button', { name: 'Add Transaction' }).first().waitFor()
+  await page.getByRole('button', { name: 'Add transaction' }).first().waitFor()
   await h.waitQuiet(page)
-  await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+  await page.getByRole('button', { name: 'Add transaction' }).first().click()
   const modal = formModal(page)
   await modal.waitFor()
   await h.waitQuiet(page)
@@ -150,7 +150,7 @@ async function scenario1(browser) {
     // AC10: an empty required account.
     await control(modal, 'description').fill('Compact required')
     await control(modal, 'amount').fill('12')
-    await modal.getByRole('button', { name: 'Create Transaction', exact: true }).click()
+    await modal.getByRole('button', { name: 'Add transaction', exact: true }).click()
     const error = modal.locator('[data-testid="field-error-account_id"]')
     await error.waitFor({ timeout: 5000 })
     await waitFocus(page, searchOf(acct))
@@ -334,7 +334,7 @@ async function scenario3(browser) {
       ((await isFocused(change)) && (await change.getAttribute('aria-expanded')) === 'false' && (await panelOf(acct).count()) === 0) || `active ${await activeText(page)}`)
     // A click outside the field closes it and changes nothing.
     await openField(page, acct)
-    await modal.getByRole('heading', { name: 'Create Transaction', exact: true }).click()
+    await modal.getByRole('heading', { name: 'Add transaction', exact: true }).click()
     await acct.locator('[data-picker-change][aria-expanded="false"]').waitFor({ timeout: 5000 }).catch(() => {})
     await h.check('3.outside-click-closes-keeps-value', 'B', async () => {
       const got = { text: await lineText(acct), panel: await panelOf(acct).count(), modal: await modal.count() }
@@ -516,7 +516,7 @@ async function scenario7(browser) {
     const native = d.trackNativeDialogs(page)
     await h.uiLogin(page, stack, user)
     await page.goto(`${stack.webUrl}/transactions`)
-    await page.getByRole('button', { name: 'Add Transaction' }).first().waitFor()
+    await page.getByRole('button', { name: 'Add transaction' }).first().waitFor()
     await h.waitQuiet(page)
     return { ctx, page, native }
   })
