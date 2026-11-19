@@ -308,6 +308,49 @@ def test_unpost(w):
     _verify_store(w)
 
 
+# --- STU-774: a cash advance on the card route is as before, with no transfer guard ----------
+
+def _cash_advance_with_checking_reconciled(w):
+    """A cash advance of 3,000 plus a 100 fee to checking, whose February statement is
+    reconciled (the bank route's guard would refuse a change to it)."""
+    advance = sw_post(w["client"], w["me"], "/transactions/", {
+        "account_id": w["card"], "transaction_type": "transfer", "amount": 3000,
+        "transfer_fee": 100, "transfer_from_account_id": w["card"],
+        "transfer_to_account_id": w["checking"], "description": "Cash advance",
+        "transaction_date": "2027-02-05T00:00:00", "is_posted": True})["id"]
+    db = w["db"]
+    db.rollback()
+    db.execute(text(
+        "INSERT INTO account_statement_reconciliations (account_id, period_start, period_end,"
+        " opening_balance, closing_balance, change, line_count, reconciled_by_actor)"
+        " VALUES (:a, '2027-02-01', '2027-02-28', 100000, 103000, 3000, 1, :u)"),
+        {"a": w["checking"], "u": w["me"]["id"]})
+    db.commit()
+    _statements(w)
+    return advance
+
+
+def test_a_cash_advance_is_updated_on_the_card_route_without_a_guard(w):
+    advance = _cash_advance_with_checking_reconciled(w)
+    body = _apply(w, _statement([_line(1, "2027-02-06", "3200.00", posting="2027-02-07")]))
+    assert _kinds(body) == [("update", 1)]
+    row = _txn(w, advance)
+    assert (row["amount"], row["transfer_fee"], row["is_reconciled"]) == (3100.0, 100.0, True)
+    assert row["transaction_date"].startswith("2027-02-06")
+    assert row["posting_date"].startswith("2027-02-07")
+    assert _balance(w) == Decimal("-3200")
+    assert _balance(w, w["checking"]) == Decimal("103100")
+
+
+def test_a_cash_advance_is_unposted_on_the_card_route_without_a_guard(w):
+    advance = _cash_advance_with_checking_reconciled(w)
+    body = _apply(w, _statement([]))
+    assert _kinds(body) == [("unpost", None)]
+    assert _txn(w, advance)["is_posted"] is False
+    assert _balance(w) == Decimal("0")
+    assert _balance(w, w["checking"]) == Decimal("100000")
+
+
 # --- AC3: after an apply the statement equals the bank's and is reconciled --------------------
 
 def test_apply_reconciles_the_statement(busy):
