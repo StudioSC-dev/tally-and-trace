@@ -12,6 +12,7 @@ import type { Account, AccountInput, BudgetEntryInput, TransactionInput } from '
 import { mockApi } from './support/mockApi'
 import type { ApiMock } from './support/mockApi'
 import { shot } from './support/shot'
+import { expandDue } from './support/transactions'
 import {
   allAccountDetailRoutes,
   createAccountRoute,
@@ -127,7 +128,8 @@ async function openPage(page: Page, route: string, heading: Name, data: Househol
 
 async function openFilters(page: Page, data: HouseholdData = household): Promise<ApiMock> {
   const api = await openPage(page, '/transactions', 'Transactions', data)
-  await page.getByRole('button', { name: 'Show filters' }).click()
+  // STU-687: one Filters button opens the filter disclosure.
+  await page.getByRole('button', { name: 'Filters', exact: true }).click()
   await expect(page.getByRole('group', { name: 'Entered by' })).toBeVisible()
   return api
 }
@@ -257,6 +259,7 @@ const duePager = (slug: string, tab: string, range: string, firstOnPage2: string
   kind: 'current',
   open: async (page) => {
     const api = await openPage(page, '/transactions', 'Transactions', withLongDueLists(household))
+    await expandDue(page)
     await page.getByTestId(`due-tab-${slug}`).click()
     await expect(visiblePager(page)).toBeVisible()
     return api
@@ -416,7 +419,12 @@ const INVENTORY: Group[] = [
     route: '/transactions',
     what: 'Due card tabs (Tabs, role=tab)',
     kind: 'tab',
-    open: (page) => openPage(page, '/transactions', 'Transactions'),
+    // STU-687: the Due card opens collapsed; its tabs show once it is expanded.
+    open: async (page) => {
+      const api = await openPage(page, '/transactions', 'Transactions')
+      await expandDue(page)
+      return api
+    },
     group: (page) => page.getByRole('tablist').filter({ has: page.getByTestId('due-tab-due') }),
     selected: /^Due and overdue/,
     other: /^Upcoming/,
@@ -439,6 +447,7 @@ const INVENTORY: Group[] = [
     kind: 'current',
     open: async (page) => {
       const api = await openPage(page, '/transactions', 'Transactions')
+      await expandDue(page)
       await page.getByTestId('due-tab-upcoming').click()
       await expect(visiblePager(page)).toBeVisible()
       return api
@@ -1419,6 +1428,7 @@ test.describe('Selection is not an action (STU-679)', () => {
 
   test('due tabs keep their keyboard behaviour', async ({ page }) => {
     await openPage(page, '/transactions', 'Transactions')
+    await expandDue(page)
     const tabs = page.getByRole('tablist').filter({ has: page.getByTestId('due-tab-due') }).getByRole('tab')
     await expect(tabs).toHaveCount(5)
     const chosen = () => tabs.evaluateAll((els) => els.map((e) => `${e.getAttribute('role')}:${e.getAttribute('aria-selected')}:${e.getAttribute('tabindex')}`))

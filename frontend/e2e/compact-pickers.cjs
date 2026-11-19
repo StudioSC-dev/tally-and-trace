@@ -521,7 +521,7 @@ async function scenario7(browser) {
     return { ctx, page, native }
   })
   try {
-    await page.getByRole('button', { name: 'Show filters' }).click()
+    await page.getByRole('button', { name: 'Filters', exact: true }).click()
     await page.locator('[data-field="filter_accounts"]').waitFor()
     await h.check('7.filters-have-no-change-button', 'B', async () => {
       const n = await page.locator('[data-field="filter_accounts"] [data-picker-change], [data-field="filter_categories"] [data-picker-change]').count()

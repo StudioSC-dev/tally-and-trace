@@ -25,6 +25,7 @@ import { addRoutes, apiRoute } from './support/mockApi'
 import type { ApiRoute } from './support/mockApi'
 import type { CardStatements } from '@tally-trace/shared'
 import { shot } from './support/shot'
+import { expandDue } from './support/transactions'
 
 /** The one negative format: a minus sign, the peso sign, grouped digits and two decimals. */
 const NEGATIVE_PESOS = /^−₱[0-9,]+\.[0-9]{2}$/
@@ -92,8 +93,10 @@ const SURFACES: readonly {
   {
     name: 'transactions upcoming',
     url: '/transactions',
-    ready: (page) => page.getByTestId('due-tab-upcoming'),
+    ready: (page) => page.getByTestId('due-section-toggle'),
     then: async (page) => {
+      // STU-687: the Due card opens collapsed, with no tabs until it is expanded.
+      await expandDue(page)
       await page.getByTestId('due-tab-upcoming').click()
       await expect(page.getByTestId('upcoming-occurrence-amount').first()).toBeVisible()
     },

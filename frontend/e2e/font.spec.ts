@@ -7,6 +7,7 @@ import { expect, test } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
 import { mockHousehold } from './support/fixtures/household'
 import { shot } from './support/shot'
+import { openTransactionFilters } from './support/transactions'
 
 // This spec lives in <repo>/frontend/e2e.
 const FRONTEND = fileURLToPath(new URL('..', import.meta.url))
@@ -21,8 +22,8 @@ interface PageCase {
   label: (row: Locator) => Locator
   amount: (row: Locator) => Locator
   /**
-   * What renders after the row and moves it: on Transactions the due list (fed by /dashboard/due, about 165px
-   * above the first row once it arrives); on the dashboard the payables panel. The scenario waits for it explicitly.
+   * What renders after the row and moves it: on Transactions the Due banner (fed by /dashboard/due; STU-687 made the
+   * Due card a one-line banner above the list); on the dashboard the payables panel. The scenario waits for it explicitly.
    */
   late?: (page: Page) => Locator
 }
@@ -30,7 +31,7 @@ interface PageCase {
 /** The three pages. `row` is the fixed locator for the first content row of each. */
 const PAGES: PageCase[] = [
   { name: 'dashboard', path: '/', row: (page) => page.getByTestId('quick-balance-tile').first(), late: (page) => page.getByTestId('payables'), label: (row) => row.getByTestId('quick-balance-name'), amount: (row) => row.getByTestId('quick-balance-balance') },
-  { name: 'transactions', path: '/transactions', row: (page) => page.locator('article[data-transaction-id]').first(), late: (page) => page.getByTestId('due-list'), label: (row) => row.locator('[data-row-title]'), amount: (row) => row.locator('p.text-lg') },
+  { name: 'transactions', path: '/transactions', row: (page) => page.locator('article[data-transaction-id]').first(), late: (page) => page.getByTestId('due-banner'), label: (row) => row.locator('[data-row-title]'), amount: (row) => row.locator('p.text-lg') },
   { name: 'allocations', path: '/allocations', row: (page) => page.locator('[data-testid^="kind-section-"] article').first(), label: (row) => row.locator('[data-row-title]'), amount: (row) => row.locator('p.text-lg') },
 ]
 
@@ -188,8 +189,12 @@ test.describe('One face: IBM Plex Sans (STU-676)', () => {
 
   test('wordmark and label styling stays unchanged (search label)', async ({ page }) => {
     await open(page, PAGES[1])
-    const label = page.locator('.label:visible', { hasText: 'Search transactions' })
-    await expect(label).toHaveText('Search transactions')
+    // STU-687: the search label is visually hidden in the one-row toolbar; the Scheduled view's From label, inside
+    // the Filters disclosure, is the visible field label on Transactions.
+    await page.getByTestId('view-scheduled').click()
+    await openTransactionFilters(page)
+    const label = page.locator('.label:visible', { hasText: 'From' })
+    await expect(label).toHaveText('From')
     // STU-677: labels are 13px sentence case now (was 11px uppercase).
     await expect.soft(label).toHaveCSS('font-size', '13px')
     await expect.soft(label).toHaveCSS('text-transform', 'none')

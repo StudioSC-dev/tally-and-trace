@@ -11,6 +11,7 @@ import type { HouseholdData } from './support/fixtures/household'
 import { addRoutes, apiRoute, errorRoute, queryRoute } from './support/mockApi'
 import type { BudgetEntry, CardStatementsResponse, PaginatedResponse } from '@tally-trace/shared'
 import { shot } from './support/shot'
+import { expandDue } from './support/transactions'
 
 // This spec lives in <repo>/frontend/e2e.
 const FRONTEND = fileURLToPath(new URL('..', import.meta.url))
@@ -168,6 +169,8 @@ test.describe('amount colours (STU-680)', () => {
 
   test('red means overdue, negative or failed only: the overdue label on Transactions is red', async ({ page }) => {
     await open(page, '/transactions')
+    // STU-687: the Due card opens collapsed; its rows carry the overdue label.
+    await expandDue(page)
     const due = page.getByTestId('due-overdue').first()
     await expect(due).toBeVisible()
     expect(await colourOf(due), 'the Transactions overdue label').toBe(LIGHT.danger)
@@ -480,6 +483,7 @@ test.describe('amount classes', () => {
 
   test('amount colour is a class, not a selector shim: upcoming occurrences', async ({ page }) => {
     await open(page, '/transactions')
+    await expandDue(page)
     await page.getByTestId('due-tab-upcoming').click()
     const amounts = page.getByTestId('upcoming-occurrence-amount')
     await expect(amounts.first()).toBeVisible()
