@@ -80,11 +80,20 @@ differences:
 - Rows and lines are ``debit`` (money out) or ``credit`` (money in); a debit counts
   like a charge in ``line_balance``, so the statement's line balance is debits less
   credits. There are no payments and no header diff.
-- A transfer between two accounts is one row carrying both sides, each placed by the
-  same date; its ``RowRecord`` has ``keeps_dates``. It keeps both its dates whatever
-  the line says (the other account's statement may print another day), so, like a
-  recurring candidate, it is paired only where its own date lands, and a ``create``
-  that it was left out for names it in ``possible_duplicate_of``.
+- A transfer between two accounts is one row carrying both sides, each placed by its
+  one ``transaction_date``; its ``RowRecord`` has ``keeps_posting_date`` (STU-774). It
+  is paired like any row. In the period it keeps both its dates whatever day the line
+  prints (the other account's statement may print another); moved in from outside the
+  period it takes the line's ``transaction_date`` (so the other account's side moves
+  with it) and keeps its ``posting_date``, which places a card's cash advance.
+- The fee pairing, before rule 1 (STU-774): the source side of a transfer with a fee
+  (its ``RowRecord.fee``, set only on a bank account's statement) is one row whose
+  amount is the transfer's amount plus its fee, while a bank may print the fee as a
+  line of its own. A posted cycle row with a ``fee`` above 0 is ``matched`` to two
+  lines, one action each: the one debit line equal to its amount less the fee and the
+  one debit line equal to the fee, both within one day of it, when there is exactly
+  one of each, they are distinct lines, and neither could be either line of another
+  such row. Otherwise the row falls to rules 1 to 3 unchanged.
 """
 from __future__ import annotations
 
@@ -116,8 +125,12 @@ class RowRecord:
     is_posted: bool
     updated_at: Optional[datetime]
     budget_entry_id: Optional[int] = None
-    # One side of a transfer on a bank account's statement: its dates are kept.
-    keeps_dates: bool = False
+    # One side of a transfer on a bank account's statement: it keeps its posting date,
+    # and its transaction date unless it is moved in from outside the period.
+    keeps_posting_date: bool = False
+    # The source side of a transfer on a bank account's statement: the fee inside
+    # ``amount`` (``amount`` is the transfer's amount plus it), for the fee pairing.
+    fee: Optional[Decimal] = None
 
 
 @dataclass(frozen=True)
@@ -206,7 +219,7 @@ def fingerprint(statement: BankStatement, view: AppStatementView,
     lines = [{k: _canon(v) for k, v in line.model_dump().items()}
              for line in sorted(statement.lines, key=lambda line: line.line_no)]
     read = [[r.id, _canon(r.amount), _canon(r.transaction_date), _canon(r.posting_date),
-             r.is_posted, _canon(r.updated_at)]
+             r.is_posted, _canon(r.updated_at)] + ([_canon(r.fee)] if r.fee is not None else [])
             for r in sorted(rows, key=lambda r: r.id)]
     app = {"close": _canon(view.close), "window_start": _canon(view.window_start),
            "due": _canon(view.due), "minimum_due": _canon(view.minimum_due)}
@@ -270,6 +283,33 @@ def _exact_pairs(lines: Sequence[StatementLine], pool: Sequence[Tuple[int, RowRe
     return pairs
 
 
+def _fee_pairs(lines: Sequence[StatementLine], pool: Sequence[Tuple[int, RowRecord]]
+               ) -> List[Tuple[StatementLine, StatementLine, RowRecord]]:
+    """The fee pairing: ``(amount line, fee line, row)`` for a posted cycle row with a
+    ``fee`` above 0 and exactly one line of each, distinct, both debits within one day
+    of it: one equal to its amount less the fee, one equal to the fee. A line that
+    could be either line of another such row is never paired."""
+    near: Dict[int, Tuple[List[StatementLine], List[StatementLine]]] = {}
+    for rank, row in pool:
+        if rank != CYCLE or not row.is_posted or row.kind != "debit" or not row.fee:
+            continue
+        close = [line for line in lines
+                 if line.kind == "debit" and _distance(line, row) <= 1]
+        near[row.id] = ([line for line in close if line.amount == row.amount - row.fee],
+                        [line for line in close if line.amount == row.fee])
+    claims: Dict[int, int] = {}
+    for amounts, fees in near.values():
+        for line_no in {line.line_no for line in (*amounts, *fees)}:
+            claims[line_no] = claims.get(line_no, 0) + 1
+    rows = {row.id: row for _, row in pool}
+    pairs = []
+    for row_id, (amounts, fees) in near.items():
+        if len(amounts) == 1 and len(fees) == 1 and amounts[0].line_no != fees[0].line_no \
+                and claims[amounts[0].line_no] == claims[fees[0].line_no] == 1:
+            pairs.append((amounts[0], fees[0], rows[row_id]))
+    return pairs
+
+
 def _unambiguous_pairs(lines: Sequence[StatementLine], pool: Sequence[Tuple[int, RowRecord]],
                        eligible) -> List[Tuple[StatementLine, int, RowRecord]]:
     """Rule 2: a line and a row of the same kind within one day of each other, when
@@ -298,8 +338,11 @@ def _lands(view: AppStatementView, transaction_date: date, posting_date: Optiona
 def _target_dates(view: AppStatementView, line: StatementLine, rank: int, row: RowRecord
                   ) -> Tuple[date, Optional[date]]:
     """The dates ``row`` takes when paired with ``line`` (see the module docstring)."""
-    if row.keeps_dates:
-        return row.transaction_date, row.posting_date
+    if row.keeps_posting_date:
+        # In the period its day is kept (the other account's line may print another);
+        # moved in, it takes the line's.
+        kept = row.budget_entry_id is not None or rank == CYCLE
+        return (row.transaction_date if kept else line.transaction_date), row.posting_date
     if row.budget_entry_id is None:
         return line.transaction_date, line.posting_date
     own = row.transaction_date
@@ -347,9 +390,8 @@ def _check_rows(cycle_rows, candidate_rows, payment_rows) -> None:
 
 
 def _keeps_day(row: RowRecord) -> bool:
-    """A row that keeps its own transaction date: linked to a recurring entry, or a
-    transfer side that keeps both dates."""
-    return row.budget_entry_id is not None or row.keeps_dates
+    """A row that keeps its own transaction date: one linked to a recurring entry."""
+    return row.budget_entry_id is not None
 
 
 def _sort_key(action: Action):
@@ -383,9 +425,16 @@ def _row_diff(statement, view: AppStatementView, cycle_rows: Sequence[RowRecord]
     items = [line for line in statement.lines if line.kind != "payment"]
     actions: List[Action] = []
 
-    paired = _exact_pairs(items, pool, eligible)
-    taken_lines = {line.line_no for line, _, _ in paired}
-    taken_rows = {row.id for _, _, row in paired}
+    for amount_line, fee_line, row in _fee_pairs(items, pool):
+        actions += [Action("matched", amount_line.line_no, row.id),
+                    Action("matched", fee_line.line_no, row.id)]
+    fee_lines = {a.line_no for a in actions}
+    fee_rows = {a.row_id for a in actions}
+    paired = _exact_pairs([line for line in items if line.line_no not in fee_lines],
+                          [(rank, row) for rank, row in pool if row.id not in fee_rows],
+                          eligible)
+    taken_lines = fee_lines | {line.line_no for line, _, _ in paired}
+    taken_rows = fee_rows | {row.id for _, _, row in paired}
     rest_lines = [line for line in items if line.line_no not in taken_lines]
     rest_pool = [(rank, row) for rank, row in pool if row.id not in taken_rows]
     for line, rank, row in paired + _unambiguous_pairs(rest_lines, rest_pool, eligible):

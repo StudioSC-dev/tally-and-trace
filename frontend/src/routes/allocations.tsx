@@ -71,6 +71,7 @@ import { apiErrorMessage } from '../utils/apiError'
 import { SkeletonRows } from '../components/Loading'
 import { Segment } from '../components/SegmentedControl'
 import { Button } from '../components/Button'
+import { Icon } from '../components/Icon'
 import { StatusText } from '../components/StatusText'
 import type { StatusTone } from '../components/StatusText'
 
@@ -1944,9 +1945,7 @@ export function AllocationsPage() {
                 className="text-muted hover:text-body transition-colors duration-200"
                 aria-label="Close allocation actions modal"
                   >
-                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <Icon name="close" />
                   </button>
                 </div>
                 
@@ -2032,13 +2031,7 @@ export function AllocationsPage() {
                 onClick={() => handleToggleAllocationActive(actionAllocation)}
                 className="flex min-h-11 py-2.5"
               >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  {actionAllocation.is_active ? (
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6M5 5h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z" />
-                  ) : (
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5l10 7-10 7V5z" />
-                  )}
-                </svg>
+                <Icon name={actionAllocation.is_active ? 'pause' : 'play'} />
                 <span>{actionAllocation.is_active ? 'Pause allocation' : 'Resume allocation'}</span>
                   </Button>
                   <Button
@@ -2046,9 +2039,7 @@ export function AllocationsPage() {
                 onClick={() => openEditFromModal(actionAllocation)}
                 className="flex min-h-11 py-2.5"
               >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                </svg>
+                <Icon name="edit" />
                 Edit allocation
               </Button>
               <Button
@@ -2056,9 +2047,7 @@ export function AllocationsPage() {
                 onClick={() => handleDelete(actionAllocation.id)}
                 className="flex min-h-11 py-2.5 sm:col-span-2"
               >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
+                <Icon name="delete" />
                 Delete allocation
                   </Button>
                 </div>
@@ -2092,9 +2081,7 @@ export function AllocationsPage() {
                 className="text-muted hover:text-body transition-colors duration-200"
                 aria-label="Close allocation modal"
               >
-                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <Icon name="close" />
               </button>
                 </div>
                 
@@ -2448,13 +2435,7 @@ export function AllocationsPage() {
                       }
                       className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold transition-colors duration-200 ${ allocationForm.is_active ? 'text-ink hover:bg-sunken' : 'bg-sunken text-body hover:bg-sunken' }`}
                     >
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        {allocationForm.is_active ? (
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6M5 5h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z" />
-                        ) : (
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5l10 7-10 7V5z" />
-                        )}
-                      </svg>
+                      <Icon name={allocationForm.is_active ? 'pause' : 'play'} />
                       <span>{allocationForm.is_active ? 'Active' : 'Paused'}</span>
                     </button>
                   </div>

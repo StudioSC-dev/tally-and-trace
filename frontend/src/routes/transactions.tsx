@@ -54,6 +54,7 @@ import { SlowReload, Spinner } from '../components/Loading'
 import { Segment, SegmentedControl } from '../components/SegmentedControl'
 import { withSelection } from '../utils/selection'
 import { Button } from '../components/Button'
+import { Icon } from '../components/Icon'
 import { StatusText } from '../components/StatusText'
 import type { StatusTone } from '../components/StatusText'
 
@@ -2847,10 +2848,8 @@ export function TransactionsPage() {
 
   const emptyState = (
     <div className="card p-6 text-center space-y-4">
-      <div className="w-16 h-16 mx-auto rounded-full bg-sunken flex items-center justify-center">
-        <svg className="w-8 h-8 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-        </svg>
+      <div className="w-16 h-16 mx-auto rounded-full bg-sunken flex items-center justify-center text-muted">
+        <Icon name="receipt" />
       </div>
       <div>
         <p className="text-lg font-semibold text-ink">No transactions found</p>
@@ -2932,12 +2931,9 @@ export function TransactionsPage() {
               variant="secondary"
               onClick={() => setIsBreakdownOpen(true)}
               data-onboarding="spending-breakdown"
-              className="px-3"
+              className="px-2.5"
             >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />
-              </svg>
+              <Icon name="spending-breakdown" />
               <span className="sr-only sm:not-sr-only">Spending breakdown</span>
             </Button>
             )}
@@ -2945,10 +2941,8 @@ export function TransactionsPage() {
           <div className="flex min-w-0 flex-1 items-center gap-2" data-testid="transactions-toolbar">
             <label htmlFor="transactions-search" className="sr-only">Search transactions</label>
             <div className="relative min-w-0 flex-1" data-busy-passthrough-box>
-              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                <svg className="h-5 w-5 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
+              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-muted">
+                <Icon name="search" />
               </div>
               <input
                 id="transactions-search"
@@ -2966,24 +2960,20 @@ export function TransactionsPage() {
               <Button
                 variant="secondary"
                 onClick={() => handleMonthChange('prev')}
-                className="px-2.5 py-1.5"
+                className="px-2 py-1"
                 aria-label="View previous month"
               >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                </svg>
+                <Icon name="caret-left" />
               </Button>
               <span className="whitespace-nowrap px-1 text-sm font-semibold text-ink">{currentMonthLabel}</span>
               <Button
                 variant="secondary"
                 onClick={() => handleMonthChange('next')}
-                className="px-2.5 py-1.5"
+                className="px-2 py-1"
                 aria-label="View next month"
                 disabled={isAtCurrentMonth}
               >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
+                <Icon name="caret-right" />
               </Button>
             </div>
             )}
@@ -2993,12 +2983,10 @@ export function TransactionsPage() {
               aria-expanded={showFilters}
               // The panel mounts only while it is open, so the button names it only then.
               aria-controls={showFilters ? 'transactions-filters' : undefined}
-              className="shrink-0 px-3"
+              className="shrink-0 px-2.5"
               data-testid="transactions-filters-toggle"
             >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h18l-7 8v6l-4 2v-8z" />
-              </svg>
+              <Icon name="filter" />
               <span className="sr-only sm:not-sr-only">Filters</span>
             </Button>
           </div>
@@ -3014,7 +3002,7 @@ export function TransactionsPage() {
                 aria-label={`Remove category filter ${name}`}
               >
                 Category: {name}
-                <span aria-hidden="true">×</span>
+                <Icon name="close" />
               </Button>
             ))}
             {filterUncategorized && (
@@ -3028,7 +3016,7 @@ export function TransactionsPage() {
                 aria-label="Remove the No category filter"
               >
                 No category
-                <span aria-hidden="true">×</span>
+                <Icon name="close" />
               </Button>
             )}
             {enteredBy === 'me' && (
@@ -3039,7 +3027,7 @@ export function TransactionsPage() {
                 aria-label="Remove the Only mine filter"
               >
                 Only mine
-                <span aria-hidden="true">×</span>
+                <Icon name="close" />
               </Button>
             )}
             {hasPanelFilters && !showFilters && (
@@ -3379,9 +3367,7 @@ export function TransactionsPage() {
                 className="text-muted hover:text-body transition-colors duration-200"
                 aria-label="Close actions modal"
               >
-                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <Icon name="close" />
               </button>
             </div>
 
@@ -3601,9 +3587,7 @@ export function TransactionsPage() {
                     disabled={actionLocked}
                     className="flex min-h-11 py-2.5"
                   >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
+                    <Icon name="check" />
                     Mark as not posted
                   </Button>
                   )
@@ -3615,9 +3599,7 @@ export function TransactionsPage() {
                     disabled={actionLocked}
                     className="flex min-h-11 py-2.5"
                   >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
+                    <Icon name="check" />
                     Mark as posted
                   </Button>
                   )
@@ -3629,9 +3611,7 @@ export function TransactionsPage() {
                   disabled={actionLocked}
                   className="flex min-h-11 py-2.5"
                 >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                          </svg>
+                  <Icon name="edit" />
                   Edit transaction
                         </Button>
                 )}
@@ -3641,9 +3621,7 @@ export function TransactionsPage() {
                   onClick={() => handleDelete(actionTransaction)}
                   className="flex min-h-11 py-2.5"
                         >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
+                  <Icon name="delete" />
                   Delete transaction
                         </Button>
                 )}
@@ -3820,9 +3798,7 @@ export function TransactionsPage() {
                 className="text-muted hover:text-body transition-colors duration-200"
                 aria-label="Close transaction modal"
               >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <Icon name="close" />
               </button>
             </div>
 
@@ -3976,9 +3952,7 @@ export function TransactionsPage() {
                 />
                 {contextHint && (
                   <div className="mt-3 flex items-start gap-2 border border-line px-3 py-2 text-xs text-ink">
-                    <svg className="mt-0.5 h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
+                    <Icon name="info" />
                     <div className="space-y-1">
                       <p>{contextHint.text}</p>
                       {contextHint.suggestTransfer && (

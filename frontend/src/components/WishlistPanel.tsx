@@ -13,10 +13,11 @@ import {
 import type { WishlistItem, WishlistItemPriority } from '../store/api'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
 import { Button } from './Button'
+import { Icon } from './Icon'
 import { EmptyState } from './EmptyState'
 
-/** A row's icon action: 4px padding and the Button's 1px border, held at 28px square, the old 6px around a 16px icon. */
-const ICON_ACTION = 'p-1 min-h-7 min-w-7'
+/** A row's icon action: 2px padding and the Button's 1px border around the 20px icon (26px), held at 28px square as before. */
+const ICON_ACTION = 'p-0.5 min-h-7 min-w-7'
 
 const PRIORITIES: WishlistItemPriority[] = ['critical', 'high', 'medium', 'low']
 
@@ -229,7 +230,7 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
                   {item.notes && <p className="text-sm text-body mt-1">{item.notes}</p>}
                   <div className="flex flex-wrap gap-2 mt-2 text-xs text-muted">
                     {item.target_date && <span className="inline-flex items-center rounded-full bg-sunken px-2 py-1">Target {longDate(item.target_date)}</span>}
-                    {item.url && <a href={item.url} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-full px-2 py-1 text-ink hover:underline">Link ↗</a>}
+                    {item.url && <a href={item.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-ink hover:underline">Link <Icon name="external-link" /></a>}
                     {item.is_purchased && item.purchased_at && <span className="inline-flex items-center rounded-full px-2 py-1 text-ok">Bought {longDate(item.purchased_at)}</span>}
                   </div>
                   {onCreateAllocationFromItem && !item.is_purchased && (
@@ -237,17 +238,17 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
                       <Button
                         variant="secondary"
                         onClick={() => onCreateAllocationFromItem(item, 'savings')}
-                        className="gap-1 px-3 py-1 text-xs"
+                        className="gap-1 px-3 py-0.5 text-xs"
                       >
-                        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8V6m0 12v-2" /></svg>
+                        <Icon name="savings" />
                         Savings target
                       </Button>
                       <Button
                         variant="secondary"
                         onClick={() => onCreateAllocationFromItem(item, 'budget')}
-                        className="gap-1 px-3 py-1 text-xs"
+                        className="gap-1 px-3 py-0.5 text-xs"
                       >
-                        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
+                        <Icon name="budget" />
                         Budget envelope
                       </Button>
                     </div>
@@ -256,14 +257,14 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
                 <div className="text-right flex-shrink-0">
                   <p className="text-lg font-bold text-ink">{formatCurrency(item.estimated_cost, item.currency as CurrencyCode)}</p>
                   <div className="mt-2 flex items-center justify-end gap-1">
-                    <Button variant="quiet" onClick={() => togglePurchased(item)} title={item.is_purchased ? 'Mark as not purchased' : 'Mark as purchased'} className={ICON_ACTION}>
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                    <Button variant="quiet" onClick={() => togglePurchased(item)} title={item.is_purchased ? 'Mark as not purchased' : 'Mark as purchased'} aria-label={item.is_purchased ? 'Mark as not purchased' : 'Mark as purchased'} className={ICON_ACTION}>
+                      <Icon name="check" />
                     </Button>
-                    <Button variant="quiet" onClick={() => openEdit(item)} title="Edit" className={ICON_ACTION}>
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                    <Button variant="quiet" onClick={() => openEdit(item)} title="Edit" aria-label="Edit" className={ICON_ACTION}>
+                      <Icon name="edit" />
                     </Button>
-                    <Button variant="danger" onClick={() => handleDelete(item)} title="Delete" className={ICON_ACTION}>
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    <Button variant="danger" onClick={() => handleDelete(item)} title="Delete" aria-label="Delete" className={ICON_ACTION}>
+                      <Icon name="delete" />
                     </Button>
                   </div>
                 </div>
@@ -280,8 +281,8 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
             <div className="bg-surface p-6 w-full max-w-md border border-line" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-semibold text-ink">{editing ? 'Edit item' : 'Add item'}</h2>
-                <button onClick={closeModal} className="text-muted hover:text-body">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                <button onClick={closeModal} className="text-muted hover:text-body" aria-label="Close wishlist modal">
+                  <Icon name="close" />
                 </button>
               </div>
               <form onSubmit={handleSubmit} className="space-y-5">

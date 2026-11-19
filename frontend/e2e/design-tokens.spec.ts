@@ -151,10 +151,10 @@ test.describe('Columnar pad design tokens (STU-675)', () => {
 
     for (const name of ['Button', 'SegmentedControl` / `Tabs', 'ListSheet` and `Row', 'StatusText', 'EmptyState', 'Icon']) {
       const line = doc.split('\n').find((l) => l.startsWith(`| \`${name}\``))
-      // STU-678 built the Button, STU-681 landed ListSheet and Row and STU-692 StatusText and EmptyState; the rest stay
-      // planned until their tickets land.
+      // STU-678 built the Button, STU-681 landed ListSheet and Row, STU-692 StatusText and EmptyState and STU-690 built
+      // the Icon; the rest stay planned until their tickets land.
       const status =
-        name === 'Button'
+        name === 'Button' || name === 'Icon'
           ? /\| built \|/
           : name === 'ListSheet` and `Row'
             ? /\| landed \(STU-681\) \|/
