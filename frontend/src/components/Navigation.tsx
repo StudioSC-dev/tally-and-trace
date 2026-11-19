@@ -39,7 +39,7 @@ export function Navigation() {
   // The router joins className, activeProps.className and inactiveProps.className,
   // so the base holds only layout; the state classes live in the active/inactive
   // props so an active link never carries the inactive colours as well.
-  const navLinkBase = "inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm transition-colors duration-200"
+  const navLinkBase = "inline-flex items-center gap-2 border-b-2 px-2.5 py-2 text-sm transition-colors duration-200"
   const navLinkInactive = "border-transparent text-body"
   const navLinkActive = "border-ink text-ink"
 
@@ -99,7 +99,7 @@ export function Navigation() {
             <div className="relative">
               <button
                 onClick={() => setShowUserMenu(!showUserMenu)}
-                className="flex items-center space-x-2 px-3 py-2 text-sm text-body transition-colors duration-200 hover:text-ink focus:outline-none"
+                className="flex items-center space-x-2 px-2.5 py-2 text-sm text-body transition-colors duration-200 hover:text-ink focus:outline-none"
               >
                 <div className="flex h-8 w-8 items-center justify-center border border-line">
                   <span className="font-mono text-xs text-body">

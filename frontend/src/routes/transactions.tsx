@@ -2921,7 +2921,7 @@ export function TransactionsPage() {
               <Button
                 variant="secondary"
                 onClick={() => handleMonthChange('prev')}
-                className="px-2.5 py-1"
+                className="px-2 py-1"
                 aria-label="View previous month"
               >
                 <Icon name="caret-left" />
@@ -2930,7 +2930,7 @@ export function TransactionsPage() {
               <Button
                 variant="secondary"
                 onClick={() => handleMonthChange('next')}
-                className="px-2.5 py-1"
+                className="px-2 py-1"
                 aria-label="View next month"
                 disabled={isAtCurrentMonth}
               >
@@ -2943,7 +2943,7 @@ export function TransactionsPage() {
               variant="secondary"
               onClick={() => setIsBreakdownOpen(true)}
               data-onboarding="spending-breakdown"
-              className="px-3"
+              className="px-2.5"
             >
               <Icon name="spending-breakdown" />
               Spending breakdown
@@ -2952,7 +2952,7 @@ export function TransactionsPage() {
             <Button
               variant="secondary"
               onClick={() => setShowFilters((prev) => !prev)}
-              className="px-3"
+              className="px-2.5"
             >
               <Icon name="filter" />
               {showFilters ? 'Hide filters' : 'Show filters'}
