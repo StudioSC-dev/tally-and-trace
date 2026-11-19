@@ -101,7 +101,7 @@ async function uiLogin(page, u) {
 const searchBox = (page) => page.getByLabel('Search recurring entries')
 const recurringTab = (page) => page.getByRole('button', { name: 'Recurring', exact: true })
 const cards = (page) => page.locator('[data-testid^="kind-section-"] article')
-const NAME = 'p.text-base.font-semibold'
+const NAME = '[data-row-title]'
 const namesNow = async (page) => (await cards(page).locator(NAME).allInnerTexts()).map((t) => t.trim()).sort()
 /** The listed entry names, once they equal `expected` (the search is client-side), or what is listed when 5s pass. */
 async function names(page, expected) {

@@ -1669,7 +1669,7 @@ async function postedHintEditForm(browser) {
   const { ctx, page } = await newPage(browser)
   await uiLogin(page, u)
   await page.goto(`${stack.webUrl}/transactions`)
-  const article = page.locator('article[role="button"]').filter({ hasText: 'E7 Charge' }).first()
+  const article = page.locator('article[data-transaction-id]').filter({ hasText: 'E7 Charge' }).first()
   await article.waitFor()
   await settle(page)
   await article.click()

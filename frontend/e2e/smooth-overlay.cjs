@@ -567,7 +567,7 @@ async function openTransactions(page) {
 }
 const dueRecurring = (page, name) => page.locator(`${tid('due-row')}[data-kind="recurring"]`).filter({ hasText: name })
 /** The transaction's row on the Transactions list. */
-const txnRow = (page, description) => page.locator('article[role="button"]').filter({ hasText: description }).first()
+const txnRow = (page, description) => page.locator('article[data-transaction-id]').filter({ hasText: description }).first()
 const saveToast = (page, description) => page.locator(tid('save-toast')).filter({ hasText: description })
 /** Waits (bounded) for the save toast naming `description` to be in `state`; true on arrival. */
 const waitToast = (page, description, state, ms = 10000) =>
@@ -1458,7 +1458,7 @@ async function scenarioY(browser) {
       const query = main.search
       const rows = await client.get(u.token, `/transactions/${query}`)
       const expected = (Array.isArray(rows) ? rows : rows.items || []).map((t) => t.description).sort()
-      const shown = (await page.locator('article[role="button"]').allTextContents()).map((t) => t.replace(/\s+/g, ' '))
+      const shown = (await page.locator('article[data-transaction-id]').allTextContents()).map((t) => t.replace(/\s+/g, ' '))
       const ok = expected.length === shown.length && expected.every((d) => shown.some((t) => t.includes(d)))
       return (ok && expected.length === 2) || `api ${JSON.stringify(expected)} shown ${JSON.stringify(shown)} query ${query}`
     })

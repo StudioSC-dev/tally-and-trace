@@ -1476,19 +1476,7 @@ export function AllocationsPage() {
       <Row
         key={entry.id}
         className={`${canEdit ? 'hover:bg-sunken cursor-pointer' : ''} ${ entry.is_active ? '' : 'opacity-60' }`}
-        onClick={canEdit ? () => openRecurringModal(entry) : undefined}
-        role={canEdit ? 'button' : undefined}
-        tabIndex={canEdit ? 0 : undefined}
-        onKeyDown={
-          canEdit
-            ? (event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault()
-                  openRecurringModal(entry)
-                }
-              }
-            : undefined
-        }
+        onOpen={canEdit ? () => openRecurringModal(entry) : undefined}
         title={entry.name}
         tags={entry.tags}
         status={remaining === 0 ? <StatusText tone="ok" data-testid="installment-paid">Fully paid</StatusText> : undefined}

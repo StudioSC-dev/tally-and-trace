@@ -1897,6 +1897,19 @@ export const LONG_TAG: Tag = { id: 43, name: 'Japan trip 2027 with the whole fam
 /** The household with `LONG_TAG` among its tags. */
 export const withLongTag = (data: HouseholdData): HouseholdData => ({ ...data, tags: [...data.tags, LONG_TAG] })
 
+/** STU-683: the transaction `withTagOverflow` adds, for the specs that find its row. */
+export const TAG_OVERFLOW = { id: 9401, description: 'Divisoria haul for the reunion' } as const
+
+/**
+ * STU-683: the household plus one transaction on the newest day carrying more tags than a title line holds on a
+ * desktop or a phone (the household's two, every old swatch tag and `LONG_TAG`), so its row draws the "+N" tag button.
+ */
+export const withTagOverflow = (data: HouseholdData): HouseholdData => {
+  const extra = [...legacyTags, LONG_TAG].filter((t) => !data.tags.some((d) => d.id === t.id))
+  const overflow = tx(data.today, TAG_OVERFLOW.description, 1850, cash, 22, 'debit', { id: TAG_OVERFLOW.id, tags: [...data.tags, ...extra] })
+  return { ...data, tags: [...data.tags, ...extra], transactions: [overflow, ...data.transactions] }
+}
+
 /** Two wishlist items, neither bought: a laptop for work and a rice cooker. */
 export const householdWishlist: WishlistItem[] = [
   { id: 801, user_id: householdUser.id, name: 'Work laptop', estimated_cost: 65000, currency: 'PHP', priority: 'high', notes: 'For freelance work', target_date: '2026-06-30', is_purchased: false, created_at: '2026-02-01T09:00:00Z' },

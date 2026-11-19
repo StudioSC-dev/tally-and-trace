@@ -291,7 +291,7 @@ async function hiddenElsewhere(browser) {
 
     await page.reload()
     await h.waitQuiet(page)
-    await page.locator('article[role="button"]').filter({ hasText: saved.description }).first().click()
+    await page.locator('article[data-transaction-id]').filter({ hasText: saved.description }).first().click()
     const actions = formModal(page, 'Transaction actions')
     await actions.waitFor()
     await actions.getByRole('button', { name: 'Edit transaction', exact: true }).click()

@@ -359,7 +359,7 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
 
   test('date facts are preserved and links carry no arrow', async ({ page }) => {
     await open(page, '/transactions')
-    const rows = page.locator('article[role="button"]')
+    const rows = page.locator('article[data-transaction-id]')
     expect.soft(await rows.count(), 'the page lists its transactions').toBe(19)
     const texts = await rows.allInnerTexts()
     for (const text of texts) {
@@ -369,7 +369,7 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
       expect.soft(/\b(Today|Yesterday|Tomorrow)\b/i.test(text), `"${name}" has no relative-day label`).toBe(false)
     }
     // The row dated on the page's today keeps its date and drops the "Today" label.
-    const today = page.locator('article[role="button"]', { hasText: 'Puregold weekly groceries' })
+    const today = page.locator('article[data-transaction-id]', { hasText: 'Puregold weekly groceries' })
     expect.soft(await today.innerText(), 'the row dated today').toContain('Mar 12th, 2026')
     await openTransactionFilters(page)
     const range = page.getByText(/^Date range:/)
@@ -448,11 +448,11 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
 
     // Transactions: a transfer row keeps both accounts, its category and who entered it; the range keeps both ends.
     await open(page, '/transactions')
-    const transfer = await page.locator('article[role="button"]', { hasText: 'Move to emergency fund' }).innerText()
+    const transfer = await page.locator('article[data-transaction-id]', { hasText: 'Move to emergency fund' }).innerText()
     for (const fact of ['BPI Payroll', 'Metrobank Savings', 'Savings transfer', 'by Mara S.', 'Transfer', 'Mar 8th, 2026']) {
       expect.soft(transfer, `the transfer row keeps "${fact}"`).toContain(fact)
     }
-    const dinner = await page.locator('article[role="button"]', { hasText: 'Dinner, Manam' }).innerText()
+    const dinner = await page.locator('article[data-transaction-id]', { hasText: 'Dinner, Manam' }).innerText()
     for (const fact of ['HSBC Red Mastercard', 'Dining out', 'by Mara S.', 'Japan trip', 'Mar 7th, 2026']) {
       expect.soft(dinner, `the tagged row keeps "${fact}"`).toContain(fact)
     }

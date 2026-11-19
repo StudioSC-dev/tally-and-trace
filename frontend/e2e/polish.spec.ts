@@ -387,11 +387,14 @@ test('every control shows a keyboard focus ring: no .focus-ring:focus rule', asy
   await shot(page, 'focus-ring-stylesheet')
 })
 
-/** The rows at a list sheet's corners, where a sheet that clipped would cut a focused row's ring. */
+/**
+ * The rows at a list sheet's corners, where a sheet that clipped would cut a focused row's ring. `focus` is what takes
+ * focus there: the row's title, which is the row's control (STU-683).
+ */
 const SHEET_ROWS = [
-  { name: 'first transaction row', url: '/transactions', heading: 'Transactions', which: 'first' },
-  { name: 'last transaction row', url: '/transactions', heading: 'Transactions', which: 'last' },
-  { name: 'first recurring row', url: '/allocations?tab=recurring', heading: 'Allocations', which: 'first' },
+  { name: 'first transaction row', url: '/transactions', heading: 'Transactions', which: 'first', focus: 'title' },
+  { name: 'last transaction row', url: '/transactions', heading: 'Transactions', which: 'last', focus: 'title' },
+  { name: 'first recurring row', url: '/allocations?tab=recurring', heading: 'Allocations', which: 'first', focus: 'title' },
 ] as const
 
 for (const c of SHEET_ROWS) {
@@ -400,10 +403,13 @@ for (const c of SHEET_ROWS) {
     const rows = page.getByTestId('list-sheet').first().getByTestId('row')
     const row = c.which === 'first' ? rows.first() : rows.last()
     await expect(row).toBeVisible()
-    await row.focus()
-    // The ring's outer edge (outline-offset plus outline-width past the row), against every ancestor that clips. The
-    // check is geometry, not an engine's overflow-clip-margin: WebKit has none, so a clipping sheet cut the ring there.
-    const ring = await row.evaluate((e) => {
+    const target = c.focus === 'title' ? row.locator('button[data-row-title]') : row
+    await target.focus()
+    await expect(target).toBeFocused()
+    // The ring's outer edge (outline-offset plus outline-width past the focused control), against every ancestor that
+    // clips. The check is geometry, not an engine's overflow-clip-margin: WebKit has none, so a clipping sheet cut the
+    // ring there.
+    const ring = await target.evaluate((e) => {
       const s = getComputedStyle(e)
       const r = e.getBoundingClientRect()
       const reach = parseFloat(s.outlineOffset) + parseFloat(s.outlineWidth)

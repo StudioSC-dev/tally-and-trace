@@ -45,15 +45,23 @@ interface RowProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
   kind?: string
   /** Let the meta lines wrap rather than cut, for a row with no opener: every fact it carries stays readable. */
   wrap?: boolean
+  /**
+   * Opens the row's record. The title becomes a button named after it, and its hit area stretches over the whole row
+   * (`.row-open`), so a click anywhere but the row's own controls opens the record. The row itself is not a control,
+   * so its controls (the actions, a detail's buttons, the "+N") are never inside another one.
+   */
+  onOpen?: () => void
+  /** The record cannot be opened for now (a save of its own is in flight): the title says so and shows no pointer. */
+  openDisabled?: boolean
 }
 
 /**
  * One line of a `ListSheet` (docs/design-system.md, "Ledger and Row"): square, ruled under
  * every row but the last, with the title and its meta line on the left, then the row's own
  * controls, then the amount. A row with one meta line is 56px between rules on desktop and 64px
- * on a phone. Click, keyboard and ARIA attributes pass through to the `<article>`.
+ * on a phone. A row that opens its record takes `onOpen`; other attributes pass through to the `<article>`.
  */
-export function Row({ title, badges, tags = [], meta, status, details = [], actions, amount, kind, wrap = false, className = '', ...rest }: RowProps) {
+export function Row({ title, badges, tags = [], meta, status, details = [], actions, amount, kind, wrap = false, onOpen, openDisabled = false, className = '', ...rest }: RowProps) {
   const lines = details.filter((d) => d !== undefined && d !== null && d !== false && d !== '')
   const lineRef = useRef<HTMLDivElement>(null)
   const rulerRef = useRef<HTMLSpanElement>(null)
@@ -102,7 +110,7 @@ export function Row({ title, badges, tags = [], meta, status, details = [], acti
   const cut = wrap ? 'break-words' : 'truncate'
   return (
     <article
-      className={`block rounded-none border-b border-line px-4 py-3 last:border-b-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent sm:py-2 ${className}`}
+      className={`block rounded-none border-b border-line px-4 py-3 last:border-b-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent sm:py-2 ${onOpen ? 'row-opener relative' : ''} ${className}`}
       {...rest}
       data-testid="row"
       data-row-kind={kind}
@@ -110,9 +118,22 @@ export function Row({ title, badges, tags = [], meta, status, details = [], acti
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
           <div ref={lineRef} className="flex min-w-0 items-center gap-2">
-            <p data-row-title className="min-w-0 truncate text-base font-semibold text-ink">
-              {title}
-            </p>
+            {onOpen ? (
+              <button
+                type="button"
+                data-testid="row-open"
+                data-row-title
+                aria-disabled={openDisabled ? 'true' : undefined}
+                className={`row-open min-w-0 truncate text-left text-base font-semibold text-ink ${openDisabled ? 'cursor-default' : ''}`}
+                onClick={onOpen}
+              >
+                {title}
+              </button>
+            ) : (
+              <p data-row-title className="min-w-0 truncate text-base font-semibold text-ink">
+                {title}
+              </p>
+            )}
             {badges !== undefined && (
               <span data-testid="row-badges" data-row-badge className="flex shrink-0 items-center gap-1.5">
                 {badges}
