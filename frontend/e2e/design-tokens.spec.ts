@@ -150,9 +150,16 @@ test.describe('Columnar pad design tokens (STU-675)', () => {
 
     for (const name of ['Button', 'SegmentedControl` / `Tabs', 'ListSheet` and `Row', 'StatusText', 'EmptyState', 'Icon']) {
       const line = doc.split('\n').find((l) => l.startsWith(`| \`${name}\``))
-      // STU-678 built the Button, STU-681 landed ListSheet and Row and STU-690 built the Icon; the rest stay planned
-      // until their tickets land.
-      const status = name === 'Button' || name === 'Icon' ? /\| built \|/ : name === 'ListSheet` and `Row' ? /\| landed \(STU-681\) \|/ : /\| planned \|/
+      // STU-678 built the Button, STU-681 landed ListSheet and Row, STU-692 StatusText and EmptyState and STU-690 built
+      // the Icon; the rest stay planned until their tickets land.
+      const status =
+        name === 'Button' || name === 'Icon'
+          ? /\| built \|/
+          : name === 'ListSheet` and `Row'
+            ? /\| landed \(STU-681\) \|/
+            : name === 'StatusText' || name === 'EmptyState'
+              ? /\| landed \(STU-692\) \|/
+              : /\| planned \|/
       expect.soft(line, `component inventory row for ${name}`).toMatch(status)
     }
 
@@ -290,10 +297,10 @@ test.describe('Columnar pad design tokens (STU-675)', () => {
     await shot(page, 'ladder-transactions')
 
     await page.goto('/accounts')
-    await page.getByRole('button', { name: 'Add Account', exact: true }).click()
+    await page.getByRole('button', { name: 'Add account', exact: true }).click()
     const panel = page.locator('.fixed.inset-0.overflow-y-auto.bg-scrim\\/60 > .min-h-full > *').last()
     await expect(panel).toBeVisible()
-    await expect(panel.getByRole('heading', { name: 'Create Account' })).toBeVisible()
+    await expect(panel.getByRole('heading', { name: 'Create account' })).toBeVisible()
     expect.soft(await style(panel, 'border-radius'), 'dialog radius').toBe('12px')
     const shadow = await style(panel, 'box-shadow')
     expect.soft(shadow, 'dialog shadow').not.toBe('none')

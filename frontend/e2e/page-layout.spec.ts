@@ -24,8 +24,8 @@ const ROUTES = [
   { name: 'allocations', path: '/allocations', title: 'Allocations', lands: '/allocations' },
   { name: 'accounts', path: '/accounts', title: 'Accounts', lands: '/accounts' },
   { name: 'settings', path: '/settings', title: 'Settings', lands: '/settings' },
-  { name: 'forecast', path: '/forecast', title: 'Cash-Flow Timeline', lands: '/forecast' },
-  { name: 'household', path: '/household', title: 'Your Household', lands: '/accounts/household' },
+  { name: 'forecast', path: '/forecast', title: 'Cash-flow timeline', lands: '/forecast' },
+  { name: 'household', path: '/household', title: 'Your household', lands: '/accounts/household' },
   { name: 'wishlist', path: '/wishlist', title: 'Allocations', lands: '/allocations' },
 ] as const
 type PageCase = (typeof ROUTES)[number]
@@ -64,9 +64,9 @@ const BASE_TOTALS = {
 const BASE_TRANSACTIONS_SECTIONS = ['due-section', 'transactions-list-card', 'role:status', 'holds:list-sheet']
 /** The Allocations tabs on `origin/main`, in order, and the header action each one shows (none on Wishlist). */
 const BASE_ALLOCATION_TABS = [
-  { label: 'Recurring', action: 'Add Recurring Entry' },
-  { label: 'Budgets', action: 'Add Allocation' },
-  { label: 'Savings', action: 'Add Allocation' },
+  { label: 'Recurring', action: 'Add recurring entry' },
+  { label: 'Budgets', action: 'Add allocation' },
+  { label: 'Savings', action: 'Add allocation' },
   { label: 'Wishlist', action: null },
 ]
 
@@ -100,7 +100,7 @@ async function open(page: Page, r: Pick<PageCase, 'path' | 'title' | 'lands'>, d
 }
 
 /** The route's root: the one element <main> renders the page into. */
-const pageRoot = (page: Page): Locator => page.locator('main .fade-in > *')
+const pageRoot = (page: Page): Locator => page.locator('main [data-route-root] > *')
 
 /**
  * The top of the first block under the title: the next of the header's own rows (controls that wrapped under the
@@ -109,7 +109,7 @@ const pageRoot = (page: Page): Locator => page.locator('main .fade-in > *')
 const nextBlockTop = (page: Page): Promise<number | null> =>
   page.locator('main h1').evaluate((h1) => {
     const titleBottom = h1.getBoundingClientRect().bottom
-    const root = document.querySelector('main .fade-in > *')
+    const root = document.querySelector('main [data-route-root] > *')
     const header = root ? [...root.children].find((c) => c.contains(h1)) : undefined
     if (!root || !header) return null
     const blocks = [...[...header.children].filter((c) => !c.contains(h1)), ...[...root.children].filter((c) => c !== header)]
@@ -201,7 +201,7 @@ for (const r of ROUTES) {
     const title = await boxOf(page.locator('main h1'))
     if (testInfo.project.name === 'phone') {
       expect(title.x, `the ${r.name} title's left edge is the 12px phone gutter`).toBe(GUTTER.phone)
-      const widths = await page.evaluate(() => ({ doc: document.documentElement.scrollWidth, root: document.querySelector('main .fade-in > *')?.scrollWidth ?? 0 }))
+      const widths = await page.evaluate(() => ({ doc: document.documentElement.scrollWidth, root: document.querySelector('main [data-route-root] > *')?.scrollWidth ?? 0 }))
       expect(widths.doc, `the ${r.name} page never scrolls sideways (document scrollWidth)`).toBeLessThanOrEqual(390)
       expect(widths.root, `the ${r.name} page content fits the viewport (page scrollWidth)`).toBeLessThanOrEqual(390)
     } else {
@@ -343,7 +343,7 @@ test('excluded page features are unchanged: allocations tabs', async ({ page }) 
   const labels = (await tabs.allInnerTexts()).map((t) => t.trim())
   expect(labels, "the Allocations tabs keep main's labels and order").toEqual(BASE_ALLOCATION_TABS.map((t) => t.label))
   // The header action, read by name so the same check runs on main, where the header is not a <header>.
-  const action = page.locator('main').getByRole('button', { name: /^Add (Recurring Entry|Allocation)$/ })
+  const action = page.locator('main').getByRole('button', { name: /^Add (recurring entry|allocation)$/ })
   for (const [i, tab] of BASE_ALLOCATION_TABS.entries()) {
     await tabs.nth(i).click()
     const pressed = await tabs.evaluateAll((all) => all.map((e) => e.getAttribute('aria-pressed')))

@@ -14,6 +14,7 @@ import type { WishlistItem, WishlistItemPriority } from '../store/api'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
 import { Button } from './Button'
 import { Icon } from './Icon'
+import { EmptyState } from './EmptyState'
 
 /** A row's icon action: 2px padding and the Button's 1px border around the 20px icon (26px), held at 28px square as before. */
 const ICON_ACTION = 'p-0.5 min-h-7 min-w-7'
@@ -212,7 +213,7 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
       ) : wishlistPhase !== 'ready' || !items ? (
         <div className="flex items-center justify-center min-h-48"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-ink" /></div>
       ) : items.length === 0 ? (
-        <div className="card p-6 text-center text-muted">Nothing on your wishlist yet.</div>
+        <EmptyState message="Nothing on your wishlist yet." action={{ label: 'Add your first item', onClick: openCreate }} />
       ) : (
         <div className="grid grid-cols-1 gap-3">
           {items.map((item) => (

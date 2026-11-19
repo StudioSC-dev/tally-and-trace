@@ -189,7 +189,7 @@ const swatches = [
 const transaction: DialogCase = {
   name: 'transaction',
   route: '/transactions',
-  trigger: (p) => p.getByRole('button', { name: 'Add Transaction' }).first(),
+  trigger: (p) => p.getByRole('button', { name: 'Add transaction' }).first(),
   controls: [
     'Close transaction modal',
     'Add notes about this transaction',
@@ -206,7 +206,7 @@ const transaction: DialogCase = {
     await overlay.locator('input[placeholder="Add notes about this transaction"]').fill('Tab bar probe')
     await overlay.locator('[data-field="account_id"]').getByRole('button', { name: /^DT Checking/ }).click()
     await overlay.locator('input[type="number"][placeholder="0.00"]').first().fill('120')
-    return overlay.getByRole('button', { name: /^Create Transaction$/ })
+    return overlay.getByRole('button', { name: /^Add transaction$/ })
   },
   request: { method: 'POST', path: '/transactions/' },
 }
@@ -215,26 +215,26 @@ const otherDialogs: DialogCase[] = [
   {
     name: 'account',
     route: '/accounts',
-    trigger: (p) => p.getByRole('button', { name: 'Add Account', exact: true }),
+    trigger: (p) => p.getByRole('button', { name: 'Add account', exact: true }),
     controls: ['Enter account name', 'Add a description for this account'],
     minFields: 8,
     fill: async (overlay) => {
       await overlay.getByPlaceholder('Enter account name').fill('New account')
-      return overlay.getByRole('button', { name: 'Create Account', exact: true })
+      return overlay.getByRole('button', { name: 'Create account', exact: true })
     },
     request: { method: 'POST', path: '/accounts/' },
   },
   {
     name: 'recurring',
     route: '/allocations',
-    trigger: (p) => p.getByRole('button', { name: 'Add Recurring Entry' }),
+    trigger: (p) => p.getByRole('button', { name: 'Add recurring entry' }),
     controls: ['Close allocation modal', 'Expense', 'Income', 'Keep running', 'On date', 'After runs', 'Active'],
     minFields: 18,
     fill: async (overlay) => {
       await overlay.locator('input[type="text"]').first().fill('Rent')
       await overlay.locator('select').first().selectOption({ label: 'DT Checking' })
       await overlay.locator('input[type="number"]').first().fill('100')
-      return overlay.getByRole('button', { name: 'Save Recurring Entry', exact: true })
+      return overlay.getByRole('button', { name: 'Save recurring entry', exact: true })
     },
     request: { method: 'POST', path: '/budget-entries/' },
   },

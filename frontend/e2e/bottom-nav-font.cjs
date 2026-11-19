@@ -299,7 +299,7 @@ async function scenarioC(browser, engine) {
       await next.click()
       await h.sleep(400)
     }
-    await page.getByText('Set Financial Goals').waitFor()
+    await page.getByText('Set financial goals').waitFor()
     await h.sleep(600)
     await h.check(`c.${engine}.tour-tab`, 'B', async () => {
       const tab = await page.locator('nav.fixed.bottom-0 [data-onboarding="nav-allocations"]').boundingBox()

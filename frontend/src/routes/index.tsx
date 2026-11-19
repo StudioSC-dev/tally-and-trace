@@ -25,6 +25,8 @@ import { heldPaymentNotice, payableActions, payableTarget, periodWindow, queryPh
 import { Skeleton, SkeletonRows } from '../components/Loading'
 import { SegmentedControl } from '../components/SegmentedControl'
 import { Button } from '../components/Button'
+import { StatusText } from '../components/StatusText'
+import type { StatusTone } from '../components/StatusText'
 import { fullCardChargeKeys, isLimitedEvent, isOtherUpcoming, loggedDays, localToday, statusFromDate, upcomingItemAmount } from '@tally-trace/shared'
 import type { LimitedEvent, Payable, Settlement } from '@tally-trace/shared'
 import { Icon } from '../components/Icon'
@@ -249,6 +251,9 @@ export function Dashboard() {
     const remaining = daysUntil(row.day, manilaDay)
     return row.overdue ? 'Overdue' : remaining === 0 ? 'Due today' : `${remaining} day${remaining === 1 ? '' : 's'} remaining`
   }
+  /** Overdue and Due today are states, a dot and a word; a count of days left is a plain caption. */
+  const dueToneOf = (row: PayableRow): StatusTone | null =>
+    row.overdue ? 'danger' : daysUntil(row.day, manilaDay) === 0 ? 'warn' : null
 
   const renderPlannedExpenseIcon = (status: PayableStatus) => {
     const label = STATUS_LABELS[status]
@@ -322,7 +327,7 @@ export function Dashboard() {
           <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-danger">
             <Icon name="warning" />
           </div>
-          <h3 className="text-lg font-semibold text-ink mb-2">Error Loading Data</h3>
+          <h3 className="text-lg font-semibold text-ink mb-2">Error loading data</h3>
           <p className="text-body mb-4">There was an issue loading your financial data.</p>
           <div className="text-sm text-muted space-y-1">
             {snapshotQuery.isError && <p>Balances and projection: {getErrorDetail(snapshotError) ?? 'Failed to load'}</p>}
@@ -406,7 +411,7 @@ export function Dashboard() {
         <div className="p-4 sm:p-6 border-b border-line">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-ink">Financial Snapshot</h2>
+              <h2 className="text-lg font-semibold text-ink">Financial snapshot</h2>
               <p className="text-sm text-muted">The projection runs from today to month end.</p>
             </div>
           </div>
@@ -504,7 +509,7 @@ export function Dashboard() {
           <div className="p-4 sm:p-6 border-b border-line">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-ink">Budget Envelope Status</h2>
+                <h2 className="text-lg font-semibold text-ink">Budget envelope status</h2>
                 <p className="text-sm text-muted">Current month spending against your envelope limits.</p>
               </div>
               {envelopesPending ? (
@@ -549,7 +554,7 @@ export function Dashboard() {
           <div className="p-4 sm:p-6 border-b border-line">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-ink">Upcoming Payables</h2>
+                <h2 className="text-lg font-semibold text-ink">Upcoming payables</h2>
                 <p className="text-sm text-muted">Cash going out in the next 30 days: bills, card statements and loan payments.</p>
               </div>
               {payablesPending ? (
@@ -577,6 +582,7 @@ export function Dashboard() {
             <div className="divide-y divide-line" data-testid="payables">
               {(showAllPayables ? payableRows : payableRows.slice(0, MAX_PAYABLES_SHOWN)).map((row) => {
                 const status = payableStatusOf(row)
+                const dueTone = dueToneOf(row)
                 const opens = row.payable !== null && payableActions(payableTarget(row.payable)).open
                 return (
                   <div key={row.key} className="p-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between" data-testid="payable-row">
@@ -610,7 +616,7 @@ export function Dashboard() {
                     )}
                     <div className="text-right space-y-1 flex-shrink-0">
                       <p className="text-xs text-muted">
-                        {dueLabelOf(row)}
+                        {dueTone ? <StatusText tone={dueTone} data-testid="payable-due-state">{dueLabelOf(row)}</StatusText> : dueLabelOf(row)}
                       </p>
                     </div>
                   </div>

@@ -2,6 +2,7 @@ import { creditCheckKey, formatEntryDate, isLimitedEvent } from '@tally-trace/sh
 import type { CardCharges, CreditCheck, FullCharge, LimitedCharge, MissedCharge } from '@tally-trace/shared'
 import { CreditCheckBadge, CreditSummary } from '../CreditSummary'
 import { estimateText, estimateTitle } from '../../utils/fx'
+import { StatusText } from '../StatusText'
 
 interface Props {
   /** `DashboardSnapshot.card_charges`: one section per card the caller holds a direct role on. */
@@ -77,7 +78,7 @@ export function CardChargesPanel({ cards }: Props) {
   return (
     <div className="bg-surface border border-line" data-testid="card-charges">
       <div className="p-4 sm:p-6 border-b border-line">
-        <h2 className="text-lg font-semibold text-ink">Card Charges</h2>
+        <h2 className="text-lg font-semibold text-ink">Card charges</h2>
         <p className="text-sm text-muted">Charges on your cards in the next 30 days. They are paid through each card's statement.</p>
       </div>
       <div className="divide-y divide-line">
@@ -121,7 +122,7 @@ export function CardChargesPanel({ cards }: Props) {
                             {dayText(charge)} · Shared item
                           </p>
                         </div>
-                        {charge.overdue && <span className="badge badge-danger flex-shrink-0" data-testid="card-charge-overdue">Overdue</span>}
+                        {charge.overdue && <StatusText tone="danger" className="flex-shrink-0" data-testid="card-charge-overdue">Overdue</StatusText>}
                       </li>
                     )
                   }
@@ -138,7 +139,12 @@ export function CardChargesPanel({ cards }: Props) {
                         <p className="text-sm font-medium text-ink">{charge.name}</p>
                         <p className="text-xs text-muted">
                           {dayText(charge)} · <span data-testid="card-charge-kind">{KIND_LABELS[charge.kind]}</span>
-                          {charge.overdue && <span className="text-danger" data-testid="card-charge-overdue"> · Overdue</span>}
+                          {charge.overdue && (
+                            <>
+                              {' · '}
+                              <StatusText tone="danger" data-testid="card-charge-overdue">Overdue</StatusText>
+                            </>
+                          )}
                         </p>
                         {check && <CreditCheckBadge check={check} />}
                       </div>

@@ -104,6 +104,7 @@ import type { CardPayDraft } from '../../store/outboxForms'
 import { outboxActions } from '../../store/outbox'
 import { Tab, Tabs } from '../Tabs'
 import { Button } from '../Button'
+import { StatusText } from '../StatusText'
 
 /**
  * "Due and overdue": every recurring occurrence the caller can record and every pending
@@ -321,9 +322,9 @@ interface BatchResultView {
 }
 
 /**
- * Row actions are secondary buttons (docs/design-system.md, "Button"). Each keeps the height it had until STU-682
- * sizes buttons: an action that was outlined keeps its padding, and one that was filled had no border, so it takes
- * 2px less padding and a 24px floor.
+ * Row actions are secondary buttons (docs/design-system.md, "Button"). On a fine pointer each keeps the height it had
+ * before the Button migration: an action that was outlined keeps its padding, and one that was filled had no border,
+ * so it takes 2px less padding and a 24px floor. On a coarse pointer the 44px floor in index.css sizes them all.
  */
 const ROW_ACTION = 'px-2.5 py-1 text-xs'
 const WAS_FILLED_ROW_ACTION = 'min-h-6 px-2.5 py-0.5 text-xs'
@@ -767,8 +768,19 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
         <div>
           <p className="text-sm font-medium text-ink">{transactionDescription(txn) ?? 'Pending transaction'}</p>
           <p className="text-xs text-muted">
-            {formatEntryDate(row.date)} · Pending
-            {row.overdue && <span className="text-danger" data-testid="due-overdue"> · Overdue</span>}
+            {formatEntryDate(row.date)} ·{' '}
+            {/* A recurring card charge the card already took is Charged (done); any other tied row is still Pending. */}
+            {row.action === 'posted' ? (
+              <StatusText tone="ok" data-testid="due-pending-state">Charged</StatusText>
+            ) : (
+              <StatusText tone="muted" data-testid="due-pending-state">Pending</StatusText>
+            )}
+            {row.overdue && (
+              <>
+                {' · '}
+                <StatusText tone="danger" data-testid="due-overdue">Overdue</StatusText>
+              </>
+            )}
           </p>
         </div>
         <div className="flex-shrink-0 space-y-1 text-right">
@@ -834,7 +846,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
         <p className="text-sm font-medium text-ink">{row.name}</p>
         <p className="text-xs text-muted">{formatEntryDate(row.date)} · Shared item</p>
       </div>
-      {row.overdue && <span className="badge badge-danger flex-shrink-0" data-testid="due-overdue">Overdue</span>}
+      {row.overdue && <StatusText tone="danger" className="flex-shrink-0" data-testid="due-overdue">Overdue</StatusText>}
     </li>
   )
 
@@ -886,7 +898,12 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
         <p className="text-xs text-muted">
           <span data-testid="due-date">{movedText(row.occurrenceDate, row.effectiveDate)}</span>
           {row.accountName && ` · ${row.accountName}`}
-          {row.overdue && <span className="text-danger" data-testid="due-overdue"> · Overdue</span>}
+          {row.overdue && (
+              <>
+                {' · '}
+                <StatusText tone="danger" data-testid="due-overdue">Overdue</StatusText>
+              </>
+            )}
         </p>
         {credit && <CreditCheckBadge check={credit} />}
       </div>
@@ -928,7 +945,12 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
           )}
           <p className="text-xs text-muted">
             Closed {formatEntryDate(row.closeDate)} · due {formatEntryDate(row.dueDate)}
-            {row.overdue && <span className="text-danger" data-testid="due-overdue"> · Overdue</span>}
+            {row.overdue && (
+              <>
+                {' · '}
+                <StatusText tone="danger" data-testid="due-overdue">Overdue</StatusText>
+              </>
+            )}
             {row.statements > 1 && (
               <span data-testid="due-earlier-statements">
                 {` · includes ${row.statements - 1} earlier ${row.statements - 1 === 1 ? 'statement' : 'statements'}`}
@@ -1011,7 +1033,12 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
           <p className="text-sm font-semibold text-ink" data-testid="due-payments-left">{shown.leftText}</p>
           <p className="text-xs text-muted">
             {shown.nextText}
-            {shown.overdue && <span className="text-danger" data-testid="due-overdue"> · Overdue</span>}
+            {shown.overdue && (
+              <>
+                {' · '}
+                <StatusText tone="danger" data-testid="due-overdue">Overdue</StatusText>
+              </>
+            )}
             {shown.missedText !== null && (
               <span className="text-warn" data-testid="due-installment-missed">{` · ${shown.missedText}`}</span>
             )}

@@ -54,6 +54,8 @@ import { Segment, SegmentedControl } from '../components/SegmentedControl'
 import { withSelection } from '../utils/selection'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
+import { StatusText } from '../components/StatusText'
+import type { StatusTone } from '../components/StatusText'
 
 const TRANSACTION_TYPE_LABELS: Record<Transaction['transaction_type'], string> = {
   credit: 'Income',
@@ -120,6 +122,8 @@ const formatDateWithOrdinal = (date: Date) => {
 // An unposted row is Pending once its day has come and Planned before; see `transactionStatus`.
 const STATUS_LABELS: Record<TransactionStatus, string> = { posted: 'Posted', pending: 'Pending', planned: 'Planned' }
 const STATUS_TEXT_CLASSES: Record<TransactionStatus, string> = { posted: 'text-ok', pending: 'text-warn', planned: 'text-muted' }
+/** A row's status as a dot and a word: Posted is done (ok); Pending and Planned stay quiet captions (STU-743). */
+const ROW_STATUS_TONES: Record<TransactionStatus, StatusTone> = { posted: 'ok', pending: 'muted', planned: 'muted' }
 
 const PAGE_SIZES = [25, 50, 100] as const
 type PageSize = (typeof PAGE_SIZES)[number]
@@ -2709,7 +2713,7 @@ export function TransactionsPage() {
         data-transaction-id={transaction.id}
         data-pending={pendingKind}
         data-highlighted={highlightedId === transaction.id ? 'true' : undefined}
-        className={`transition-colors duration-200 ${actionable ? 'hover:bg-sunken cursor-pointer' : 'cursor-default'} ${pendingKind === 'delete' ? 'opacity-50' : ''} ${highlightedId === transaction.id ? 'ring-2 ring-inset ring-ink' : ''} ${cardStateClasses}`}
+        className={`${actionable ? 'hover:bg-sunken cursor-pointer' : 'cursor-default'} ${pendingKind === 'delete' ? 'opacity-50' : ''} ${highlightedId === transaction.id ? 'ring-2 ring-inset ring-ink' : ''} ${cardStateClasses}`}
         onClick={open}
         role="button"
         tabIndex={0}
@@ -2721,6 +2725,7 @@ export function TransactionsPage() {
           }
         }}
         title={description}
+        status={<StatusText tone={ROW_STATUS_TONES[status]} data-testid="transaction-status">{STATUS_LABELS[status]}</StatusText>}
         meta={
           <>
             <span>{exactDate}</span>
@@ -2734,7 +2739,6 @@ export function TransactionsPage() {
                 ? categoryName || 'Transfer'
                 : categoryName || 'Uncategorized'}
             </span>
-            <span className="font-medium text-muted">{STATUS_LABELS[status]}</span>
             <span className="font-medium text-muted">{typeLabel}</span>
             {transaction.created_by && <span data-testid="created-by">by {transaction.created_by}</span>}
             {scheduleLabel && <span className="text-ink">{scheduleLabel}</span>}
@@ -2835,7 +2839,7 @@ export function TransactionsPage() {
           onClick={() => setIsCreateModalOpen(true)}
           className="w-full sm:w-auto mx-auto"
         >
-          Add Transaction
+          Add transaction
         </Button>
       )}
     </div>
@@ -2863,7 +2867,7 @@ export function TransactionsPage() {
             onClick={() => setIsCreateModalOpen(true)}
             className="w-full sm:w-auto justify-center"
           >
-            Add Transaction
+            Add transaction
           </Button>
         )}
       </PageHeader>
@@ -3314,7 +3318,7 @@ export function TransactionsPage() {
           >
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-xl font-semibold text-ink">Transaction Actions</h2>
+                <h2 className="text-xl font-semibold text-ink">Transaction actions</h2>
                 <p className="text-sm text-muted">
                   {transactionDescription(actionTransaction) || 'No description'}
                 </p>
@@ -3557,7 +3561,7 @@ export function TransactionsPage() {
                     className="flex min-h-11 py-2.5"
                   >
                     <Icon name="check" />
-                    Mark as Posted
+                    Mark as posted
                   </Button>
                   )
                 )}
@@ -3569,7 +3573,7 @@ export function TransactionsPage() {
                   className="flex min-h-11 py-2.5"
                 >
                   <Icon name="edit" />
-                  Edit Transaction
+                  Edit transaction
                         </Button>
                 )}
                 {actionPermissions.can_delete && (
@@ -3579,7 +3583,7 @@ export function TransactionsPage() {
                   className="flex min-h-11 py-2.5"
                         >
                   <Icon name="delete" />
-                  Delete Transaction
+                  Delete transaction
                         </Button>
                 )}
                       </div>
@@ -3714,7 +3718,7 @@ export function TransactionsPage() {
                       onClick={handleSavePostingForm}
                       disabled={actionLocked}
                     >
-                      Save Posted Amount
+                      Save posted amount
                     </Button>
                     <Button
                       variant="quiet"
@@ -3739,7 +3743,7 @@ export function TransactionsPage() {
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h2 className="text-xl font-semibold text-ink">
-              {editingTransaction ? 'Edit Transaction' : 'Create Transaction'}
+              {editingTransaction ? 'Edit transaction' : 'Add transaction'}
             </h2>
                 <p className="text-sm text-muted mt-1">
                   {formData.transaction_type === 'transfer'
@@ -3921,7 +3925,7 @@ export function TransactionsPage() {
                           }}
                           className="font-semibold text-ink underline-offset-2 hover:underline"
                         >
-                          Switch to Transfer
+                          Switch to transfer
                         </button>
                       )}
                     </div>
@@ -4316,7 +4320,7 @@ export function TransactionsPage() {
               </fieldset>
               <div className="flex flex-wrap gap-3 pt-2">
                 <Button variant="primary" type="submit" className="flex-1">
-                  {editingTransaction ? 'Update Transaction' : 'Create Transaction'}
+                  {editingTransaction ? 'Save changes' : 'Add transaction'}
                 </Button>
                 {!editingTransaction && (
                   <Button

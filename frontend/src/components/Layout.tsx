@@ -42,7 +42,8 @@ export function Layout() {
                 in standalone mode swallows. pb-20 sm:pb-8 clears the fixed bottom tab bar; --toast-room
                  (Toast.tsx, STU-629) lifts the bottom padding over the toast stack. */}
             <main id="main-content" tabIndex={-1} className="below-nav pb-[max(5rem,var(--toast-room,0px))] sm:pb-[max(2rem,var(--toast-room,0px))]">
-              <div className="fade-in">
+              {/* No entrance animation (no .fade-in): motion answers an action, and a page load is not one. */}
+              <div data-route-root>
                 <Outlet />
               </div>
             </main>

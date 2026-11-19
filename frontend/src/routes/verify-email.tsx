@@ -60,14 +60,14 @@ export function VerifyEmailPage() {
           <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-danger">
             <Icon name="error" />
           </div>
-          <h2 className="text-xl font-semibold text-ink mb-2">Verification Failed</h2>
+          <h2 className="text-xl font-semibold text-ink mb-2">Verification failed</h2>
           <p className="text-body mb-6">{errorMessage}</p>
           <Button
             variant="primary"
             onClick={() => navigate({ to: '/login', search: { message: undefined } })}
             className="w-full min-h-10 py-1.5 text-base"
           >
-            Go to Login
+            Go to login
           </Button>
         </div>
       </div>
@@ -81,7 +81,7 @@ export function VerifyEmailPage() {
           <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-ok">
             <Icon name="success" />
           </div>
-          <h2 className="text-xl font-semibold text-ink mb-2">Email Verified!</h2>
+          <h2 className="text-xl font-semibold text-ink mb-2">Email verified!</h2>
           <p className="text-body mb-6">
             Your email has been successfully verified. Starting your onboarding in {countdown} second{countdown !== 1 ? 's' : ''}...
           </p>
@@ -96,7 +96,7 @@ export function VerifyEmailPage() {
             onClick={() => navigate({ to: '/' })}
             className="w-full min-h-10 py-1.5 text-base"
           >
-            Continue Now
+            Continue now
           </Button>
         </div>
       </div>

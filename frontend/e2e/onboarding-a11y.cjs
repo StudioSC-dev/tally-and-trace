@@ -40,13 +40,13 @@ let stack
 // The tour on main 2d8eb26: step order, copy, spotlight target and the route each step opens. Step 5 is
 // STU-688's: it points at the dashboard's leading figure, where the period's totals moved.
 const STEPS = [
-  { title: 'Welcome to Your Dashboard', description: 'This is your home overview where you can see all your financial information at a glance.', target: 'nav-home', path: '/' },
-  { title: 'Manage Your Accounts', description: 'Track all your accounts - cash, savings, checking, and credit cards - in one place.', target: 'nav-accounts', path: '/accounts' },
-  { title: 'Record Transactions', description: 'Add and categorize your income and expenses to keep track of your spending.', target: 'nav-transactions', path: '/transactions' },
-  { title: 'Set Financial Goals', description: 'Create budgets, savings goals, and track your progress toward financial milestones.', target: 'nav-allocations', path: '/allocations' },
+  { title: 'Welcome to your dashboard', description: 'This is your home overview where you can see all your financial information at a glance.', target: 'nav-home', path: '/' },
+  { title: 'Manage your accounts', description: 'Track all your accounts - cash, savings, checking, and credit cards - in one place.', target: 'nav-accounts', path: '/accounts' },
+  { title: 'Record transactions', description: 'Add and categorize your income and expenses to keep track of your spending.', target: 'nav-transactions', path: '/transactions' },
+  { title: 'Set financial goals', description: 'Create budgets, savings goals, and track your progress toward financial milestones.', target: 'nav-allocations', path: '/allocations' },
   { title: 'Available cash', description: 'See the cash you can spend now, with the money in, money out and net for the selected period.', target: 'leading-figure', path: '/' },
-  { title: 'Budget Envelope Status', description: 'Monitor your spending against budget limits to stay on track with your financial goals.', target: 'budget-envelopes', path: '/' },
-  { title: 'Upcoming Planned Expenses', description: 'See your scheduled payments and expenses to plan ahead and avoid surprises.', target: 'upcoming-expenses', path: '/' },
+  { title: 'Budget envelope status', description: 'Monitor your spending against budget limits to stay on track with your financial goals.', target: 'budget-envelopes', path: '/' },
+  { title: 'Upcoming planned expenses', description: 'See your scheduled payments and expenses to plan ahead and avoid surprises.', target: 'upcoming-expenses', path: '/' },
   { title: 'Spending breakdown', description: 'Open a breakdown of your posted spending by category for the dates shown, then pick a category to filter the list.', target: 'spending-breakdown', path: '/transactions' },
 ]
 
@@ -363,11 +363,11 @@ async function scenarioG(browser, engine) {
     })
     await h.check(`g.${engine}.keyboard-walk.finish`, 'B', async () => {
       const f = await focusInfo(page)
-      if (f.label !== 'Get Started') return `last step's primary button is "${f.label}"`
+      if (f.label !== 'Get started') return `last step's primary button is "${f.label}"`
       await page.keyboard.press('Enter')
       await page.locator(BUBBLE).waitFor({ state: 'detached' })
       await h.sleep(300)
-      return completed(user) || 'onboarding_completed is still false after Get Started'
+      return completed(user) || 'onboarding_completed is still false after Get started'
     })
   } finally {
     await ctx.close()
@@ -424,7 +424,7 @@ async function scenarioI(browser, engine) {
       await h.check(`i.${engine}.regression.step${i + 1}.buttons`, 'B', async () => {
         const prevDisabled = await page.getByRole('button', { name: 'Previous', exact: true }).isDisabled()
         if (prevDisabled !== (i === 0)) return `Previous disabled=${prevDisabled}`
-        const nextName = i === STEPS.length - 1 ? 'Get Started' : 'Next'
+        const nextName = i === STEPS.length - 1 ? 'Get started' : 'Next'
         return (await page.getByRole('button', { name: nextName, exact: true }).count()) === 1 || `no "${nextName}" button`
       })
       if (i < STEPS.length - 1) {
@@ -445,10 +445,10 @@ async function scenarioI(browser, engine) {
     })
     await h.check(`i.${engine}.regression.not-complete-before-finish`, 'B', async () => !completed(user) || 'completed before the last step was finished')
     await h.check(`i.${engine}.regression.get-started-persists`, 'B', async () => {
-      await clickButton('Get Started')
+      await clickButton('Get started')
       await page.locator(BUBBLE).waitFor({ state: 'detached' })
       await h.sleep(300)
-      return completed(user) || 'onboarding_completed is false after Get Started'
+      return completed(user) || 'onboarding_completed is false after Get started'
     })
   } finally {
     await ctx.close()

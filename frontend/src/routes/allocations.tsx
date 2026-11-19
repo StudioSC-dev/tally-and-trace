@@ -60,6 +60,7 @@ import { EntryCreditWarningRow, KindCreditLines } from '../components/Allocation
 import type { KindCreditState } from '../components/AllocationsCredit'
 import { ListSheet } from '../components/ListSheet'
 import { PageHeader } from '../components/PageHeader'
+import { EmptyState } from '../components/EmptyState'
 import { Row } from '../components/Row'
 import { TagFilter } from '../components/TagFilter'
 import { MarkPaidDialog } from '../components/MarkPaidDialog'
@@ -70,6 +71,8 @@ import { SkeletonRows } from '../components/Loading'
 import { Segment } from '../components/SegmentedControl'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
+import { StatusText } from '../components/StatusText'
+import type { StatusTone } from '../components/StatusText'
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000
 
@@ -78,6 +81,12 @@ const AUTO_POST_STATE_LABELS: Record<AutoPostState, string> = {
   on: 'Auto-post on',
   off: 'Auto-post off',
   unreviewed: 'Not reviewed',
+}
+/** On is the healthy state, off a settled choice, and not reviewed waits on the owner. */
+const AUTO_POST_STATE_TONES: Record<AutoPostState, StatusTone> = {
+  on: 'ok',
+  off: 'muted',
+  unreviewed: 'warn',
 }
 
 const ENTRY_ACTION_TEST_IDS: Record<RecurringAction, string> = {
@@ -387,7 +396,11 @@ export function AllocationsPage() {
   const showToast = useToast()
   const beginBudgetEntriesRequest = useRequestGeneration()
   const beginAllocationsRequest = useRequestGeneration()
-  const { data: accountsData } = useGetAccountsQuery(
+  const {
+    data: accountsData,
+    isSuccess: accountsLoaded,
+    isError: accountsFailed,
+  } = useGetAccountsQuery(
     { is_active: true, limit: 100 },
     { skip: !isAuthenticated }
   )
@@ -414,6 +427,14 @@ export function AllocationsPage() {
   const accounts = useMemo(() => accountsData?.items ?? [], [accountsData])
   // Allocations are private to their owner, so only the caller's own accounts can back one.
   const ownAccounts = useMemo(() => accounts.filter((a) => a.my_role === 'owner'), [accounts])
+  // An empty list offers its create action only to someone who could save one: an allocation needs an account of
+  // their own, a recurring entry an account they can add records to (RecurringEntryFormModal's writable accounts).
+  // A viewer, whose accounts are all shared with them to read, sees the sentence alone.
+  // An empty state waits for the accounts, so its action arrives with its sentence rather than after it, and a
+  // viewer never sees an action that then goes.
+  const accountsSettled = accountsLoaded || accountsFailed
+  const canCreateAllocation = ownAccounts.length > 0
+  const canCreateRecurring = useMemo(() => accounts.some((a) => a.permissions.can_add_transactions), [accounts])
   const categories = useMemo(() => categoriesData ?? [], [categoriesData])
   // An expense or income category may share the name, so the transfer "Savings" wins.
   const savingsCategory = useMemo(
@@ -424,10 +445,10 @@ export function AllocationsPage() {
     [categories]
   )
   const submitButtonLabel = editingAllocation
-    ? 'Update Allocation'
+    ? 'Update allocation'
     : allocationForm.allocation_type === 'budget'
-    ? 'Create Budget Envelope'
-    : 'Create Savings Tracker'
+    ? 'Create budget envelope'
+    : 'Create savings tracker'
   const accountsById = useMemo(() => {
     const map = new Map<number, Account>()
     accounts.forEach((account) => map.set(account.id, account))
@@ -1181,7 +1202,7 @@ export function AllocationsPage() {
     return (
       <article
         key={allocation.id}
-        className={`card p-4 sm:p-5 transition-colors duration-200 hover:bg-sunken cursor-pointer ${ allocation.is_active ? '' : 'opacity-60' }`}
+        className={`card p-4 sm:p-5 cursor-pointer ${ allocation.is_active ? '' : 'opacity-60' }`}
         onClick={() => openActionModal(allocation)}
         role="button"
         tabIndex={0}
@@ -1455,7 +1476,7 @@ export function AllocationsPage() {
     return (
       <Row
         key={entry.id}
-        className={`transition-colors duration-200 ${canEdit ? 'hover:bg-sunken cursor-pointer' : ''} ${ entry.is_active ? '' : 'opacity-60' }`}
+        className={`${canEdit ? 'hover:bg-sunken cursor-pointer' : ''} ${ entry.is_active ? '' : 'opacity-60' }`}
         onClick={canEdit ? () => openRecurringModal(entry) : undefined}
         role={canEdit ? 'button' : undefined}
         tabIndex={canEdit ? 0 : undefined}
@@ -1471,6 +1492,7 @@ export function AllocationsPage() {
         }
         title={entry.name}
         tags={entry.tags}
+        status={remaining === 0 ? <StatusText tone="ok" data-testid="installment-paid">Fully paid</StatusText> : undefined}
         meta={
           <>
             <span>{entry.entry_type === 'income' ? 'Recurring income' : 'Recurring expense'}</span>
@@ -1491,7 +1513,6 @@ export function AllocationsPage() {
             {allocation && <span>Envelope: {allocation.name}</span>}
             <span>{endLabel}</span>
             {remaining !== null && remaining > 0 && <span className="text-ink">{remaining} left</span>}
-            {remaining === 0 && <span className="text-ok">Fully paid</span>}
           </>
         }
         details={[
@@ -1499,9 +1520,9 @@ export function AllocationsPage() {
           creditWarning && <EntryCreditWarningRow warning={creditWarning} />,
           showAutoPost && (
             <div className="flex flex-wrap items-center gap-2 text-xs text-body" data-testid="installment-auto-post" data-source={`budget_entry:${entry.id}`}>
-              <span className="font-semibold text-ink" data-testid="installment-auto-post-state" data-state={autoPostState}>
+              <StatusText tone={AUTO_POST_STATE_TONES[autoPostState]} data-testid="installment-auto-post-state" data-state={autoPostState}>
                 {AUTO_POST_STATE_LABELS[autoPostState]}
-              </span>
+              </StatusText>
               {canEdit && autoPostState !== 'on' && (
                 <Button
                   variant="secondary"
@@ -1580,7 +1601,8 @@ export function AllocationsPage() {
     title: string,
     subtitle: string,
     allocations: Allocation[],
-    emptyMessage: string
+    emptyMessage: string,
+    emptyAction: string
   ) => (
     <section className="space-y-3">
       <header className="space-y-1">
@@ -1600,7 +1622,12 @@ export function AllocationsPage() {
         </div>
       )}
       {allocations.length === 0 ? (
-        loadError ? null : <div className="card p-6 text-center text-muted">{emptyMessage}</div>
+        loadError || !accountsSettled ? null : (
+          <EmptyState
+            message={emptyMessage}
+            action={canCreateAllocation ? { label: emptyAction, onClick: openCreateModal } : undefined}
+          />
+        )
       ) : (
         <div className="grid grid-cols-1 gap-3">{allocations.map(renderAllocationCard)}</div>
       )}
@@ -1701,11 +1728,12 @@ export function AllocationsPage() {
     }
     if (groups.length === 0) {
       return (
-        errorAlert || (
-          <div className="card p-6 text-center text-muted">
-            No recurring entries yet. Add your regular income, bills and subscriptions to stay ahead.
-          </div>
-        )
+        errorAlert || (!accountsSettled ? null : (
+          <EmptyState
+            message="No recurring entries yet. Add your regular income, bills and subscriptions to stay ahead."
+            action={canCreateRecurring ? { label: 'Add a recurring entry', onClick: openCreateModal } : undefined}
+          />
+        ))
       )
     }
     return (
@@ -1758,12 +1786,11 @@ export function AllocationsPage() {
               onClick={openCreateModal}
             className="w-full sm:w-auto justify-center"
           >
-              {activeTab === 'subscriptions' ? 'Add Recurring Entry' : 'Add Allocation'}
+              {activeTab === 'subscriptions' ? 'Add recurring entry' : 'Add allocation'}
           </Button>
         )}
       </PageHeader>
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border border-line p-2 bg-surface">
-          <nav className="flex flex-wrap gap-1">
+          <nav className="grid grid-cols-4 gap-1 sm:flex">
             {[
               { value: 'subscriptions' as const, label: 'Recurring' },
               { value: 'budgets' as const, label: 'Budgets' },
@@ -1775,17 +1802,13 @@ export function AllocationsPage() {
                   key={tab.value}
                   selected={activeTab === tab.value}
                   onClick={() => setActiveTab(tab.value)}
-                  className="px-4 py-2 text-sm"
+                  className="min-w-0 whitespace-nowrap px-1 py-2 text-sm sm:px-4"
                 >
                   {tab.label}
                   </Segment>
               )
             })}
           </nav>
-          <p className="text-xs sm:text-sm text-muted">
-            Switch tabs to view recurring subscriptions, monthly budgets, savings envelopes, or your wishlist.
-          </p>
-                </div>
 
       {activeTab === 'subscriptions' && (
         <div>
@@ -1809,18 +1832,20 @@ export function AllocationsPage() {
 
       {activeTab === 'budgets' &&
         renderAllocationSection(
-          'Budget Envelopes',
+          'Budget envelopes',
           'Monthly spending buckets that align with your categories and keep cash flow on track.',
           budgetEnvelopes,
-          'No budget envelopes yet. Create one to keep monthly spending in check.'
+          'No budget envelopes yet. Create one to keep monthly spending in check.',
+          'Create a budget envelope'
         )}
 
       {activeTab === 'savings' &&
         renderAllocationSection(
-          'Savings & Investment Targets',
+          'Savings & investment targets',
           'Longer-term goals and rainy-day funds that should steadily grow over time.',
           savingsAndGoals,
-          'No savings or goal envelopes yet. Create one to start building your future plans.'
+          'No savings or goal envelopes yet. Create one to start building your future plans.',
+          'Create a savings target'
         )}
 
       {activeTab === 'wishlist' && (
@@ -2032,10 +2057,10 @@ export function AllocationsPage() {
               <div className="space-y-1">
                 <h2 className="text-xl font-semibold text-ink">
                   {editingAllocation
-                    ? 'Edit Allocation'
+                    ? 'Edit allocation'
                     : activeTab === 'budgets'
-                    ? 'Create Budget Envelope'
-                    : 'Create Savings Tracker'}
+                    ? 'Create budget envelope'
+                    : 'Create savings tracker'}
             </h2>
                 <p className="text-sm text-muted">
                   {activeTab === 'budgets'

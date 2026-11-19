@@ -9,6 +9,11 @@ const TITLE_MIN_PX = 96
 const CHIP_GAP_PX = 6
 const LINE_GAP_PX = 8
 const MORE_CLASS = 'inline-flex items-center rounded-full border border-line-strong px-2 py-0.5 text-xs font-semibold text-body'
+/**
+ * The "+N" button's box around its chip: the chip's own size on a fine pointer, 44px on a coarse one (`.tap-target`),
+ * reaching above and below the title line (`.row-more`). The ruler measures the same box, so the fit holds on both.
+ */
+const MORE_TARGET_CLASS = 'row-more tap-target inline-flex shrink-0 items-center'
 
 interface RowProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
   /** The row's name, on its first line. */
@@ -22,6 +27,11 @@ interface RowProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
   tags?: TagRef[]
   /** The one meta line under the title: short facts as sibling spans, cut to one line unless `wrap` is set. */
   meta?: ReactNode
+  /**
+   * The record's status (a `StatusText`, which never shrinks or wraps), first on the meta line and outside the text
+   * that is cut, so the word always shows in full; the facts after it are cut instead.
+   */
+  status?: ReactNode
   /**
    * More meta lines, each its own `row-meta` line under the first: content that needs a line of its own
    * (a description, a warning, a decision to make). Each wraps. Falsy entries are skipped.
@@ -43,7 +53,7 @@ interface RowProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
  * controls, then the amount. A row with one meta line is 56px between rules on desktop and 64px
  * on a phone. Click, keyboard and ARIA attributes pass through to the `<article>`.
  */
-export function Row({ title, badges, tags = [], meta, details = [], actions, amount, kind, wrap = false, className = '', ...rest }: RowProps) {
+export function Row({ title, badges, tags = [], meta, status, details = [], actions, amount, kind, wrap = false, className = '', ...rest }: RowProps) {
   const lines = details.filter((d) => d !== undefined && d !== null && d !== false && d !== '')
   const lineRef = useRef<HTMLDivElement>(null)
   const rulerRef = useRef<HTMLSpanElement>(null)
@@ -92,7 +102,7 @@ export function Row({ title, badges, tags = [], meta, details = [], actions, amo
   const cut = wrap ? 'break-words' : 'truncate'
   return (
     <article
-      className={`block rounded-none border-b border-line px-4 py-3 last:border-b-0 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ink sm:py-2 ${className}`}
+      className={`block rounded-none border-b border-line px-4 py-3 last:border-b-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent sm:py-2 ${className}`}
       {...rest}
       data-testid="row"
       data-row-kind={kind}
@@ -109,14 +119,14 @@ export function Row({ title, badges, tags = [], meta, details = [], actions, amo
               </span>
             )}
             {tags.length > 0 && (
-              <span data-testid="row-tags" className="relative flex max-w-full shrink-0 items-center gap-1.5 overflow-hidden whitespace-nowrap">
+              <span data-testid="row-tags" className="row-tags relative flex max-w-full shrink-0 items-center gap-1.5 overflow-hidden whitespace-nowrap">
                 {tags.slice(0, shown).map((tag) => (
                   <TagChip key={tag.id} tag={tag} />
                 ))}
                 {hidden.length > 0 && (
                   <button
                     type="button"
-                    className={`${MORE_CLASS} focus-ring hover:border-ink`}
+                    className={`${MORE_TARGET_CLASS} group focus-ring`}
                     data-testid="row-tags-more"
                     aria-expanded={open}
                     aria-controls={restId}
@@ -127,22 +137,31 @@ export function Row({ title, badges, tags = [], meta, details = [], actions, amo
                     }}
                     onKeyDown={stop}
                   >
-                    +{hidden.length}
+                    <span className={`${MORE_CLASS} group-hover:border-ink`}>+{hidden.length}</span>
                   </button>
                 )}
                 <span ref={rulerRef} aria-hidden="true" className="pointer-events-none invisible absolute left-0 top-0 flex gap-1.5 whitespace-nowrap">
                   {tags.map((tag) => (
                     <TagChip key={tag.id} tag={tag} measure />
                   ))}
-                  <span className={MORE_CLASS}>+{tags.length}</span>
+                  <span className={MORE_TARGET_CLASS}>
+                    <span className={MORE_CLASS}>+{tags.length}</span>
+                  </span>
                 </span>
               </span>
             )}
           </div>
-          {meta !== undefined && (
-            <p data-testid="row-meta" className={`${cut} space-x-3 text-xs text-muted`}>
-              {meta}
-            </p>
+          {status !== undefined ? (
+            <div data-testid="row-meta" className="flex min-w-0 items-center gap-3 text-xs text-muted">
+              {status}
+              {meta !== undefined && <p className={`${cut} min-w-0 space-x-3`}>{meta}</p>}
+            </div>
+          ) : (
+            meta !== undefined && (
+              <p data-testid="row-meta" className={`${cut} space-x-3 text-xs text-muted`}>
+                {meta}
+              </p>
+            )
           )}
           {open && hidden.length > 0 && (
             <div id={restId} data-testid="row-meta" data-row-tags-rest className="mt-1 flex flex-wrap items-center gap-1.5">
@@ -158,7 +177,7 @@ export function Row({ title, badges, tags = [], meta, details = [], actions, amo
           ))}
         </div>
         {actions !== undefined && (
-          <div data-testid="row-actions" className="flex shrink-0 items-center gap-2">
+          <div data-testid="row-actions" className="row-actions flex shrink-0 items-center gap-2">
             {actions}
           </div>
         )}

@@ -221,14 +221,14 @@ const SURFACES: Surface[] = [
   {
     key: 'transaction actions',
     page: false,
-    open: (p) => openDialog(p, '/transactions', 'Transactions', (q) => transactionRow(q, ROW_TRANSACTION), 'Transaction Actions'),
+    open: (p) => openDialog(p, '/transactions', 'Transactions', (q) => transactionRow(q, ROW_TRANSACTION), 'Transaction actions'),
     target: (p) => dialogOf(p).locator('svg'),
   },
   {
     key: 'transaction create picker',
     page: false,
     open: async (p) => {
-      await openDialog(p, '/transactions', 'Transactions', (q) => q.getByRole('button', { name: 'Add Transaction', exact: true }).first(), 'Create Transaction')
+      await openDialog(p, '/transactions', 'Transactions', (q) => q.getByRole('button', { name: 'Add transaction', exact: true }).first(), 'Add transaction')
       await pickAccount(p, SAVINGS_ACCOUNT)
       // Open the picked field again: its panel marks the current value.
       await dialogOf(p).locator('[data-field="account_id"] [data-picker-change]').click()
@@ -241,12 +241,12 @@ const SURFACES: Surface[] = [
     key: 'saved toast',
     page: false,
     open: async (p) => {
-      await openDialog(p, '/transactions', 'Transactions', (q) => q.getByRole('button', { name: 'Add Transaction', exact: true }).first(), 'Create Transaction')
+      await openDialog(p, '/transactions', 'Transactions', (q) => q.getByRole('button', { name: 'Add transaction', exact: true }).first(), 'Add transaction')
       await dialogOf(p).getByPlaceholder('Add notes about this transaction').fill('Icon check')
       await pickAccount(p, household.accounts[0].name)
       await dialogOf(p).locator('input[type="number"][placeholder="0.00"]').first().fill('120')
       await addRoutes(p, householdRoutes(SAVED))
-      await dialogOf(p).getByRole('button', { name: 'Create Transaction', exact: true }).click()
+      await dialogOf(p).getByRole('button', { name: 'Add transaction', exact: true }).click()
       await expect(p.getByTestId('save-toast-dismiss')).toBeVisible()
       await settle(p)
     },
@@ -262,7 +262,7 @@ const SURFACES: Surface[] = [
     key: 'account create',
     page: false,
     open: async (p) => {
-      await openDialog(p, '/accounts', 'Accounts', (q) => q.getByRole('button', { name: 'Add Account', exact: true }), 'Create Account', [createAccountRoute([formAccount])])
+      await openDialog(p, '/accounts', 'Accounts', (q) => q.getByRole('button', { name: 'Add account', exact: true }), 'Create account', [createAccountRoute([formAccount])])
       await dialogOf(p).locator('select').first().selectOption('credit')
       await expect(dialogOf(p).getByRole('button', { name: 'Show details' })).toBeVisible()
       await settle(p)
@@ -290,13 +290,13 @@ const SURFACES: Surface[] = [
   {
     key: 'recurring create',
     page: false,
-    open: (p) => openDialog(p, '/allocations', 'Allocations', (q) => q.getByRole('button', { name: 'Add Recurring Entry', exact: true }), 'Add Recurring Entry'),
+    open: (p) => openDialog(p, '/allocations', 'Allocations', (q) => q.getByRole('button', { name: 'Add recurring entry', exact: true }), 'Add recurring entry'),
     target: (p) => dialogOf(p).locator('svg[data-icon="close"], svg[data-icon="pause"]'),
   },
   {
     key: 'allocation create',
     page: false,
-    open: (p) => openDialog(p, '/allocations?tab=budgets', 'Allocations', (q) => q.getByRole('button', { name: 'Add Allocation', exact: true }), 'Create Budget Envelope'),
+    open: (p) => openDialog(p, '/allocations?tab=budgets', 'Allocations', (q) => q.getByRole('button', { name: 'Add allocation', exact: true }), 'Create budget envelope'),
     target: (p) => dialogOf(p).locator('svg[data-icon="close"], svg[data-icon="pause"]'),
   },
   {
@@ -422,7 +422,7 @@ test.describe('AC1: no emoji or glyph icons in text', () => {
 test.describe('AC2: option labels are plain words', () => {
   test('option labels are plain words', async ({ page }) => {
     test.skip(RECORD, 'a recording run only writes the baseline')
-    await openDialog(page, '/accounts', 'Accounts', (q) => q.getByRole('button', { name: 'Add Account', exact: true }), 'Create Account', [createAccountRoute([formAccount])])
+    await openDialog(page, '/accounts', 'Accounts', (q) => q.getByRole('button', { name: 'Add account', exact: true }), 'Create account', [createAccountRoute([formAccount])])
     const select = dialogOf(page).locator('select').first()
     await expect(select.locator('option[value="credit"]')).toBeAttached()
     await select.focus()
@@ -541,7 +541,7 @@ test.describe('AC5: source has one icon path', () => {
 /** The navigation items: the top bar's on desktop, the tab bar's on a phone. */
 const NAV: { project: 'desktop' | 'phone'; label: string; route: string; heading: string; other: string; otherHeading: string }[] = [
   { project: 'desktop', label: 'Dashboard', route: '/', heading: 'Dashboard', other: '/accounts', otherHeading: 'Accounts' },
-  { project: 'desktop', label: 'Forecast', route: '/forecast', heading: 'Cash-Flow Timeline', other: '/', otherHeading: 'Dashboard' },
+  { project: 'desktop', label: 'Forecast', route: '/forecast', heading: 'Cash-flow timeline', other: '/', otherHeading: 'Dashboard' },
   { project: 'desktop', label: 'Accounts', route: '/accounts', heading: 'Accounts', other: '/', otherHeading: 'Dashboard' },
   { project: 'desktop', label: 'Transactions', route: '/transactions', heading: 'Transactions', other: '/', otherHeading: 'Dashboard' },
   { project: 'desktop', label: 'Allocations', route: '/allocations', heading: 'Allocations', other: '/', otherHeading: 'Dashboard' },
@@ -682,7 +682,7 @@ test.describe('AC7: icon replacement preserves existing behaviour', () => {
 
   test('icon replacement preserves existing behaviour: pickers select and expand', async ({ page }) => {
     test.skip(RECORD, 'a recording run only writes the baseline')
-    await openDialog(page, '/transactions', 'Transactions', (q) => q.getByRole('button', { name: 'Add Transaction', exact: true }).first(), 'Create Transaction')
+    await openDialog(page, '/transactions', 'Transactions', (q) => q.getByRole('button', { name: 'Add transaction', exact: true }).first(), 'Add transaction')
     const field = dialogOf(page).locator('[data-field="account_id"]')
     await pickAccount(page, SAVINGS_ACCOUNT)
     await field.locator('[data-picker-change]').click()
@@ -707,13 +707,13 @@ test.describe('AC7: icon replacement preserves existing behaviour', () => {
 
   test('icon replacement preserves existing behaviour: account type values are saved', async ({ page }) => {
     test.skip(RECORD, 'a recording run only writes the baseline')
-    const api = await openDialog(page, '/accounts', 'Accounts', (q) => q.getByRole('button', { name: 'Add Account', exact: true }), 'Create Account', [createAccountRoute([formAccount])])
+    const api = await openDialog(page, '/accounts', 'Accounts', (q) => q.getByRole('button', { name: 'Add account', exact: true }), 'Create account', [createAccountRoute([formAccount])])
     const select = dialogOf(page).locator('select').first()
     const options = await select.locator('option').evaluateAll((els) => els.map((e) => `${(e as HTMLOptionElement).value}=${e.textContent}`))
     expect(options, 'each option keeps its value').toEqual(['checking=Checking', 'savings=Savings', 'credit=Credit Card', 'cash=Cash', 'e_wallet=E-Wallet', 'loan=Loan'])
     await select.selectOption({ label: 'Savings' })
     await dialogOf(page).getByPlaceholder('Enter account name').fill(newAccountInput.name)
-    await dialogOf(page).getByRole('button', { name: 'Create Account', exact: true }).click()
+    await dialogOf(page).getByRole('button', { name: 'Create account', exact: true }).click()
     await expect.poll(() => api.bodies('POST', '/accounts/').length).toBe(1)
     await viewportShot(page, 'account-type-saved')
     expect((api.bodies('POST', '/accounts/')[0] as { account_type?: string }).account_type, 'the picked type is sent').toBe('savings')
@@ -727,10 +727,10 @@ test.describe('AC7: icon replacement preserves existing behaviour', () => {
     await dialogOf(page).getByRole('button', { name: 'Hide details' }).click()
     await expect(dialogOf(page).getByRole('button', { name: 'Show details' })).toBeVisible()
     await page.getByRole('button', { name: 'Close account modal' }).click()
-    await expect(page.getByRole('heading', { name: 'Create Account' })).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: 'Create account' })).toHaveCount(0)
     await transactionRowActions(page)
     await page.getByRole('button', { name: 'Close actions modal' }).click()
-    await expect(page.getByRole('heading', { name: 'Transaction Actions' })).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: 'Transaction actions' })).toHaveCount(0)
     await viewportShot(page, 'dialogs-closed')
     expect(await page.locator(DIALOG).count(), 'no dialog left open').toBe(0)
   })
@@ -793,5 +793,5 @@ async function transactionRowActions(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { level: 1, name: 'Transactions' })).toBeVisible({ timeout: 15_000 })
   await settle(page)
   await transactionRow(page, ROW_TRANSACTION).click()
-  await expect(dialogOf(page).getByRole('heading', { name: 'Transaction Actions' })).toBeVisible()
+  await expect(dialogOf(page).getByRole('heading', { name: 'Transaction actions' })).toBeVisible()
 }

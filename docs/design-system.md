@@ -50,7 +50,10 @@ spine across the top and a red pencil that comes out only when something is in t
 7. **Motion answers an action.** There is no entrance choreography, and
    `prefers-reduced-motion` reduces every duration to 1ms.
 8. **One icon set per app** and no emoji (ban 3).
-9. **Touch targets** are at least 44px on coarse pointers.
+9. **Touch targets** are at least 44px tall and wide on coarse pointers, `@media (pointer: coarse)`
+   in `index.css`. `Button`, segments and tabs, the pager, fields and `.tap-target` (a link used as an
+   action, an icon button) carry it; a ListSheet row keeps its pitch. Links inside a sentence are exempt.
+   The Playwright `phone` project (`hasTouch`) matches the condition; `desktop` does not.
 10. **One face, self-hosted via `@fontsource`,** with ₱ (U+20B1) and true tabular
     figures verified in a browser: IBM Plex Sans (see Type).
 
@@ -192,7 +195,31 @@ Fields have no box. They are written on a ruled line (an underline in `line-stro
 - **Easing:** `--ease: cubic-bezier(.3,0,.2,1)` (`ease-standard`).
 - **Where:** no scale, no slide, no hover changes on panels. The selection rule moves
   under the new tab at `dur-fast`.
-- **Reduced motion:** 1ms.
+- **Page load:** nothing animates. There is no entrance fade on a page, and a loading
+  `Skeleton` is a still block (no pulse); a spinner is the one thing that turns.
+  `.fade-in`, for an element that appears in answer to an action, is an opacity fade
+  at `dur-base` with no transform.
+- **Hover:** a `.card`, `.stat-card`, `ListSheet` or `Row` has no transition and keeps
+  its border, shadow and position; a card keeps its background too, and only a row may
+  take the `sunken` background, at once.
+- **Reduced motion:** under `prefers-reduced-motion: reduce` every animation and
+  transition takes 1ms and runs once, smooth scrolling stops, and a spinner
+  (`Spinner`, `.animate-spin`, `.loading-spinner`) does not turn at all.
+
+## Focus
+
+- **Keyboard ring:** a 2px `accent` outline, 2px off the control, on `:focus-visible`
+  only, so a mouse click shows no ring.
+- **Where:** a base rule in `index.css` gives it to every `button`, `a`, `input`,
+  `select`, `textarea`, `summary`, `[role="tab"]` and Tab-stop `[tabindex]`, and
+  `.focus-ring` carries the same ring for the shared components that name it. A
+  `focus:outline-none` utility cannot hide it. A `tabindex="-1"` target (`<main>`, a
+  dialog panel) is focused by script, not by Tab, and gets no ring.
+- **On the spine:** the light accent is the band's own colour, so a control in the top
+  bar also gets a 2px `on-spine` ring inside the outline.
+- A `ListSheet` clips nothing, so a focused row's ring shows in full on every
+  engine; its first and last rows round their own outer corners instead (see
+  below).
 
 ## Components
 
@@ -223,14 +250,18 @@ Fields have no box. They are written on a ruled line (an underline in `line-stro
   - The rule is keyed on the class, never on an ARIA attribute selector.
 - **Ledger and Row:**
   - The sheet is leaf, `radius-md`, one `line` border, no shadow.
-  - Rows are ruled, radius 0.
+  - Rows are ruled, radius 0, but for the sheet's corners.
   - Amounts are right-aligned on one column edge.
 - **`ListSheet` and `Row` (`frontend/src/components/`):**
   - `ListSheet` is the sheet: leaf (`surface`), `radius-md`, one `line` border, no
-    shadow. It clips its rows to its corners. Hook: `data-testid="list-sheet"`.
-  - `Row` is one line on it: an `<article>`, radius 0, with a 1px `line` rule under
+    shadow. It clips nothing; its first row rounds its top corners and its last row
+    its bottom corners to the sheet's inner radius (`radius-md` less the 1px border,
+    5px), so a row's hover or state background stays inside the sheet's corners.
+    Hook: `data-testid="list-sheet"`.
+  - `Row` is one line on it: an `<article>`, radius 0 but at the sheet's corners, with a 1px `line` rule under
     every row but the last. The title (`text-base`, 600) with its badges (a saving
-    state), its tags and one meta line (`text-xs`, `muted`, cut to one line) sit on the
+    state), its tags and one meta line (`text-xs`, `muted`, cut to one line, led by the
+    row's status word when it has one) sit on the
     left; the row's own controls sit in the trailing area; the amount sits last in its
     own right-aligned slot, so the amounts of a sheet share one right edge.
   - Content that needs a line of its own (a description, a warning, a decision such
@@ -256,8 +287,30 @@ Fields have no box. They are written on a ruled line (an underline in `line-stro
   - The dashboard's quick balances are account lines on their panel, ruled with
     `line`, figures right-aligned, with no tile fill; their editor's controls are
     outlined, and its Add account list sits under a rule, not on a fill.
-- **Status, as a dot and a word:** 13px 500 in the status colour. "Overdue" and
-  negative balances are the only red text.
+- **Status, as a dot and a word (`StatusText`, `frontend/src/components/StatusText.tsx`):**
+  - An 8px `rounded-full` dot in the status colour, then the word in the same colour,
+    13px 500. No fill, no border: the state never pulls focus off the amount.
+  - `tone` is `danger`, `warn`, `ok` or `muted`. The dot is `aria-hidden`; the word is
+    what is read out. Hooks: `data-status` (the tone), `data-status-dot`,
+    `data-status-word`.
+  - The states: Overdue (`danger`); Due today and Not reviewed (`warn`); Posted, Fully
+    paid, Charged (a card charge already taken, waiting to post) and Auto-post on
+    (`ok`); Pending, Planned and Auto-post off (`muted`).
+  - The word is never cut: it does not wrap or shrink, and on a `Row` it leads the meta
+    line (`status`) outside the text that is cut, so the facts after it are cut instead.
+  - An action on a state (Mark paid, Charged, Posted) stays a secondary `Button`.
+  - "Overdue" and negative balances are the only red text.
+- **Empty state (`EmptyState`, `frontend/src/components/EmptyState.tsx`):**
+  - The sentence that says what is missing (`text-base`, `body`), then one primary
+    `Button` for the next step. Left-aligned on the page, with no card chrome.
+  - Someone who cannot create here (a viewer with no account of their own, or none
+    they can add records to) sees the sentence alone.
+  - The sentence and its action arrive together: a list whose action depends on the
+    caller's accounts shows no empty state until the accounts have loaded.
+  - Used by Accounts, the Budgets and Savings lists, Recurring and the Wishlist. A
+    filter or search that matches nothing ("No accounts have this tag.", "No recurring
+    entries match") is a result, not an empty list, and keeps its own line.
+  - Hook: `data-testid="empty-state"`.
 
 ### Component inventory
 
@@ -269,8 +322,8 @@ The shared components later tickets add. Each is marked planned until its ticket
 | `SegmentedControl` / `Tabs` | planned | the selection rule, shared by every tab and segment |
 | `PageHeader` and `.page` | landed (STU-685) | every page's title row and container (see Page, under Spacing) |
 | `ListSheet` and `Row` | landed (STU-681) | one leaf sheet with ruled rows, figures on one right edge (see below) |
-| `StatusText` | planned | status as a dot and a word |
-| `EmptyState` | planned | an empty list's message and its one action |
+| `StatusText` | landed (STU-692) | status as a dot and a word (see above) |
+| `EmptyState` | landed (STU-692) | an empty list's message and its one action (see above) |
 | `Icon` | built | Phosphor Regular at 20px, `currentColor`: `frontend/src/components/Icon.tsx`, the one icon path (see Icons) |
 
 ## Layout concept

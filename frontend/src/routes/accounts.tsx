@@ -13,6 +13,7 @@ import { balanceClass, formatBalance } from '../utils/amount'
 import { LoanActions, LoanDueDates, LoanSettlement, LoanSummary } from '../components/LoanPanel'
 import { TagChips } from '../components/TagChips'
 import { PageHeader } from '../components/PageHeader'
+import { EmptyState } from '../components/EmptyState'
 import { TagFilter } from '../components/TagFilter'
 import { TagPicker } from '../components/TagPicker'
 import { AccountRoleBadge } from '../components/AccountRoleBadge'
@@ -73,9 +74,9 @@ function AccountCard({ account, credit, creditPhase, sharedWith, onOpen }: {
 }) {
   const managed = servesCredit(account)
   return (
-    <article className={`card p-4 sm:p-5 transition-colors duration-200 ${isAccountActive(account) ? '' : 'opacity-60'}`}>
+    <article className={`card p-4 sm:p-5 ${isAccountActive(account) ? '' : 'opacity-60'}`}>
       <div
-        className="cursor-pointer hover:bg-sunken focus-ring"
+        className="cursor-pointer focus-ring"
         onClick={() => onOpen(account)}
         role="button"
         tabIndex={0}
@@ -828,7 +829,7 @@ export function AccountsPage() {
           onClick={() => setIsCreateModalOpen(true)}
           className="w-full sm:w-auto justify-center"
         >
-          Add Account
+          Add account
         </Button>
       </PageHeader>
 
@@ -849,12 +850,14 @@ export function AccountsPage() {
         </div>
       )}
       {orderedAccounts.length === 0 ? (
-        loadError ? null : (
-        <div className="card p-6 text-center text-muted">
-          {selectedTag === undefined
-            ? 'No accounts yet. Start by adding your first account.'
-            : 'No accounts have this tag.'}
-        </div>
+        loadError ? null : selectedTag === undefined ? (
+          <EmptyState
+            message="No accounts yet. Start by adding your first account."
+            action={{ label: 'Add your first account', onClick: () => setIsCreateModalOpen(true) }}
+          />
+        ) : (
+          // A filter result, not an empty list: it stays as it was.
+          <div className="card p-6 text-center text-muted">No accounts have this tag.</div>
         )
       ) : (
         <div className="hidden md:grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_160px] items-center gap-3 px-4 text-xs font-semibold text-muted -mb-4">
@@ -1023,7 +1026,7 @@ export function AccountsPage() {
               <Button
                 variant="secondary"
                 onClick={() => handleToggleActive(actionAccount)}
-                className="flex min-h-12 justify-between gap-3 py-2.5"
+                className="flex h-12 justify-between gap-3 py-2.5"
               >
                 <span>{isAccountActive(actionAccount) ? 'Mark as inactive' : 'Activate account'}</span>
                 <span
@@ -1083,7 +1086,7 @@ export function AccountsPage() {
           <div className="bg-surface p-6 w-full max-w-md border border-line">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-semibold text-ink">
-                {editingAccount ? 'Edit Account' : 'Create Account'}
+                {editingAccount ? 'Edit account' : 'Create account'}
               </h2>
               <button
                 onClick={() => {
@@ -1247,7 +1250,7 @@ export function AccountsPage() {
               {formData.account_type === 'credit' && (
                 <div className="space-y-3 p-4 border border-line">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-medium text-ink">Credit Card Settings</h3>
+                    <h3 className="text-sm font-medium text-ink">Credit card settings</h3>
                     <button
                       type="button"
                       onClick={() => setShowCreditSettings((prev) => !prev)}
@@ -1595,7 +1598,7 @@ export function AccountsPage() {
                   type="submit"
                   className="flex-1 w-full sm:w-auto py-3 px-4 text-base"
                 >
-                  {editingAccount ? 'Update Account' : 'Create Account'}
+                  {editingAccount ? 'Update account' : 'Create account'}
                 </Button>
                 <Button
                   variant="quiet"

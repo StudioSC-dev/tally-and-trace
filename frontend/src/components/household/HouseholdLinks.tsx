@@ -19,7 +19,7 @@ export function HouseholdLinks() {
           className="text-ink underline underline-offset-2 focus-ring"
           data-testid={`household-link-${view.sharer_id}`}
         >
-          {view.is_self ? 'Your Household' : `${view.sharer_name}'s Household`}
+          {view.is_self ? 'Your household' : `${view.sharer_name}'s household`}
         </Link>
       ))}
       <Link
@@ -28,7 +28,7 @@ export function HouseholdLinks() {
         className="text-muted underline underline-offset-2 hover:text-ink focus-ring"
         data-testid="household-manage-link"
       >
-        Manage Household sharing
+        Manage household sharing
       </Link>
     </div>
   )

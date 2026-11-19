@@ -23,7 +23,9 @@
  * `with*` helpers derive a variant for one state (a main account, one account's balance, zero-amount rows,
  * a zero forecast event, dollars, five currencies, a long account history, long Due card lists, a funding shortfall); `cardStatements` answers the card's
  * statements; the create factories (`createdAccount`, `createAccountRoute`,
- * `householdCreateRoutes`) answer the dialogs' saves.
+ * `householdCreateRoutes`) answer the dialogs' saves. `withUnpostedRide` leaves one row not posted yet,
+ * `withLoan` adds a housing loan (its schedule answered by `loanScheduleRoute`), and `withOnboarding` makes Mara
+ * a first-run user, so the onboarding tour starts.
  */
 import type { Page } from '@playwright/test'
 import type {
@@ -37,6 +39,7 @@ import type {
   BudgetEntry,
   BudgetEntryInput,
   CardCredit,
+  CardCharges,
   CardCreditDetail,
   CardStatementDue,
   CardStatements,
@@ -50,6 +53,7 @@ import type {
   EntryOccurrences,
   ForcedDateResult,
   FullBudgetEntry,
+  FullCharge,
   ForecastPeriod,
   FullTransaction,
   HouseholdDashboard,
@@ -63,6 +67,7 @@ import type {
   InstallmentReview,
   InstallmentReviewResult,
   LimitedBudgetEntry,
+  LoanSchedule,
   MinimumDuePreset,
   PaginatedResponse,
   Payable,
@@ -916,6 +921,119 @@ export const emptyHousehold: HouseholdData = build({
   allocations,
 })
 
+/** STU-692: the empty household before any account is added, so the Accounts page shows its empty state. */
+export const noAccountsHousehold: HouseholdData = build({
+  accounts: [],
+  transactions: [],
+  entries: [],
+  upcoming: [],
+  payables: [],
+  cardStatements: [],
+  occurrences: [],
+  allocations: [],
+})
+
+/** STU-692: the empty household with its accounts but no envelopes, so Budgets and Savings show their empty states. */
+export const noEnvelopesHousehold: HouseholdData = build({
+  accounts,
+  transactions: [],
+  entries: [],
+  upcoming: [],
+  payables: [],
+  cardStatements: [],
+  occurrences: [],
+  allocations: [],
+})
+
+const viewerPerms: AccountPermissions = {
+  can_edit_settings: false,
+  can_manage_shares: false,
+  can_add_transactions: false,
+  can_delete: false,
+  can_view_details: true,
+}
+
+/**
+ * STU-692: an empty household seen by a viewer. Every account is Jun's, shared with Mara to read only, so she owns
+ * none (no envelope can be created) and can add records to none (no recurring entry can be created).
+ */
+export const viewerEmptyHousehold: HouseholdData = build({
+  accounts: accounts.map((a) => ({ ...a, my_role: 'viewer', is_shared: null, owner_id: 2, owner_name: 'Jun R.', permissions: viewerPerms })),
+  transactions: [],
+  entries: [],
+  upcoming: [],
+  payables: [],
+  cardStatements: [],
+  occurrences: [],
+  allocations: [],
+})
+
+/** STU-692: the ids `withStatusStates` adds, for the specs that find its rows. */
+export const STATUS_STATE_IDS = {
+  pendingTransaction: 9301,
+  chargedTransaction: 9302,
+  autoPostOn: 9311,
+  autoPostOff: 9312,
+  notReviewed: 9313,
+  fullyPaid: 9314,
+} as const
+
+/**
+ * STU-692: a variant that shows every status state the household lacks. A payable due today (Due today), a pending
+ * Jollibee lunch dated today (Pending on the Transactions list), a Netflix charge the card took today and that is not
+ * posted yet (Charged in the Due card), and four card installments: auto-post on, off after a review, not reviewed,
+ * and one fully paid.
+ */
+export const withStatusStates = (data: HouseholdData): HouseholdData => {
+  const dueToday = payable({ due_date: data.today, name: 'Maynilad water', amount: 680, source: 'budget_entry', source_id: hmoEntry.id, occurrence_date: data.today, settlement: 'manual', can_mark_paid: true, kind: 'cash' })
+  const pending = tx(data.today, 'Jollibee, pending', 420, gcash, 23, 'debit', { id: STATUS_STATE_IDS.pendingTransaction, is_posted: false })
+  const charged = tx(data.today, 'Netflix Standard', 549, card, 27, 'debit', {
+    id: STATUS_STATE_IDS.chargedTransaction,
+    is_posted: false,
+    is_recurring: true,
+    budget_entry_id: netflixEntry.id,
+  })
+  const chargedOnCard: FullCharge = {
+    view: 'full',
+    date: data.today,
+    original_date: null,
+    overdue: false,
+    occurrence_date: null,
+    name: 'Netflix Standard',
+    kind: 'pending',
+    plan_kind: null,
+    source: 'transaction',
+    source_id: charged.id,
+    amount: 549,
+    currency: 'PHP',
+    can_mark_paid: false,
+    recurring: true,
+  }
+  const cardCharges: CardCharges = { account_id: card.id, account_name: card.name, currency: 'PHP', statement_cycle: true, missed: [], charges: [chargedOnCard] }
+  const installment = (id: number, name: string, extra: Partial<FullBudgetEntry>): FullBudgetEntry =>
+    entry(name, 'expense', 2500, '2026-03-20', card, { id, kind: 'installment', anchor_day: 20, end_mode: 'after_occurrences', max_occurrences: 10, occurrences_paid: 2, ...extra })
+  const installments = [
+    installment(STATUS_STATE_IDS.autoPostOn, 'Laptop, 12 months', { auto_post_enabled: true, installment_reviewed: true }),
+    installment(STATUS_STATE_IDS.autoPostOff, 'Aircon, 12 months', { auto_post_enabled: false, installment_reviewed: true }),
+    installment(STATUS_STATE_IDS.notReviewed, 'Washing machine, 12 months', { auto_post_enabled: false, installment_reviewed: false }),
+    installment(STATUS_STATE_IDS.fullyPaid, 'Rice cooker, 6 months', { max_occurrences: 0, occurrences_paid: 6, auto_post_enabled: true, installment_reviewed: true }),
+  ]
+  const unposted = [charged, ...data.due.unposted.items]
+  return {
+    ...data,
+    transactions: [pending, charged, ...data.transactions],
+    entries: [...data.entries, ...installments],
+    payables: [dueToday, ...data.payables],
+    snapshot: { ...data.snapshot, payables: [dueToday, ...data.snapshot.payables] },
+    due: {
+      ...data.due,
+      payables: [dueToday, ...data.due.payables],
+      card_charges: [...data.due.card_charges, cardCharges],
+      unposted: { ...data.due.unposted, items: unposted, total: unposted.length },
+    },
+  }
+}
+
 /** The busy month with every occurrence listed as Upcoming: the Upcoming tab's count badge reads 18, a two-digit count. */
 export const allUpcomingHousehold: HouseholdData = {
   ...household,
@@ -1392,7 +1510,7 @@ export const householdViewRoutes = (data: HouseholdData = household): ApiRoute[]
 }
 
 /**
- * The account Mara fills in on Add Account in the selection specs: every field moved off its default (a savings
+ * The account Mara fills in on Add account in the selection specs: every field moved off its default (a savings
  * account in dollars, a spending wallet, one tag, a balance and a note), so a later change to one control can be
  * checked against the rest.
  */
@@ -1427,7 +1545,7 @@ export const createAccountRoute = (created: Account[]): ApiRoute =>
   sequenceRoute<Account>('POST', '/accounts/', created.map((body) => ({ body, status: 201 })))
 
 /**
- * The creates the Add Transaction, Add Recurring Entry and allocation dialogs send, answered with a record built
+ * The creates the Add transaction, Add recurring entry and allocation dialogs send, answered with a record built
  * from the variant's own accounts (201). The specs read what was sent from the mock's captured bodies.
  */
 export const householdCreateRoutes = (data: HouseholdData): ApiRoute[] => {
@@ -1694,7 +1812,7 @@ export const householdSaveRoutes = (data: HouseholdData): ApiRoute[] => [
   }),
   ...data.allocations.map((a) => apiRoute<Allocation>('PUT', `/allocations/${a.id}`, a)),
   apiRoute<QuickBalances>('PUT', '/dashboard/quick-balances', data.quickBalances),
-  // Add Transaction with a repeat or an installment: the first payment and its recurring entry, on the card.
+  // Add transaction with a repeat or an installment: the first payment and its recurring entry, on the card.
   apiRoute<RepeatingCreated>('POST', '/transactions/repeating', { transaction: tx(data.today, 'New installment', 2000, card, 0), entry: entry('New installment', 'expense', 2000, data.today, card) }, 201),
   apiRoute<Category>('POST', '/categories/', { id: 90, name: 'New category', is_expense: true, kind: 'expense', is_active: true, created_at: `${data.today}T09:00:00Z` }, 201),
   apiRoute<Tag>('POST', '/tags/', { id: 90, name: 'New tag', color: '#5B7553', is_system: false, created_at: `${data.today}T09:00:00Z` }, 201),
@@ -1836,3 +1954,56 @@ export const withShortfalls = (data: HouseholdData): HouseholdData => {
 
 /** The wishlist with a shop link on the laptop, so its row shows the external Link. */
 export const householdWishlistWithLink: WishlistItem[] = householdWishlist.map((i) => (i.id === 801 ? { ...i, url: 'https://shop.example.com/work-laptop' } : i))
+
+/** A variant where "Grab to Makati" is not posted yet, so its action dialog offers Mark as posted. */
+export const withUnpostedRide = (data: HouseholdData): HouseholdData => ({
+  ...data,
+  transactions: data.transactions.map((t) => (t.view !== 'limited' && t.description === 'Grab to Makati' ? { ...t, is_posted: false } : t)),
+})
+
+/** The loan the loan variant adds: a Pag-IBIG housing loan Mara pays from payroll. */
+export const housingLoan: Account = acct({
+  id: 17,
+  name: 'Pag-IBIG housing loan',
+  account_type: 'loan',
+  balance: -1180000,
+  payment_account_id: payroll.id,
+  loan_kind: 'home',
+  loan_annual_rate: 6.5,
+  loan_term_months: 240,
+  loan_payment_amount: 9850,
+  loan_first_payment_date: '2024-04-15',
+  loan_amortization: 'reduce_term',
+})
+
+/** A variant that also holds a housing loan, so Accounts lists a loan and its action dialog shows the loan panel. */
+export const withLoan = (data: HouseholdData): HouseholdData => ({ ...data, accounts: [...data.accounts, housingLoan] })
+
+/** `GET /accounts/17/loan-schedule` for the loan variant: 23 payments made and the next three due on the 15th. */
+export const loanScheduleRoute = (): ApiRoute =>
+  apiRoute<LoanSchedule>('GET', `/accounts/${housingLoan.id}/loan-schedule`, {
+    view: 'full',
+    account_id: housingLoan.id,
+    name: housingLoan.name,
+    loan_kind: 'home',
+    amortization: 'reduce_term',
+    owed: 1180000,
+    annual_rate: 6.5,
+    payment_amount: 9850,
+    term_months: 240,
+    first_payment_date: '2024-04-15',
+    payments_made: 23,
+    payments_left: 217,
+    next_due_date: '2026-03-15',
+    proposed_split: { principal: 3460, interest: 6390 },
+    settlement: null,
+    payments: [],
+    upcoming: [
+      { number: 24, due_date: '2026-03-15', effective_date: '2026-03-15', payment: 9850, principal: 3460, interest: 6390, balance_after: 1176540 },
+      { number: 25, due_date: '2026-04-15', effective_date: '2026-04-15', payment: 9850, principal: 3479, interest: 6371, balance_after: 1173061 },
+      { number: 26, due_date: '2026-05-15', effective_date: '2026-05-15', payment: 9850, principal: 3498, interest: 6352, balance_after: 1169563 },
+    ],
+  })
+
+/** A variant whose user has not finished onboarding, so the app opens the onboarding tour. */
+export const withOnboarding = (data: HouseholdData): HouseholdData => ({ ...data, user: { ...data.user, onboarding_completed: false } })

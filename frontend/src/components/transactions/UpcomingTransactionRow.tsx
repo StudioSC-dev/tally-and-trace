@@ -2,8 +2,12 @@ import { formatEntryDate, rowAmount, transactionDate, transactionDescription, tr
 import type { Transaction, TransactionStatus } from '@tally-trace/shared'
 import { formatCurrency } from '../../utils/currency'
 import type { CurrencyCode } from '../../utils/currency'
+import { StatusText } from '../StatusText'
+import type { StatusTone } from '../StatusText'
 
 const STATUS_LABELS: Record<TransactionStatus, string> = { planned: 'Planned', pending: 'Pending', posted: 'Posted' }
+/** As on the Transactions rows: Posted is done (ok); Planned and Pending stay quiet. */
+const STATUS_TONES: Record<TransactionStatus, StatusTone> = { planned: 'muted', pending: 'muted', posted: 'ok' }
 
 interface Props {
   transaction: Transaction
@@ -24,6 +28,7 @@ export function UpcomingTransactionRow({ transaction: txn, localDay, onOpen, acc
   const accountCurrency = txn.view === 'limited' ? undefined : accountCurrencies?.get(txn.account_id)
   const shown = accountCurrency ? rowAmount(txn, accountCurrency) : { amount: txn.amount, currency: txn.currency }
   const day = wallDay(transactionDate(txn))
+  const status = transactionStatus(txn, localDay)
   return (
     <li
       data-testid="due-row"
@@ -41,7 +46,8 @@ export function UpcomingTransactionRow({ transaction: txn, localDay, onOpen, acc
         <div className="min-w-0">
           <p className="text-sm font-medium text-ink">{transactionDescription(txn) ?? 'Transaction'}</p>
           <p className="text-xs text-muted">
-            {formatEntryDate(day)} · {STATUS_LABELS[transactionStatus(txn, localDay)]}
+            {formatEntryDate(day)} ·{' '}
+            <StatusText tone={STATUS_TONES[status]} data-testid="upcoming-status">{STATUS_LABELS[status]}</StatusText>
           </p>
         </div>
         <div className="flex-shrink-0 text-right">
