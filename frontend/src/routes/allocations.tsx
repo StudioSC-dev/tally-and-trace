@@ -54,7 +54,7 @@ import { BudgetUsageBar } from '../components/BudgetUsageBar'
 import { amountClass, formatAmount } from '../utils/amount'
 import type { AmountKind } from '../utils/amount'
 import { formatCadenceLabel, formatScheduleLabel } from '../utils/recurringEntry'
-import { chunkFacts, createdByLabel, isSharedAccount, viewerDisplayName } from '../utils/createdBy'
+import { createdByLabel, foldFacts, isSharedAccount, viewerDisplayName } from '../utils/createdBy'
 import { WishlistPanel } from '../components/WishlistPanel'
 import { RecurringEntryFormModal } from '../components/RecurringEntryFormModal'
 import { EntryCreditWarningRow, KindCreditLines } from '../components/AllocationsCredit'
@@ -1378,7 +1378,7 @@ export function AllocationsPage() {
     // A limited entry has no opener, so its facts wrap onto further lines instead of being cut. It is someone
     // else's entry on a shared account, so it names its creator.
     const limitedBy = createdByLabel(entry.created_by, viewerName, true)
-    const factLines = chunkFacts([
+    const factItems = foldFacts([
       entry.account && <span key="account">Account: {entry.account.name}</span>,
       entry.counterpart && <span key="counterpart">Transfer to: {entry.counterpart.name}</span>,
       entry.category_name && <span key="category">Category: {entry.category_name}</span>,
@@ -1400,7 +1400,7 @@ export function AllocationsPage() {
           </>
         }
         details={[
-          ...factLines.map((line, i) => <p key={i} className="space-x-3 text-muted">{line}</p>),
+          factItems.length > 0 && <p className="space-x-3 text-muted">{factItems}</p>,
           entry.permissions.can_delete && (
             <button
               type="button"
@@ -1472,7 +1472,7 @@ export function AllocationsPage() {
 
     const canDeleteOnly = !canEdit && entry.permissions.can_delete
 
-    // Each fact once, in priority order, three to a line; the first line is the row's meta. The entry's type is left
+    // Each fact once, in priority order, as at most three items on the one meta line: facts past the third fold into it. The entry's type is left
     // out when its group's heading already says it: every group but "Income & transfers" and "Shared with you" is expenses.
     const group = entry.kind ?? 'other'
     const typeLabel =
@@ -1483,7 +1483,7 @@ export function AllocationsPage() {
       (id) => id != null && isSharedAccount(accountsById.get(id)),
     )
     const by = createdByLabel(entry.created_by, viewerName, sharedAccount)
-    const metaLines = chunkFacts([
+    const metaItems = foldFacts([
       typeLabel && <span key="type">{typeLabel}</span>,
       // The cadence once, with how it settles (and that it is paused) in the same item, then when it falls next, then where.
       <span key="schedule">{[cadenceLabel, settlementLabel(entry.settlement), !entry.is_active && 'Paused'].filter(Boolean).join(' · ')}</span>,
@@ -1521,9 +1521,8 @@ export function AllocationsPage() {
         title={entry.name}
         tags={entry.tags}
         status={remaining === 0 ? <StatusText tone="ok" data-testid="installment-paid">Fully paid</StatusText> : undefined}
-        meta={<>{metaLines[0]}</>}
+        meta={<>{metaItems}</>}
         details={[
-          ...metaLines.slice(1).map((line, i) => <p key={`meta-${i}`} className="space-x-3 text-muted">{line}</p>),
           entry.description && <p>{entry.description}</p>,
           creditWarning && <EntryCreditWarningRow warning={creditWarning} />,
           showAutoPost && (

@@ -22,7 +22,7 @@ import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneratio
 import { useManilaDay } from '../hooks/useManilaDay'
 import { useToday } from '../hooks/useToday'
 import { useAuth } from '../contexts/AuthContext'
-import { chunkFacts, createdByLabel, isSharedAccount, viewerDisplayName } from '../utils/createdBy'
+import { createdByLabel, foldFacts, isSharedAccount, viewerDisplayName } from '../utils/createdBy'
 import { currentSessionGeneration } from '../store/baseQuery'
 import type { AppDispatch, RootState } from '../store'
 import { newOutboxId, outboxActions } from '../store/outbox'
@@ -2719,7 +2719,7 @@ export function TransactionsPage() {
     const hasOriginal = !isLimited(transaction) && transaction.original_amount != null && transaction.original_currency
 
     // Each fact once: the date, the account (with who entered it, when that is worth saying) and the category (with the
-    // type and a transfer's fee) lead as three items; the rest (schedule, projected, original, posted, reconciled) follow.
+    // type and a transfer's fee) lead; the rest (schedule, projected, original, posted, reconciled) fold into the third item, so a row is never taller than its one meta line.
     const sharedAccount =
       !isLimited(transaction) &&
       [transaction.account_id, transaction.transfer_from_account_id, transaction.transfer_to_account_id].some(
@@ -2729,7 +2729,7 @@ export function TransactionsPage() {
     const accountText = transaction.transaction_type === 'transfer' ? `${sourceLabel} to ${destinationLabel}` : accountLabel
     const categoryText = transaction.transaction_type === 'transfer' ? categoryName || 'Transfer' : categoryName || 'Uncategorized'
     const typeText = TRANSACTION_TYPE_LABELS[transaction.transaction_type]
-    const metaLines = chunkFacts([
+    const metaItems = foldFacts([
       <span key="date">{exactDate}</span>,
       <span key="account">
         {accountText}
@@ -2775,10 +2775,7 @@ export function TransactionsPage() {
         openDisabled={!actionable}
         title={description}
         status={<StatusText tone={ROW_STATUS_TONES[status]} data-testid="transaction-status">{STATUS_LABELS[status]}</StatusText>}
-        meta={<>{metaLines[0]}</>}
-        details={metaLines.slice(1).map((line, i) => (
-          <p key={i} className="space-x-3 text-muted">{line}</p>
-        ))}
+        meta={<>{metaItems}</>}
         badges={
           pendingKind !== undefined ? (
             <span className="inline-flex items-center gap-1 text-xs font-medium text-muted" data-testid="row-saving">

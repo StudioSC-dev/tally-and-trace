@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chunkFacts, createdByLabel, isSharedAccount, viewerDisplayName } from './createdBy'
+import { createdByLabel, foldFacts, isSharedAccount, viewerDisplayName } from './createdBy'
 
 describe('viewerDisplayName', () => {
   it('reads like the API names a creator', () => {
@@ -17,20 +17,28 @@ describe('createdByLabel', () => {
     expect(createdByLabel('Jun R.', 'Mara S.', true)).toBe('by Jun R.')
     expect(createdByLabel(null, 'Mara S.', true)).toBeNull()
   })
+  it('shows nothing until the viewer is known', () => {
+    expect(createdByLabel('Jun R.', null, true)).toBeNull()
+    expect(createdByLabel('Mara S.', null, false)).toBeNull()
+  })
 })
 
 describe('isSharedAccount', () => {
-  it('is shared when the owner shares it out or someone else owns it', () => {
+  it('follows the shared package rule', () => {
     expect(isSharedAccount({ is_shared: false, my_role: 'owner' })).toBe(false)
+    expect(isSharedAccount({ is_shared: null, my_role: 'owner' })).toBe(false)
     expect(isSharedAccount({ is_shared: true, my_role: 'owner' })).toBe(true)
     expect(isSharedAccount({ is_shared: null, my_role: 'editor' })).toBe(true)
     expect(isSharedAccount(undefined)).toBe(false)
   })
 })
 
-describe('chunkFacts', () => {
-  it('drops empty facts and lines at most three', () => {
-    expect(chunkFacts(['a', false, 'b', null, 'c', 'd', undefined, ''])).toEqual([['a', 'b', 'c'], ['d']])
-    expect(chunkFacts([])).toEqual([])
+describe('foldFacts', () => {
+  it('drops empty facts and keeps at most three items', () => {
+    expect(foldFacts(['a', false, 'b', null, 'c'])).toEqual(['a', 'b', 'c'])
+    expect(foldFacts([])).toEqual([])
+    const folded = foldFacts(['a', 'b', 'c', 'd', 'e'])
+    expect(folded).toHaveLength(3)
+    expect(folded.slice(0, 2)).toEqual(['a', 'b'])
   })
 })
