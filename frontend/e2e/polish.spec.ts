@@ -21,6 +21,7 @@ import type { HouseholdData } from './support/fixtures/household'
 import { addRoutes } from './support/mockApi'
 import type { ApiMock, ApiRoute } from './support/mockApi'
 import { shot } from './support/shot'
+import { expandDue } from './support/transactions'
 
 // Token values from docs/design-system.md, as computed rgb().
 const ACCENT = { light: 'rgb(34, 72, 58)', dark: 'rgb(147, 205, 169)' }
@@ -350,8 +351,8 @@ for (const scheme of SCHEMES) {
 
 /** Buttons a mouse click focuses without moving focus elsewhere. */
 const CLICKED = [
-  // Its label turns from Show to Hide filters on the click.
-  { name: 'Transactions filter toggle', url: '/transactions', heading: 'Transactions', button: (p: Page) => p.getByRole('button', { name: /^(Show|Hide) filters$/ }) },
+  // STU-687: one Filters button; the click flips its aria-expanded.
+  { name: 'Transactions filter toggle', url: '/transactions', heading: 'Transactions', button: (p: Page) => p.getByRole('button', { name: 'Filters', exact: true }) },
   { name: 'Allocations tab', url: '/allocations?tab=recurring', heading: 'Allocations', button: (p: Page) => p.getByRole('button', { name: 'Budgets', exact: true }) },
 ] as const
 
@@ -609,6 +610,8 @@ const STATES = [
     heading: 'Transactions',
     colour: OK,
     find: (p: Page) => p.locator(`[data-testid="due-row"][data-source="transaction:${STATUS_STATE_IDS.chargedTransaction}"]`).getByTestId('due-pending-state'),
+    // STU-687: the Due card opens collapsed; its rows show once it is expanded.
+    expandDue: true,
   },
   {
     state: 'Auto-post on',
@@ -688,6 +691,7 @@ function contrast(a: string, b: string): number {
 for (const s of STATES) {
   test(`status is a dot and a word: ${s.state}`, async ({ page }) => {
     await open(page, s.url, s.heading, { data: withStatusStates(household) })
+    if ('expandDue' in s && s.expandDue) await expandDue(page)
     const el = s.find(page)
     await expect(el).toBeVisible()
     await el.scrollIntoViewIfNeeded()
@@ -748,6 +752,7 @@ for (const r of STATUS_ROUTES) {
 for (const s of STATES) {
   test(`no filled status boxes: ${s.state}`, async ({ page }) => {
     await open(page, s.url, s.heading, { data: withStatusStates(household) })
+    if ('expandDue' in s && s.expandDue) await expandDue(page)
     const el = s.find(page)
     await expect(el).toBeVisible()
     const st = await statusOf(el)

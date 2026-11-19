@@ -27,6 +27,7 @@ import { landingStubs } from './support/landing'
 import { apiRoute, mockApi, queryRoute } from './support/mockApi'
 import type { ApiRoute } from './support/mockApi'
 import { signedIn } from './support/signedIn'
+import { expandDue } from './support/transactions'
 
 // STU-747 AC6 in the browser: a card with an open installment has its closing day changed in the account
 // form. The confirm step lists the installment's next charge before and after, Confirm sends the apply (not
@@ -283,6 +284,7 @@ for (const { width, height } of VIEWPORTS) {
 
       // The installment's next date shown in the app is on the new close.
       await page.goto('/transactions')
+      await expandDue(page)
       await page.getByTestId('due-tab-installments').click()
       const plan = page.locator(`[data-testid="due-row"][data-kind="installment"][data-source="budget_entry:${ENTRY_ID}"]`)
       await expect(plan).toBeVisible()
