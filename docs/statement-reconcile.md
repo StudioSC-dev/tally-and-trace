@@ -73,13 +73,48 @@ tags**.
 - A matching row off the cycle (an unposted row, or a row on a neighbouring statement) is
   moved onto it: posted, with the line's amount and dates.
 - A row on the cycle that no line matches is **unposted**, never deleted. An unposted row
-  sits on the cycle open today, so it leaves the closed statement.
+  sits on the cycle open today, so it leaves the closed statement. A row linked to a
+  recurring entry is also unlinked from it (see the next section).
 - A row linked to a recurring entry keeps its `transaction_date`; its posting date
   follows the line.
 - Payments are matched to the card's payment transfers and never written.
 
 Matching is deterministic: an exact amount and kind first (cycle rows before others,
 nearest date, lowest row id), then a unique near match within one day.
+
+## Unposting a row linked to a recurring entry
+
+An installment (a recurring entry with a set number of payments) counts its payments
+from the rows linked to it, and keeps the number of payments left on the entry. When the
+statement unposts a row linked to a recurring entry, the apply does one of three things,
+and the dry run says which in its `notes` (nothing is written by a dry run):
+
+- **The installment's latest payment is given back.** The row was recorded as one of the
+  installment's payments (Mark paid, Post due or auto-post) and no other linked row is on
+  its day or later. The row is unposted and unlinked, so the paid count drops by one; the
+  installment gets that payment back (one more left) and is due again on that payment's
+  date; a completed installment is active again. Auto-post is turned off, as it is when a
+  schedule edit moves the next date earlier, so the next run does not post the payment
+  again; turn it back on after the review. This is the one path that moves an
+  installment's schedule back past a recorded payment.
+- **A row of any other recurring entry** (no set number of payments, such as a
+  subscription) is unposted and unlinked; the entry's schedule is not changed.
+- **Refused**, with nothing written: an installment payment that is not its latest (give
+  the later ones back first, or handle the row by hand); a row linked to an installment
+  by hand rather than recorded as a payment (it never used a payment up); and a row
+  linked to a recurring transfer.
+
+For example (made-up figures): a 6-payment laptop plan has payments recorded on
+2026-01-24 and 2026-02-24, so 4 are left. The 2026-02-24 statement does not list the
+February payment. The dry run notes "row 812: unposted and unlinked from installment 40;
+its payment due 2026-02-24 is given back (5 left, the next due 2026-02-24)". After the
+apply the plan shows 1 of 6 paid, 5 left, the next due 2026-02-24. Had the 2026-01-24
+statement been the one missing its payment, the apply would be refused, since the
+February payment is later.
+
+The fingerprint covers what each such unpost does and the entry's figures it changes: if
+the entry changes after the dry run (a payment recorded, auto-post turned on), the apply
+is refused and the dry run must be run again.
 
 ## Action kinds
 
@@ -125,9 +160,9 @@ Each refusal writes nothing.
   a credit card.
 - **Not the card's owner or admin.** The access check is the service's, as on the
   endpoint: another user gets "Account not found".
-- **Unposting a row linked to an installment (a recurring entry) is refused.** There is
-  no write path that moves the entry's paid count and schedule back. Follow-up: STU-761.
-  Until then, handle that row by hand and run again.
+- **Unposting a row linked to a recurring entry, in the cases listed above**: an
+  installment payment that is not its latest, a row linked to an installment by hand, or
+  a row linked to a recurring transfer. Handle that row by hand and run again.
 - **The fingerprint differs, the diff is unbalanced, or a write path refuses a row.** The
   reason names the row or line.
 - **The verify finds a gap.** Rolled back; the gap is reported.
@@ -216,7 +251,7 @@ A transfer is one row carrying both accounts' sides, so:
   the dry run again".
 
 Unposting a row linked to a recurring entry (salary, a bill, an installment, a loan
-payment) is refused as on a card.
+payment) is refused here, whatever the entry: a bank statement never gives a payment back.
 
 ### Verify
 
@@ -275,8 +310,9 @@ DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DBNAME \
   says whether the diff is balanced and, after an apply, that the statement is recorded
   as reconciled.
 - A dry run that an apply would refuse (a close mismatch, an unbalanced diff) exits 3. A
-  refusal only an apply can find (an installment-linked unpost, a verify gap) shows when
-  the apply runs, and writes nothing.
+  dry run prints a `note:` line for each unpost of a row linked to a recurring entry,
+  saying what the apply does with it or that it refuses it. A refused unpost and a verify
+  gap stop the apply when it runs, and it writes nothing.
 - Exit codes: 0 done (a dry run: the apply would go ahead), 3 refused (nothing written),
   1 an error, 2 refused before connecting (the file, the URL or the `--expect-*` flags).
 
