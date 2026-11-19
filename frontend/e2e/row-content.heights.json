@@ -1,0 +1,258 @@
+{
+  "desktop": {
+    "Netflix Standard": [
+      57
+    ],
+    "Spotify Duo": [
+      57
+    ],
+    "Disney+ Premium": [
+      56
+    ],
+    "Laptop, 12 months": [
+      99
+    ],
+    "Aircon, 12 months": [
+      99
+    ],
+    "Washing machine, 12 months": [
+      99
+    ],
+    "Rice cooker, 6 months": [
+      56
+    ],
+    "Rent": [
+      57
+    ],
+    "Meralco": [
+      57
+    ],
+    "PLDT Fibr": [
+      57
+    ],
+    "Emergency fund top-up": [
+      57
+    ],
+    "HMO dependent add-on": [
+      57
+    ],
+    "Globe Postpaid": [
+      57
+    ],
+    "Maynilad water": [
+      57
+    ],
+    "Palengke run": [
+      57
+    ],
+    "Yaya salary": [
+      57
+    ],
+    "Gym membership": [
+      56
+    ],
+    "Payroll": [
+      56
+    ],
+    "Water refill service": [
+      101
+    ],
+    "Condo parking rental income": [
+      100
+    ]
+  },
+  "phone": {
+    "Netflix Standard": [
+      65
+    ],
+    "Spotify Duo": [
+      65
+    ],
+    "Disney+ Premium": [
+      64
+    ],
+    "Laptop, 12 months": [
+      137
+    ],
+    "Aircon, 12 months": [
+      137
+    ],
+    "Washing machine, 12 months": [
+      137
+    ],
+    "Rice cooker, 6 months": [
+      64
+    ],
+    "Rent": [
+      65
+    ],
+    "Meralco": [
+      65
+    ],
+    "PLDT Fibr": [
+      65
+    ],
+    "Emergency fund top-up": [
+      65
+    ],
+    "HMO dependent add-on": [
+      65
+    ],
+    "Globe Postpaid": [
+      65
+    ],
+    "Maynilad water": [
+      65
+    ],
+    "Palengke run": [
+      65
+    ],
+    "Yaya salary": [
+      65
+    ],
+    "Gym membership": [
+      64
+    ],
+    "Payroll": [
+      64
+    ],
+    "Water refill service": [
+      141
+    ],
+    "Condo parking rental income": [
+      124
+    ]
+  },
+  "transactions:desktop": {
+    "Divisoria haul for the reunion": [
+      57
+    ],
+    "Netflix Standard": [
+      57,
+      57
+    ],
+    "Jollibee, pending": [
+      57
+    ],
+    "Puregold weekly groceries": [
+      57
+    ],
+    "Lunch, Kanto Freestyle": [
+      57
+    ],
+    "Grab to Makati": [
+      57
+    ],
+    "Mercury Drug": [
+      57
+    ],
+    "Meralco February bill": [
+      57
+    ],
+    "Palengke, Marikina market": [
+      57
+    ],
+    "Move to emergency fund": [
+      57
+    ],
+    "Dinner, Manam": [
+      57
+    ],
+    "Logo design, Kapé Co.": [
+      57
+    ],
+    "PLDT Fibr": [
+      57
+    ],
+    "S&R bulk run": [
+      57
+    ],
+    "Shell V-Power": [
+      57
+    ],
+    "Spotify Duo": [
+      57
+    ],
+    "Water refill, 4 gallons": [
+      57
+    ],
+    "Coffee, Yardstick": [
+      57
+    ],
+    "Yaya salary, Feb 16–28": [
+      57
+    ],
+    "Household fund, March": [
+      57
+    ],
+    "March rent": [
+      56
+    ]
+  },
+  "transactions:phone": {
+    "Divisoria haul for the reunion": [
+      65
+    ],
+    "Netflix Standard": [
+      65,
+      65
+    ],
+    "Jollibee, pending": [
+      65
+    ],
+    "Puregold weekly groceries": [
+      65
+    ],
+    "Lunch, Kanto Freestyle": [
+      65
+    ],
+    "Grab to Makati": [
+      65
+    ],
+    "Mercury Drug": [
+      65
+    ],
+    "Meralco February bill": [
+      65
+    ],
+    "Palengke, Marikina market": [
+      65
+    ],
+    "Move to emergency fund": [
+      65
+    ],
+    "Dinner, Manam": [
+      65
+    ],
+    "Logo design, Kapé Co.": [
+      65
+    ],
+    "PLDT Fibr": [
+      65
+    ],
+    "S&R bulk run": [
+      65
+    ],
+    "Shell V-Power": [
+      65
+    ],
+    "Spotify Duo": [
+      65
+    ],
+    "Water refill, 4 gallons": [
+      65
+    ],
+    "Coffee, Yardstick": [
+      65
+    ],
+    "Yaya salary, Feb 16–28": [
+      65
+    ],
+    "Household fund, March": [
+      65
+    ],
+    "March rent": [
+      64
+    ]
+  }
+}

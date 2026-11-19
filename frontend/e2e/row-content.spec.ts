@@ -3,6 +3,8 @@
 // only when the creator is not the viewer or the account is shared, and a row's meta is plain text (tags are the only
 // chips) in at most three items to a line. The API is faked in the browser with the shared household fixture;
 // there is no backend.
+import fs from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
 import type { BudgetEntry, PaginatedResponse } from '@tally-trace/shared'
@@ -14,6 +16,9 @@ import {
   mockHousehold,
   SHARED_ACCOUNT_IDS,
   withCreatorCombos,
+  withInstallmentAndBill,
+  withStatusStates,
+  withTagOverflow,
 } from './support/fixtures/household'
 import { addRoutes, queryRoute } from './support/mockApi'
 import { shot } from './support/shot'
@@ -26,7 +31,7 @@ const TRANSPARENT = 'rgba(0, 0, 0, 0)'
 const PITCH: Record<string, number> = { desktop: 56, phone: 64 }
 
 /** The busy month plus the one creator-and-sharing combination it lacks, and another member's limited entries. */
-const data = withCreatorCombos({ ...household, entries: [...household.entries, ...limitedRecurring] })
+const data = withInstallmentAndBill(withCreatorCombos({ ...household, entries: [...household.entries, ...limitedRecurring] }))
 const VIEWER = 'Mara S.'
 
 /** The word a cadence reads as on a row, written here so the test does not borrow the app's formatter. */
@@ -75,7 +80,6 @@ for (const key of SECTIONS_THAT_SAY_EXPENSE) {
     await openRecurring(page)
     const section = page.getByTestId(`kind-section-${key}`)
     const rows = section.locator('article[data-testid="row"]')
-    test.skip((await rows.count()) === 0, `the fixture has no ${key} section`)
     const texts = await rows.evaluateAll((all) => all.map((r) => (r as HTMLElement).innerText))
     expect(texts.length, `rows under ${key}`).toBeGreaterThan(0)
     for (const text of texts) expect.soft(text, 'no row repeats its heading as a type').not.toMatch(TYPE_UNDER_HEADING)
@@ -251,14 +255,21 @@ for (const e of data.entries) {
     await openRecurring(page)
     const row = rowNamed(page, name)
     await expect(row).toBeVisible()
-    const m = await row.evaluate((r) => ({
+    // A limited entry has no opener, so its facts wrap onto a line of their own by design (STU-681: every fact stays
+    // readable); its first meta line is measured, and the no-taller guard below holds its whole height. Every other
+    // row cuts its meta to the one line, so all of its meta lines together are measured.
+    const limited = e.view === 'limited'
+    const m = await row.evaluate((r, onlyFirst) => ({
       amount: (r.querySelector('[data-testid="row-amount"]') as HTMLElement).getBoundingClientRect().height,
-      meta: (r.querySelector('[data-testid="row-meta"]') as HTMLElement).getBoundingClientRect().height,
+      meta: [...r.querySelectorAll('[data-testid="row-meta"]')]
+        .filter((m) => m.querySelector('button') === null)
+        .slice(0, onlyFirst ? 1 : undefined)
+        .reduce((h, m) => h + m.getBoundingClientRect().height, 0),
       scroll: r.scrollWidth,
       client: r.clientWidth,
-    }))
+    }), limited)
     expect.soft(m.amount, `${name}: the amount is one line`).toBeLessThanOrEqual(28)
-    expect.soft(m.meta, `${name}: the meta block is at most two lines`).toBeLessThanOrEqual(40)
+    expect.soft(m.meta, `${name}: the meta lines together (a line that holds a control is the row's action, not meta) are at most two lines`).toBeLessThanOrEqual(40)
     expect.soft(m.scroll, `${name}: no horizontal overflow`).toBeLessThanOrEqual(m.client)
     await row.scrollIntoViewIfNeeded()
     await shot(page, `rows-390-${e.id}`)
@@ -287,3 +298,38 @@ for (const surface of ['transactions', 'recurring'] as const) {
   })
 }
 
+
+// ─── No row is taller than it was before this change ────────────────────────────────────────────
+
+/** Each row's height (px, box) at `0f24527`, as the AC6 appearance baseline recorded it: by project key, then title, in list order. */
+const BEFORE = JSON.parse(fs.readFileSync(fileURLToPath(new URL('./row-content.heights.json', import.meta.url)), 'utf8')) as Record<string, Record<string, number[]>>
+
+/** The datasets the baseline was recorded on. */
+const recordedRecurring = { ...withStatusStates(household), entries: [...withStatusStates(household).entries, ...limitedRecurring] }
+const recordedTransactions = withTagOverflow(withStatusStates(household))
+
+for (const surface of ['recurring', 'transactions'] as const) {
+  test(`trimmed rows reach the ruled pitch: no ${surface} row is taller than before`, async ({ page }, testInfo) => {
+    const set = surface === 'recurring' ? recordedRecurring : recordedTransactions
+    await mockHousehold(page, set)
+    await addRoutes(page, [queryRoute<PaginatedResponse<BudgetEntry>>('GET', '/budget-entries/', (q) => budgetEntriesFor(set, q))])
+    await page.goto(surface === 'recurring' ? '/allocations?tab=recurring' : '/transactions')
+    const rows = surface === 'recurring' ? page.locator('[data-testid^="kind-section-"]').getByTestId('row') : page.locator('article[data-transaction-id]')
+    await expect(rows.first()).toBeVisible()
+    await page.waitForLoadState('networkidle')
+    await page.evaluate(() => document.fonts.ready)
+    const now = await rows.evaluateAll((all) => all.map((r) => ({ name: (r.querySelector('[data-row-title]')?.textContent ?? '').trim(), h: r.getBoundingClientRect().height })))
+    const before = BEFORE[surface === 'recurring' ? testInfo.project.name : `transactions:${testInfo.project.name}`]
+    const seen: Record<string, number> = {}
+    const taller: string[] = []
+    for (const r of now) {
+      const i = (seen[r.name] = (seen[r.name] ?? -1) + 1)
+      const was = before[r.name]?.[i]
+      expect.soft(was, `${r.name} is in the recorded heights`).toBeDefined()
+      if (was !== undefined && r.h > was + 1) taller.push(`${r.name}: ${was}px -> ${r.h}px`)
+    }
+    expect(now.length, `${surface} rows`).toBe(Object.values(before).flat().length)
+    expect(taller, `${surface} rows taller than at 0f24527`).toEqual([])
+    await shot(page, `no-taller-${surface}`)
+  })
+}

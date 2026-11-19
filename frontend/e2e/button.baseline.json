@@ -7479,7 +7479,7 @@
       "recurring-create | Save recurring entry | 1": {
         "fields": [],
         "rows": [
-          "Water deliveryRecurring expenseMonthly · ScheduledNext Mar 12th, 2026 · TodayAccount: BPI PayrollMark paid₱350.00"
+          "Water deliveryRecurring expenseMonthly · ScheduledNext Mar 12th, 2026 · Today · Account: BPI PayrollMark paid₱350.00"
         ],
         "url": "/allocations",
         "dialogs": 0,
@@ -19208,7 +19208,7 @@
       "recurring-create | Save recurring entry | 1": {
         "fields": [],
         "rows": [
-          "Water deliveryRecurring expenseMonthly · ScheduledNext Mar 12th, 2026 · TodayAccount: BPI PayrollMark paid₱350.00"
+          "Water deliveryRecurring expenseMonthly · ScheduledNext Mar 12th, 2026 · Today · Account: BPI PayrollMark paid₱350.00"
         ],
         "url": "/allocations",
         "dialogs": 0,

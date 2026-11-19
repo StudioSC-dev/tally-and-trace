@@ -340,7 +340,7 @@
       "y": 691,
       "sy": 1,
       "w": 1230,
-      "h": 119,
+      "h": 99,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
       "texts": [
         {
@@ -408,25 +408,41 @@
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
+          "text": "·",
+          "x": 538,
+          "y": 32,
+          "w": 10,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
           "text": "Payment 2 of 12",
-          "x": 16,
-          "y": 52,
+          "x": 548,
+          "y": 32,
           "w": 88,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
+          "text": "·",
+          "x": 636,
+          "y": 32,
+          "w": 10,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
           "text": "10",
-          "x": 116,
-          "y": 52,
+          "x": 646,
+          "y": 32,
           "w": 14,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "left",
-          "x": 130,
-          "y": 52,
+          "x": 660,
+          "y": 32,
           "w": 21,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -434,7 +450,7 @@
         {
           "text": "Auto-post on",
           "x": 30,
-          "y": 82,
+          "y": 62,
           "w": 78,
           "h": 17,
           "style": "rgb(42, 100, 64) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
@@ -442,7 +458,7 @@
         {
           "text": "Turn off",
           "x": 133,
-          "y": 82,
+          "y": 62,
           "w": 49,
           "h": 18,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 14px | 400 | normal | 20px | normal | none | none | clip | 1"
@@ -450,7 +466,7 @@
         {
           "text": "Charged",
           "x": 991,
-          "y": 51,
+          "y": 41,
           "w": 44,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -458,7 +474,7 @@
         {
           "text": "Posted",
           "x": 1065,
-          "y": 51,
+          "y": 41,
           "w": 38,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -466,7 +482,7 @@
         {
           "text": "₱2,500.00",
           "x": 1126,
-          "y": 47,
+          "y": 37,
           "w": 88,
           "h": 23,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
@@ -477,33 +493,33 @@
           "x": 0,
           "y": 0,
           "w": 1230,
-          "h": 119,
+          "h": 99,
           "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 5px | 5px | 0px | 0px | none | 1"
         },
         {
           "x": 16,
-          "y": 87,
+          "y": 67,
           "w": 8,
           "h": 8,
           "style": "rgb(42, 100, 64) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 9999px | 9999px | 9999px | 9999px | none | 1"
         },
         {
           "x": 116,
-          "y": 72,
+          "y": 52,
           "w": 83,
           "h": 38,
           "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
         },
         {
           "x": 980,
-          "y": 47,
+          "y": 37,
           "w": 66,
           "h": 24,
           "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
         },
         {
           "x": 1054,
-          "y": 47,
+          "y": 37,
           "w": 60,
           "h": 24,
           "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
@@ -515,10 +531,10 @@
     {
       "name": "Aircon, 12 months",
       "x": 105,
-      "y": 810,
-      "sy": 120,
+      "y": 790,
+      "sy": 100,
       "w": 1230,
-      "h": 119,
+      "h": 99,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
       "texts": [
         {
@@ -586,25 +602,41 @@
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
+          "text": "·",
+          "x": 538,
+          "y": 32,
+          "w": 10,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
           "text": "Payment 2 of 12",
-          "x": 16,
-          "y": 52,
+          "x": 548,
+          "y": 32,
           "w": 88,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
+          "text": "·",
+          "x": 636,
+          "y": 32,
+          "w": 10,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
           "text": "10",
-          "x": 116,
-          "y": 52,
+          "x": 646,
+          "y": 32,
           "w": 14,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "left",
-          "x": 130,
-          "y": 52,
+          "x": 660,
+          "y": 32,
           "w": 21,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -612,7 +644,7 @@
         {
           "text": "Auto-post off",
           "x": 30,
-          "y": 82,
+          "y": 62,
           "w": 78,
           "h": 17,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
@@ -620,7 +652,7 @@
         {
           "text": "Review",
           "x": 133,
-          "y": 82,
+          "y": 62,
           "w": 47,
           "h": 18,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 14px | 400 | normal | 20px | normal | none | none | clip | 1"
@@ -628,7 +660,7 @@
         {
           "text": "Charged",
           "x": 991,
-          "y": 51,
+          "y": 41,
           "w": 44,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -636,7 +668,7 @@
         {
           "text": "Posted",
           "x": 1065,
-          "y": 51,
+          "y": 41,
           "w": 38,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -644,7 +676,7 @@
         {
           "text": "₱2,500.00",
           "x": 1126,
-          "y": 47,
+          "y": 37,
           "w": 88,
           "h": 23,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
@@ -655,33 +687,33 @@
           "x": 0,
           "y": 0,
           "w": 1230,
-          "h": 119,
+          "h": 99,
           "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 0px | 0px | 0px | 0px | none | 1"
         },
         {
           "x": 16,
-          "y": 87,
+          "y": 67,
           "w": 8,
           "h": 8,
           "style": "rgb(74, 89, 80) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 9999px | 9999px | 9999px | 9999px | none | 1"
         },
         {
           "x": 116,
-          "y": 72,
+          "y": 52,
           "w": 81,
           "h": 38,
           "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
         },
         {
           "x": 980,
-          "y": 47,
+          "y": 37,
           "w": 66,
           "h": 24,
           "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
         },
         {
           "x": 1054,
-          "y": 47,
+          "y": 37,
           "w": 60,
           "h": 24,
           "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
@@ -693,10 +725,10 @@
     {
       "name": "Washing machine, 12 months",
       "x": 105,
-      "y": 929,
-      "sy": 239,
+      "y": 889,
+      "sy": 199,
       "w": 1230,
-      "h": 119,
+      "h": 99,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
       "texts": [
         {
@@ -764,25 +796,41 @@
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
+          "text": "·",
+          "x": 538,
+          "y": 32,
+          "w": 10,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
           "text": "Payment 2 of 12",
-          "x": 16,
-          "y": 52,
+          "x": 548,
+          "y": 32,
           "w": 88,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
+          "text": "·",
+          "x": 636,
+          "y": 32,
+          "w": 10,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
           "text": "10",
-          "x": 116,
-          "y": 52,
+          "x": 646,
+          "y": 32,
           "w": 14,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "left",
-          "x": 130,
-          "y": 52,
+          "x": 660,
+          "y": 32,
           "w": 21,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -790,7 +838,7 @@
         {
           "text": "Not reviewed",
           "x": 30,
-          "y": 82,
+          "y": 62,
           "w": 78,
           "h": 17,
           "style": "rgb(135, 80, 0) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
@@ -798,7 +846,7 @@
         {
           "text": "Review",
           "x": 133,
-          "y": 82,
+          "y": 62,
           "w": 47,
           "h": 18,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 14px | 400 | normal | 20px | normal | none | none | clip | 1"
@@ -806,7 +854,7 @@
         {
           "text": "Charged",
           "x": 991,
-          "y": 51,
+          "y": 41,
           "w": 44,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -814,7 +862,7 @@
         {
           "text": "Posted",
           "x": 1065,
-          "y": 51,
+          "y": 41,
           "w": 38,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -822,7 +870,7 @@
         {
           "text": "₱2,500.00",
           "x": 1126,
-          "y": 47,
+          "y": 37,
           "w": 88,
           "h": 23,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
@@ -833,33 +881,33 @@
           "x": 0,
           "y": 0,
           "w": 1230,
-          "h": 119,
+          "h": 99,
           "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 0px | 0px | 0px | 0px | none | 1"
         },
         {
           "x": 16,
-          "y": 87,
+          "y": 67,
           "w": 8,
           "h": 8,
           "style": "rgb(135, 80, 0) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 9999px | 9999px | 9999px | 9999px | none | 1"
         },
         {
           "x": 116,
-          "y": 72,
+          "y": 52,
           "w": 81,
           "h": 38,
           "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
         },
         {
           "x": 980,
-          "y": 47,
+          "y": 37,
           "w": 66,
           "h": 24,
           "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
         },
         {
           "x": 1054,
-          "y": 47,
+          "y": 37,
           "w": 60,
           "h": 24,
           "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
@@ -871,10 +919,10 @@
     {
       "name": "Rice cooker, 6 months",
       "x": 105,
-      "y": 1048,
-      "sy": 358,
+      "y": 988,
+      "sy": 298,
       "w": 1230,
-      "h": 76,
+      "h": 56,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
       "texts": [
         {
@@ -950,9 +998,17 @@
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
+          "text": "·",
+          "x": 623,
+          "y": 32,
+          "w": 10,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
           "text": "Payment 6 of 6",
-          "x": 16,
-          "y": 52,
+          "x": 633,
+          "y": 32,
           "w": 81,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -960,7 +1016,7 @@
         {
           "text": "₱2,500.00",
           "x": 1126,
-          "y": 26,
+          "y": 16,
           "w": 88,
           "h": 23,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
@@ -981,7 +1037,7 @@
     {
       "name": "Rent",
       "x": 105,
-      "y": 1203,
+      "y": 1123,
       "sy": 1,
       "w": 1230,
       "h": 57,
@@ -1112,7 +1168,7 @@
     {
       "name": "Meralco",
       "x": 105,
-      "y": 1260,
+      "y": 1180,
       "sy": 58,
       "w": 1230,
       "h": 57,
@@ -1243,7 +1299,7 @@
     {
       "name": "PLDT Fibr",
       "x": 105,
-      "y": 1317,
+      "y": 1237,
       "sy": 115,
       "w": 1230,
       "h": 57,
@@ -1352,7 +1408,7 @@
     {
       "name": "Emergency fund top-up",
       "x": 105,
-      "y": 1374,
+      "y": 1294,
       "sy": 172,
       "w": 1230,
       "h": 57,
@@ -1461,7 +1517,7 @@
     {
       "name": "HMO dependent add-on",
       "x": 105,
-      "y": 1431,
+      "y": 1351,
       "sy": 229,
       "w": 1230,
       "h": 57,
@@ -1570,7 +1626,7 @@
     {
       "name": "Globe Postpaid",
       "x": 105,
-      "y": 1488,
+      "y": 1408,
       "sy": 286,
       "w": 1230,
       "h": 57,
@@ -1679,7 +1735,7 @@
     {
       "name": "Maynilad water",
       "x": 105,
-      "y": 1545,
+      "y": 1465,
       "sy": 343,
       "w": 1230,
       "h": 57,
@@ -1810,7 +1866,7 @@
     {
       "name": "Palengke run",
       "x": 105,
-      "y": 1602,
+      "y": 1522,
       "sy": 400,
       "w": 1230,
       "h": 57,
@@ -1957,7 +2013,7 @@
     {
       "name": "Yaya salary",
       "x": 105,
-      "y": 1659,
+      "y": 1579,
       "sy": 457,
       "w": 1230,
       "h": 57,
@@ -2104,7 +2160,7 @@
     {
       "name": "Gym membership",
       "x": 105,
-      "y": 1716,
+      "y": 1636,
       "sy": 514,
       "w": 1230,
       "h": 56,
@@ -2190,7 +2246,7 @@
     {
       "name": "Payroll",
       "x": 105,
-      "y": 1851,
+      "y": 1771,
       "sy": 1,
       "w": 1230,
       "h": 56,
@@ -2292,10 +2348,10 @@
     {
       "name": "Water refill service",
       "x": 105,
-      "y": 1986,
+      "y": 1906,
       "sy": 1,
       "w": 1230,
-      "h": 121,
+      "h": 101,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
       "texts": [
         {
@@ -2387,9 +2443,17 @@
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
+          "text": "·",
+          "x": 377,
+          "y": 52,
+          "w": 10,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
           "text": "by Jun R.",
-          "x": 16,
-          "y": 72,
+          "x": 387,
+          "y": 52,
           "w": 50,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -2397,7 +2461,7 @@
         {
           "text": "Delete recurring entry",
           "x": 16,
-          "y": 93,
+          "y": 73,
           "w": 138,
           "h": 18,
           "style": "rgb(174, 42, 32) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 14px | 400 | normal | 20px | normal | none | none | clip | 1"
@@ -2405,7 +2469,7 @@
         {
           "text": "₱350.00",
           "x": 1142,
-          "y": 48,
+          "y": 38,
           "w": 72,
           "h": 23,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
@@ -2416,7 +2480,7 @@
           "x": 0,
           "y": 0,
           "w": 1230,
-          "h": 121,
+          "h": 101,
           "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 5px | 5px | 0px | 0px | none | 1"
         }
       ],
@@ -2426,8 +2490,8 @@
     {
       "name": "Condo parking rental income",
       "x": 105,
-      "y": 2107,
-      "sy": 122,
+      "y": 2007,
+      "sy": 102,
       "w": 1230,
       "h": 100,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
@@ -2859,7 +2923,7 @@
       "y": 727,
       "sy": 1,
       "w": 364,
-      "h": 173,
+      "h": 137,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
       "texts": [
         {
@@ -2927,25 +2991,41 @@
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
+          "text": "·",
+          "x": 538,
+          "y": 36,
+          "w": 10,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
           "text": "Payment 2 of 12",
-          "x": 16,
-          "y": 56,
-          "w": 71,
-          "h": 31,
+          "x": 548,
+          "y": 36,
+          "w": 88,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "·",
+          "x": 636,
+          "y": 36,
+          "w": 10,
+          "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "10",
-          "x": 42,
-          "y": 72,
+          "x": 646,
+          "y": 36,
           "w": 14,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "left",
-          "x": 56,
-          "y": 72,
+          "x": 660,
+          "y": 36,
           "w": 21,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -2953,7 +3033,7 @@
         {
           "text": "Auto-post on",
           "x": 30,
-          "y": 91,
+          "y": 55,
           "w": 78,
           "h": 17,
           "style": "rgb(42, 100, 64) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
@@ -2961,7 +3041,7 @@
         {
           "text": "Turn off",
           "x": 33,
-          "y": 129,
+          "y": 93,
           "w": 49,
           "h": 18,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 14px | 400 | normal | 20px | normal | none | none | clip | 1"
@@ -2969,7 +3049,7 @@
         {
           "text": "Charged",
           "x": 125,
-          "y": 78,
+          "y": 60,
           "w": 44,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -2977,7 +3057,7 @@
         {
           "text": "Posted",
           "x": 199,
-          "y": 78,
+          "y": 60,
           "w": 38,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -2985,7 +3065,7 @@
         {
           "text": "₱2,500.00",
           "x": 260,
-          "y": 74,
+          "y": 56,
           "w": 88,
           "h": 23,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
@@ -2996,33 +3076,33 @@
           "x": 0,
           "y": 0,
           "w": 364,
-          "h": 173,
+          "h": 137,
           "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 5px | 5px | 0px | 0px | none | 1"
         },
         {
           "x": 16,
-          "y": 96,
+          "y": 60,
           "w": 8,
           "h": 8,
           "style": "rgb(42, 100, 64) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 9999px | 9999px | 9999px | 9999px | none | 1"
         },
         {
           "x": 16,
-          "y": 116,
+          "y": 80,
           "w": 83,
           "h": 44,
           "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
         },
         {
           "x": 114,
-          "y": 64,
+          "y": 46,
           "w": 66,
           "h": 44,
           "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
         },
         {
           "x": 188,
-          "y": 64,
+          "y": 46,
           "w": 60,
           "h": 44,
           "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
@@ -3034,10 +3114,10 @@
     {
       "name": "Aircon, 12 months",
       "x": 13,
-      "y": 900,
-      "sy": 174,
+      "y": 864,
+      "sy": 138,
       "w": 364,
-      "h": 173,
+      "h": 137,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
       "texts": [
         {
@@ -3105,25 +3185,41 @@
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
+          "text": "·",
+          "x": 538,
+          "y": 36,
+          "w": 10,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
           "text": "Payment 2 of 12",
-          "x": 16,
-          "y": 56,
-          "w": 71,
-          "h": 31,
+          "x": 548,
+          "y": 36,
+          "w": 88,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "·",
+          "x": 636,
+          "y": 36,
+          "w": 10,
+          "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "10",
-          "x": 42,
-          "y": 72,
+          "x": 646,
+          "y": 36,
           "w": 14,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "left",
-          "x": 56,
-          "y": 72,
+          "x": 660,
+          "y": 36,
           "w": 21,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -3131,7 +3227,7 @@
         {
           "text": "Auto-post off",
           "x": 30,
-          "y": 91,
+          "y": 55,
           "w": 78,
           "h": 17,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
@@ -3139,7 +3235,7 @@
         {
           "text": "Review",
           "x": 33,
-          "y": 129,
+          "y": 93,
           "w": 47,
           "h": 18,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 14px | 400 | normal | 20px | normal | none | none | clip | 1"
@@ -3147,7 +3243,7 @@
         {
           "text": "Charged",
           "x": 125,
-          "y": 78,
+          "y": 60,
           "w": 44,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -3155,7 +3251,7 @@
         {
           "text": "Posted",
           "x": 199,
-          "y": 78,
+          "y": 60,
           "w": 38,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -3163,7 +3259,7 @@
         {
           "text": "₱2,500.00",
           "x": 260,
-          "y": 74,
+          "y": 56,
           "w": 88,
           "h": 23,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
@@ -3174,33 +3270,33 @@
           "x": 0,
           "y": 0,
           "w": 364,
-          "h": 173,
+          "h": 137,
           "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 0px | 0px | 0px | 0px | none | 1"
         },
         {
           "x": 16,
-          "y": 96,
+          "y": 60,
           "w": 8,
           "h": 8,
           "style": "rgb(74, 89, 80) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 9999px | 9999px | 9999px | 9999px | none | 1"
         },
         {
           "x": 16,
-          "y": 116,
+          "y": 80,
           "w": 81,
           "h": 44,
           "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
         },
         {
           "x": 114,
-          "y": 64,
+          "y": 46,
           "w": 66,
           "h": 44,
           "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
         },
         {
           "x": 188,
-          "y": 64,
+          "y": 46,
           "w": 60,
           "h": 44,
           "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
@@ -3212,10 +3308,10 @@
     {
       "name": "Washing machine, 12 months",
       "x": 13,
-      "y": 1073,
-      "sy": 347,
+      "y": 1001,
+      "sy": 275,
       "w": 364,
-      "h": 173,
+      "h": 137,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
       "texts": [
         {
@@ -3283,25 +3379,41 @@
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
+          "text": "·",
+          "x": 538,
+          "y": 36,
+          "w": 10,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
           "text": "Payment 2 of 12",
-          "x": 16,
-          "y": 56,
-          "w": 71,
-          "h": 31,
+          "x": 548,
+          "y": 36,
+          "w": 88,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "·",
+          "x": 636,
+          "y": 36,
+          "w": 10,
+          "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "10",
-          "x": 42,
-          "y": 72,
+          "x": 646,
+          "y": 36,
           "w": 14,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "left",
-          "x": 56,
-          "y": 72,
+          "x": 660,
+          "y": 36,
           "w": 21,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -3309,7 +3421,7 @@
         {
           "text": "Not reviewed",
           "x": 30,
-          "y": 91,
+          "y": 55,
           "w": 78,
           "h": 17,
           "style": "rgb(135, 80, 0) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
@@ -3317,7 +3429,7 @@
         {
           "text": "Review",
           "x": 33,
-          "y": 129,
+          "y": 93,
           "w": 47,
           "h": 18,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 14px | 400 | normal | 20px | normal | none | none | clip | 1"
@@ -3325,7 +3437,7 @@
         {
           "text": "Charged",
           "x": 125,
-          "y": 78,
+          "y": 60,
           "w": 44,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -3333,7 +3445,7 @@
         {
           "text": "Posted",
           "x": 199,
-          "y": 78,
+          "y": 60,
           "w": 38,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -3341,7 +3453,7 @@
         {
           "text": "₱2,500.00",
           "x": 260,
-          "y": 74,
+          "y": 56,
           "w": 88,
           "h": 23,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
@@ -3352,33 +3464,33 @@
           "x": 0,
           "y": 0,
           "w": 364,
-          "h": 173,
+          "h": 137,
           "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 0px | 0px | 0px | 0px | none | 1"
         },
         {
           "x": 16,
-          "y": 96,
+          "y": 60,
           "w": 8,
           "h": 8,
           "style": "rgb(135, 80, 0) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 9999px | 9999px | 9999px | 9999px | none | 1"
         },
         {
           "x": 16,
-          "y": 116,
+          "y": 80,
           "w": 81,
           "h": 44,
           "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
         },
         {
           "x": 114,
-          "y": 64,
+          "y": 46,
           "w": 66,
           "h": 44,
           "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
         },
         {
           "x": 188,
-          "y": 64,
+          "y": 46,
           "w": 60,
           "h": 44,
           "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
@@ -3390,10 +3502,10 @@
     {
       "name": "Rice cooker, 6 months",
       "x": 13,
-      "y": 1246,
-      "sy": 520,
+      "y": 1138,
+      "sy": 412,
       "w": 364,
-      "h": 84,
+      "h": 64,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
       "texts": [
         {
@@ -3469,9 +3581,17 @@
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
+          "text": "·",
+          "x": 623,
+          "y": 36,
+          "w": 10,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
           "text": "Payment 6 of 6",
-          "x": 16,
-          "y": 56,
+          "x": 633,
+          "y": 36,
           "w": 81,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -3479,7 +3599,7 @@
         {
           "text": "₱2,500.00",
           "x": 260,
-          "y": 30,
+          "y": 20,
           "w": 88,
           "h": 23,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
@@ -3500,7 +3620,7 @@
     {
       "name": "Rent",
       "x": 13,
-      "y": 1409,
+      "y": 1281,
       "sy": 1,
       "w": 364,
       "h": 65,
@@ -3631,7 +3751,7 @@
     {
       "name": "Meralco",
       "x": 13,
-      "y": 1474,
+      "y": 1346,
       "sy": 66,
       "w": 364,
       "h": 65,
@@ -3763,7 +3883,7 @@
     {
       "name": "PLDT Fibr",
       "x": 13,
-      "y": 1539,
+      "y": 1411,
       "sy": 131,
       "w": 364,
       "h": 65,
@@ -3872,7 +3992,7 @@
     {
       "name": "Emergency fund top-up",
       "x": 13,
-      "y": 1604,
+      "y": 1476,
       "sy": 196,
       "w": 364,
       "h": 65,
@@ -3981,7 +4101,7 @@
     {
       "name": "HMO dependent add-on",
       "x": 13,
-      "y": 1669,
+      "y": 1541,
       "sy": 261,
       "w": 364,
       "h": 65,
@@ -4090,7 +4210,7 @@
     {
       "name": "Globe Postpaid",
       "x": 13,
-      "y": 1734,
+      "y": 1606,
       "sy": 326,
       "w": 364,
       "h": 65,
@@ -4199,7 +4319,7 @@
     {
       "name": "Maynilad water",
       "x": 13,
-      "y": 1799,
+      "y": 1671,
       "sy": 391,
       "w": 364,
       "h": 65,
@@ -4331,7 +4451,7 @@
     {
       "name": "Palengke run",
       "x": 13,
-      "y": 1864,
+      "y": 1736,
       "sy": 456,
       "w": 364,
       "h": 65,
@@ -4479,7 +4599,7 @@
     {
       "name": "Yaya salary",
       "x": 13,
-      "y": 1929,
+      "y": 1801,
       "sy": 521,
       "w": 364,
       "h": 65,
@@ -4627,7 +4747,7 @@
     {
       "name": "Gym membership",
       "x": 13,
-      "y": 1994,
+      "y": 1866,
       "sy": 586,
       "w": 364,
       "h": 64,
@@ -4713,7 +4833,7 @@
     {
       "name": "Payroll",
       "x": 13,
-      "y": 2137,
+      "y": 2009,
       "sy": 1,
       "w": 364,
       "h": 64,
@@ -4815,10 +4935,10 @@
     {
       "name": "Water refill service",
       "x": 13,
-      "y": 2280,
+      "y": 2152,
       "sy": 1,
       "w": 364,
-      "h": 161,
+      "h": 141,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
       "texts": [
         {
@@ -4910,9 +5030,17 @@
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
+          "text": "·",
+          "x": 182,
+          "y": 88,
+          "w": 10,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
           "text": "by Jun R.",
-          "x": 16,
-          "y": 108,
+          "x": 192,
+          "y": 88,
           "w": 50,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -4920,7 +5048,7 @@
         {
           "text": "Delete recurring entry",
           "x": 16,
-          "y": 129,
+          "y": 109,
           "w": 138,
           "h": 18,
           "style": "rgb(174, 42, 32) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 14px | 400 | normal | 20px | normal | none | none | clip | 1"
@@ -4928,7 +5056,7 @@
         {
           "text": "₱350.00",
           "x": 276,
-          "y": 68,
+          "y": 58,
           "w": 72,
           "h": 23,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
@@ -4939,7 +5067,7 @@
           "x": 0,
           "y": 0,
           "w": 364,
-          "h": 161,
+          "h": 141,
           "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 5px | 5px | 0px | 0px | none | 1"
         }
       ],
@@ -4949,8 +5077,8 @@
     {
       "name": "Condo parking rental income",
       "x": 13,
-      "y": 2441,
-      "sy": 162,
+      "y": 2293,
+      "sy": 142,
       "w": 364,
       "h": 124,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
@@ -5328,7 +5456,7 @@
       "y": 454,
       "sy": 58,
       "w": 1230,
-      "h": 77,
+      "h": 57,
       "row": "rgb(214, 222, 211) | 1 | 8px | 16px | 8px | 16px",
       "texts": [
         {
@@ -5388,9 +5516,17 @@
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 500 | normal | 16px | normal | none | none | clip | 1"
         },
         {
+          "text": "·",
+          "x": 446,
+          "y": 32,
+          "w": 10,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
           "text": "Netflix Standard (Monthly)",
-          "x": 16,
-          "y": 52,
+          "x": 456,
+          "y": 32,
           "w": 141,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -5398,7 +5534,7 @@
         {
           "text": "₱549.00",
           "x": 1142,
-          "y": 26,
+          "y": 16,
           "w": 72,
           "h": 23,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
@@ -5409,7 +5545,7 @@
           "x": 0,
           "y": 0,
           "w": 1230,
-          "h": 77,
+          "h": 57,
           "style": "rgb(214, 222, 211) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 0px | 0px | 0px | 0px | none | 1"
         },
         {
@@ -5426,8 +5562,8 @@
     {
       "name": "Jollibee, pending",
       "x": 105,
-      "y": 531,
-      "sy": 135,
+      "y": 511,
+      "sy": 115,
       "w": 1230,
       "h": 57,
       "row": "rgb(214, 222, 211) | 1 | 8px | 16px | 8px | 16px",
@@ -5519,8 +5655,8 @@
     {
       "name": "Puregold weekly groceries",
       "x": 105,
-      "y": 588,
-      "sy": 192,
+      "y": 568,
+      "sy": 172,
       "w": 1230,
       "h": 57,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
@@ -5634,8 +5770,8 @@
     {
       "name": "Lunch, Kanto Freestyle",
       "x": 105,
-      "y": 645,
-      "sy": 249,
+      "y": 625,
+      "sy": 229,
       "w": 1230,
       "h": 57,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
@@ -5727,8 +5863,8 @@
     {
       "name": "Grab to Makati",
       "x": 105,
-      "y": 702,
-      "sy": 306,
+      "y": 682,
+      "sy": 286,
       "w": 1230,
       "h": 57,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
@@ -5820,8 +5956,8 @@
     {
       "name": "Mercury Drug",
       "x": 105,
-      "y": 759,
-      "sy": 363,
+      "y": 739,
+      "sy": 343,
       "w": 1230,
       "h": 57,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
@@ -5913,8 +6049,8 @@
     {
       "name": "Meralco February bill",
       "x": 105,
-      "y": 816,
-      "sy": 420,
+      "y": 796,
+      "sy": 400,
       "w": 1230,
       "h": 57,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
@@ -6028,8 +6164,8 @@
     {
       "name": "Palengke, Marikina market",
       "x": 105,
-      "y": 873,
-      "sy": 477,
+      "y": 853,
+      "sy": 457,
       "w": 1230,
       "h": 57,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
@@ -6159,8 +6295,8 @@
     {
       "name": "Netflix Standard",
       "x": 105,
-      "y": 930,
-      "sy": 534,
+      "y": 910,
+      "sy": 514,
       "w": 1230,
       "h": 57,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
@@ -6252,8 +6388,8 @@
     {
       "name": "Move to emergency fund",
       "x": 105,
-      "y": 987,
-      "sy": 591,
+      "y": 967,
+      "sy": 571,
       "w": 1230,
       "h": 57,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
@@ -6369,8 +6505,8 @@
     {
       "name": "Dinner, Manam",
       "x": 105,
-      "y": 1044,
-      "sy": 648,
+      "y": 1024,
+      "sy": 628,
       "w": 1230,
       "h": 57,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
@@ -6484,8 +6620,8 @@
     {
       "name": "Logo design, Kapé Co.",
       "x": 105,
-      "y": 1101,
-      "sy": 705,
+      "y": 1081,
+      "sy": 685,
       "w": 1230,
       "h": 57,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
@@ -6577,8 +6713,8 @@
     {
       "name": "PLDT Fibr",
       "x": 105,
-      "y": 1158,
-      "sy": 762,
+      "y": 1138,
+      "sy": 742,
       "w": 1230,
       "h": 57,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
@@ -6692,8 +6828,8 @@
     {
       "name": "S&R bulk run",
       "x": 105,
-      "y": 1215,
-      "sy": 819,
+      "y": 1195,
+      "sy": 799,
       "w": 1230,
       "h": 57,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
@@ -6807,8 +6943,8 @@
     {
       "name": "Shell V-Power",
       "x": 105,
-      "y": 1272,
-      "sy": 876,
+      "y": 1252,
+      "sy": 856,
       "w": 1230,
       "h": 57,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
@@ -6900,8 +7036,8 @@
     {
       "name": "Spotify Duo",
       "x": 105,
-      "y": 1329,
-      "sy": 933,
+      "y": 1309,
+      "sy": 913,
       "w": 1230,
       "h": 57,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
@@ -6993,8 +7129,8 @@
     {
       "name": "Water refill, 4 gallons",
       "x": 105,
-      "y": 1386,
-      "sy": 990,
+      "y": 1366,
+      "sy": 970,
       "w": 1230,
       "h": 57,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
@@ -7124,8 +7260,8 @@
     {
       "name": "Coffee, Yardstick",
       "x": 105,
-      "y": 1443,
-      "sy": 1047,
+      "y": 1423,
+      "sy": 1027,
       "w": 1230,
       "h": 57,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
@@ -7217,8 +7353,8 @@
     {
       "name": "Yaya salary, Feb 16–28",
       "x": 105,
-      "y": 1500,
-      "sy": 1104,
+      "y": 1480,
+      "sy": 1084,
       "w": 1230,
       "h": 57,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
@@ -7348,8 +7484,8 @@
     {
       "name": "Household fund, March",
       "x": 105,
-      "y": 1557,
-      "sy": 1161,
+      "y": 1537,
+      "sy": 1141,
       "w": 1230,
       "h": 57,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
@@ -7479,8 +7615,8 @@
     {
       "name": "March rent",
       "x": 105,
-      "y": 1614,
-      "sy": 1218,
+      "y": 1594,
+      "sy": 1198,
       "w": 1230,
       "h": 56,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
@@ -7708,7 +7844,7 @@
       "y": 518,
       "sy": 66,
       "w": 364,
-      "h": 85,
+      "h": 65,
       "row": "rgb(214, 222, 211) | 1 | 12px | 16px | 12px | 16px",
       "texts": [
         {
@@ -7768,9 +7904,17 @@
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 500 | normal | 16px | normal | none | none | clip | 1"
         },
         {
+          "text": "·",
+          "x": 446,
+          "y": 36,
+          "w": 10,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
           "text": "Netflix Standard (Monthly)",
-          "x": 16,
-          "y": 56,
+          "x": 456,
+          "y": 36,
           "w": 141,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
@@ -7778,7 +7922,7 @@
         {
           "text": "₱549.00",
           "x": 276,
-          "y": 30,
+          "y": 20,
           "w": 72,
           "h": 23,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
@@ -7789,7 +7933,7 @@
           "x": 0,
           "y": 0,
           "w": 364,
-          "h": 85,
+          "h": 65,
           "style": "rgb(214, 222, 211) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 0px | 0px | 0px | 0px | none | 1"
         },
         {
@@ -7806,8 +7950,8 @@
     {
       "name": "Jollibee, pending",
       "x": 13,
-      "y": 603,
-      "sy": 151,
+      "y": 583,
+      "sy": 131,
       "w": 364,
       "h": 65,
       "row": "rgb(214, 222, 211) | 1 | 12px | 16px | 12px | 16px",
@@ -7899,8 +8043,8 @@
     {
       "name": "Puregold weekly groceries",
       "x": 13,
-      "y": 668,
-      "sy": 216,
+      "y": 648,
+      "sy": 196,
       "w": 364,
       "h": 65,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
@@ -8014,8 +8158,8 @@
     {
       "name": "Lunch, Kanto Freestyle",
       "x": 13,
-      "y": 733,
-      "sy": 281,
+      "y": 713,
+      "sy": 261,
       "w": 364,
       "h": 65,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
@@ -8107,8 +8251,8 @@
     {
       "name": "Grab to Makati",
       "x": 13,
-      "y": 798,
-      "sy": 346,
+      "y": 778,
+      "sy": 326,
       "w": 364,
       "h": 65,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
@@ -8200,8 +8344,8 @@
     {
       "name": "Mercury Drug",
       "x": 13,
-      "y": 863,
-      "sy": 411,
+      "y": 843,
+      "sy": 391,
       "w": 364,
       "h": 65,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
@@ -8293,8 +8437,8 @@
     {
       "name": "Meralco February bill",
       "x": 13,
-      "y": 928,
-      "sy": 476,
+      "y": 908,
+      "sy": 456,
       "w": 364,
       "h": 65,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
@@ -8408,8 +8552,8 @@
     {
       "name": "Palengke, Marikina market",
       "x": 13,
-      "y": 993,
-      "sy": 541,
+      "y": 973,
+      "sy": 521,
       "w": 364,
       "h": 65,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
@@ -8539,8 +8683,8 @@
     {
       "name": "Netflix Standard",
       "x": 13,
-      "y": 1058,
-      "sy": 606,
+      "y": 1038,
+      "sy": 586,
       "w": 364,
       "h": 65,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
@@ -8632,8 +8776,8 @@
     {
       "name": "Move to emergency fund",
       "x": 13,
-      "y": 1123,
-      "sy": 671,
+      "y": 1103,
+      "sy": 651,
       "w": 364,
       "h": 65,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
@@ -8749,8 +8893,8 @@
     {
       "name": "Dinner, Manam",
       "x": 13,
-      "y": 1188,
-      "sy": 736,
+      "y": 1168,
+      "sy": 716,
       "w": 364,
       "h": 65,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
@@ -8864,8 +9008,8 @@
     {
       "name": "Logo design, Kapé Co.",
       "x": 13,
-      "y": 1253,
-      "sy": 801,
+      "y": 1233,
+      "sy": 781,
       "w": 364,
       "h": 65,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
@@ -8957,8 +9101,8 @@
     {
       "name": "PLDT Fibr",
       "x": 13,
-      "y": 1318,
-      "sy": 866,
+      "y": 1298,
+      "sy": 846,
       "w": 364,
       "h": 65,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
@@ -9072,8 +9216,8 @@
     {
       "name": "S&R bulk run",
       "x": 13,
-      "y": 1383,
-      "sy": 931,
+      "y": 1363,
+      "sy": 911,
       "w": 364,
       "h": 65,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
@@ -9187,8 +9331,8 @@
     {
       "name": "Shell V-Power",
       "x": 13,
-      "y": 1448,
-      "sy": 996,
+      "y": 1428,
+      "sy": 976,
       "w": 364,
       "h": 65,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
@@ -9280,8 +9424,8 @@
     {
       "name": "Spotify Duo",
       "x": 13,
-      "y": 1513,
-      "sy": 1061,
+      "y": 1493,
+      "sy": 1041,
       "w": 364,
       "h": 65,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
@@ -9373,8 +9517,8 @@
     {
       "name": "Water refill, 4 gallons",
       "x": 13,
-      "y": 1578,
-      "sy": 1126,
+      "y": 1558,
+      "sy": 1106,
       "w": 364,
       "h": 65,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
@@ -9504,8 +9648,8 @@
     {
       "name": "Coffee, Yardstick",
       "x": 13,
-      "y": 1643,
-      "sy": 1191,
+      "y": 1623,
+      "sy": 1171,
       "w": 364,
       "h": 65,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
@@ -9597,8 +9741,8 @@
     {
       "name": "Yaya salary, Feb 16–28",
       "x": 13,
-      "y": 1708,
-      "sy": 1256,
+      "y": 1688,
+      "sy": 1236,
       "w": 364,
       "h": 65,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
@@ -9728,8 +9872,8 @@
     {
       "name": "Household fund, March",
       "x": 13,
-      "y": 1773,
-      "sy": 1321,
+      "y": 1753,
+      "sy": 1301,
       "w": 364,
       "h": 65,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
@@ -9859,8 +10003,8 @@
     {
       "name": "March rent",
       "x": 13,
-      "y": 1838,
-      "sy": 1386,
+      "y": 1818,
+      "sy": 1366,
       "w": 364,
       "h": 64,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
