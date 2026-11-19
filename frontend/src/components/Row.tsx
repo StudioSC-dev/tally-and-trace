@@ -28,6 +28,11 @@ interface RowProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
   /** The one meta line under the title: short facts as sibling spans, cut to one line unless `wrap` is set. */
   meta?: ReactNode
   /**
+   * The record's status (a `StatusText`, which never shrinks or wraps), first on the meta line and outside the text
+   * that is cut, so the word always shows in full; the facts after it are cut instead.
+   */
+  status?: ReactNode
+  /**
    * More meta lines, each its own `row-meta` line under the first: content that needs a line of its own
    * (a description, a warning, a decision to make). Each wraps. Falsy entries are skipped.
    */
@@ -48,7 +53,7 @@ interface RowProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
  * controls, then the amount. A row with one meta line is 56px between rules on desktop and 64px
  * on a phone. Click, keyboard and ARIA attributes pass through to the `<article>`.
  */
-export function Row({ title, badges, tags = [], meta, details = [], actions, amount, kind, wrap = false, className = '', ...rest }: RowProps) {
+export function Row({ title, badges, tags = [], meta, status, details = [], actions, amount, kind, wrap = false, className = '', ...rest }: RowProps) {
   const lines = details.filter((d) => d !== undefined && d !== null && d !== false && d !== '')
   const lineRef = useRef<HTMLDivElement>(null)
   const rulerRef = useRef<HTMLSpanElement>(null)
@@ -97,7 +102,7 @@ export function Row({ title, badges, tags = [], meta, details = [], actions, amo
   const cut = wrap ? 'break-words' : 'truncate'
   return (
     <article
-      className={`block rounded-none border-b border-line px-4 py-3 last:border-b-0 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ink sm:py-2 ${className}`}
+      className={`block rounded-none border-b border-line px-4 py-3 last:border-b-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent sm:py-2 ${className}`}
       {...rest}
       data-testid="row"
       data-row-kind={kind}
@@ -146,10 +151,17 @@ export function Row({ title, badges, tags = [], meta, details = [], actions, amo
               </span>
             )}
           </div>
-          {meta !== undefined && (
-            <p data-testid="row-meta" className={`${cut} space-x-3 text-xs text-muted`}>
-              {meta}
-            </p>
+          {status !== undefined ? (
+            <div data-testid="row-meta" className="flex min-w-0 items-center gap-3 text-xs text-muted">
+              {status}
+              {meta !== undefined && <p className={`${cut} min-w-0 space-x-3`}>{meta}</p>}
+            </div>
+          ) : (
+            meta !== undefined && (
+              <p data-testid="row-meta" className={`${cut} space-x-3 text-xs text-muted`}>
+                {meta}
+              </p>
+            )
           )}
           {open && hidden.length > 0 && (
             <div id={restId} data-testid="row-meta" data-row-tags-rest className="mt-1 flex flex-wrap items-center gap-1.5">

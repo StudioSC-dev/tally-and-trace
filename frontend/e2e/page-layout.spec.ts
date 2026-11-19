@@ -100,7 +100,7 @@ async function open(page: Page, r: Pick<PageCase, 'path' | 'title' | 'lands'>, d
 }
 
 /** The route's root: the one element <main> renders the page into. */
-const pageRoot = (page: Page): Locator => page.locator('main .fade-in > *')
+const pageRoot = (page: Page): Locator => page.locator('main [data-route-root] > *')
 
 /**
  * The top of the first block under the title: the next of the header's own rows (controls that wrapped under the
@@ -109,7 +109,7 @@ const pageRoot = (page: Page): Locator => page.locator('main .fade-in > *')
 const nextBlockTop = (page: Page): Promise<number | null> =>
   page.locator('main h1').evaluate((h1) => {
     const titleBottom = h1.getBoundingClientRect().bottom
-    const root = document.querySelector('main .fade-in > *')
+    const root = document.querySelector('main [data-route-root] > *')
     const header = root ? [...root.children].find((c) => c.contains(h1)) : undefined
     if (!root || !header) return null
     const blocks = [...[...header.children].filter((c) => !c.contains(h1)), ...[...root.children].filter((c) => c !== header)]
@@ -201,7 +201,7 @@ for (const r of ROUTES) {
     const title = await boxOf(page.locator('main h1'))
     if (testInfo.project.name === 'phone') {
       expect(title.x, `the ${r.name} title's left edge is the 12px phone gutter`).toBe(GUTTER.phone)
-      const widths = await page.evaluate(() => ({ doc: document.documentElement.scrollWidth, root: document.querySelector('main .fade-in > *')?.scrollWidth ?? 0 }))
+      const widths = await page.evaluate(() => ({ doc: document.documentElement.scrollWidth, root: document.querySelector('main [data-route-root] > *')?.scrollWidth ?? 0 }))
       expect(widths.doc, `the ${r.name} page never scrolls sideways (document scrollWidth)`).toBeLessThanOrEqual(390)
       expect(widths.root, `the ${r.name} page content fits the viewport (page scrollWidth)`).toBeLessThanOrEqual(390)
     } else {

@@ -2,6 +2,7 @@ import { creditCheckKey, formatEntryDate, isLimitedEvent } from '@tally-trace/sh
 import type { CardCharges, CreditCheck, FullCharge, LimitedCharge, MissedCharge } from '@tally-trace/shared'
 import { CreditCheckBadge, CreditSummary } from '../CreditSummary'
 import { estimateText, estimateTitle } from '../../utils/fx'
+import { StatusText } from '../StatusText'
 
 interface Props {
   /** `DashboardSnapshot.card_charges`: one section per card the caller holds a direct role on. */
@@ -121,7 +122,7 @@ export function CardChargesPanel({ cards }: Props) {
                             {dayText(charge)} · Shared item
                           </p>
                         </div>
-                        {charge.overdue && <span className="badge badge-danger flex-shrink-0" data-testid="card-charge-overdue">Overdue</span>}
+                        {charge.overdue && <StatusText tone="danger" className="flex-shrink-0" data-testid="card-charge-overdue">Overdue</StatusText>}
                       </li>
                     )
                   }
@@ -138,7 +139,12 @@ export function CardChargesPanel({ cards }: Props) {
                         <p className="text-sm font-medium text-ink">{charge.name}</p>
                         <p className="text-xs text-muted">
                           {dayText(charge)} · <span data-testid="card-charge-kind">{KIND_LABELS[charge.kind]}</span>
-                          {charge.overdue && <span className="text-danger" data-testid="card-charge-overdue"> · Overdue</span>}
+                          {charge.overdue && (
+                            <>
+                              {' · '}
+                              <StatusText tone="danger" data-testid="card-charge-overdue">Overdue</StatusText>
+                            </>
+                          )}
                         </p>
                         {check && <CreditCheckBadge check={check} />}
                       </div>

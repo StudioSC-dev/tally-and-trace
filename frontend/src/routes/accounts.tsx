@@ -13,6 +13,7 @@ import { balanceClass, formatBalance } from '../utils/amount'
 import { LoanActions, LoanDueDates, LoanSettlement, LoanSummary } from '../components/LoanPanel'
 import { TagChips } from '../components/TagChips'
 import { PageHeader } from '../components/PageHeader'
+import { EmptyState } from '../components/EmptyState'
 import { TagFilter } from '../components/TagFilter'
 import { TagPicker } from '../components/TagPicker'
 import { AccountRoleBadge } from '../components/AccountRoleBadge'
@@ -72,9 +73,9 @@ function AccountCard({ account, credit, creditPhase, sharedWith, onOpen }: {
 }) {
   const managed = servesCredit(account)
   return (
-    <article className={`card p-4 sm:p-5 transition-colors duration-200 ${isAccountActive(account) ? '' : 'opacity-60'}`}>
+    <article className={`card p-4 sm:p-5 ${isAccountActive(account) ? '' : 'opacity-60'}`}>
       <div
-        className="cursor-pointer hover:bg-sunken focus-ring"
+        className="cursor-pointer focus-ring"
         onClick={() => onOpen(account)}
         role="button"
         tabIndex={0}
@@ -848,12 +849,14 @@ export function AccountsPage() {
         </div>
       )}
       {orderedAccounts.length === 0 ? (
-        loadError ? null : (
-        <div className="card p-6 text-center text-muted">
-          {selectedTag === undefined
-            ? 'No accounts yet. Start by adding your first account.'
-            : 'No accounts have this tag.'}
-        </div>
+        loadError ? null : selectedTag === undefined ? (
+          <EmptyState
+            message="No accounts yet. Start by adding your first account."
+            action={{ label: 'Add your first account', onClick: () => setIsCreateModalOpen(true) }}
+          />
+        ) : (
+          // A filter result, not an empty list: it stays as it was.
+          <div className="card p-6 text-center text-muted">No accounts have this tag.</div>
         )
       ) : (
         <div className="hidden md:grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_160px] items-center gap-3 px-4 text-xs font-semibold text-muted -mb-4">

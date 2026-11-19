@@ -38,6 +38,7 @@ import type {
   BudgetEntry,
   BudgetEntryInput,
   CardCredit,
+  CardCharges,
   CardCreditDetail,
   CardStatementDue,
   CardStatements,
@@ -50,6 +51,7 @@ import type {
   EntryOccurrences,
   ForcedDateResult,
   FullBudgetEntry,
+  FullCharge,
   ForecastPeriod,
   FullTransaction,
   HouseholdDashboard,
@@ -916,6 +918,119 @@ export const emptyHousehold: HouseholdData = build({
   occurrences: [],
   allocations,
 })
+
+/** STU-692: the empty household before any account is added, so the Accounts page shows its empty state. */
+export const noAccountsHousehold: HouseholdData = build({
+  accounts: [],
+  transactions: [],
+  entries: [],
+  upcoming: [],
+  payables: [],
+  cardStatements: [],
+  occurrences: [],
+  allocations: [],
+})
+
+/** STU-692: the empty household with its accounts but no envelopes, so Budgets and Savings show their empty states. */
+export const noEnvelopesHousehold: HouseholdData = build({
+  accounts,
+  transactions: [],
+  entries: [],
+  upcoming: [],
+  payables: [],
+  cardStatements: [],
+  occurrences: [],
+  allocations: [],
+})
+
+const viewerPerms: AccountPermissions = {
+  can_edit_settings: false,
+  can_manage_shares: false,
+  can_add_transactions: false,
+  can_delete: false,
+  can_view_details: true,
+}
+
+/**
+ * STU-692: an empty household seen by a viewer. Every account is Jun's, shared with Mara to read only, so she owns
+ * none (no envelope can be created) and can add records to none (no recurring entry can be created).
+ */
+export const viewerEmptyHousehold: HouseholdData = build({
+  accounts: accounts.map((a) => ({ ...a, my_role: 'viewer', is_shared: null, owner_id: 2, owner_name: 'Jun R.', permissions: viewerPerms })),
+  transactions: [],
+  entries: [],
+  upcoming: [],
+  payables: [],
+  cardStatements: [],
+  occurrences: [],
+  allocations: [],
+})
+
+/** STU-692: the ids `withStatusStates` adds, for the specs that find its rows. */
+export const STATUS_STATE_IDS = {
+  pendingTransaction: 9301,
+  chargedTransaction: 9302,
+  autoPostOn: 9311,
+  autoPostOff: 9312,
+  notReviewed: 9313,
+  fullyPaid: 9314,
+} as const
+
+/**
+ * STU-692: a variant that shows every status state the household lacks. A payable due today (Due today), a pending
+ * Jollibee lunch dated today (Pending on the Transactions list), a Netflix charge the card took today and that is not
+ * posted yet (Charged in the Due card), and four card installments: auto-post on, off after a review, not reviewed,
+ * and one fully paid.
+ */
+export const withStatusStates = (data: HouseholdData): HouseholdData => {
+  const dueToday = payable({ due_date: data.today, name: 'Maynilad water', amount: 680, source: 'budget_entry', source_id: hmoEntry.id, occurrence_date: data.today, settlement: 'manual', can_mark_paid: true, kind: 'cash' })
+  const pending = tx(data.today, 'Jollibee, pending', 420, gcash, 23, 'debit', { id: STATUS_STATE_IDS.pendingTransaction, is_posted: false })
+  const charged = tx(data.today, 'Netflix Standard', 549, card, 27, 'debit', {
+    id: STATUS_STATE_IDS.chargedTransaction,
+    is_posted: false,
+    is_recurring: true,
+    budget_entry_id: netflixEntry.id,
+  })
+  const chargedOnCard: FullCharge = {
+    view: 'full',
+    date: data.today,
+    original_date: null,
+    overdue: false,
+    occurrence_date: null,
+    name: 'Netflix Standard',
+    kind: 'pending',
+    plan_kind: null,
+    source: 'transaction',
+    source_id: charged.id,
+    amount: 549,
+    currency: 'PHP',
+    can_mark_paid: false,
+    recurring: true,
+  }
+  const cardCharges: CardCharges = { account_id: card.id, account_name: card.name, currency: 'PHP', statement_cycle: true, missed: [], charges: [chargedOnCard] }
+  const installment = (id: number, name: string, extra: Partial<FullBudgetEntry>): FullBudgetEntry =>
+    entry(name, 'expense', 2500, '2026-03-20', card, { id, kind: 'installment', anchor_day: 20, end_mode: 'after_occurrences', max_occurrences: 10, occurrences_paid: 2, ...extra })
+  const installments = [
+    installment(STATUS_STATE_IDS.autoPostOn, 'Laptop, 12 months', { auto_post_enabled: true, installment_reviewed: true }),
+    installment(STATUS_STATE_IDS.autoPostOff, 'Aircon, 12 months', { auto_post_enabled: false, installment_reviewed: true }),
+    installment(STATUS_STATE_IDS.notReviewed, 'Washing machine, 12 months', { auto_post_enabled: false, installment_reviewed: false }),
+    installment(STATUS_STATE_IDS.fullyPaid, 'Rice cooker, 6 months', { max_occurrences: 0, occurrences_paid: 6, auto_post_enabled: true, installment_reviewed: true }),
+  ]
+  const unposted = [charged, ...data.due.unposted.items]
+  return {
+    ...data,
+    transactions: [pending, charged, ...data.transactions],
+    entries: [...data.entries, ...installments],
+    payables: [dueToday, ...data.payables],
+    snapshot: { ...data.snapshot, payables: [dueToday, ...data.snapshot.payables] },
+    due: {
+      ...data.due,
+      payables: [dueToday, ...data.due.payables],
+      card_charges: [...data.due.card_charges, cardCharges],
+      unposted: { ...data.due.unposted, items: unposted, total: unposted.length },
+    },
+  }
+}
 
 /** The busy month with every occurrence listed as Upcoming: the Upcoming tab's count badge reads 18, a two-digit count. */
 export const allUpcomingHousehold: HouseholdData = {
