@@ -98,7 +98,9 @@ def _attach_occurrence_counts(db: Session, entries: list) -> list:
     An installment is "n of m". Neither n nor m is a single stored field:
     ``max_occurrences`` is decremented on each materialisation (it means occurrences
     REMAINING, which is also how ``iter_occurrences`` reads it), and ``n`` isn't
-    stored at all because ``next_occurrence`` only moves forward. So n is recovered
+    stored at all: recording a payment moves ``next_occurrence`` on, and only a card
+    statement reconcile's unpost of the latest payment (STU-761) gives one back,
+    unlinking its row and adding it back to ``max_occurrences``. So n is recovered
     from the transactions that materialisation links back via ``budget_entry_id``,
     and the true total is ``n + remaining`` (computed on the client).
 

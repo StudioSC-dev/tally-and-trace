@@ -122,7 +122,8 @@ def run(db: Session, *, actor_user_id: int, card_id: int, statement: BankStateme
         db.rollback()
         return Outcome(REFUSED, refusal(exc))
     lines = [f"card: {card.id}", f"statement: closes {statement.header.close_date.isoformat()}"
-             f" (app: {loaded.view.close.isoformat()})", *describe(result)]
+             f" (app: {loaded.view.close.isoformat()})", *describe(result),
+             *(f"note: {scrub(note)}" for note in reconcile.unpost_notes(loaded, result))]
     if any(h.field == "close" for h in result.header):
         db.rollback()
         lines.append("refused: the statement's close is not the card's: change the card's "

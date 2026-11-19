@@ -1028,7 +1028,7 @@ def reconcile_account_statement(
     fx: FxRates = Depends(get_fx),
     idem: Idempotency = Depends(idempotency),
 ):
-    """Reconcile a savings, checking or e-wallet statement with the bank's (STU-753,
+    """Reconcile a savings, checking, e-wallet or cash statement with the bank's (STU-753,
     ``services/statement_reconcile_apply.py``). The statement always wins.
 
     Owner or admin of the account only (404 otherwise); 400 for a card (its
