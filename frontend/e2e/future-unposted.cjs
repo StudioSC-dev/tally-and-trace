@@ -1,4 +1,4 @@
-// Browser checks for STU-582: a future Transaction Date in the Add Transaction dialog
+// Browser checks for STU-582: a future Transaction Date in the Add transaction dialog
 // starts the row as not posted. "Mark as posted" starts ticked; when the user changes the
 // date to a day after the browser's local today, the box unticks, the posting date clears
 // and the amount fields swap exactly as unticking by hand does.
@@ -61,14 +61,14 @@ async function openPage(browser) {
   const native = d.trackNativeDialogs(page)
   await h.uiLogin(page, stack, user)
   await page.goto(`${stack.webUrl}/transactions`)
-  await page.getByRole('button', { name: 'Add Transaction' }).first().waitFor()
+  await page.getByRole('button', { name: 'Add transaction' }).first().waitFor()
   await h.waitQuiet(page)
   return { ctx, page, native }
 }
 
 async function openAdd(page) {
-  await page.getByRole('button', { name: 'Add Transaction' }).first().click()
-  const modal = formModal(page, 'Create Transaction')
+  await page.getByRole('button', { name: 'Add transaction' }).first().click()
+  const modal = formModal(page, 'Add transaction')
   await modal.waitFor()
   await h.waitQuiet(page)
   await pick(control(modal, 'account_id'), account.name)
@@ -114,7 +114,7 @@ async function scenarioA(browser) {
       return JSON.stringify(s) === JSON.stringify(byHand) || `${JSON.stringify(s)} vs by hand ${JSON.stringify(byHand)}`
     })
     await h.check('a.no-note-when-unticked', 'B', async () => (await noteOf(modal).count()) === 0 || 'note shown')
-    const sent = await save(page, modal, 'Create Transaction', isCreate, 'Future unposted')
+    const sent = await save(page, modal, 'Add transaction', isCreate, 'Future unposted')
     await h.check('a.payload-is-posted-false', 'B', async () => sent.is_posted === false || `is_posted ${sent.is_posted}`)
     await h.check('a.payload-no-posting-date', 'B', async () => !sent.posting_date || `posting_date ${sent.posting_date}`)
     // A past or same-day date does not untick the box.
@@ -144,7 +144,7 @@ async function scenarioB(browser) {
       const text = (await noteOf(modal).innerText()).trim()
       return text === NOTE || `text ${JSON.stringify(text)}`
     })
-    const sent = await save(page, modal, 'Create Transaction', isCreate, 'Future posted')
+    const sent = await save(page, modal, 'Add transaction', isCreate, 'Future posted')
     await h.check('b.payload-is-posted-true', 'B', async () => sent.is_posted === true || `is_posted ${sent.is_posted}`)
     await h.check('b.payload-date-is-future', 'B', async () => String(sent.transaction_date).startsWith(day(5)) || `transaction_date ${sent.transaction_date}`)
   } finally {
@@ -190,11 +190,11 @@ async function openEdit(page, description) {
   await row.waitFor()
   await h.waitQuiet(page)
   await row.click()
-  const actions = formModal(page, 'Transaction Actions')
+  const actions = formModal(page, 'Transaction actions')
   await actions.waitFor()
   await h.waitQuiet(page)
-  await actions.getByRole('button', { name: 'Edit Transaction', exact: true }).click()
-  const modal = formModal(page, 'Edit Transaction')
+  await actions.getByRole('button', { name: 'Edit transaction', exact: true }).click()
+  const modal = formModal(page, 'Edit transaction')
   await modal.waitFor()
   await h.waitQuiet(page)
   return modal
@@ -234,7 +234,7 @@ async function scenarioD(browser) {
     modal = await openEdit(page, 'Edit future posted')
     await h.check('d.reopen-loads-ticked-no-note', 'B', async () =>
       ((await postedBox(modal).isChecked()) && (await noteOf(modal).count()) === 0) || 'state leaked from the previous dialog')
-    const sent = await save(page, modal, 'Update Transaction', isUpdate)
+    const sent = await save(page, modal, 'Save changes', isUpdate)
     await h.check('d.untouched-save-stays-posted', 'B', async () => sent.is_posted === true || `is_posted ${sent.is_posted}`)
   } finally {
     await d.checkNoNativeDialogs(h, 'd', native)

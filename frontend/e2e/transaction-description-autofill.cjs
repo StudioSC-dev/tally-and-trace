@@ -1,4 +1,4 @@
-// Browser checks for STU-626: Add Transaction fills itself from the latest transaction with
+// Browser checks for STU-626: Add transaction fills itself from the latest transaction with
 // the same description. While Description is typed, the descriptions used before are listed
 // under it (most recent first); picking one, or leaving the field on an exact match (any
 // case), fills type, account, category, tags and a transfer's from and to accounts from the
@@ -65,11 +65,11 @@ const addDays = (day, n) => {
 const wire = (day) => `${day}T09:00:00`
 
 const formModal = (page, heading) => page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: heading, exact: true }) })
-const createModal = (page) => formModal(page, 'Create Transaction')
+const createModal = (page) => formModal(page, 'Add transaction')
 const control = (modal, key) => modal.locator(`[data-field="${key}"]`)
 const list = (modal) => modal.locator('[data-testid="description-suggestions"]')
 const options = (modal) => modal.locator('[data-testid="description-suggestion"]')
-const primaryOf = (modal) => modal.getByRole('button', { name: 'Create Transaction', exact: true })
+const primaryOf = (modal) => modal.getByRole('button', { name: 'Add transaction', exact: true })
 const anotherOf = (modal) => modal.locator('[data-testid="save-and-add-another"]')
 const rowFor = (page, description) => page.locator('article[data-transaction-id]').filter({ hasText: description }).first()
 const isSuggest = (r) => new URL(r.url()).pathname.endsWith('/transactions/description-suggestions')
@@ -155,14 +155,14 @@ async function openPage(browser, user, contextOptions = {}) {
   })
   await h.uiLogin(page, stack, user)
   await page.goto(`${stack.webUrl}/transactions`)
-  await page.getByRole('button', { name: 'Add Transaction' }).first().waitFor()
+  await page.getByRole('button', { name: 'Add transaction' }).first().waitFor()
   await h.waitQuiet(page)
   return { ctx, page, native, creates, suggests }
 }
 
 async function openAdd(page) {
   await h.waitQuiet(page)
-  await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+  await page.getByRole('button', { name: 'Add transaction' }).first().click()
   const modal = createModal(page)
   await modal.waitFor()
   await h.waitQuiet(page)
@@ -464,7 +464,7 @@ async function scenarioRepeat(browser) {
 
 // ─── edit ───────────────────────────────────────────────────────────────────
 async function scenarioEdit(browser) {
-  console.log('\n=== (edit) Edit Transaction never suggests or autofills')
+  console.log('\n=== (edit) Edit transaction never suggests or autofills')
   const seed = await seedUser('edit')
   await seedHistory(seed)
   await client.post(seed.user.token, '/transactions/', { amount: 50, is_posted: true, account_id: seed.bank.id,
@@ -476,11 +476,11 @@ async function scenarioEdit(browser) {
     const row = rowFor(page, 'Edit me')
     await row.waitFor()
     await row.click()
-    const actions = formModal(page, 'Transaction Actions')
+    const actions = formModal(page, 'Transaction actions')
     await actions.waitFor()
     await h.waitQuiet(page)
-    await actions.getByRole('button', { name: 'Edit Transaction', exact: true }).click()
-    const modal = formModal(page, 'Edit Transaction')
+    await actions.getByRole('button', { name: 'Edit transaction', exact: true }).click()
+    const modal = formModal(page, 'Edit transaction')
     await modal.waitFor()
     await h.waitQuiet(page)
     const before = await formState(modal)
@@ -895,7 +895,7 @@ async function scenarioTagsSlow(browser) {
       await gate
       return route.continue()
     })
-    await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+    await page.getByRole('button', { name: 'Add transaction' }).first().click()
     const modal = createModal(page)
     await modal.waitFor()
     await until(async () => held, (n) => n >= 1)

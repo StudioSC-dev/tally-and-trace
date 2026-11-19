@@ -103,7 +103,7 @@ const recurringRow = (page: Page, name: string): Locator =>
   page.locator('[data-testid^="kind-section-"]').getByTestId('row').filter({ has: page.locator('[data-row-title]', { hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) }) })
 
 /** The open recurring-entry edit dialog. */
-const editDialog = (page: Page): Locator => page.locator('form').filter({ has: page.getByRole('button', { name: 'Update Recurring Entry' }) })
+const editDialog = (page: Page): Locator => page.locator('form').filter({ has: page.getByRole('button', { name: 'Update recurring entry' }) })
 
 // ─── AC1 ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -257,8 +257,8 @@ async function openTransactions(page: Page): Promise<ApiMock> {
 /** The Transactions row for the transaction `id`. */
 const txRow = (page: Page, id: number): Locator => page.locator(`article[data-transaction-id="${id}"]`)
 
-/** The open Transaction Actions dialog. */
-const actionDialog = (page: Page): Locator => page.locator('.modal-backdrop').filter({ hasText: 'Transaction Actions' })
+/** The open Transaction actions dialog. */
+const actionDialog = (page: Page): Locator => page.locator('.modal-backdrop').filter({ hasText: 'Transaction actions' })
 
 test('no nested controls on the main pages: Transactions with a "+N" tag button', async ({ page }) => {
   await openTransactions(page)
@@ -447,7 +447,7 @@ for (const area of AREAS) {
       new MutationObserver((records) => {
         for (const r of records)
           for (const n of Array.from(r.addedNodes))
-            if (n instanceof Element && [n, ...Array.from(n.querySelectorAll('button'))].some((b) => b.textContent === 'Update Recurring Entry')) w.__opened()
+            if (n instanceof Element && [n, ...Array.from(n.querySelectorAll('button'))].some((b) => b.textContent === 'Update recurring entry')) w.__opened()
       }).observe(document.body, { childList: true, subtree: true })
     })
     // Netflix Standard draws no chip on its title line, so the chip is clicked on the first editable row that does.
@@ -510,13 +510,13 @@ for (const area of AREAS) {
     await page.exposeFunction('__opened', () => {
       opened += 1
     })
-    // Counts each time a Transaction Actions dialog is added to the page.
+    // Counts each time a Transaction actions dialog is added to the page.
     await page.evaluate(() => {
       const w = window as unknown as { __opened: () => void }
       new MutationObserver((records) => {
         for (const r of records)
           for (const n of Array.from(r.addedNodes))
-            if (n instanceof Element && [n, ...Array.from(n.querySelectorAll('h2'))].some((h) => h.tagName === 'H2' && h.textContent === 'Transaction Actions')) w.__opened()
+            if (n instanceof Element && [n, ...Array.from(n.querySelectorAll('h2'))].some((h) => h.tagName === 'H2' && h.textContent === 'Transaction actions')) w.__opened()
       }).observe(document.body, { childList: true, subtree: true })
     })
     // On a phone the overflowing row's chips all fold into its "+N", so the chip is clicked on the first row that draws one.

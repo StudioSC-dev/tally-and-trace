@@ -42,8 +42,8 @@ const isDelete = (id) => (r) => r.method() === 'DELETE' && pathOf(r.url()).endsW
 const posts = (log) => log.filter((r) => r.method === 'POST' && pathOf(r.url).endsWith('/allocations')).length
 const today = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)
 
-const budgetForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Create Budget Envelope' }) })
-const savingsForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Create Savings Tracker' }) })
+const budgetForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Create budget envelope' }) })
+const savingsForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Create savings tracker' }) })
 const field = (form, key) => form.locator(`[data-field="${key}"]`)
 const errorOf = (page, key) => page.locator(`[data-testid="field-error-${key}"]`)
 
@@ -63,7 +63,7 @@ async function openAllocations(browser, tab) {
 }
 
 async function openAddForm(page, formOf) {
-  await page.getByRole('button', { name: 'Add Allocation' }).click()
+  await page.getByRole('button', { name: 'Add allocation' }).click()
   const form = formOf(page)
   await form.waitFor()
   await h.waitQuiet(page)
@@ -143,7 +143,7 @@ async function scenarioA(browser) {
     const form = await openAddForm(page, budgetForm)
     await field(form, 'account_id').selectOption(String(bank.id))
     const before = posts(log)
-    await form.getByRole('button', { name: 'Create Budget Envelope' }).click()
+    await form.getByRole('button', { name: 'Create budget envelope' }).click()
     // Two fields fail the browser's check in this attempt; only the first is shown and focused.
     await h.check('a.two-invalid', 'S', async () => {
       const flagged = [
@@ -176,7 +176,7 @@ async function scenarioB(browser) {
     await field(form, 'name').fill('Dialog B Envelope')
     await field(form, 'target_amount').fill('1000')
     const before = posts(log)
-    await form.getByRole('button', { name: 'Create Budget Envelope' }).click()
+    await form.getByRole('button', { name: 'Create budget envelope' }).click()
     await checkGroupError(page, form, log, 'b', 'category_ids', 'Select at least one category for this budget envelope.', before)
     await h.check('b.choosing-clears', 'B', async () => {
       await pick(field(form, 'category_ids'), 'Utilities')
@@ -197,7 +197,7 @@ async function scenarioD(browser) {
     await fillValidBudget(form, 'Dialog D Envelope')
     await field(form, 'current_amount').fill('-5')
     const before = posts(log)
-    await form.getByRole('button', { name: 'Create Budget Envelope' }).click()
+    await form.getByRole('button', { name: 'Create budget envelope' }).click()
     await checkFieldError(page, form, log, 'd', 'current_amount', null, before)
     await h.check('d.browser-text', 'B', async () => {
       const [shown, browserText] = await Promise.all([
@@ -225,7 +225,7 @@ async function scenarioE(browser) {
     await fillValidBudget(form, 'Dialog E Envelope')
     await field(form, 'period_end').fill('2020-01-01')
     const before = posts(log)
-    await form.getByRole('button', { name: 'Create Budget Envelope' }).click()
+    await form.getByRole('button', { name: 'Create budget envelope' }).click()
     await checkFieldError(page, form, log, 'e', 'period_end', 'Budget end date must be after the start date.', before)
   } finally {
     await d.checkNoNativeDialogs(h, 'e', native)
@@ -243,7 +243,7 @@ async function scenarioF(browser) {
     await field(form, 'name').fill('Dialog F Tracker')
     await form.getByRole('button', { name: 'Combined account total' }).click()
     const before = posts(log)
-    await form.getByRole('button', { name: 'Create Savings Tracker' }).click()
+    await form.getByRole('button', { name: 'Create savings tracker' }).click()
     await checkGroupError(page, form, log, 'f', 'savings_account_ids', 'Choose at least one account to aggregate for this savings tracker.', before)
   } finally {
     await d.checkNoNativeDialogs(h, 'f', native)
@@ -261,7 +261,7 @@ async function scenarioG(browser) {
     await field(form, 'name').fill('Dialog G Tracker')
     await form.getByRole('button', { name: 'Savings transactions total' }).click()
     const before = posts(log)
-    await form.getByRole('button', { name: 'Create Savings Tracker' }).click()
+    await form.getByRole('button', { name: 'Create savings tracker' }).click()
     const line = page.locator('[data-testid="allocation-form-error"]')
     await h.check('g.line-shown', 'B', async () => {
       const shown = await line.waitFor({ timeout: 3000 }).then(() => true, () => false)
@@ -277,11 +277,11 @@ async function scenarioG(browser) {
       return gone || 'the line stayed after changing the goal mode'
     })
     await form.getByRole('button', { name: 'Savings transactions total' }).click()
-    await form.getByRole('button', { name: 'Create Savings Tracker' }).click()
+    await form.getByRole('button', { name: 'Create savings tracker' }).click()
     await line.waitFor({ timeout: 3000 }).catch(() => null)
     await h.check('g.saving-again-clears', 'B', async () => {
       await form.getByRole('button', { name: 'Target account balance' }).click()
-      await form.getByRole('button', { name: 'Create Savings Tracker' }).click()
+      await form.getByRole('button', { name: 'Create savings tracker' }).click()
       await page.getByLabel('Close allocation modal').waitFor({ state: 'detached', timeout: 5000 }).catch(() => null)
       return (await line.count()) === 0 || 'the line stayed'
     })

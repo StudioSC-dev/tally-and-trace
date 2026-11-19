@@ -100,9 +100,9 @@ async function uiLogin(page, u) {
 }
 
 const field = (form, key) => form.locator(`[data-field="${key}"]`)
-const budgetForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Create Budget Envelope' }) })
-const savingsForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Create Savings Tracker' }) })
-const editForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Update Allocation' }) })
+const budgetForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Create budget envelope' }) })
+const savingsForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Create savings tracker' }) })
+const editForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Update allocation' }) })
 const modal = (page) => page.getByLabel('Close allocation modal')
 const settle = async (page) => { await page.waitForLoadState('networkidle'); await page.waitForTimeout(400) }
 const cardNamed = (page, name) =>
@@ -132,7 +132,7 @@ async function openTab(page, tab) {
 }
 
 async function createBudget(page, bank, name, { start, end, amount = '1000', description } = {}) {
-  await page.getByRole('button', { name: 'Add Allocation' }).click()
+  await page.getByRole('button', { name: 'Add allocation' }).click()
   const form = budgetForm(page)
   await form.waitFor()
   await field(form, 'account_id').selectOption(String(bank.id))
@@ -144,13 +144,13 @@ async function createBudget(page, bank, name, { start, end, amount = '1000', des
   await field(form, 'period_start').fill(start)
   if (end) await field(form, 'period_end').fill(end)
   else await field(form, 'period_end').fill('')
-  await form.getByRole('button', { name: 'Create Budget Envelope' }).click()
+  await form.getByRole('button', { name: 'Create budget envelope' }).click()
   await modal(page).waitFor({ state: 'detached' })
   await settle(page)
 }
 
 async function createSavings(page, bank, name, { target, amount = '5000' } = {}) {
-  await page.getByRole('button', { name: 'Add Allocation' }).click()
+  await page.getByRole('button', { name: 'Add allocation' }).click()
   const form = savingsForm(page)
   await form.waitFor()
   await field(form, 'account_id').selectOption(String(bank.id))
@@ -159,7 +159,7 @@ async function createSavings(page, bank, name, { target, amount = '5000' } = {})
   // A savings card with no monthly target crashes the page today (null monthly_target); not this ticket's.
   await field(form, 'monthly_target').fill('100')
   await field(form, 'target_date').fill(target)
-  await form.getByRole('button', { name: 'Create Savings Tracker' }).click()
+  await form.getByRole('button', { name: 'Create savings tracker' }).click()
   await modal(page).waitFor({ state: 'detached' })
   await settle(page)
 }
@@ -297,7 +297,7 @@ async function unrelatedBudgetFieldsArePreserved(browser) {
   check('edit form: description', await form.locator('textarea').inputValue(), description)
   check('edit form: target_amount', await field(form, 'target_amount').inputValue(), '1500')
   check('edit form: account', await field(form, 'account_id').inputValue(), String(bank.id))
-  await form.getByRole('button', { name: 'Update Allocation' }).click()
+  await form.getByRole('button', { name: 'Update allocation' }).click()
   await modal(page).waitFor({ state: 'detached' })
   await settle(page)
   check('after an unchanged re-save: non-date fields', pickFields(await byName(user.token, name)), wanted)
@@ -306,7 +306,7 @@ async function unrelatedBudgetFieldsArePreserved(browser) {
   await ctx.close()
 }
 
-const updateButton = (form) => form.getByRole('button', { name: 'Update Allocation' })
+const updateButton = (form) => form.getByRole('button', { name: 'Update allocation' })
 async function saveEdit(page, form) {
   await updateButton(form).click()
   await modal(page).waitFor({ state: 'detached' })

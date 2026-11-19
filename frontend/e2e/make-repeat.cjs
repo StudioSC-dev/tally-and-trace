@@ -1,4 +1,4 @@
-// Browser checks for STU-585: "Make this repeat" in the Edit Transaction dialog. A saved
+// Browser checks for STU-585: "Make this repeat" in the Edit transaction dialog. A saved
 // transaction becomes the first occurrence of a new recurring entry, with the dialog's edits,
 // in one request (POST /transactions/{id}/repeat) that replaces the PUT.
 //
@@ -87,8 +87,8 @@ const entriesNamed = async (user, name) => {
   return (entries.items ?? entries).filter((e) => e.name === name)
 }
 
-/** `ready` is what the page shows once loaded: Add Transaction, or (a viewer with no account of their own has none) a row. */
-async function openPage(browser, user, contextOptions = {}, ready = (page) => page.getByRole('button', { name: 'Add Transaction' }).first()) {
+/** `ready` is what the page shows once loaded: Add transaction, or (a viewer with no account of their own has none) a row. */
+async function openPage(browser, user, contextOptions = {}, ready = (page) => page.getByRole('button', { name: 'Add transaction' }).first()) {
   const { ctx, page } = await h.newPage(browser, contextOptions)
   page.setDefaultTimeout(10000)
   const native = d.trackNativeDialogs(page)
@@ -101,13 +101,13 @@ async function openPage(browser, user, contextOptions = {}, ready = (page) => pa
   return { ctx, page, native, writes }
 }
 
-/** Opens a row's Transaction Actions modal. */
+/** Opens a row's Transaction actions modal. */
 async function openActions(page, description) {
   const row = rowFor(page, description)
   await row.waitFor()
   await h.waitQuiet(page)
   await row.click()
-  const actions = formModal(page, 'Transaction Actions')
+  const actions = formModal(page, 'Transaction actions')
   await actions.waitFor()
   await h.waitQuiet(page)
   return actions
@@ -115,8 +115,8 @@ async function openActions(page, description) {
 
 async function openEdit(page, description) {
   const actions = await openActions(page, description)
-  await actions.getByRole('button', { name: 'Edit Transaction', exact: true }).click()
-  const modal = formModal(page, 'Edit Transaction')
+  await actions.getByRole('button', { name: 'Edit transaction', exact: true }).click()
+  const modal = formModal(page, 'Edit transaction')
   await modal.waitFor()
   await h.waitQuiet(page)
   return modal
@@ -144,11 +144,11 @@ async function answerRepeat(page, status, body) {
   return state
 }
 
-/** Clicks Update Transaction and waits for the make-repeat POST it sends; returns its response. */
+/** Clicks Save changes and waits for the make-repeat POST it sends; returns its response. */
 async function update(page, modal) {
   const [response] = await Promise.all([
     page.waitForResponse(isRepeatPost),
-    modal.getByRole('button', { name: 'Update Transaction', exact: true }).click(),
+    modal.getByRole('button', { name: 'Save changes', exact: true }).click(),
   ])
   return response
 }
@@ -180,8 +180,8 @@ async function scenarioA(browser) {
   {
     const { ctx, page, native, writes } = await openPage(browser, owner)
     try {
-      await page.getByRole('button', { name: 'Add Transaction' }).first().click()
-      let modal = formModal(page, 'Create Transaction')
+      await page.getByRole('button', { name: 'Add transaction' }).first().click()
+      let modal = formModal(page, 'Add transaction')
       await modal.waitFor()
       await h.check('a.add-label-repeat', 'S', async () => (await toggleLabel(modal).innerText()).trim() === 'Repeat' || `label ${JSON.stringify(await toggleLabel(modal).innerText())}`)
       await cancel(page, modal)
@@ -237,7 +237,7 @@ async function scenarioA(browser) {
     try {
       const actions = await openActions(page, 'MR Coffee')
       await h.check('a.viewer-no-edit', 'B', async () =>
-        (await actions.getByRole('button', { name: 'Edit Transaction', exact: true }).count()) === 0 || 'viewer has Edit')
+        (await actions.getByRole('button', { name: 'Edit transaction', exact: true }).count()) === 0 || 'viewer has Edit')
     } finally {
       await d.checkNoNativeDialogs(h, 'a.viewer', native)
       await ctx.close()

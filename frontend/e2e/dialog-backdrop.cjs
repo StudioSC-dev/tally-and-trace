@@ -2,7 +2,7 @@
 // The shared overlay (`fixed inset-0 overflow-y-auto bg-scrim/60`) is a sibling inside `space-y-6`
 // containers on some pages, and that rule gave it a 24px margin-top, so the backdrop started 24px
 // down and the top nav stayed visible above it.
-//   accounts_backdrop_full_viewport: the Add Account dialog open, at 390x844 and 1280x800: the
+//   accounts_backdrop_full_viewport: the Add account dialog open, at 390x844 and 1280x800: the
 //       overlay's bounding box is x=0, y=0, the full viewport wide and tall, and the page's top
 //       nav is under it (elementFromPoint at the top edge hits the overlay).
 //   all_pages_backdrop_full_viewport: the same check for the transaction, account, recurring-entry,
@@ -55,9 +55,9 @@ const settle = (page) => page.evaluate(() => new Promise((r) => requestAnimation
 
 /** Every dialog on the shared overlay that opens from a page: where, how to open it. */
 const DIALOGS = [
-  { name: 'transaction', route: '/transactions', open: (p) => p.getByRole('button', { name: 'Add Transaction' }).first() },
-  { name: 'account', route: '/accounts', open: (p) => p.getByRole('button', { name: 'Add Account', exact: true }) },
-  { name: 'recurring', route: '/allocations', open: (p) => p.getByRole('button', { name: 'Add Recurring Entry' }) },
+  { name: 'transaction', route: '/transactions', open: (p) => p.getByRole('button', { name: 'Add transaction' }).first() },
+  { name: 'account', route: '/accounts', open: (p) => p.getByRole('button', { name: 'Add account', exact: true }) },
+  { name: 'recurring', route: '/allocations', open: (p) => p.getByRole('button', { name: 'Add recurring entry' }) },
   { name: 'category', route: '/settings', open: (p) => p.getByRole('button', { name: 'Add category', exact: true }) },
   { name: 'tag', route: '/settings', open: (p) => p.getByRole('button', { name: 'Add tag', exact: true }) },
 ]
@@ -142,7 +142,7 @@ function assertFull(m) {
 
 // ─── accounts_backdrop_full_viewport ───────────────────────────────────────
 async function accountsBackdropFullViewport(browser) {
-  console.log('\naccounts_backdrop_full_viewport: the Add Account dialog covers the viewport at 390x844 and 1280x800')
+  console.log('\naccounts_backdrop_full_viewport: the Add account dialog covers the viewport at 390x844 and 1280x800')
   const user = await seedUser('dba')
   for (const [sizeName, size] of Object.entries(SIZES)) {
     const { ctx, page } = await openPage(browser, user, size, '/accounts')

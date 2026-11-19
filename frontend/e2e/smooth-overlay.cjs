@@ -567,7 +567,7 @@ async function openTransactions(page) {
 }
 const dueRecurring = (page, name) => page.locator(`${tid('due-row')}[data-kind="recurring"]`).filter({ hasText: name })
 /** The transaction's row on the Transactions list. */
-const txnRow = (page, description) => page.locator('article[role="button"]').filter({ hasText: description }).first()
+const txnRow = (page, description) => page.locator('article[data-transaction-id]').filter({ hasText: description }).first()
 const saveToast = (page, description) => page.locator(tid('save-toast')).filter({ hasText: description })
 /** Waits (bounded) for the save toast naming `description` to be in `state`; true on arrival. */
 const waitToast = (page, description, state, ms = 10000) =>
@@ -575,8 +575,8 @@ const waitToast = (page, description, state, ms = 10000) =>
 
 /** Fills the create-transaction modal (an expense on `accountName`); returns the form. */
 async function createTransactionUI(page, { accountName, amount, description }) {
-  await page.getByRole('button', { name: 'Add Transaction' }).first().click()
-  const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Create Transaction' }) })
+  await page.getByRole('button', { name: 'Add transaction' }).first().click()
+  const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Add transaction' }) })
   await form.waitFor()
   await h.waitQuiet(page)
   await form.locator('input[placeholder="Add notes about this transaction"]').fill(description)
@@ -612,13 +612,13 @@ async function scenarioC(browser) {
   try {
     await h.uiLogin(page, stack, owner)
     await page.goto(`${stack.webUrl}/accounts`)
-    await page.getByRole('button', { name: 'Add Account' }).waitFor()
+    await page.getByRole('button', { name: 'Add account' }).waitFor()
     await h.waitQuiet(page)
-    await page.getByRole('button', { name: 'Add Account' }).click()
+    await page.getByRole('button', { name: 'Add account' }).click()
     await page.locator('input[placeholder="Enter account name"]').fill('Overlay C Wallet')
     await page.locator('input[type="number"][placeholder="0.00"]').first().fill('1234')
     reload = await h.gate(page, (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/accounts/') && new URL(r.url()).searchParams.get('limit') === '1000')
-    await page.getByRole('button', { name: 'Create Account' }).click()
+    await page.getByRole('button', { name: 'Create account' }).click()
     await h.check('c.reload-hit', 'S', async () => (await reload.waitHits(1)) || 'the list reload never started')
     await h.check('c.listed-account-kept', 'B', async () => (await page.getByText('Owner Checking').first().isVisible()) || 'the existing accounts left the page')
     await navLink(page, '/forecast').click()
@@ -902,7 +902,7 @@ async function scenarioG3(browser) {
     const form = await createTransactionUI(page, { accountName: 'Owner Checking', amount: 42, description: 'Overlay G3 new' })
     const snap = await h.gate(page, isDueSource)
     gates.push(snap)
-    await form.getByRole('button', { name: 'Create Transaction' }).click()
+    await form.getByRole('button', { name: 'Add transaction' }).click()
     await h.check('g3.form-closes-at-once', 'B', async () => (await h.expectAbsentFor(page, form, 300)) || 'the form is still open')
     await h.check('g3.reload-while-receipt-held', 'B', async () => ((await snap.waitHits(1, 5000)) && receipt.hits === 1) || `snapshot hits ${snap.hits}`)
     await h.check('g3.saved', 'B', async () => (await waitToast(page, 'Overlay G3 new', 'saved')) || 'no Saved toast')
@@ -1145,12 +1145,12 @@ async function scenarioS(browser) {
     await txnRow(page, 'Overlay S transfer').click()
     await h.check('s.lookup-hit', 'S', async () => (await lookup.waitHits(1)) || 'no destination lookup')
     await page.getByRole('button', { name: 'Close actions modal' }).click()
-    await h.check('s.modal-closes-while-held', 'B', async () => (await h.expectAbsentFor(page, page.getByRole('heading', { name: 'Transaction Actions' }), 500)) || 'modal still open')
+    await h.check('s.modal-closes-while-held', 'B', async () => (await h.expectAbsentFor(page, page.getByRole('heading', { name: 'Transaction actions' }), 500)) || 'modal still open')
     lookup.release({ disarm: true })
     await h.waitQuiet(page)
     await txnRow(page, 'Overlay S transfer').click()
     await page.getByRole('button', { name: 'Close actions modal' }).click()
-    await h.check('s.modal-closes', 'B', async () => (await h.expectAbsentFor(page, page.getByRole('heading', { name: 'Transaction Actions' }), 500)) || 'modal still open')
+    await h.check('s.modal-closes', 'B', async () => (await h.expectAbsentFor(page, page.getByRole('heading', { name: 'Transaction actions' }), 500)) || 'modal still open')
     await checkNoOverlay('s.no-overlay', page)
   } finally {
     lookup?.release({ disarm: true })
@@ -1458,7 +1458,7 @@ async function scenarioY(browser) {
       const query = main.search
       const rows = await client.get(u.token, `/transactions/${query}`)
       const expected = (Array.isArray(rows) ? rows : rows.items || []).map((t) => t.description).sort()
-      const shown = (await page.locator('article[role="button"]').allTextContents()).map((t) => t.replace(/\s+/g, ' '))
+      const shown = (await page.locator('article[data-transaction-id]').allTextContents()).map((t) => t.replace(/\s+/g, ' '))
       const ok = expected.length === shown.length && expected.every((d) => shown.some((t) => t.includes(d)))
       return (ok && expected.length === 2) || `api ${JSON.stringify(expected)} shown ${JSON.stringify(shown)} query ${query}`
     })

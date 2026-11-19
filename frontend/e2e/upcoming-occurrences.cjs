@@ -919,15 +919,15 @@ async function upcomingTabPlacement(browser) {
 
   const target = await showRow(page, page.locator('[data-testid="due-row"][data-kind="upcoming"]').filter({ hasText: 'M Row 1' }))
   await target.locator('[data-testid="upcoming-transaction"]').click()
-  const modal = page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: 'Transaction Actions', exact: true }) })
+  const modal = page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: 'Transaction actions', exact: true }) })
   const modalShown = await modal.waitFor({ timeout: 10000 }).then(() => true, () => false)
   check('(m) tapping a row opens the action modal', modalShown, true)
   if (modalShown) {
     await waitQuiet(page)
     check('(m) tapping a row opens the action modal with Edit, Delete and Post',
-      [await modal.getByRole('button', { name: 'Edit Transaction', exact: true }).count(), await modal.getByRole('button', { name: 'Delete Transaction', exact: true }).count(),
-        await modal.getByRole('button', { name: 'Mark as Posted', exact: true }).count()], [1, 1, 1])
-    await modal.getByRole('button', { name: 'Delete Transaction', exact: true }).click()
+      [await modal.getByRole('button', { name: 'Edit transaction', exact: true }).count(), await modal.getByRole('button', { name: 'Delete transaction', exact: true }).count(),
+        await modal.getByRole('button', { name: 'Mark as posted', exact: true }).count()], [1, 1, 1])
+    await modal.getByRole('button', { name: 'Delete transaction', exact: true }).click()
     const confirm = page.locator('[data-testid="confirm-dialog"]')
     if (await dialogOpened(confirm, '(m) Delete opened the in-app Confirm')) {
       await confirm.locator('[data-testid="confirm-dialog-confirm"]').click()

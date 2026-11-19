@@ -1,4 +1,4 @@
-// Browser checks for STU-584: Repeat in the Add Transaction dialog. The transaction being
+// Browser checks for STU-584: Repeat in the Add transaction dialog. The transaction being
 // added is recorded as the first occurrence of a new recurring entry, in one request.
 //
 // (a) "Netflix" posted today with Repeat monthly: exactly one POST, to
@@ -70,7 +70,7 @@ const repeatControl = (modal, key) => fields(modal).locator(`[data-field="${key}
 const linkLabel = (modal) => modal.getByText('Recurring entry (optional)', { exact: true })
 // The link select is the dialog's one select whose first option ("None") has an empty value.
 const linkSelect = (modal) => modal.locator('select:has(> option[value=""])')
-const rowFor = (page, description) => page.locator('article[role="button"]').filter({ hasText: description }).first()
+const rowFor = (page, description) => page.locator('article[data-transaction-id]').filter({ hasText: description }).first()
 const isApiPost = (r) => r.method() === 'POST' && r.url().includes('/api/v1/')
 /** Picks the link select's option whose text starts with `name`. */
 async function pickLink(modal, name) {
@@ -95,14 +95,14 @@ async function openPage(browser, user, contextOptions = {}) {
   page.on('request', (r) => { if (isApiPost(r)) posts.push({ path: pathOf(r), body: r.postDataJSON() }) })
   await h.uiLogin(page, stack, user)
   await page.goto(`${stack.webUrl}/transactions`)
-  await page.getByRole('button', { name: 'Add Transaction' }).first().waitFor()
+  await page.getByRole('button', { name: 'Add transaction' }).first().waitFor()
   await h.waitQuiet(page)
   return { ctx, page, native, posts }
 }
 
 async function openAdd(page, accountName) {
-  await page.getByRole('button', { name: 'Add Transaction' }).first().click()
-  const modal = formModal(page, 'Create Transaction')
+  await page.getByRole('button', { name: 'Add transaction' }).first().click()
+  const modal = formModal(page, 'Add transaction')
   await modal.waitFor()
   await h.waitQuiet(page)
   if (accountName) await pick(control(modal, 'account_id'), accountName)
@@ -175,7 +175,7 @@ async function scenarioA(browser) {
       return text.startsWith(`Monthly · day ${Number(day(0).slice(8))}`) || `preview ${JSON.stringify(text)}`
     })
     posts.length = 0
-    const response = await submit(page, modal, 'Create Transaction')
+    const response = await submit(page, modal, 'Add transaction')
     await modal.waitFor({ state: 'detached' })
     await h.waitQuiet(page)
     await h.check('a.created-201', 'B', async () => response.status() === 201 || `status ${response.status()}`)
@@ -289,7 +289,7 @@ async function scenarioC(browser) {
       return text === 'Charged monthly on each statement close (the 28th)' || `note ${JSON.stringify(text)}`
     })
     posts.length = 0
-    const response = await submit(page, modal, 'Create Transaction')
+    const response = await submit(page, modal, 'Add transaction')
     await modal.waitFor({ state: 'detached' })
     await h.waitQuiet(page)
     await h.check('c.created-201', 'B', async () => response.status() === 201 || `status ${response.status()} ${await response.text()}`)
@@ -325,7 +325,7 @@ async function scenarioD(browser) {
     })
     await fields(modal).locator('[data-testid="repeat-settlement"]').selectOption('autopay')
     posts.length = 0
-    const response = await submit(page, modal, 'Create Transaction')
+    const response = await submit(page, modal, 'Add transaction')
     await editRefused(page, modal, 'Rent past')
     await h.check('d.refused-422', 'B', async () => response.status() === 422 || `status ${response.status()}`)
     await h.check('d.reason-inline', 'B', async () => {
@@ -355,7 +355,7 @@ async function scenarioD(browser) {
     // A real 404 (a share revoked mid-form) is a refusal, not a missing endpoint.
     await fields(modal).locator('[data-testid="repeat-settlement"]').selectOption('manual')
     await answerRepeating(page, 404, { detail: 'Account not found' })
-    await submit(page, modal, 'Create Transaction')
+    await submit(page, modal, 'Add transaction')
     await editRefused(page, modal, 'Rent past')
     await h.check('d.404-reason-inline', 'B', async () => {
       const line = modal.locator('[data-testid="transaction-form-error"]')
@@ -370,7 +370,7 @@ async function scenarioD(browser) {
     // A refused Repeat field shows under its own control; an unknown one on the section line.
     for (const [field, key] of [['settlement', 'settlement'], ['cadence', 'cadence'], ['end_mode', 'end_mode']]) {
       await answerRepeating(page, 422, { detail: [{ loc: ['body', 'repeat', field], msg: `${field} refused`, type: 'value_error' }] })
-      await submit(page, modal, 'Create Transaction')
+      await submit(page, modal, 'Add transaction')
       await editRefused(page, modal, 'Rent past')
       await h.check(`d.${field}-error-on-control`, 'B', async () => {
         const error = modal.locator(`[data-testid="repeat-error-${key}"]`)
@@ -385,7 +385,7 @@ async function scenarioD(browser) {
       })
     }
     await answerRepeating(page, 422, { detail: [{ loc: ['body', 'repeat', 'lead_time_days'], msg: 'Extra inputs are not permitted', type: 'extra_forbidden' }] })
-    await submit(page, modal, 'Create Transaction')
+    await submit(page, modal, 'Add transaction')
     await editRefused(page, modal, 'Rent past')
     await h.check('d.unknown-field-on-section-line', 'B', async () => {
       const line = modal.locator('[data-testid="repeat-error"]')
@@ -414,7 +414,7 @@ async function scenarioD(browser) {
     await toggle(modal).check()
 
     const old = await h.failWith(page, (r) => r.method() === 'POST' && r.url().includes('/transactions/repeating'), 405, { times: 1 })
-    await submit(page, modal, 'Create Transaction')
+    await submit(page, modal, 'Add transaction')
     await editRefused(page, modal, 'Rent again')
     await h.check('d.unavailable-shown', 'B', async () => {
       await modal.locator('[data-testid="repeat-unavailable"]').waitFor({ timeout: 5000 })
@@ -440,11 +440,11 @@ async function openEdit(page, description) {
   await row.waitFor()
   await h.waitQuiet(page)
   await row.click()
-  const actions = formModal(page, 'Transaction Actions')
+  const actions = formModal(page, 'Transaction actions')
   await actions.waitFor()
   await h.waitQuiet(page)
-  await actions.getByRole('button', { name: 'Edit Transaction', exact: true }).click()
-  const modal = formModal(page, 'Edit Transaction')
+  await actions.getByRole('button', { name: 'Edit transaction', exact: true }).click()
+  const modal = formModal(page, 'Edit transaction')
   await modal.waitFor()
   await h.waitQuiet(page)
   return modal

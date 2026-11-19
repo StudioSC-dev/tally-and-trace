@@ -136,7 +136,7 @@ const endChip = (page: Page, name: string): Locator =>
   card(page, name).locator('span').filter({ hasText: /^\s*Ends\s+\S/ })
 
 const editForm = (page: Page): Locator =>
-  page.locator('form').filter({ has: page.getByRole('button', { name: 'Update Allocation' }) })
+  page.locator('form').filter({ has: page.getByRole('button', { name: 'Update allocation' }) })
 
 async function openEdit(page: Page, name: string): Promise<Locator> {
   await card(page, name).click()
@@ -156,7 +156,7 @@ const DATE_KEYS = ['target_date', 'period_start', 'period_end']
 const day = (value: unknown): string => String(value).slice(0, 10)
 
 async function save(form: Locator): Promise<void> {
-  await form.getByRole('button', { name: 'Update Allocation' }).click()
+  await form.getByRole('button', { name: 'Update allocation' }).click()
   await expect(form).toBeHidden()
 }
 
@@ -249,7 +249,7 @@ test.describe('allocation dates on edit', () => {
 
     const form = await openEdit(page, budget.name)
     await field(form, 'period_start').fill('')
-    await form.getByRole('button', { name: 'Update Allocation' }).click()
+    await form.getByRole('button', { name: 'Update allocation' }).click()
 
     const error = page.getByTestId('field-error-period_start')
     await expect(error).toBeVisible()

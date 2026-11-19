@@ -108,14 +108,14 @@ async function openTransactions(browser, user = owner, contextOptions = {}) {
   })
   await h.uiLogin(page, stack, user)
   await page.goto(`${stack.webUrl}/transactions`)
-  await page.getByRole('button', { name: 'Add Transaction' }).first().waitFor()
+  await page.getByRole('button', { name: 'Add transaction' }).first().waitFor()
   await h.waitQuiet(page)
   return { ctx, page, native, creates }
 }
 
 async function openAddForm(page) {
-  await page.getByRole('button', { name: 'Add Transaction' }).first().click()
-  const modal = formModal(page, 'Create Transaction')
+  await page.getByRole('button', { name: 'Add transaction' }).first().click()
+  const modal = formModal(page, 'Add transaction')
   await modal.waitFor()
   await h.waitQuiet(page)
   await control(modal, 'account_id').locator('button').first().waitFor()
@@ -123,7 +123,7 @@ async function openAddForm(page) {
 }
 
 const submit = async (page, modal) => {
-  await modal.getByRole('button', { name: 'Create Transaction', exact: true }).click()
+  await modal.getByRole('button', { name: 'Add transaction', exact: true }).click()
   await page.waitForTimeout(300)
   await h.waitQuiet(page)
 }
@@ -164,7 +164,7 @@ async function scenario3(browser) {
       await modal.getByRole('button', { name: 'Cancel', exact: true }).click()
       await client.post(small.user.token, '/accounts/', accountBody('S Ninth', 'cash'))
       await page.reload()
-      await page.getByRole('button', { name: 'Add Transaction' }).first().waitFor()
+      await page.getByRole('button', { name: 'Add transaction' }).first().waitFor()
       await h.waitQuiet(page)
       modal = await openAddForm(page)
       group = control(modal, 'account_id')
@@ -259,7 +259,7 @@ async function scenario4(browser) {
   try {
     await writeRecent(page, 'account', [acct['P Maya'].id, acct['P Cash'].id])
     await page.reload()
-    await page.getByRole('button', { name: 'Add Transaction' }).first().waitFor()
+    await page.getByRole('button', { name: 'Add transaction' }).first().waitFor()
     await h.waitQuiet(page)
     const modal = await openAddForm(page)
     const group = control(modal, 'account_id')
@@ -385,11 +385,11 @@ async function scenario6(browser) {
     await h.check('6.creates', 'S', async () => creates.length === 3 || `${creates.length} POST(s)`)
     // An edit that moves the row to another account.
     await page.locator('article[data-transaction-id]').filter({ hasText: 'Picker refused' }).first().click()
-    const actions = formModal(page, 'Transaction Actions')
+    const actions = formModal(page, 'Transaction actions')
     await actions.waitFor()
     await h.waitQuiet(page)
-    await actions.getByRole('button', { name: 'Edit Transaction', exact: true }).click()
-    const edit = formModal(page, 'Edit Transaction')
+    await actions.getByRole('button', { name: 'Edit transaction', exact: true }).click()
+    const edit = formModal(page, 'Edit transaction')
     await edit.waitFor()
     await h.waitQuiet(page)
     await pick(control(edit, 'account_id'), 'P Coins Wallet')
@@ -681,8 +681,8 @@ async function scenarioF1(browser) {
 // ---- PR 4: the allocation form (C6 tracked categories, C7 accounts to aggregate) ----
 
 const isAllocationCreate = (r) => r.method() === 'POST' && pathOf(r.url()).endsWith('/allocations')
-const budgetForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Create Budget Envelope' }) })
-const savingsForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Create Savings Tracker' }) })
+const budgetForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Create budget envelope' }) })
+const savingsForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Create savings tracker' }) })
 const headingsOf = (group) => group.locator('[data-picker-heading]').evaluateAll((els) => els.map((el) => el.textContent.trim()))
 
 async function openAllocationForm(browser, tab, formOf) {
@@ -701,7 +701,7 @@ async function openAllocationForm(browser, tab, formOf) {
   await h.waitQuiet(page)
   await page.getByRole('button', { name: tab, exact: true }).click()
   await h.waitQuiet(page)
-  await page.getByRole('button', { name: 'Add Allocation' }).click()
+  await page.getByRole('button', { name: 'Add allocation' }).click()
   const form = formOf(page)
   await form.waitFor()
   await h.waitQuiet(page)
@@ -739,7 +739,7 @@ async function scenarioG1(browser) {
     await field(form, 'account_id').selectOption(String(acct['P Bdo Savings'].id))
     await field(form, 'name').fill('Picker G1 envelope')
     await field(form, 'target_amount').fill('1000')
-    await form.getByRole('button', { name: 'Create Budget Envelope' }).click()
+    await form.getByRole('button', { name: 'Create budget envelope' }).click()
     await page.getByLabel('Close allocation modal').waitFor({ state: 'detached', timeout: 6000 }).catch(() => null)
     await h.check('g1.post-body-category-ids', 'B', async () => {
       const ids = creates.length === 1 ? (creates[0]?.configuration?.category_ids ?? null) : null
@@ -922,7 +922,7 @@ async function scenarioG2(browser) {
     await field(form, 'account_id').selectOption(String(acct['P Bdo Savings'].id))
     await field(form, 'name').fill('Picker G2 tracker')
     await field(form, 'target_amount').fill('5000')
-    await form.getByRole('button', { name: 'Create Savings Tracker' }).click()
+    await form.getByRole('button', { name: 'Create savings tracker' }).click()
     await page.getByLabel('Close allocation modal').waitFor({ state: 'detached', timeout: 6000 }).catch(() => null)
     await h.check('g2.post-body-account-ids', 'B', async () => {
       const ids = creates.length === 1 ? (creates[0]?.configuration?.account_ids ?? null) : null
@@ -945,7 +945,7 @@ async function scenarioG3(browser) {
     await field(form, 'target_amount').fill('1000')
     const group = control(form, 'category_ids')
     await toggleOf(group).click()
-    await form.getByRole('button', { name: 'Create Budget Envelope' }).click()
+    await form.getByRole('button', { name: 'Create budget envelope' }).click()
     const err = page.locator('[data-testid="field-error-category_ids"]')
     await err.waitFor({ timeout: 3000 }).catch(() => null)
     await h.check('g3.error-shown', 'B', async () => (await err.count()) === 1 || 'no category error')

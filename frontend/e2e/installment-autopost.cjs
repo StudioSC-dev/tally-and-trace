@@ -316,7 +316,7 @@ async function reviewWithDuplicate(browser) {
 
   // "Move the next date instead" opens the entry's edit form; Cancel comes back to the review.
   await testId(page, 'installment-review-move-date').click()
-  const update = page.getByRole('button', { name: 'Update Recurring Entry' })
+  const update = page.getByRole('button', { name: 'Update recurring entry' })
   if (!(await dialogOpened(update, '(a) "Move the next date instead" opened the edit form'))) return ctx.close()
   await waitQuiet(page)
   check('(a) the edit form replaced the review', await reviewDialog(page).count(), 0)
@@ -349,19 +349,19 @@ async function newFromTomorrow(browser) {
   const { ctx, page } = await newPage(browser)
   await uiLogin(page, me)
   await page.goto(`${stack.webUrl}/allocations`)
-  await page.getByRole('button', { name: 'Add Recurring Entry' }).waitFor()
+  await page.getByRole('button', { name: 'Add recurring entry' }).waitFor()
   await waitQuiet(page)
-  await page.getByRole('button', { name: 'Add Recurring Entry' }).click()
-  if (!(await dialogOpened(page.getByLabel('Close allocation modal'), 'Add Recurring Entry opened the form'))) return ctx.close()
+  await page.getByRole('button', { name: 'Add recurring entry' }).click()
+  if (!(await dialogOpened(page.getByLabel('Close allocation modal'), 'Add recurring entry opened the form'))) return ctx.close()
   await waitQuiet(page)
-  const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Save Recurring Entry' }) })
+  const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Save recurring entry' }) })
   await form.locator('input[type="text"]').first().fill('Camera')
   await form.locator('input[type="number"]').first().fill('4000')
   await form.locator('select').filter({ has: page.locator('option', { hasText: 'Select account' }) }).selectOption({ label: card.name })
   await form.locator('[data-field="next_occurrence"]').fill(`${tomorrow}T00:00`)
   await form.getByRole('button', { name: 'After runs', exact: true }).click()
   await form.locator('[data-field="max_occurrences"]').fill('6')
-  await form.getByRole('button', { name: 'Save Recurring Entry' }).click()
+  await form.getByRole('button', { name: 'Save recurring entry' }).click()
   await waitQuiet(page)
   check('(b) the form closed', await waitCount(page, page.getByLabel('Close allocation modal'), 0), 0)
   const created = (await get(me.token, '/budget-entries/?limit=100')).items.filter((e) => e.name === 'Camera')
@@ -511,7 +511,7 @@ async function allocationsAutoPost(browser) {
   const stateText = (page) => state(page).locator('[data-testid="installment-auto-post-state"]')
   const openAllocations = async (page) => {
     await page.goto(`${stack.webUrl}/allocations`)
-    await page.getByRole('button', { name: 'Add Recurring Entry' }).waitFor()
+    await page.getByRole('button', { name: 'Add recurring entry' }).waitFor()
     await waitQuiet(page)
   }
 
@@ -745,7 +745,7 @@ async function postOnOpen(browser) {
   // Away and back: a new mount, but nothing is postable now, so no request.
   const sent = watch.count()
   await page.goto(`${stack.webUrl}/allocations`)
-  await page.getByRole('button', { name: 'Add Recurring Entry' }).waitFor()
+  await page.getByRole('button', { name: 'Add recurring entry' }).waitFor()
   await waitQuiet(page)
   await openTransactions(page)
   await page.waitForTimeout(1500)

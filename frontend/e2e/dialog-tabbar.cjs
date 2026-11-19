@@ -1,6 +1,6 @@
 // Browser checks for STU-635: at a phone width the bottom tab bar (BottomNav) never covers a
 // dialog's fields or action buttons, with or without save toasts, and nothing else moves.
-//   phone_dialog_actions_clear: 390x844, no toasts, the Add Transaction dialog: every field
+//   phone_dialog_actions_clear: 390x844, no toasts, the Add transaction dialog: every field
 //       scrolled into view is unobscured by the tab bar, and at the end of the scroll every action
 //       button (centre and inset corners, elementFromPoint) is unobscured and takes a click.
 //   phone_all_dialogs_clear: the same check for the account, recurring-entry, category and tag
@@ -52,9 +52,9 @@ const settle = (page) => page.evaluate(() => new Promise((r) => requestAnimation
 
 /** Every dialog on the shared overlay that the suite opens: where, how to open, its overlay. */
 const DIALOGS = [
-  { name: 'transaction', route: '/transactions', open: (p) => p.getByRole('button', { name: 'Add Transaction' }).first() },
-  { name: 'account', route: '/accounts', open: (p) => p.getByRole('button', { name: 'Add Account', exact: true }) },
-  { name: 'recurring', route: '/allocations', open: (p) => p.getByRole('button', { name: 'Add Recurring Entry' }) },
+  { name: 'transaction', route: '/transactions', open: (p) => p.getByRole('button', { name: 'Add transaction' }).first() },
+  { name: 'account', route: '/accounts', open: (p) => p.getByRole('button', { name: 'Add account', exact: true }) },
+  { name: 'recurring', route: '/allocations', open: (p) => p.getByRole('button', { name: 'Add recurring entry' }) },
   { name: 'category', route: '/settings', open: (p) => p.getByRole('button', { name: 'Add category', exact: true }) },
   { name: 'tag', route: '/settings', open: (p) => p.getByRole('button', { name: 'Add tag', exact: true }) },
 ]
@@ -188,7 +188,7 @@ const toasts = (page) => page.locator(tid('save-toast'))
 const formOf = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: /^(Create|Update) Transaction$/ }) })
 
 async function fillCreate(page, { accountName, amount, description }) {
-  await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+  await page.getByRole('button', { name: 'Add transaction' }).first().click()
   const form = formOf(page)
   await form.waitFor()
   await form.locator('input[placeholder="Add notes about this transaction"]').fill(description)
@@ -206,7 +206,7 @@ async function createUI(page, opts) {
 
 // ─── phone_dialog_actions_clear ────────────────────────────────────────────
 async function phoneDialogActionsClear(browser) {
-  console.log('\nphone_dialog_actions_clear: 390x844, no toasts, the Add Transaction dialog')
+  console.log('\nphone_dialog_actions_clear: 390x844, no toasts, the Add transaction dialog')
   const { user } = await seedUser('dta')
   const { ctx, page } = await openPage(browser, user, PHONE)
   try {
@@ -235,7 +235,7 @@ async function phoneAllDialogsClear(browser) {
 
 // ─── phone_with_toasts_clear ───────────────────────────────────────────────
 async function phoneWithToastsClear(browser) {
-  console.log('\nphone_with_toasts_clear: 390x844, 2 saves pending, the Add Transaction dialog')
+  console.log('\nphone_with_toasts_clear: 390x844, 2 saves pending, the Add transaction dialog')
   const { user, checking } = await seedUser('dtc')
   const { ctx, page } = await openPage(browser, user, PHONE)
   try {

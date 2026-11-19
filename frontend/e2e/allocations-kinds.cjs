@@ -232,11 +232,11 @@ async function markPaidInstallment(browser) {
   await ctx.close()
 }
 
-/** Fills the Add Recurring Entry form for a card expense. */
+/** Fills the Add recurring entry form for a card expense. */
 async function fillForm(page, { name, amount, cardName, category }) {
-  await page.getByRole('button', { name: 'Add Recurring Entry' }).click()
+  await page.getByRole('button', { name: 'Add recurring entry' }).click()
   await editForm(page).waitFor()
-  const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Save Recurring Entry' }) })
+  const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Save recurring entry' }) })
   await form.locator('input[type="text"]').first().fill(name)
   await form.locator('input[type="number"]').first().fill(String(amount))
   await form.locator('select').filter({ has: page.locator('option', { hasText: 'Select account' }) }).selectOption({ label: cardName })
@@ -259,7 +259,7 @@ async function automaticUtilities(browser) {
   check('(c) open-ended options', await kind.locator('option').allInnerTexts(), [
     'Automatic (Utilities to bill)', 'Subscription', 'Bill',
   ])
-  await form.getByRole('button', { name: 'Save Recurring Entry' }).click()
+  await form.getByRole('button', { name: 'Save recurring entry' }).click()
   await editForm(page).waitFor({ state: 'detached' })
   await settle(page)
   check('(c) Water is under bills', await cardNamed(page, 'bill', 'Water').count(), 1)
@@ -277,12 +277,12 @@ async function cappedBill(browser) {
 
   await cardNamed(page, 'installment', 'Phone plan').click()
   await editForm(page).waitFor()
-  const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Update Recurring Entry' }) })
+  const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Update recurring entry' }) })
   const kind = form.getByTestId('recurring-kind')
   check('(d) capped options', await kind.locator('option').allInnerTexts(), ['Installment', 'Bill (amount varies)'])
   check('(d) opens on Installment', await kind.inputValue(), 'installment')
   await kind.selectOption('bill')
-  await form.getByRole('button', { name: 'Update Recurring Entry' }).click()
+  await form.getByRole('button', { name: 'Update recurring entry' }).click()
   await editForm(page).waitFor({ state: 'detached' })
   await settle(page)
   check('(d) Phone plan moved to bills', await cardNamed(page, 'bill', 'Phone plan').count(), 1)
@@ -290,11 +290,11 @@ async function cappedBill(browser) {
 
   await cardNamed(page, 'bill', 'Phone plan').click()
   await editForm(page).waitFor()
-  const again = page.locator('form').filter({ has: page.getByRole('button', { name: 'Update Recurring Entry' }) })
+  const again = page.locator('form').filter({ has: page.getByRole('button', { name: 'Update recurring entry' }) })
   const kindAgain = again.getByTestId('recurring-kind')
   check('(d) reopens on Bill', await kindAgain.inputValue(), 'bill')
   await kindAgain.selectOption('installment')
-  await again.getByRole('button', { name: 'Update Recurring Entry' }).click()
+  await again.getByRole('button', { name: 'Update recurring entry' }).click()
   await editForm(page).waitFor({ state: 'detached' })
   await settle(page)
   check('(d) Phone plan is back under installments', await cardNamed(page, 'installment', 'Phone plan').count(), 1)
@@ -325,7 +325,7 @@ async function chargedOnClose(browser) {
   check('(f) no day picker', await form.locator('select[data-field="day"]').count(), 0)
   const preview = await form.getByTestId('schedule-preview').innerText()
   check('(f) the preview starts on the close', preview.includes(`Next: ${fmt(expected)}, ${fmt(addMonths(expected, 1, closeDay))}`), true)
-  await form.getByRole('button', { name: 'Save Recurring Entry' }).click()
+  await form.getByRole('button', { name: 'Save recurring entry' }).click()
   await editForm(page).waitFor({ state: 'detached' })
   await settle(page)
   const list = await get(me.token, '/budget-entries/?limit=200')
@@ -337,10 +337,10 @@ async function chargedOnClose(browser) {
   // Reopened, the saved installment shows the same note, and a rename saves.
   await cardNamed(page, 'installment', 'Tablet plan').click()
   await editForm(page).waitFor()
-  const edit = page.locator('form').filter({ has: page.getByRole('button', { name: 'Update Recurring Entry' }) })
+  const edit = page.locator('form').filter({ has: page.getByRole('button', { name: 'Update recurring entry' }) })
   check('(f) the edit shows the note', await edit.getByTestId('installment-close-note').count(), 1)
   await edit.locator('input[type="text"]').first().fill('Tablet plan renamed')
-  await edit.getByRole('button', { name: 'Update Recurring Entry' }).click()
+  await edit.getByRole('button', { name: 'Update recurring entry' }).click()
   await editForm(page).waitFor({ state: 'detached' })
   await settle(page)
   check('(f) the rename saved', await cardNamed(page, 'installment', 'Tablet plan renamed').count(), 1)

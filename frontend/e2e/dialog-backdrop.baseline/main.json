@@ -9,7 +9,7 @@
       },
       "actions": [
         {
-          "label": "Create Transaction",
+          "label": "Add transaction",
           "x": 40,
           "y": 1154.5,
           "w": 110,
@@ -40,7 +40,7 @@
       },
       "actions": [
         {
-          "label": "Create Account",
+          "label": "Create account",
           "x": 41,
           "y": 888,
           "w": 148,
@@ -64,7 +64,7 @@
       },
       "actions": [
         {
-          "label": "Save Recurring Entry",
+          "label": "Save recurring entry",
           "x": 40,
           "y": 1782.5,
           "w": 310,
@@ -138,7 +138,7 @@
       },
       "actions": [
         {
-          "label": "Create Transaction",
+          "label": "Add transaction",
           "x": 376,
           "y": 1046,
           "w": 168,
@@ -169,7 +169,7 @@
       },
       "actions": [
         {
-          "label": "Create Account",
+          "label": "Create account",
           "x": 441,
           "y": 828,
           "w": 193,
@@ -193,7 +193,7 @@
       },
       "actions": [
         {
-          "label": "Save Recurring Entry",
+          "label": "Save recurring entry",
           "x": 328,
           "y": 1394,
           "w": 306,

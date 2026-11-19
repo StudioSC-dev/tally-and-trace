@@ -6,15 +6,15 @@
 //
 // Scenario (run at 390x844 and at 1280x800, each with its own user and card):
 //   a card closing on the 10th has an installment whose next charge is a coming 10th. In the
-//   form the closing day goes to the 24th and Update Account is pressed:
+//   form the closing day goes to the 24th and Update account is pressed:
 //     - the step opens with focus inside it, names "Installment #<id>" with its next charge
 //       before and after, offers Change closing day, and has no horizontal scroll
-//     - Cancel closes it, focus returns to Update Account and the API still has the 10th
-//     - Update Account again, then Change closing day: the form closes, the API has the 24th
+//     - Cancel closes it, focus returns to Update account and the API still has the 10th
+//     - Update account again, then Change closing day: the form closes, the API has the 24th
 //       and the installment's next charge is the 24th of the same month
 //     - the Installments tab on Transactions shows "Next charge" on that new date
 //
-// Escape closes the step and returns focus to Update Account.
+// Escape closes the step and returns focus to Update account.
 //
 // Two more scenarios, each on its own card at 1280x800:
 //   (history) an installment moves and an older posted charge sits on a statement the new day
@@ -169,7 +169,7 @@ async function scenario(browser, viewport) {
     await uiLogin(page, u)
     await openForm(page, card)
     await closeField(page).selectOption(String(NEW_CLOSE))
-    const update = page.getByRole('button', { name: 'Update Account', exact: true })
+    const update = page.getByRole('button', { name: 'Update account', exact: true })
     await update.click()
 
     const dialog = testId(page, 'close-day-dialog')
@@ -189,10 +189,10 @@ async function scenario(browser, viewport) {
     check(`(${tag}) the step fits the viewport width`, box !== null && box.x >= 0 && box.x + box.width <= viewport.width, true)
     check(`(${tag}) the API has changed nothing yet`, (await get(u.token, `/accounts/${card.id}`)).billing_cycle_start, OLD_CLOSE)
 
-    // Cancel: the step closes, focus returns to Update Account, nothing is saved.
+    // Cancel: the step closes, focus returns to Update account, nothing is saved.
     await testId(page, 'close-day-cancel').click()
     await dialog.waitFor({ state: 'detached' })
-    check(`(${tag}) Cancel returns focus to Update Account`, await update.evaluate((el) => el === document.activeElement), true)
+    check(`(${tag}) Cancel returns focus to Update account`, await update.evaluate((el) => el === document.activeElement), true)
     check(`(${tag}) the form is still open on the new day`, await closeField(page).inputValue(), String(NEW_CLOSE))
     check(`(${tag}) Cancel changed nothing`, (await get(u.token, `/accounts/${card.id}`)).billing_cycle_start, OLD_CLOSE)
 
@@ -201,7 +201,7 @@ async function scenario(browser, viewport) {
     await testId(page, 'close-day-confirm').waitFor()
     await page.keyboard.press('Escape')
     await dialog.waitFor({ state: 'detached' })
-    check(`(${tag}) Escape closes the step and returns focus to Update Account`, await update.evaluate((el) => el === document.activeElement), true)
+    check(`(${tag}) Escape closes the step and returns focus to Update account`, await update.evaluate((el) => el === document.activeElement), true)
 
     // Confirm.
     await update.click()
@@ -258,7 +258,7 @@ async function historyScenario(browser) {
     await uiLogin(page, u)
     await openForm(page, card)
     await closeField(page).selectOption(String(NEW_CLOSE))
-    await page.getByRole('button', { name: 'Update Account', exact: true }).click()
+    await page.getByRole('button', { name: 'Update account', exact: true }).click()
     const confirm = testId(page, 'close-day-confirm')
     await confirm.waitFor()
     check(`(${tag}) the step lists the past statement`, (await testId(page, 'close-day-history').locator('li').count()) > 0, true)
@@ -297,9 +297,9 @@ async function plainScenario(browser) {
       }).observe(document.body, { childList: true, subtree: true })
     })
     const saved = page.waitForResponse((r) => r.request().method() === 'PUT' && new URL(r.url()).pathname.endsWith(`/accounts/${card.id}`))
-    await page.getByRole('button', { name: 'Update Account', exact: true }).click()
+    await page.getByRole('button', { name: 'Update account', exact: true }).click()
     check(`(${tag}) the PUT answers 200`, (await saved).status(), 200)
-    await page.getByRole('button', { name: 'Update Account', exact: true }).waitFor({ state: 'detached' })
+    await page.getByRole('button', { name: 'Update account', exact: true }).waitFor({ state: 'detached' })
     await waitQuiet(page)
     check(`(${tag}) no step ever appeared`, await page.evaluate(() => window.__sawStep), false)
     // The dev server's StrictMode runs the check twice; every request is a dry run, none applies.

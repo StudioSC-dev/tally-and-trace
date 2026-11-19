@@ -1,18 +1,18 @@
 // Browser checks for STU-584 PR 6: Weekly and Every 2 weeks in the schedule fields that the
-// recurring entry form and Repeat in the Add Transaction dialog share.
+// recurring entry form and Repeat in the Add transaction dialog share.
 //
 // (a) the recurring entry form offers Weekly and Every 2 weeks and shows "Day of week" for
 //     them (not the month Day control); picking Friday on a Monday date moves the date forward
 //     to that Friday, never earlier; the preview reads "Every 2 weeks · Friday" with the next
 //     dates; it saves cadence biweekly with no day fields, and Allocations reads
 //     "Every 2 weeks · Friday";
-// (b) Repeat in Add Transaction offers both (and still not semi-monthly), shows the day of the
+// (b) Repeat in Add transaction offers both (and still not semi-monthly), shows the day of the
 //     week read-only, and the entry's first occurrence is the transaction's own day: the POST
 //     sends cadence biweekly with no day fields and the entry's next date is 14 days on;
 // (c) a card installment still shows "Charged monthly on each statement close" with no cadence
 //     choice and no Day of week, even when the form held Weekly, and saves monthly;
 // (c2) the same on a credit account with no statement cycle: monthly, no cadence choice;
-// (d) the link select in Add Transaction and the Transaction Actions modal read "Every 2 weeks";
+// (d) the link select in Add transaction and the Transaction actions modal read "Every 2 weeks";
 // (e) Delay all on a bi-weekly entry's missed payment previews "every 14 days".
 // Every scenario checks that no browser dialog fired.
 //
@@ -66,12 +66,12 @@ const futureMonday = () => {
 }
 const manilaToday = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)
 
-const addForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Save Recurring Entry' }) })
+const addForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Save recurring entry' }) })
 const field = (form, key) => form.locator(`[data-field="${key}"]`)
 const formModal = (page, heading) => page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: heading, exact: true }) })
 const toggle = (modal) => modal.locator('[data-testid="repeat-toggle"]')
 const fields = (modal) => modal.locator('[data-testid="repeat-fields"]')
-const rowFor = (page, description) => page.locator('article[role="button"]').filter({ hasText: description }).first()
+const rowFor = (page, description) => page.locator('article[data-transaction-id]').filter({ hasText: description }).first()
 const linkSelect = (modal) => modal.locator('select:has(> option[value=""])')
 const isApiPost = (r) => r.method() === 'POST' && r.url().includes('/api/v1/')
 const pathOf = (r) => new URL(r.url()).pathname.replace(/^\/api\/v1/, '').replace(/\/$/, '')
@@ -93,19 +93,19 @@ async function openPage(browser, user, path, ready, contextOptions = {}) {
   await h.waitQuiet(page)
   return { ctx, page, native, posts }
 }
-const onAllocations = (browser, user) => openPage(browser, user, '/allocations', (p) => p.getByRole('button', { name: 'Add Recurring Entry' }))
-const onTransactions = (browser, user) => openPage(browser, user, '/transactions', (p) => p.getByRole('button', { name: 'Add Transaction' }).first())
+const onAllocations = (browser, user) => openPage(browser, user, '/allocations', (p) => p.getByRole('button', { name: 'Add recurring entry' }))
+const onTransactions = (browser, user) => openPage(browser, user, '/transactions', (p) => p.getByRole('button', { name: 'Add transaction' }).first())
 
 async function openRecurringForm(page) {
-  await page.getByRole('button', { name: 'Add Recurring Entry' }).click()
+  await page.getByRole('button', { name: 'Add recurring entry' }).click()
   const form = addForm(page)
   await form.waitFor()
   await h.waitQuiet(page)
   return form
 }
 async function openAdd(page, accountName) {
-  await page.getByRole('button', { name: 'Add Transaction' }).first().click()
-  const modal = formModal(page, 'Create Transaction')
+  await page.getByRole('button', { name: 'Add transaction' }).first().click()
+  const modal = formModal(page, 'Add transaction')
   await modal.waitFor()
   await h.waitQuiet(page)
   if (accountName) await pick(field(modal, 'account_id'), accountName)
@@ -161,7 +161,7 @@ async function scenarioA(browser) {
     await weekday.selectOption({ label: 'Friday' })
     await h.check('a.same-weekday-stays', 'B', async () => (await date.inputValue()) === `${friday}T09:00` || `date ${await date.inputValue()}`)
     posts.length = 0
-    await form.getByRole('button', { name: 'Save Recurring Entry' }).click()
+    await form.getByRole('button', { name: 'Save recurring entry' }).click()
     await form.waitFor({ state: 'detached' })
     await h.waitQuiet(page)
     await h.check('a.saved-biweekly-without-day-fields', 'B', async () => {
@@ -183,9 +183,9 @@ async function scenarioA(browser) {
   }
 }
 
-// (b) Repeat in Add Transaction.
+// (b) Repeat in Add transaction.
 async function scenarioB(browser) {
-  console.log('\n=== (b) Repeat in Add Transaction offers Weekly and Every 2 weeks')
+  console.log('\n=== (b) Repeat in Add transaction offers Weekly and Every 2 weeks')
   const user = await h.makeUser(stack, 'wkb')
   const bank = await account(user, 'Rep Checking')
   const { ctx, page, native, posts } = await onTransactions(browser, user)
@@ -213,7 +213,7 @@ async function scenarioB(browser) {
     posts.length = 0
     const [response] = await Promise.all([
       page.waitForResponse((r) => r.request().method() === 'POST' && r.url().includes('/transactions')),
-      modal.getByRole('button', { name: 'Create Transaction', exact: true }).click(),
+      modal.getByRole('button', { name: 'Add transaction', exact: true }).click(),
     ])
     await modal.waitFor({ state: 'detached' })
     await h.waitQuiet(page)
@@ -262,7 +262,7 @@ async function scenarioC(browser) {
     await h.check('c.no-day-of-week-for-an-installment', 'B', async () =>
       (await form.locator('[data-testid="weekday-select"]').count()) === 0 || 'Day of week shown')
     posts.length = 0
-    await form.getByRole('button', { name: 'Save Recurring Entry' }).click()
+    await form.getByRole('button', { name: 'Save recurring entry' }).click()
     await form.waitFor({ state: 'detached' })
     await h.waitQuiet(page)
     await h.check('c.saved-monthly', 'B', async () => {
@@ -296,7 +296,7 @@ async function scenarioC2(browser) {
         (await form.locator('[data-testid="installment-close-note"]').count()) === 0) || 'cadence select or Day of week still shown'
     })
     posts.length = 0
-    await form.getByRole('button', { name: 'Save Recurring Entry' }).click()
+    await form.getByRole('button', { name: 'Save recurring entry' }).click()
     await form.waitFor({ state: 'detached' })
     await h.waitQuiet(page)
     await h.check('c2.saved-monthly', 'B', async () => {
@@ -312,7 +312,7 @@ async function scenarioC2(browser) {
 
 // (d) The link select and the action modal.
 async function scenarioD(browser) {
-  console.log('\n=== (d) the link select and the Transaction Actions modal read "Every 2 weeks"')
+  console.log('\n=== (d) the link select and the Transaction actions modal read "Every 2 weeks"')
   const user = await h.makeUser(stack, 'wkd')
   const bank = await account(user, 'Link Checking')
   const entry = await client.post(user.token, '/budget-entries/', {
@@ -336,7 +336,7 @@ async function scenarioD(browser) {
     await row.waitFor()
     await h.waitQuiet(page)
     await row.click()
-    const actions = formModal(page, 'Transaction Actions')
+    const actions = formModal(page, 'Transaction actions')
     await actions.waitFor()
     await h.check('d.action-modal-cadence-reads-every-2-weeks', 'B', async () => {
       const text = (await actions.innerText()).replace(/\s+/g, ' ')

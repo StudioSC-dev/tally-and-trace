@@ -2832,7 +2832,7 @@ export function TransactionsPage() {
           onClick={() => setIsCreateModalOpen(true)}
           className="w-full sm:w-auto mx-auto"
         >
-          Add Transaction
+          Add transaction
         </Button>
       )}
     </div>
@@ -2860,7 +2860,7 @@ export function TransactionsPage() {
             onClick={() => setIsCreateModalOpen(true)}
             className="w-full sm:w-auto justify-center"
           >
-            Add Transaction
+            Add transaction
           </Button>
         )}
       </PageHeader>
@@ -3322,7 +3322,7 @@ export function TransactionsPage() {
           >
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-xl font-semibold text-ink">Transaction Actions</h2>
+                <h2 className="text-xl font-semibold text-ink">Transaction actions</h2>
                 <p className="text-sm text-muted">
                   {transactionDescription(actionTransaction) || 'No description'}
                 </p>
@@ -3571,7 +3571,7 @@ export function TransactionsPage() {
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    Mark as Posted
+                    Mark as posted
                   </Button>
                   )
                 )}
@@ -3585,7 +3585,7 @@ export function TransactionsPage() {
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                           </svg>
-                  Edit Transaction
+                  Edit transaction
                         </Button>
                 )}
                 {actionPermissions.can_delete && (
@@ -3597,7 +3597,7 @@ export function TransactionsPage() {
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                           </svg>
-                  Delete Transaction
+                  Delete transaction
                         </Button>
                 )}
                       </div>
@@ -3732,7 +3732,7 @@ export function TransactionsPage() {
                       onClick={handleSavePostingForm}
                       disabled={actionLocked}
                     >
-                      Save Posted Amount
+                      Save posted amount
                     </Button>
                     <Button
                       variant="quiet"
@@ -3757,7 +3757,7 @@ export function TransactionsPage() {
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h2 className="text-xl font-semibold text-ink">
-              {editingTransaction ? 'Edit Transaction' : 'Create Transaction'}
+              {editingTransaction ? 'Edit transaction' : 'Add transaction'}
             </h2>
                 <p className="text-sm text-muted mt-1">
                   {formData.transaction_type === 'transfer'
@@ -3943,7 +3943,7 @@ export function TransactionsPage() {
                           }}
                           className="font-semibold text-ink underline-offset-2 hover:underline"
                         >
-                          Switch to Transfer
+                          Switch to transfer
                         </button>
                       )}
                     </div>
@@ -4338,7 +4338,7 @@ export function TransactionsPage() {
               </fieldset>
               <div className="flex flex-wrap gap-3 pt-2">
                 <Button variant="primary" type="submit" className="flex-1">
-                  {editingTransaction ? 'Update Transaction' : 'Create Transaction'}
+                  {editingTransaction ? 'Save changes' : 'Add transaction'}
                 </Button>
                 {!editingTransaction && (
                   <Button

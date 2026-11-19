@@ -71,12 +71,12 @@ const isDue = (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith(
 // ─── Locators ────────────────────────────────────────────────────────────────
 const formModal = (page, heading) =>
   page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: heading, exact: true }) })
-const createModal = (page) => formModal(page, 'Create Transaction')
+const createModal = (page) => formModal(page, 'Add transaction')
 const control = (modal, key) => modal.locator(`[data-field="${key}"]`)
 const fieldError = (modal, key) => modal.locator(`[data-testid="field-error-${key}"]`)
 const noticeOf = (modal) => modal.locator('[data-testid="transaction-saved-notice"]')
 const formErrorOf = (modal) => modal.locator('[data-testid="transaction-form-error"]')
-const primaryOf = (modal) => modal.getByRole('button', { name: 'Create Transaction', exact: true })
+const primaryOf = (modal) => modal.getByRole('button', { name: 'Add transaction', exact: true })
 const anotherOf = (modal) => modal.locator('[data-testid="save-and-add-another"]')
 const cancelOf = (modal) => modal.getByRole('button', { name: 'Cancel', exact: true })
 const postedBox = (modal) => modal.getByRole('checkbox', { name: 'Mark as posted' })
@@ -163,7 +163,7 @@ function watchCreates(page) {
 
 async function openAddForm(page) {
   await h.waitQuiet(page)
-  await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+  await page.getByRole('button', { name: 'Add transaction' }).first().click()
   const modal = createModal(page)
   await modal.waitFor()
   await h.waitQuiet(page)
@@ -190,7 +190,7 @@ async function openPage(browser, user, scenario, { dialog = true } = {}) {
   })
   await h.uiLogin(page, stack, user)
   await page.goto(`${stack.webUrl}/transactions`)
-  await page.getByRole('button', { name: 'Add Transaction' }).first().waitFor()
+  await page.getByRole('button', { name: 'Add transaction' }).first().waitFor()
   await h.waitQuiet(page)
   const modal = dialog ? await openAddForm(page) : null
   await h.waitQuiet(page)
@@ -786,15 +786,15 @@ async function scenarioF(browser) {
     await rowFor(page, 'Edit me').waitFor()
     await h.waitQuiet(page)
     await rowFor(page, 'Edit me').click()
-    const actions = formModal(page, 'Transaction Actions')
+    const actions = formModal(page, 'Transaction actions')
     await actions.waitFor()
     await h.waitQuiet(page)
-    await actions.getByRole('button', { name: 'Edit Transaction', exact: true }).click()
-    const modal = formModal(page, 'Edit Transaction')
+    await actions.getByRole('button', { name: 'Edit transaction', exact: true }).click()
+    const modal = formModal(page, 'Edit transaction')
     await modal.waitFor()
     await h.waitQuiet(page)
     await h.check('f.update-button', 'G', async () =>
-      (await modal.getByRole('button', { name: 'Update Transaction', exact: true }).count()) === 1 || 'no Update Transaction button')
+      (await modal.getByRole('button', { name: 'Save changes', exact: true }).count()) === 1 || 'no Save changes button')
     await h.check('f.no-add-another', 'G', async () => {
       const [button, notice] = [await anotherOf(modal).count(), await noticeOf(modal).count()]
       return (button === 0 && notice === 0) || `add-another buttons ${button}, status elements ${notice}`
@@ -972,7 +972,7 @@ async function scenarioI1(browser) {
     await hold.waitHits(1)
     await cancelOf(modal).click()
     await modal.waitFor({ state: 'detached', timeout: 5000 }).catch(() => {})
-    await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+    await page.getByRole('button', { name: 'Add transaction' }).first().click()
     const again = createModal(page)
     await again.waitFor()
     await control(again, 'description').fill('Fresh')
@@ -1024,7 +1024,7 @@ async function scenarioI2(browser) {
     await hold.waitHits(1)
     await cancelOf(modal).click()
     await modal.waitFor({ state: 'detached', timeout: 5000 }).catch(() => {})
-    await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+    await page.getByRole('button', { name: 'Add transaction' }).first().click()
     const again = createModal(page)
     await again.waitFor()
     await control(again, 'description').fill('Fresh')
@@ -1081,7 +1081,7 @@ async function scenarioJ(browser) {
       return (got.dialog === 0 && got.earlier > 0 && got.overlay === false) || JSON.stringify(got)
     })
     await h.check('j.page-takes-input', 'B', async () => {
-      await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+      await page.getByRole('button', { name: 'Add transaction' }).first().click()
       const ok = await createModal(page).waitFor({ timeout: 3000 }).then(() => true, () => false)
       if (ok) await cancelOf(createModal(page)).click()
       return ok || 'the Create dialog did not open while the refresh was held'
@@ -1115,7 +1115,7 @@ async function scenarioK(browser) {
     await postGate.waitHits(1)
     await cancelOf(modal).click()
     await modal.waitFor({ state: 'detached', timeout: 5000 }).catch(() => {})
-    await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+    await page.getByRole('button', { name: 'Add transaction' }).first().click()
     const again = createModal(page)
     await again.waitFor()
     await fillEntry(again, 'Fresh', 25)

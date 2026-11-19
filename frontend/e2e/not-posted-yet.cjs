@@ -220,7 +220,7 @@ const structure = (page) => page.evaluate(() => {
 /** The page's own posting form, opened from a row's button: save the posted amount. */
 async function savePosted(page, txnId) {
   const put = page.waitForResponse((r) => r.request().method() === 'PUT' && new URL(r.url()).pathname.endsWith(`/transactions/${txnId}`))
-  await page.getByRole('button', { name: 'Save Posted Amount' }).click()
+  await page.getByRole('button', { name: 'Save posted amount' }).click()
   return put
 }
 /** Posting closes the actions modal at once and saves in the background (STU-605): wait for it to be gone. */

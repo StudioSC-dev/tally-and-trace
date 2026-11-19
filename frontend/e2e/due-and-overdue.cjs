@@ -228,7 +228,7 @@ const ACTION_BUTTONS = 'button[data-testid="due-mark-paid"], button[data-testid=
 /** The page's own posting form, opened from a pending row's button: save the posted amount. */
 async function savePosted(page, txnId) {
   const put = page.waitForResponse((r) => r.request().method() === 'PUT' && new URL(r.url()).pathname.endsWith(`/transactions/${txnId}`))
-  await page.getByRole('button', { name: 'Save Posted Amount' }).click()
+  await page.getByRole('button', { name: 'Save posted amount' }).click()
   return put
 }
 
@@ -326,8 +326,8 @@ async function dashboardReadOnly(browser) {
   const rentCard = page.locator('article').filter({ has: page.getByText('Rent', { exact: true }) })
   check('(a) Allocations lists Rent once', await rentCard.count(), 1)
   await rentCard.click()
-  await page.getByRole('button', { name: 'Delete Recurring Entry' }).waitFor()
-  check('(a) Rent opens its form with a delete control', await page.getByRole('button', { name: 'Delete Recurring Entry' }).count(), 1)
+  await page.getByRole('button', { name: 'Delete recurring entry' }).waitFor()
+  check('(a) Rent opens its form with a delete control', await page.getByRole('button', { name: 'Delete recurring entry' }).count(), 1)
   await ctx.close()
 }
 
@@ -486,7 +486,7 @@ async function postingDateChecks(browser) {
   const stillPending = async () => (await allTransactions(u)).find((t) => t.id === row.id)?.is_posted === false
 
   await postedOnInput(page).fill('')
-  await page.getByRole('button', { name: 'Save Posted Amount' }).click()
+  await page.getByRole('button', { name: 'Save posted amount' }).click()
   await error.waitFor()
   await waitQuiet(page)
   check('(e2) an empty date shows its message', (await error.textContent())?.trim(), 'Choose the date it posted.')
@@ -495,7 +495,7 @@ async function postingDateChecks(browser) {
 
   await postedOnInput(page).fill('1999-12-31')
   check('(e2) editing the date clears its message', await error.count(), 0)
-  await page.getByRole('button', { name: 'Save Posted Amount' }).click()
+  await page.getByRole('button', { name: 'Save posted amount' }).click()
   await error.waitFor()
   await waitQuiet(page)
   const [y, md] = [Number(today.slice(0, 4)), today.slice(4)]
@@ -529,7 +529,7 @@ async function statusOnlyPosting(browser) {
   const puts = putsFor(page, row.id)
   await openDueTab(page, 'not-posted')
   await (await showRow(page, pendRows(page, 'E3 Foreign'))).locator('[data-testid="due-mark-posted"]').click()
-  const saveButton = page.getByRole('button', { name: 'Save Posted Amount' })
+  const saveButton = page.getByRole('button', { name: 'Save posted amount' })
   await saveButton.waitFor()
   const figure = saveButton.locator('xpath=ancestor::div[contains(@class,"border-ink")][1]').locator('input[type="number"]')
   check('(e3) the form asks for the one figure', await figure.count(), 1)
@@ -744,9 +744,9 @@ async function gifts(browser) {
   console.log('\n=== (g) Gifts & Donations is an expense category, not an income one')
   const w = await seed()
   const { ctx, page } = await openDue(browser, w.u)
-  await page.getByRole('button', { name: 'Add Transaction' }).first().click()
-  const modal = page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: 'Create Transaction' }) })
-  if (!(await dialogOpened(modal, '(g) Add Transaction opened the Create Transaction dialog'))) return ctx.close()
+  await page.getByRole('button', { name: 'Add transaction' }).first().click()
+  const modal = page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: 'Add transaction' }) })
+  if (!(await dialogOpened(modal, '(g) Add transaction opened the Add transaction dialog'))) return ctx.close()
   const categories = modal.locator('[data-field="category_id"]')
   // The compact picker's open panel also lists a recent or chosen category under Recent; count the groups only.
   const gifts = categories.locator('[data-picker-group]:not([data-picker-group="recent"])').getByRole('button', { name: 'Gifts & Donations', exact: true })
@@ -834,7 +834,7 @@ async function pausedEntry(browser) {
   await page.getByRole('button', { name: 'Paused', exact: true }).click()
   check('(i) the skip note shows on resume', await page.locator('[data-testid="recurring-resume-note"]').count(), 1)
   const put = page.waitForResponse((r) => r.request().method() === 'PUT' && new URL(r.url()).pathname.endsWith(`/budget-entries/${w.gym.id}`))
-  await page.getByRole('button', { name: 'Update Recurring Entry' }).click()
+  await page.getByRole('button', { name: 'Update recurring entry' }).click()
   const res = await put
   const body = JSON.parse(res.request().postData() || '{}')
   check('(i) the save is 200 and sends is_active true with no next_occurrence', [res.status(), body.is_active, 'next_occurrence' in body], [200, true, false])
@@ -1249,7 +1249,7 @@ async function outOfOrderRefetch(browser) {
    */
   const postHeld = async (name, txnId) => {
     await pendRow(page, name).locator('[data-testid="due-mark-posted"]').click()
-    await page.getByRole('button', { name: 'Save Posted Amount' }).waitFor()
+    await page.getByRole('button', { name: 'Save posted amount' }).waitFor()
     await waitQuiet(page)
     const held = await hold()
     return { held, status: (await savePosted(page, txnId)).status() }
@@ -1509,7 +1509,7 @@ async function outOfOrderRefetchDue(browser) {
   }
   const postHeld = async (name, txnId) => {
     await pendRow(page, name).locator('[data-testid="due-mark-posted"]').click()
-    await page.getByRole('button', { name: 'Save Posted Amount' }).waitFor()
+    await page.getByRole('button', { name: 'Save posted amount' }).waitFor()
     await waitQuiet(page)
     const held = await hold()
     return { held, status: (await savePosted(page, txnId)).status() }
@@ -1673,8 +1673,8 @@ async function postedHintEditForm(browser) {
   await article.waitFor()
   await settle(page)
   await article.click()
-  await page.getByRole('button', { name: 'Edit Transaction', exact: true }).click()
-  const modal = page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: 'Edit Transaction', exact: true }) })
+  await page.getByRole('button', { name: 'Edit transaction', exact: true }).click()
+  const modal = page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: 'Edit transaction', exact: true }) })
   await modal.waitFor()
   await settle(page)
   const hint = modal.locator('[data-testid="posting-date-hint"]')
@@ -1687,7 +1687,7 @@ async function postedHintEditForm(browser) {
   await posting.fill(c.today)
   check('(e7) the later day shows it again', (await hint.textContent())?.trim(), hintText(c))
   const put = page.waitForResponse((r) => r.request().method() === 'PUT' && new URL(r.url()).pathname.endsWith(`/transactions/${row.id}`))
-  await modal.getByRole('button', { name: 'Update Transaction', exact: true }).click()
+  await modal.getByRole('button', { name: 'Save changes', exact: true }).click()
   check('(e7) saving is not blocked (200)', (await put).status(), 200)
   await ctx.close()
 }

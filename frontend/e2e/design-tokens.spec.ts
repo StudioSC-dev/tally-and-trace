@@ -297,10 +297,10 @@ test.describe('Columnar pad design tokens (STU-675)', () => {
     await shot(page, 'ladder-transactions')
 
     await page.goto('/accounts')
-    await page.getByRole('button', { name: 'Add Account', exact: true }).click()
+    await page.getByRole('button', { name: 'Add account', exact: true }).click()
     const panel = page.locator('.fixed.inset-0.overflow-y-auto.bg-scrim\\/60 > .min-h-full > *').last()
     await expect(panel).toBeVisible()
-    await expect(panel.getByRole('heading', { name: 'Create Account' })).toBeVisible()
+    await expect(panel.getByRole('heading', { name: 'Create account' })).toBeVisible()
     expect.soft(await style(panel, 'border-radius'), 'dialog radius').toBe('12px')
     const shadow = await style(panel, 'box-shadow')
     expect.soft(shadow, 'dialog shadow').not.toBe('none')
