@@ -2022,6 +2022,48 @@ export const withUnpostedRide = (data: HouseholdData): HouseholdData => ({
   transactions: data.transactions.map((t) => (t.view !== 'limited' && t.description === 'Grab to Makati' ? { ...t, is_posted: false } : t)),
 })
 
+/**
+ * STU-689: the one creator-and-sharing combination the busy month lacks. Jun's name is on a row of Mara's own,
+ * unshared payroll account (a share that has since ended), in Transactions and on the Recurring tab. The other three
+ * combinations are in `household`: Mara's rows on her own accounts, Mara's rows on the joint account (`Yaya salary`,
+ * `Palengke run`), and Jun's rows on it (`Palengke, Marikina market`, the limited entries).
+ */
+export const CREATOR_COMBOS = { transaction: 'Passport renewal fee', entry: 'Storage unit rental' } as const
+export const withCreatorCombos = (data: HouseholdData): HouseholdData => ({
+  ...data,
+  transactions: [
+    tx('2026-03-11', CREATOR_COMBOS.transaction, 1200, payroll, 24, 'debit', { created_by: 'Jun R.' }),
+    ...data.transactions,
+  ],
+  entries: [
+    ...data.entries,
+    entry(CREATOR_COMBOS.entry, 'expense', 2200, '2026-04-12', payroll, { anchor_day: 12, kind: 'cash', settlement: 'manual', created_by: 'Jun R.' }),
+  ],
+})
+
+/**
+ * STU-689: one entry of each of the two Recurring sections the busy month leaves empty: a card installment (a phone
+ * paid over five months, one paid) and a card-billed bill (an internet plan whose amount varies). Made-up data. Kept
+ * out of `household` so the Due card, the forecast and every other spec's counts stay as they were.
+ */
+export const KIND_SECTION_ENTRIES = { installment: 'Phone, 5 months', bill: 'Converge Fiber' } as const
+export const withInstallmentAndBill = (data: HouseholdData): HouseholdData => ({
+  ...data,
+  entries: [
+    ...data.entries,
+    entry(KIND_SECTION_ENTRIES.installment, 'expense', 3200, '2026-03-25', card, {
+      anchor_day: 25,
+      kind: 'installment',
+      end_mode: 'after_occurrences',
+      max_occurrences: 4,
+      occurrences_paid: 1,
+      auto_post_enabled: true,
+      installment_reviewed: true,
+    }),
+    entry(KIND_SECTION_ENTRIES.bill, 'expense', 1699, '2026-03-28', card, { anchor_day: 28, kind: 'bill', settlement: 'manual' }),
+  ],
+})
+
 /** The loan the loan variant adds: a Pag-IBIG housing loan Mara pays from payroll. */
 export const housingLoan: Account = acct({
   id: 17,

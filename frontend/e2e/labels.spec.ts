@@ -331,7 +331,7 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
     { name: 'dashboard', anchor: 'Cash-flow timeline', text: async (p) => (await open(p, '/'), p.locator('main').innerText()) },
     // STU-687: the Date range line lives only inside the open Filters disclosure.
     { name: 'transactions', anchor: 'Date range:', text: async (p) => (await open(p, '/transactions'), await openTransactionFilters(p), p.locator('main').innerText()) },
-    { name: 'allocations', anchor: 'Recurring expense', text: async (p) => (await open(p, '/allocations?tab=recurring'), p.locator('main').innerText()) },
+    { name: 'allocations', anchor: 'Next Apr 9th, 2026', text: async (p) => (await open(p, '/allocations?tab=recurring'), p.locator('main').innerText()) },
     { name: 'add transaction dialog', anchor: 'Transaction type', text: async (p) => (await openAddTransaction(p)).innerText() },
     { name: 'recurring entry dialog', anchor: 'Add recurring entry', text: async (p) => (await openRecurringEntry(p)).innerText() },
     {
@@ -420,8 +420,9 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
     expect.soft(await meta.locator(':scope > *').count(), 'the meta line is separate elements').toBeGreaterThan(1)
     expect.soft(await meta.innerText(), 'the meta line has no bullet').not.toContain('•')
     const boxes = await meta.locator(':scope > *').evaluateAll((els) => els.map((e) => e.getBoundingClientRect()).map((r) => ({ x: r.x, y: r.y, right: r.right, bottom: r.bottom })))
-    expect.soft(boxes.length, 'at least three facts: kind, cadence, settlement').toBeGreaterThanOrEqual(3)
-    expect.soft(await meta.locator(':scope > *').evaluateAll((els) => els.slice(0, 3).map((e) => (e as HTMLElement).innerText)), 'kind, cadence and settlement lead the line').toEqual(['Recurring expense', 'Monthly · day 9', 'Scheduled'])
+    expect.soft(boxes.length, 'three items: schedule, next date, account').toBe(3)
+    // STU-689: the type is left out under a heading that says it, and the cadence shows once, with its settlement.
+    expect.soft(await meta.locator(':scope > *').evaluateAll((els) => els.map((e) => (e as HTMLElement).innerText)), 'schedule, next date and account make the line').toEqual(['Monthly · day 9 · Scheduled', 'Next Apr 9th, 2026 · In 28 days', 'Account: HSBC Red Mastercard'])
     // Each fact sits on its own box: a gap of 8px or more beside the one before it, or on the line below it.
     boxes.slice(1).forEach((b, i) => {
       const before = boxes[i]
@@ -432,28 +433,28 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
   })
 
   test('chrome cleanup preserves facts and actions', async ({ page }) => {
-    // Allocations: each recurring entry's meta line keeps its kind, cadence and settlement.
+    // Allocations: each recurring entry's meta line keeps its cadence and settlement (STU-689: the type is left out under its heading).
     await open(page, '/allocations?tab=recurring')
     const entries: [string, string[]][] = [
-      ['Netflix Standard', ['Recurring expense', 'Monthly · day 9', 'Scheduled']],
-      ['Rent', ['Recurring expense', 'Monthly · day 1', 'Manual']],
-      ['PLDT Fibr', ['Recurring expense', 'Monthly · day 6', 'Auto-pay']],
+      ['Netflix Standard', ['Monthly · day 9', 'Scheduled']],
+      ['Rent', ['Monthly · day 1', 'Manual']],
+      ['PLDT Fibr', ['Monthly · day 6', 'Auto-pay']],
     ]
     for (const [name, facts] of entries) {
       const meta = await metaOf(page, name).innerText()
       for (const fact of facts) expect.soft(meta, `${name} keeps "${fact}"`).toContain(fact)
     }
-    await expect.soft(page.getByText('Recurring income').first(), 'an income entry keeps its kind').toBeVisible()
+    await expect.soft(page.getByTestId('kind-section-other').getByText('Payroll', { exact: true }), 'an income entry keeps its place under Income & transfers').toBeVisible()
     await shot(page, 'facts-allocations')
 
-    // Transactions: a transfer row keeps both accounts, its category and who entered it; the range keeps both ends.
+    // Transactions: a transfer row keeps both accounts and its category (STU-689: not who entered it, on Mara's own accounts); the range keeps both ends.
     await open(page, '/transactions')
     const transfer = await page.locator('article[data-transaction-id]', { hasText: 'Move to emergency fund' }).innerText()
-    for (const fact of ['BPI Payroll', 'Metrobank Savings', 'Savings transfer', 'by Mara S.', 'Transfer', 'Mar 8th, 2026']) {
+    for (const fact of ['BPI Payroll', 'Metrobank Savings', 'Savings transfer', 'Transfer', 'Mar 8th, 2026']) {
       expect.soft(transfer, `the transfer row keeps "${fact}"`).toContain(fact)
     }
     const dinner = await page.locator('article[data-transaction-id]', { hasText: 'Dinner, Manam' }).innerText()
-    for (const fact of ['HSBC Red Mastercard', 'Dining out', 'by Mara S.', 'Japan trip', 'Mar 7th, 2026']) {
+    for (const fact of ['HSBC Red Mastercard', 'Dining out', 'Japan trip', 'Mar 7th, 2026']) {
       expect.soft(dinner, `the tagged row keeps "${fact}"`).toContain(fact)
     }
     await shot(page, 'facts-transactions')
