@@ -301,7 +301,10 @@ interface PaintedBox {
 interface RowLook {
   name: string
   x: number
+  /** The row's top in the document: recorded, not compared (see `sy`). */
   y: number
+  /** The row's top inside its list sheet, which is what the comparison uses for the row's vertical place. */
+  sy: number
   w: number
   h: number
   row: string
@@ -311,7 +314,10 @@ interface RowLook {
   cursor?: string
 }
 
-/** Reads a row's look: everything is relative to the row's own box, and the row's box is relative to the document. */
+/**
+ * Reads a row's look: everything is relative to the row's own box; the row's box is relative to the document, and its
+ * top also relative to the list sheet that holds it.
+ */
 const lookOf = (row: Locator): Promise<RowLook> =>
   row.evaluate((r) => {
     const round = (n: number): number => Math.round(n * 100) / 100
@@ -349,6 +355,7 @@ const lookOf = (row: Locator): Promise<RowLook> =>
       name: (r.querySelector('[data-row-title]')?.textContent ?? '').trim(),
       x: round(box.left + window.scrollX),
       y: round(box.top + window.scrollY),
+      sy: round(box.top - (r.closest('[data-testid="list-sheet"]') ?? document.documentElement).getBoundingClientRect().top),
       w: round(box.width),
       h: round(box.height),
       row: [s.backgroundColor, s.opacity, s.paddingTop, s.paddingRight, s.paddingBottom, s.paddingLeft].join(' | '),
@@ -378,7 +385,10 @@ const near = (a: number, b: number): boolean => Math.abs(a - b) <= 0.5
 function differences(base: RowLook, now: RowLook): string[] {
   const out: string[] = []
   const at = `${base.name}:`
-  for (const k of ['x', 'y', 'w', 'h'] as const) if (!near(base[k], now[k])) out.push(`${at} row ${k} ${base[k]} -> ${now[k]}`)
+  // A row's vertical place is its top inside its list sheet, not in the document: content above the list (a page's
+  // intro line, a tab bar) moves every sheet without changing how a row looks. Any change to a row's own place in its
+  // sheet (padding or a row above it growing, a row's order) still shows here, and the sheet screenshots stay saved.
+  for (const k of ['x', 'sy', 'w', 'h'] as const) if (!near(base[k], now[k])) out.push(`${at} row ${k} ${base[k]} -> ${now[k]}`)
   for (const k of ['row', 'hover', 'cursor'] as const) if (base[k] !== now[k]) out.push(`${at} ${k} "${base[k]}" -> "${now[k]}"`)
   if (base.texts.length !== now.texts.length) out.push(`${at} ${base.texts.length} text runs -> ${now.texts.length}`)
   base.texts.forEach((t, i) => {
