@@ -87,6 +87,15 @@ class AllocationUpdate(BaseModel):
 
 
 class AllocationResponse(AllocationBase):
+    # A savings allocation's figure is calculated from its mode (STU-777), and a
+    # linked account's balance may be negative; budgets' and goals' are stored.
+    current_amount: float = 0.0
+    # False when a balance or transaction was left out for want of an exchange
+    # rate; ``current_amount_missing`` names those currencies. Savings only.
+    current_amount_complete: bool = True
+    current_amount_missing: List[str] = Field(default_factory=list)
+    # What a savings figure is, e.g. "Balance of BPI Joint Savings"; None otherwise.
+    current_amount_source: Optional[str] = None
     id: int
     created_at: datetime
     updated_at: Optional[datetime] = None

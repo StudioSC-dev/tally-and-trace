@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Iterable, List, Optional
 from app.core import locking
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
@@ -16,6 +16,8 @@ from app.schemas.allocation import (
 from app.models.user import User
 from app.core.time import utc_now
 from app.routers.transactions import _lock_allocations, _recompute_budget_total
+from app.services.fx import FxRates, get_fx
+from app.services.savings_progress import progress_for
 
 router = APIRouter()
 
@@ -55,6 +57,19 @@ def _first_aggregated_account(allocation_type, configuration) -> Optional[int]:
                     "configuration.account_ids must be a list of ids")
     return first
 
+def _responses(db: Session, allocations: Iterable[Allocation],
+               fx: FxRates) -> List[AllocationResponse]:
+    """The allocations as responses: savings ones with their calculated progress."""
+    allocations = list(allocations)
+    progress = progress_for(db, allocations, fx)
+    bodies = []
+    for allocation in allocations:
+        body = AllocationResponse.model_validate(allocation)
+        if allocation.id in progress:
+            body = body.model_copy(update=progress[allocation.id].as_fields())
+        bodies.append(body)
+    return bodies
+
 @router.get("/", response_model=AllocationListResponse)
 def get_allocations(
     db: Session = Depends(get_db),
@@ -64,6 +79,7 @@ def get_allocations(
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
     limit: int = Query(10, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    fx: FxRates = Depends(get_fx),
 ):
     """Get all allocations with optional filtering"""
     # Allocations are never shared: the caller's own only.
@@ -89,13 +105,14 @@ def get_allocations(
         .all()
     )
     has_more = offset + len(allocations) < total
-    return {"items": allocations, "total": total, "has_more": has_more}
+    return {"items": _responses(db, allocations, fx), "total": total, "has_more": has_more}
 
 @router.post("/", response_model=AllocationResponse)
 def create_allocation(
     allocation: AllocationCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    fx: FxRates = Depends(get_fx),
 ):
     """Create a new allocation"""
     # Allocations are never shared: the caller is the owner (STU-222).
@@ -105,6 +122,9 @@ def create_allocation(
     first = _first_aggregated_account(allocation.allocation_type, allocation.configuration)
     if first is not None:
         allocation_data["account_id"] = first
+    if allocation.allocation_type == AllocationType.SAVINGS:
+        # A savings figure is calculated on read (STU-777): a sent one is ignored.
+        allocation_data["current_amount"] = 0
     # An allocation is the owner's: its account must be the caller's own.
     if allocation_data["account_id"] is not None:
         get_account_or_404(db, current_user, allocation_data["account_id"], roles=OWNER_ROLES)
@@ -117,17 +137,18 @@ def create_allocation(
         _recompute_budget_total(db, db_allocation, [None])
     db.commit()
     db.refresh(db_allocation)
-    return db_allocation
+    return _responses(db, [db_allocation], fx)[0]
 
 @router.get("/{allocation_id}", response_model=AllocationResponse)
 def get_allocation(
     allocation_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    fx: FxRates = Depends(get_fx),
 ):
     """Get a specific allocation by ID"""
     allocation = get_owned_or_404(db, Allocation, allocation_id, current_user, "Allocation not found")
-    return allocation
+    return _responses(db, [allocation], fx)[0]
 
 @router.put("/{allocation_id}", response_model=AllocationResponse)
 def update_allocation(
@@ -135,6 +156,7 @@ def update_allocation(
     allocation_update: AllocationUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    fx: FxRates = Depends(get_fx),
 ):
     """Update an existing allocation"""
     db_allocation = get_owned_or_404(db, Allocation, allocation_id, current_user, "Allocation not found")
@@ -142,7 +164,7 @@ def update_allocation(
         db, current_user, db_allocation, allocation_update.dict(exclude_unset=True))
     db.commit()
     db.refresh(db_allocation)
-    return db_allocation
+    return _responses(db, [db_allocation], fx)[0]
 
 def apply_allocation_update(db: Session, user: User, allocation: Allocation,
                             update_data: dict) -> Allocation:
@@ -176,7 +198,9 @@ def apply_allocation_update(db: Session, user: User, allocation: Allocation,
             update_data["account_id"] = first
     if "account_id" in update_data and update_data["account_id"] is not None:
         get_account_or_404(db, user, update_data["account_id"], roles=OWNER_ROLES)
-    if update_data.get("allocation_type", allocation.allocation_type) == AllocationType.BUDGET:
+    if update_data.get("allocation_type", allocation.allocation_type) in (
+            AllocationType.BUDGET, AllocationType.SAVINGS):
+        # Budgets' and savings' figures are derived (STU-222, STU-777): a sent one is ignored.
         update_data.pop("current_amount", None)
     for field, value in update_data.items():
         setattr(allocation, field, value)
@@ -205,13 +229,17 @@ def get_allocation_progress(
     allocation_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    fx: FxRates = Depends(get_fx),
 ):
     """Get progress details for an allocation"""
     allocation = get_owned_or_404(db, Allocation, allocation_id, current_user, "Allocation not found")
+    # A savings allocation's figure is calculated from its mode (STU-777).
+    savings = progress_for(db, [allocation], fx).get(allocation.id)
+    current_amount = savings.current_amount if savings else allocation.current_amount
     # Calculate progress percentage
     progress_percentage = 0
     if allocation.target_amount and allocation.target_amount > 0:
-        progress_percentage = (allocation.current_amount / allocation.target_amount) * 100
+        progress_percentage = (current_amount / allocation.target_amount) * 100
     
     # Calculate monthly progress
     monthly_progress = 0
@@ -234,17 +262,20 @@ def get_allocation_progress(
         
         monthly_progress = sum(t.amount for t in transactions)
     
-    return {
+    body = {
         "allocation_id": allocation_id,
-        "current_amount": allocation.current_amount,
+        "current_amount": current_amount,
         "target_amount": allocation.target_amount,
         "progress_percentage": round(progress_percentage, 2),
         "monthly_target": allocation.monthly_target,
         "monthly_progress": monthly_progress,
-        "remaining_amount": allocation.target_amount - allocation.current_amount if allocation.target_amount else 0,
+        "remaining_amount": allocation.target_amount - current_amount if allocation.target_amount else 0,
         "target_date": allocation.target_date,
         "days_remaining": (allocation.target_date - datetime.now()).days if allocation.target_date else None
     }
+    if savings:
+        body.update(savings.as_fields())
+    return body
 
 @router.get("/summary/goals")
 def get_goals_summary(
