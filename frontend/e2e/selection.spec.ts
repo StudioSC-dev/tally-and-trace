@@ -237,7 +237,9 @@ async function saveRecurringEntry(page: Page, api: ApiMock): Promise<BudgetEntry
 /** Fills the rest of the allocation dialog and saves it; returns the `configuration` sent. */
 async function saveAllocation(page: Page, api: ApiMock, name: string): Promise<unknown> {
   await dialogOf(page).locator('input[type="text"]').first().fill(name)
-  await dialogOf(page).locator('select').first().selectOption('11')
+  // A combined-total tracker has no single Account select (STU-778).
+  const accountSelect = dialogOf(page).locator('select').first()
+  if (await accountSelect.count()) await accountSelect.selectOption('11')
   // The empty amounts: a budget's spending limit, a savings tracker's target.
   for (const amount of await dialogOf(page).locator('input[type="number"]').all()) {
     if ((await amount.inputValue()) === '') await amount.fill('3000')

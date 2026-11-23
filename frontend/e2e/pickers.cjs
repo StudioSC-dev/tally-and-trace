@@ -919,7 +919,7 @@ async function scenarioG2(browser) {
       const got = await headingsOf(group)
       return JSON.stringify(got) === JSON.stringify(['Debit', 'Credit', 'E-wallet', 'Cash', 'Loan']) || `headings ${JSON.stringify(got)}`
     })
-    await field(form, 'account_id').selectOption(String(acct['P Bdo Savings'].id))
+    await h.check('g2.no-single-account', 'B', async () => (await field(form, 'account_id').count()) === 0 || 'a single Account select is shown for a combined total')
     await field(form, 'name').fill('Picker G2 tracker')
     await field(form, 'target_amount').fill('5000')
     await form.getByRole('button', { name: 'Create savings tracker' }).click()

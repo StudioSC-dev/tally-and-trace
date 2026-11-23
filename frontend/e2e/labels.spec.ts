@@ -220,8 +220,9 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
   // The budget and savings forms of Allocations: every `<label>` reads in sentence case, as held here.
   const ALLOCATION_FORMS: { name: string; tab: string; mode?: string; labels: string[] }[] = [
     { name: 'budget form', tab: 'budgets', labels: ['Account', 'Name', 'Description', 'Tracked categories', 'Budget cadence', 'Period start', 'Period end (optional)', 'Amount already spent', 'Spending limit'] },
-    { name: 'savings form', tab: 'savings', labels: ['Account', 'Name', 'Description', 'Tracking mode', 'Current amount', 'Target amount (optional)', 'Monthly target', 'Target date'] },
-    { name: 'savings form, combined account total', tab: 'savings', mode: 'Combined account total', labels: ['Account', 'Name', 'Description', 'Tracking mode', 'Accounts to aggregate', 'Current amount', 'Target amount (optional)', 'Monthly target', 'Target date'] },
+    { name: 'savings form', tab: 'savings', labels: ['Tracking mode', 'Account', 'Name', 'Description', 'Target amount (optional)', 'Monthly target (optional)', 'Target date'] },
+    { name: 'savings form, combined account total', tab: 'savings', mode: 'Combined account total', labels: ['Tracking mode', 'Accounts to aggregate', 'Name', 'Description', 'Target amount (optional)', 'Monthly target (optional)', 'Target date'] },
+    { name: 'savings form, savings transactions total', tab: 'savings', mode: 'Savings transactions total', labels: ['Tracking mode', 'Name', 'Description', 'Target amount (optional)', 'Monthly target (optional)', 'Target date'] },
   ]
   for (const form of ALLOCATION_FORMS) {
     test(`labels are sentence case: allocations ${form.name}`, async ({ page }) => {

@@ -239,7 +239,6 @@ async function scenarioF(browser) {
   const { ctx, page, native, log } = await openAllocations(browser, 'Savings')
   try {
     const form = await openAddForm(page, savingsForm)
-    await field(form, 'account_id').selectOption(String(bank.id))
     await field(form, 'name').fill('Dialog F Tracker')
     await form.getByRole('button', { name: 'Combined account total' }).click()
     const before = posts(log)
@@ -257,7 +256,6 @@ async function scenarioG(browser) {
   const { ctx, page, native, log } = await openAllocations(browser, 'Savings')
   try {
     const form = await openAddForm(page, savingsForm)
-    await field(form, 'account_id').selectOption(String(bank.id))
     await field(form, 'name').fill('Dialog G Tracker')
     await form.getByRole('button', { name: 'Savings transactions total' }).click()
     const before = posts(log)
@@ -281,6 +279,7 @@ async function scenarioG(browser) {
     await line.waitFor({ timeout: 3000 }).catch(() => null)
     await h.check('g.saving-again-clears', 'B', async () => {
       await form.getByRole('button', { name: 'Target account balance' }).click()
+      await field(form, 'account_id').selectOption(String(bank.id))
       await form.getByRole('button', { name: 'Create savings tracker' }).click()
       await page.getByLabel('Close allocation modal').waitFor({ state: 'detached', timeout: 5000 }).catch(() => null)
       return (await line.count()) === 0 || 'the line stayed'
