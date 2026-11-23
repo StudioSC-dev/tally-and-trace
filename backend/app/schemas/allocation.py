@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from app.models.allocation import AllocationType, BudgetPeriodFrequency
+from app.models.user import CurrencyType
 
 # How a savings allocation tracks its progress (``configuration.goal_mode``, STU-777).
 TARGET_BALANCE = "target_balance"
@@ -53,6 +54,9 @@ class AllocationBase(BaseModel):
     target_amount: Optional[float] = Field(None, ge=0)
     current_amount: float = Field(default=0.0, ge=0)
     monthly_target: Optional[float] = Field(None, ge=0)
+    # Omitted on create: a target_balance or multi_account savings allocation takes
+    # its account's currency, anything else PHP (STU-777).
+    currency: Optional[CurrencyType] = None
     target_date: Optional[datetime] = None
     period_frequency: Optional[BudgetPeriodFrequency] = None
     period_start: Optional[datetime] = None
@@ -78,6 +82,7 @@ class AllocationUpdate(BaseModel):
     target_amount: Optional[float] = Field(None, ge=0)
     current_amount: Optional[float] = Field(None, ge=0)
     monthly_target: Optional[float] = Field(None, ge=0)
+    currency: Optional[CurrencyType] = None
     target_date: Optional[datetime] = None
     period_frequency: Optional[BudgetPeriodFrequency] = None
     period_start: Optional[datetime] = None
@@ -96,9 +101,16 @@ class AllocationResponse(AllocationBase):
     current_amount_missing: List[str] = Field(default_factory=list)
     # What a savings figure is, e.g. "Balance of BPI Joint Savings"; None otherwise.
     current_amount_source: Optional[str] = None
+    # Always set; a legacy row stored without one is PHP, the column's default.
+    currency: CurrencyType = CurrencyType.PHP
     id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
+
+    @field_validator("currency", mode="before")
+    @classmethod
+    def _legacy_currency(cls, value):
+        return CurrencyType.PHP if value is None else value
 
     class Config:
         from_attributes = True

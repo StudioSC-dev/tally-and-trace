@@ -95,7 +95,7 @@ def test_target_balance_is_the_linked_accounts_balance_converted(world):
     client, me = world["client"], world["me"]
     php = _allocation(client, me, {"goal_mode": "target_balance"}, world["bpi"])
     assert _fields(php) == (10_000.0, True, [], "Balance of BPI Joint Savings")
-    usd = _allocation(client, me, {"goal_mode": "target_balance"}, world["usd"])
+    usd = _allocation(client, me, {"goal_mode": "target_balance"}, world["usd"], currency="PHP")
     assert _fields(usd) == (5_800.0, True, [], "Balance of Dollar Savings")
 
 
@@ -294,3 +294,78 @@ def test_the_list_does_not_query_per_allocation(world):
     body, many = _statements(client, me, "/allocations/", limit=100)
     assert len(body["items"]) == 12
     assert many == few
+
+
+# --- currency ---------------------------------------------------------------------------------
+
+def test_an_explicit_currency_is_respected(world):
+    client, me = world["client"], world["me"]
+    body = _allocation(client, me, {"goal_mode": "target_balance"}, world["bpi"], currency="USD")
+    # 10,000 PHP at 1/58 (0.017241).
+    assert body["currency"] == "USD"
+    assert _fields(body) == (172.41, True, [], "Balance of BPI Joint Savings")
+    goal = _allocation(client, me, None, world["bpi"], kind="goal", currency="EUR")
+    assert goal["currency"] == "EUR"
+
+
+def test_the_default_currency_is_the_tracked_accounts(world):
+    client, me = world["client"], world["me"]
+    # A USD goal on a USD account: the raw balance, no conversion, nothing missing.
+    usd = _allocation(client, me, {"goal_mode": "target_balance"}, world["usd"])
+    assert usd["currency"] == "USD"
+    assert _fields(usd) == (100.0, True, [], "Balance of Dollar Savings")
+    # multi_account: the first aggregated account's currency.
+    multi = _allocation(client, me, {"goal_mode": "multi_account",
+                                     "account_ids": [world["usd"], world["bpi"]]})
+    assert multi["currency"] == "USD"
+    assert _fields(multi) == (272.41, True, [], "2 accounts combined")
+    multi = _allocation(client, me, {"goal_mode": "multi_account",
+                                     "account_ids": [world["bpi"], world["usd"]]})
+    assert multi["currency"] == "PHP"
+
+
+def test_the_default_currency_is_php_otherwise(world):
+    client, me = world["client"], world["me"]
+    total = _allocation(client, me, {"goal_mode": "transaction_total",
+                                     "savings_category_id": world["savings"]})
+    assert total["currency"] == "PHP"
+    # An account sent with transaction_total is not tracked, so it sets no currency.
+    total = _allocation(client, me, {"goal_mode": "transaction_total",
+                                     "savings_category_id": world["savings"]}, world["usd"])
+    assert total["currency"] == "PHP"
+    goal = _allocation(client, me, None, world["usd"], kind="goal")
+    assert goal["currency"] == "PHP"
+    (exported,) = [a for a in _get(client, me, "/data/export.json")["allocations"]
+                   if a["id"] == goal["id"]]
+    assert exported["currency"] == "PHP"
+
+
+def test_an_update_changes_the_currency_and_the_figure_follows(world):
+    client, me = world["client"], world["me"]
+    body = _allocation(client, me, {"goal_mode": "target_balance"}, world["usd"])
+    aid = body["id"]
+    r = client.put(f"{API}/allocations/{aid}", json={"currency": "PHP"}, headers=me["headers"])
+    assert r.status_code == 200, r.text
+    assert (r.json()["currency"], r.json()["current_amount"]) == ("PHP", 5_800.0)
+    assert _get(client, me, f"/allocations/{aid}")["current_amount"] == 5_800.0
+    assert float(_get(client, me, f"/allocations/{aid}/progress")["current_amount"]) == 5_800.0
+    (exported,) = [a for a in _get(client, me, "/data/export.json")["allocations"]
+                   if a["id"] == aid]
+    assert (exported["currency"], exported["current_amount"]) == ("PHP", "5800.00")
+    # A null currency changes nothing.
+    r = client.put(f"{API}/allocations/{aid}", json={"currency": None}, headers=me["headers"])
+    assert r.status_code == 200 and r.json()["currency"] == "PHP"
+
+
+def test_a_budgets_total_ignores_its_currency(world):
+    client, me = world["client"], world["me"]
+    budget = {"category_ids": [world["other"]]}
+    period = {"period_frequency": "monthly", "period_start": "2026-11-01T00:00:00"}
+    php = _allocation(client, me, budget, world["checking"], kind="budget", **period)
+    usd = _allocation(client, me, budget, world["checking"], kind="budget", currency="USD",
+                      **period)
+    assert (php["currency"], usd["currency"]) == ("PHP", "USD")
+    _row(client, me, world["checking"], "debit", "2026-11-05", 500, world["other"])
+    got = {a["id"]: a for a in _get(client, me, "/allocations/", limit=100)["items"]}
+    assert _fields(got[php["id"]]) == (500.0, True, [], None)
+    assert _fields(got[usd["id"]]) == (500.0, True, [], None)

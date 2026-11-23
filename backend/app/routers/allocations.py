@@ -10,10 +10,10 @@ from app.core.access import (
 from app.models.category import Category
 from app.models.allocation import Allocation, AllocationType
 from app.schemas.allocation import (
-    MULTI_ACCOUNT, AllocationCreate, AllocationResponse, AllocationUpdate, AllocationListResponse,
+    MULTI_ACCOUNT, TRANSACTION_TOTAL, AllocationCreate, AllocationResponse, AllocationUpdate, AllocationListResponse,
     account_rule_error, goal_mode,
 )
-from app.models.user import User
+from app.models.user import CurrencyType, User
 from app.core.time import utc_now
 from app.routers.transactions import _lock_allocations, _recompute_budget_total
 from app.services.fx import FxRates, get_fx
@@ -126,8 +126,17 @@ def create_allocation(
         # A savings figure is calculated on read (STU-777): a sent one is ignored.
         allocation_data["current_amount"] = 0
     # An allocation is the owner's: its account must be the caller's own.
+    account = None
     if allocation_data["account_id"] is not None:
-        get_account_or_404(db, current_user, allocation_data["account_id"], roles=OWNER_ROLES)
+        account = get_account_or_404(db, current_user, allocation_data["account_id"],
+                                     roles=OWNER_ROLES)
+    if allocation_data["currency"] is None:
+        # Unsent: a savings allocation tracking its account(s) takes the (first)
+        # account's currency, anything else PHP, the column's default (STU-777).
+        tracks_account = (allocation.allocation_type == AllocationType.SAVINGS
+                          and goal_mode(allocation.configuration) != TRANSACTION_TOTAL)
+        allocation_data["currency"] = (account.currency if tracks_account and account
+                                       else CurrencyType.PHP)
 
     db_allocation = Allocation(**allocation_data, user_id=current_user.id)
     db.add(db_allocation)
@@ -183,6 +192,8 @@ def apply_allocation_update(db: Session, user: User, allocation: Allocation,
         raise HTTPException(status_code=404, detail="Allocation not found")
     (allocation,) = locked
     update_data = dict(update_data)
+    if "currency" in update_data and update_data["currency"] is None:
+        update_data.pop("currency")  # a null currency is no change, never a null column
     if {"allocation_type", "configuration", "account_id"} & update_data.keys():
         # The account each mode needs (STU-777), judged on the allocation as edited.
         allocation_type = update_data.get("allocation_type", allocation.allocation_type)
