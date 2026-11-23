@@ -1,18 +1,21 @@
 import math
 from datetime import timedelta
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
 from app.core.context import RequestContext, request_context
 from app.core.database import get_db
-from app.core.access import get_owned_or_404, owned_criterion, require_owned_ref
+from app.core.access import get_owned_or_404, owned_criterion, require_account, require_owned_ref
+from app.models.account import Account, AccountType
 from app.models.category import Category
 from app.models.user import User
-from app.models.wishlist_item import WishlistItem
+from app.models.wishlist_item import WishlistItem, WishlistPaymentPlan
 from app.schemas.wishlist import (
+    months_rule,
     WishlistItemCreate,
     WishlistItemResponse,
     WishlistItemUpdate,
@@ -21,6 +24,7 @@ from app.schemas.wishlist import (
     WishlistReadiness,
 )
 from app.services import forecast as forecast_svc
+from app.services.installment_split import TOO_SMALL_MESSAGE, try_installment_split
 from app.core.time import utc_now
 
 router = APIRouter()
@@ -41,6 +45,50 @@ def item_currency_row(ctx: RequestContext, item, rows: Optional[List[dict]] = No
     if rows is None:
         rows = forecast_svc.disposable_by_currency(ctx)["by_currency"]
     return next((r for r in rows if r["currency"] == code), None)
+
+
+def price_of(cost) -> Decimal:
+    """An item's price as money: two places, half up (as ``Numeric(15, 2)`` stores it)."""
+    return Decimal(str(cost)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+INSTALLMENT_CARD_MESSAGE = "An installment is paid from a credit card account"
+LOAN_ACCOUNT_MESSAGE = "A wishlist item cannot be paid from a loan"
+INSTALLMENT_LINKED_MESSAGE = (
+    "This item's card installment was already created; change it in Recurring instead")
+
+
+def validate_payment(db: Session, user: User, owner: User, *, account_id: Optional[int],
+                     payment_plan, installment_months: Optional[int], cost,
+                     check_account: bool = True) -> Optional[Account]:
+    """The item's payment account, after the payment rules (STU-779).
+
+    The account passes the check recurring entries use (``require_account``):
+    the caller and the item's owner both hold an edit role on it, so a
+    household admin or editor may plan on a shared account and a viewer may
+    not (404). It is never a loan, as a recurring entry is never paid from one.
+    An installment is a card installment: it needs a credit card account and
+    ``installment_months``, and a price that gives every payment at least 0.01
+    (``installment_split``). ``check_account`` False skips the account's
+    access check (an edit that leaves the payment fields alone).
+    """
+    try:
+        months_rule(payment_plan, installment_months)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    account = None
+    if account_id is not None:
+        account = (require_account(db, user, account_id, "Account not found", owner=owner)
+                   if check_account else db.get(Account, account_id))
+    if check_account and account is not None and account.account_type == AccountType.LOAN:
+        raise HTTPException(status_code=400, detail=LOAN_ACCOUNT_MESSAGE)
+    if payment_plan == WishlistPaymentPlan.INSTALLMENT:
+        if check_account and (account is None or account.account_type != AccountType.CREDIT):
+            raise HTTPException(status_code=400, detail=INSTALLMENT_CARD_MESSAGE)
+        if try_installment_split(price_of(cost), installment_months) is None:
+            raise HTTPException(status_code=422,
+                                detail=TOO_SMALL_MESSAGE.format(months=installment_months))
+    return account
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +124,10 @@ def create_wishlist_item(
     # Same-owner rule: the category is the caller's own.
     require_owned_ref(db, Category, item_data.get("category_id"), "Category not found",
                       current_user)
+    validate_payment(db, current_user, current_user, account_id=payload.account_id,
+                     payment_plan=payload.payment_plan,
+                     installment_months=payload.installment_months,
+                     cost=payload.estimated_cost)
 
     item = WishlistItem(**item_data, user_id=current_user.id)
     db.add(item)
@@ -179,6 +231,7 @@ def update_wishlist_item(
     if "category_id" in update_data:
         require_owned_ref(db, Category, update_data["category_id"], "Category not found",
                           current_user)
+    _validate_payment_update(db, current_user, item, update_data)
     if update_data.get("is_purchased") and not item.is_purchased:
         update_data.setdefault("purchased_at", utc_now())
     for field, value in update_data.items():
@@ -187,6 +240,37 @@ def update_wishlist_item(
     db.commit()
     db.refresh(item)
     return item
+
+
+PAYMENT_FIELDS = ("account_id", "payment_plan", "installment_months")
+
+
+def _validate_payment_update(db: Session, user: User, item: WishlistItem,
+                             update_data: dict) -> None:
+    """The payment rules on the item as the update leaves it (``validate_payment``).
+
+    Sending ``payment_plan`` "full" without ``installment_months`` clears the
+    months. The account's access is checked only when a payment field is
+    sent, so an edit of the name alone never fails on it. Once marking the
+    item purchased created its card installment, the payment fields are
+    fixed (409 on a change; resending the stored values passes).
+    """
+    sent = [f for f in PAYMENT_FIELDS if f in update_data]
+    if "payment_plan" in update_data and update_data["payment_plan"] is None:
+        raise HTTPException(status_code=422, detail="payment_plan cannot be null")
+    if (update_data.get("payment_plan") == WishlistPaymentPlan.FULL
+            and "installment_months" not in update_data):
+        update_data["installment_months"] = None
+        sent.append("installment_months")
+    if not sent and "estimated_cost" not in update_data:
+        return
+    if item.installment_entry_id is not None and any(
+            update_data[f] != getattr(item, f) for f in sent):
+        raise HTTPException(status_code=409, detail=INSTALLMENT_LINKED_MESSAGE)
+    merged = {f: update_data.get(f, getattr(item, f)) for f in PAYMENT_FIELDS}
+    validate_payment(db, user, item.user, **merged,
+                     cost=update_data.get("estimated_cost") or item.estimated_cost,
+                     check_account=bool(sent))
 
 
 @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
