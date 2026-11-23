@@ -32,6 +32,7 @@ import {
   householdSaveRoutes,
   householdWishlist,
   householdWishlistRoutes,
+  WISHLIST_PAY_FROM_OPTIONS,
   installmentReviewRoutes,
   mockHousehold,
   newAccountInput,
@@ -69,6 +70,34 @@ const HEADER_MAX_PX = 260
  * still holds it, so the layout check drops it from the base text; everything else must match as recorded.
  */
 const REMOVED_ALLOCATIONS_HELP = 'Switch tabs to view recurring subscriptions, monthly budgets, savings envelopes, or your wishlist.'
+
+/**
+ * What STU-780 added to the wishlist, which the baseline (recorded before it) lacks. A wishlist surface is compared with
+ * the baseline minus exactly these, each matched whole:
+ * - each item's budget badge text;
+ * - the add dialog's new text, as `textOf` joins it (no separators): "Pay from", "No account", every account option,
+ *   "Payment", "Full" and "Installments";
+ * - the dialog's two segment buttons and its `select-one:0` field (Add item and Edit only);
+ * - the reads that follow a click: each item's `GET /wishlist/<id>/outlook`, and after marking an item purchased
+ *   (which invalidates the account, recurring-entry and card-credit tags) the accounts list, recurring-entry list and
+ *   card-credit reads the Allocations page makes, spelled out below;
+ * - the three payment fields every save now sends.
+ */
+const WISHLIST_BADGE = 'Fits your monthly budget'
+const WISHLIST_PAYMENT_TEXT = ['Pay from', 'No account', ...WISHLIST_PAY_FROM_OPTIONS, 'Payment', 'Full', 'Installments'].join('')
+const WISHLIST_SEGMENTS = new Set(['Full', 'Installments'])
+const WISHLIST_NEW_READS = new Set(['GET /accounts/?is_active=true&limit=100', 'GET /budget-entries/?entry_type=expense&limit=100', 'GET /cards/credit'])
+const WISHLIST_OUTLOOK_READ = /^GET \/wishlist\/\d+\/outlook$/
+const WISHLIST_PAYMENT_FIELDS = ',"account_id":null,"payment_plan":"full","installment_months":null'
+const isWishlist = (key: string): boolean => key.includes('wishlist')
+/** `opensForm`: the click opened the wishlist form (Add item, Edit), whose fields gain "Pay from"; other dialogs keep theirs. */
+const withoutWishlistAdditions = (effect: Effect, opensForm: boolean): Effect => ({
+  ...effect,
+  requests: effect.requests.filter((r) => !WISHLIST_NEW_READS.has(r) && !WISHLIST_OUTLOOK_READ.test(r)).map((r) => r.replace(WISHLIST_PAYMENT_FIELDS, '')),
+  buttons: opensForm ? effect.buttons.filter((b) => !WISHLIST_SEGMENTS.has(b)) : effect.buttons,
+  fields: opensForm ? effect.fields.filter((f) => f !== 'select-one:0') : effect.fields,
+  rows: effect.rows.map((r) => r.replace(WISHLIST_BADGE, '')),
+})
 
 /** Selection controls, owned by STU-679: AC2 skips them and AC6 checks they are untouched. */
 const SELECTION = '[role="tab"], [aria-pressed], [aria-current], [role="switch"]'
@@ -296,7 +325,7 @@ const UPDATED_TAG = savedRow({ ...household, tags: household.tags.map((t) => (t.
 /** The account AC6's Create account saves: only the name is filled, so the rest is the form's defaults. */
 const formAccount = createdAccount(household, 91, { name: newAccountInput.name, account_type: 'checking', balance: 0, description: '', currency: 'PHP', is_spending_wallet: false, is_active: true, tag_ids: [] })
 const SAVED_ACCOUNT = savedRow({ ...household, accounts: [...household.accounts, formAccount] }, newAccountInput.name)
-const newWish: WishlistItem = { id: 803, user_id: household.user.id, name: 'Standing desk', estimated_cost: 12000, currency: 'PHP', priority: 'medium', is_purchased: false, created_at: `${household.today}T09:00:00Z` }
+const newWish: WishlistItem = { id: 803, user_id: household.user.id, name: 'Standing desk', estimated_cost: 12000, currency: 'PHP', priority: 'medium', is_purchased: false, payment_plan: 'full', created_at: `${household.today}T09:00:00Z` }
 const SAVED_WISH: Saved = { routes: householdWishlistRoutes([...householdWishlist, newWish]), row: (p) => rowsWith(p, newWish.name) }
 const SAVED_SHARE: Saved = { routes: [accountSharesRoute(household, PAYROLL, [sharedWithMatch(household, PAYROLL)])], row: (p) => rowsWith(p, 'Lia M.') }
 
@@ -1090,8 +1119,8 @@ test.describe('AC6: button migration preserves surrounding behavior and layout',
     test(`button migration preserves surrounding behavior and layout: ${s.key} layout`, async ({ page }, testInfo) => {
       await s.open(page)
       const scope = scopeOf(page, s)
-      const controls = await controlsIn(scope)
-      const text = await textOf(scope)
+      const controls = (await controlsIn(scope)).filter((c) => !(isWishlist(s.key) && WISHLIST_SEGMENTS.has(c.name)))
+      const text = isWishlist(s.key) ? (await textOf(scope)).replaceAll(WISHLIST_BADGE, '').replace(WISHLIST_PAYMENT_TEXT, '') : await textOf(scope)
       await capture(page, s, `layout-${s.key}`)
       const project = testInfo.project.name
       if (RECORD) {
@@ -1128,7 +1157,8 @@ test.describe('AC6: button migration preserves surrounding behavior and layout',
         const target = await controlAt(scopeOf(page, s), c.name, c.nth)
         const project = testInfo.project.name
         const enabled = await target.isEnabled()
-        const effect = enabled ? await effectOf(page, target, saved?.row(page)) : null
+        const seen = enabled ? await effectOf(page, target, saved?.row(page)) : null
+        const effect = seen && isWishlist(s.key) ? withoutWishlistAdditions(seen, c.name === 'Add item' || c.name === 'Edit') : seen
         await viewportShot(page, `effect-${c.key.replace(/[^a-z0-9]+/gi, '-')}`)
         if (RECORD) {
           record(project, (b) => {

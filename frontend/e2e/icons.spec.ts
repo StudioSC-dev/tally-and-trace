@@ -27,6 +27,7 @@ import {
   mockHousehold,
   newAccountInput,
   savedTransaction,
+  WISHLIST_PAY_FROM_OPTIONS,
   withFxNotice,
   withShortfalls,
 } from './support/fixtures/household'
@@ -382,7 +383,17 @@ const iconOnlyControls = (page: Page): Promise<{ where: string; label: string | 
       .map((e) => ({ where: `${e.tagName.toLowerCase()} ${e.getAttribute('data-testid') ?? e.getAttribute('title') ?? e.outerHTML.slice(0, 80)}`, label: e.getAttribute('aria-label') })),
   )
 
-const normalise = (text: string): string => text.replace(REMOVED, '').replace(/\s+/g, ' ').trim()
+/**
+ * What STU-780 added to the wishlist, which the baseline (recorded before it) lacks. A baseline entry is compared with
+ * the page minus exactly these, each matched whole: each item's budget badge text, the add dialog's new text ("Pay from",
+ * "No account", every account option, "Payment", "Full", "Installments", as the page reads it, one space between), and
+ * the dialog's two segment buttons by name.
+ */
+const WISHLIST_BADGE = 'Fits your monthly budget'
+const WISHLIST_PAYMENT_TEXT = ['Pay from', 'No account', ...WISHLIST_PAY_FROM_OPTIONS, 'Payment', 'Full', 'Installments'].join(' ')
+const WISHLIST_ADDED_CONTROLS = new Set(['Full', 'Installments'])
+const normalise = (text: string): string =>
+  text.replace(REMOVED, '').replaceAll(WISHLIST_BADGE, '').replace(/\s+/g, ' ').replace(WISHLIST_PAYMENT_TEXT, '').replace(/\s+/g, ' ').trim()
 
 interface SurfaceBaseline {
   text: string
@@ -588,7 +599,7 @@ test.describe('AC7: icon replacement preserves existing behaviour', () => {
     test(`icon replacement preserves existing behaviour: ${s.key} text and names`, async ({ page }, testInfo) => {
       await s.open(page)
       const text = await bodyText(page)
-      const names = await controlNames(page)
+      const names = (await controlNames(page)).filter((n) => !(s.key === 'wishlist item' && WISHLIST_ADDED_CONTROLS.has(n)))
       await viewportShot(page, `same-${slug(s.key)}`)
       const project = testInfo.project.name
       if (RECORD) {

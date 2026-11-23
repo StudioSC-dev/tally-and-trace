@@ -89,6 +89,7 @@ import type {
   User,
   UserMatch,
   WishlistItem,
+  WishlistOutlook,
   WishlistPlan,
 } from '@tally-trace/shared'
 import { apiRoute, mockApi, queryRoute, sequenceRoute } from '../mockApi'
@@ -1365,7 +1366,7 @@ export const withFxNotice = (data: HouseholdData): HouseholdData => ({
 /** The Allocations Wishlist tab's calls, for a household with nothing on its wishlist yet. */
 export const wishlistRoutes = (data: HouseholdData = household): ApiRoute[] => [
   apiRoute<WishlistItem[]>('GET', '/wishlist/', []),
-  apiRoute<WishlistPlan>('GET', '/wishlist/plan', { monthly_disposable: data.snapshot.monthly_summary.monthly_disposable, savings_rate: 0, items: [] }),
+  apiRoute<WishlistPlan>('GET', '/wishlist/plan', { monthly_disposable: data.snapshot.monthly_summary.monthly_disposable, savings_rate: 0, items: [], installments: [] }),
 ]
 
 /** A variant whose user has pinned the payroll account as their main account (the Forecast's "Main" scope). */
@@ -1914,9 +1915,37 @@ export const withTagOverflow = (data: HouseholdData): HouseholdData => {
 
 /** Two wishlist items, neither bought: a laptop for work and a rice cooker. */
 export const householdWishlist: WishlistItem[] = [
-  { id: 801, user_id: householdUser.id, name: 'Work laptop', estimated_cost: 65000, currency: 'PHP', priority: 'high', notes: 'For freelance work', target_date: '2026-06-30', is_purchased: false, created_at: '2026-02-01T09:00:00Z' },
-  { id: 802, user_id: householdUser.id, name: 'Rice cooker', estimated_cost: 3500, currency: 'PHP', priority: 'medium', is_purchased: false, created_at: '2026-02-10T09:00:00Z' },
+  { id: 801, user_id: householdUser.id, name: 'Work laptop', estimated_cost: 65000, currency: 'PHP', priority: 'high', notes: 'For freelance work', target_date: '2026-06-30', is_purchased: false, payment_plan: 'full', created_at: '2026-02-01T09:00:00Z' },
+  { id: 802, user_id: householdUser.id, name: 'Rice cooker', estimated_cost: 3500, currency: 'PHP', priority: 'medium', is_purchased: false, payment_plan: 'full', created_at: '2026-02-10T09:00:00Z' },
 ]
+
+/**
+ * The "Pay from" select's option texts for the household, in the order the add dialog lists them (STU-780: the accounts
+ * the caller can add records to, never a loan, grouped by type, as `Name (CUR)`). The specs that compare the page with a
+ * baseline recorded before the field existed subtract exactly this text.
+ */
+export const WISHLIST_PAY_FROM_OPTIONS: readonly string[] = [
+  'BPI Payroll (PHP)',
+  'Metrobank Savings (PHP)',
+  'HSBC Red Mastercard (PHP)',
+  'GCash (PHP)',
+  'Cash on hand (PHP)',
+  // Shared with the caller as an editor, so it is offered too, after the caller's own (the "Shared" section).
+  'BDO Joint household (PHP)',
+]
+
+/**
+ * A full-payment item's outlook: the item's price in its first month against a monthly disposable income that
+ * covers it, and a card limit that does too.
+ */
+export const wishlistOutlookFor = (item: WishlistItem): WishlistOutlook => ({
+  item_id: item.id,
+  currency: item.currency,
+  payment_plan: item.payment_plan,
+  estimated_cost: item.estimated_cost,
+  months: [],
+  disposable_check: { status: 'fits', currency: item.currency, amount: item.estimated_cost, monthly_disposable: 90000, after_purchase: 90000 - item.estimated_cost },
+})
 
 /**
  * The wishlist tab's reads and writes, answered from `items`: the list (with or without bought items), the plan,
@@ -1927,8 +1956,9 @@ export const householdWishlistRoutes = (items: WishlistItem[] = householdWishlis
     only(q, ['is_purchased'])
     return q.get('is_purchased') === 'false' ? items.filter((i) => !i.is_purchased) : items
   }),
-  apiRoute<WishlistPlan>('GET', '/wishlist/plan', { monthly_disposable: 0, savings_rate: 0, items: [] }),
-  apiRoute<WishlistItem>('POST', '/wishlist/', { id: 803, user_id: householdUser.id, name: 'New item', estimated_cost: 1, currency: 'PHP', priority: 'medium', is_purchased: false, created_at: '2026-03-12T09:00:00Z' }, 201),
+  apiRoute<WishlistPlan>('GET', '/wishlist/plan', { monthly_disposable: 0, savings_rate: 0, items: [], installments: [] }),
+  apiRoute<WishlistItem>('POST', '/wishlist/', { id: 803, user_id: householdUser.id, name: 'New item', estimated_cost: 1, currency: 'PHP', priority: 'medium', is_purchased: false, payment_plan: 'full', created_at: '2026-03-12T09:00:00Z' }, 201),
+  ...items.map((i) => apiRoute<WishlistOutlook>('GET', `/wishlist/${i.id}/outlook`, wishlistOutlookFor(i))),
   ...items.flatMap((i) => [apiRoute<WishlistItem>('PUT', `/wishlist/${i.id}`, { ...i, is_purchased: !i.is_purchased }), apiRoute<Record<string, never>>('DELETE', `/wishlist/${i.id}`, {})]),
 ]
 

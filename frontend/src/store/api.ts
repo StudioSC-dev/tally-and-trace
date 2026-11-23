@@ -72,6 +72,7 @@ export type {
   CashflowShortfall,
   AccountShortfall,
   WishlistPlan,
+  WishlistOutlook,
   WishlistReadiness,
   WishlistPlanItem,
   LoanKind,
@@ -147,6 +148,7 @@ import type {
   QuickBalances,
   WishlistItem,
   WishlistPlan,
+  WishlistOutlook,
   LoanPaymentRequest,
   LoanPrepaymentRequest,
   LoanScheduleResponse,
@@ -897,13 +899,20 @@ export const accountingApi = createApi({
       query: () => 'wishlist/plan',
       providesTags: ['Wishlist', 'BudgetEntry'],
     }),
+    // The outlook reads the recurring entries, the forecast and the card's credit, so those writes refresh it.
+    getWishlistOutlook: builder.query<WishlistOutlook, number>({
+      query: (id) => `wishlist/${id}/outlook`,
+      providesTags: ['Wishlist', 'BudgetEntry', 'Account'],
+    }),
     createWishlistItem: builder.mutation<WishlistItem, Partial<WishlistItem>>({
       query: (body) => ({ url: 'wishlist/', method: 'POST', body }),
       invalidatesTags: ['Wishlist'],
     }),
     updateWishlistItem: builder.mutation<WishlistItem, { id: number; data: Partial<WishlistItem> }>({
       query: ({ id, data }) => ({ url: `wishlist/${id}`, method: 'PUT', body: data }),
-      invalidatesTags: ['Wishlist'],
+      // Marking an installment item purchased creates a card installment (a recurring entry) that shows in Due and the card's credit.
+      invalidatesTags: (_result, _error, { data }) =>
+        data.is_purchased !== undefined ? ['Wishlist', 'BudgetEntry', 'Due', 'Account'] : ['Wishlist'],
     }),
     deleteWishlistItem: builder.mutation<void, number>({
       query: (id) => ({ url: `wishlist/${id}`, method: 'DELETE' }),
@@ -1039,6 +1048,7 @@ export const {
   // Wishlist hooks
   useGetWishlistQuery,
   useGetWishlistPlanQuery,
+  useGetWishlistOutlookQuery,
   useCreateWishlistItemMutation,
   useUpdateWishlistItemMutation,
   useDeleteWishlistItemMutation,
