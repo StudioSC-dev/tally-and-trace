@@ -28,7 +28,9 @@ class Allocation(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    # Null only for a savings allocation that totals its Savings transactions
+    # (``configuration.goal_mode`` "transaction_total", STU-777).
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
 
     name = Column(String(100), nullable=False, index=True)
     allocation_type = Column(

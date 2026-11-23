@@ -9,7 +9,10 @@ from app.core.access import (
 )
 from app.models.category import Category
 from app.models.allocation import Allocation, AllocationType
-from app.schemas.allocation import AllocationCreate, AllocationResponse, AllocationUpdate, AllocationListResponse
+from app.schemas.allocation import (
+    MULTI_ACCOUNT, AllocationCreate, AllocationResponse, AllocationUpdate, AllocationListResponse,
+    account_rule_error, goal_mode,
+)
 from app.models.user import User
 from app.core.time import utc_now
 from app.routers.transactions import _lock_allocations, _recompute_budget_total
@@ -43,6 +46,14 @@ def _validate_configuration(db: Session, user: User, configuration) -> None:
     if savings is not None:
         (savings_id,) = _ids([savings], "configuration.savings_category_id must be an id")
         require_owned_ref(db, Category, savings_id, "Category not found", user)
+
+def _first_aggregated_account(allocation_type, configuration) -> Optional[int]:
+    """A ``multi_account`` savings allocation's stored account: its first aggregated one."""
+    if allocation_type != AllocationType.SAVINGS or goal_mode(configuration) != MULTI_ACCOUNT:
+        return None
+    (first,) = _ids(configuration["account_ids"][:1],
+                    "configuration.account_ids must be a list of ids")
+    return first
 
 @router.get("/", response_model=AllocationListResponse)
 def get_allocations(
@@ -89,11 +100,14 @@ def create_allocation(
     """Create a new allocation"""
     # Allocations are never shared: the caller is the owner (STU-222).
     locking.lock_owner_budgets(db, current_user.id)
-    # An allocation is the owner's: its account must be the caller's own.
-    get_account_or_404(db, current_user, allocation.account_id, roles=OWNER_ROLES)
     _validate_configuration(db, current_user, allocation.configuration)
-
     allocation_data = allocation.dict()
+    first = _first_aggregated_account(allocation.allocation_type, allocation.configuration)
+    if first is not None:
+        allocation_data["account_id"] = first
+    # An allocation is the owner's: its account must be the caller's own.
+    if allocation_data["account_id"] is not None:
+        get_account_or_404(db, current_user, allocation_data["account_id"], roles=OWNER_ROLES)
 
     db_allocation = Allocation(**allocation_data, user_id=current_user.id)
     db.add(db_allocation)
@@ -147,10 +161,21 @@ def apply_allocation_update(db: Session, user: User, allocation: Allocation,
         raise HTTPException(status_code=404, detail="Allocation not found")
     (allocation,) = locked
     update_data = dict(update_data)
+    if {"allocation_type", "configuration", "account_id"} & update_data.keys():
+        # The account each mode needs (STU-777), judged on the allocation as edited.
+        allocation_type = update_data.get("allocation_type", allocation.allocation_type)
+        configuration = update_data.get("configuration", allocation.configuration)
+        problem = account_rule_error(allocation_type, configuration,
+                                     update_data.get("account_id", allocation.account_id))
+        if problem:
+            raise HTTPException(status_code=422, detail=problem)
+        if "configuration" in update_data:
+            _validate_configuration(db, user, configuration)
+        first = _first_aggregated_account(allocation_type, configuration)
+        if first is not None:
+            update_data["account_id"] = first
     if "account_id" in update_data and update_data["account_id"] is not None:
         get_account_or_404(db, user, update_data["account_id"], roles=OWNER_ROLES)
-    if "configuration" in update_data:
-        _validate_configuration(db, user, update_data["configuration"])
     if update_data.get("allocation_type", allocation.allocation_type) == AllocationType.BUDGET:
         update_data.pop("current_amount", None)
     for field, value in update_data.items():
