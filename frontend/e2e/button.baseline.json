@@ -5335,6 +5335,7 @@
           "select-one:0",
           "text:Work laptop",
           "textarea:From wishlist: Work laptop",
+          "select-one:PHP",
           "number:65000",
           "number:",
           "date:2026-06-30"
@@ -5386,6 +5387,7 @@
           "select-one:0",
           "text:Rice cooker",
           "textarea:From wishlist: Rice cooker",
+          "select-one:PHP",
           "number:3500",
           "number:",
           "date:"
@@ -17082,6 +17084,7 @@
           "select-one:0",
           "text:Work laptop",
           "textarea:From wishlist: Work laptop",
+          "select-one:PHP",
           "number:65000",
           "number:",
           "date:2026-06-30"
@@ -17132,6 +17135,7 @@
           "select-one:0",
           "text:Rice cooker",
           "textarea:From wishlist: Rice cooker",
+          "select-one:PHP",
           "number:3500",
           "number:",
           "date:"

@@ -51,7 +51,9 @@ import { useDeleteRecurringEntry } from '../hooks/useDeleteRecurringEntry'
 import { useManilaDay } from '../hooks/useManilaDay'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { BudgetUsageBar } from '../components/BudgetUsageBar'
-import { amountClass, formatAmount } from '../utils/amount'
+import { amountClass, formatAmount, formatSigned } from '../utils/amount'
+import { CURRENCY_CONFIGS, getCurrencySymbol } from '../utils/currency'
+import type { CurrencyCode } from '../utils/currency'
 import type { AmountKind } from '../utils/amount'
 import { formatCadenceLabel, formatScheduleLabel } from '../utils/recurringEntry'
 import { createdByLabel, foldFacts, isSharedAccount, viewerDisplayName } from '../utils/createdBy'
@@ -131,11 +133,12 @@ type AllocationFieldKey =
   | 'target_amount'
   | 'monthly_target'
   | 'target_date'
+  | 'currency'
 const isAllocationFieldKey = (key: string | undefined): key is AllocationFieldKey =>
   key !== undefined &&
   [
     'account_id', 'name', 'category_ids', 'savings_account_ids', 'period_frequency', 'period_start',
-    'period_end', 'current_amount', 'target_amount', 'monthly_target', 'target_date',
+    'period_end', 'current_amount', 'target_amount', 'monthly_target', 'target_date', 'currency',
   ].includes(key)
 
 /** The app's own wording for a required field left empty; a bound such as `min` uses the browser's text. */
@@ -301,7 +304,11 @@ type AllocationFormState = {
   period_frequency?: 'daily' | 'weekly' | 'monthly' | 'quarterly'
   period_start?: string
   period_end?: string
+  /** A savings currency the user picked (or the stored one when editing); unset follows the mode's default. */
+  currency?: CurrencyCode
 }
+
+const CURRENCY_OPTIONS = Object.keys(CURRENCY_CONFIGS) as CurrencyCode[]
 
 export const Route = createFileRoute('/allocations')({
   validateSearch: (search: Record<string, unknown>): { tab?: AllocationsTab | 'recurring' } => ({
@@ -906,6 +913,20 @@ export function AllocationsPage() {
   const needsSingleAccount =
     allocationForm.allocation_type === 'budget' || allocationForm.goal_mode === 'target_balance'
 
+  // A savings tracker's currency: the user's pick, else the chosen account's (target balance), the first
+  // aggregated account's (combined total), or PHP (savings transactions total).
+  const defaultSavingsCurrency: CurrencyCode = useMemo(() => {
+    const accountId =
+      allocationForm.goal_mode === 'target_balance'
+        ? allocationForm.account_id
+        : allocationForm.goal_mode === 'multi_account'
+        ? selectedSavingsAccountIds[0]
+        : undefined
+    const linked = accountId ? ownAccounts.find((a) => a.id === accountId) : undefined
+    return (linked?.currency as CurrencyCode | undefined) ?? 'PHP'
+  }, [allocationForm.goal_mode, allocationForm.account_id, selectedSavingsAccountIds, ownAccounts])
+  const savingsCurrency: CurrencyCode = allocationForm.currency ?? defaultSavingsCurrency
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setFieldErrors({})
@@ -1022,6 +1043,7 @@ export function AllocationsPage() {
           allocationForm.allocation_type === 'budget' && allocationForm.period_end
             ? dateInputToWire(allocationForm.period_end)
             : undefined,
+        currency: allocationForm.allocation_type === 'budget' ? undefined : savingsCurrency,
         is_active: allocationForm.is_active,
         configuration,
       }
@@ -1096,6 +1118,7 @@ export function AllocationsPage() {
       current_amount: allocation.current_amount,
       monthly_target: normalizedType === 'savings' ? allocation.monthly_target : undefined,
       target_date: normalizedType === 'savings' ? isoToDateInput(allocation.target_date ?? undefined) : undefined,
+      currency: normalizedType === 'savings' ? (allocation.currency as CurrencyCode) : undefined,
       is_active: allocation.is_active,
       goal_mode: normalizedType === 'budget' ? 'target_balance' : derivedGoalMode,
       period_frequency: resolvedCadence,
@@ -1316,7 +1339,7 @@ export function AllocationsPage() {
               )}
               {allocation.monthly_target != null && !isBudget && (
                 <span className="inline-flex items-center gap-1 px-2 py-1 text-ink">
-                  Monthly {format(allocation.monthly_target)}
+                  Monthly {formatSigned(allocation.monthly_target, allocation.currency)}
                 </span>
               )}
             </div>
@@ -1358,7 +1381,7 @@ export function AllocationsPage() {
               <>
                 <div className="flex items-center justify-between text-sm text-body">
                   <span>Current</span>
-                  <span className="font-semibold text-ink">{format(allocation.current_amount)}</span>
+                  <span className="font-semibold text-ink">{formatSigned(allocation.current_amount, allocation.currency)}</span>
                 </div>
                 {excludedCurrenciesNote(allocation) && (
                   <p className="text-xs text-warn" data-testid="allocation-card-excluded-note">
@@ -1369,7 +1392,7 @@ export function AllocationsPage() {
                   <>
                     <div className="flex items-center justify-between text-sm text-body">
                       <span>Target</span>
-                      <span className="font-medium">{format(allocation.target_amount)}</span>
+                      <span className="font-medium">{formatSigned(allocation.target_amount, allocation.currency)}</span>
                     </div>
                     <div className="w-full bg-sunken rounded-full h-2">
                       <div
@@ -2012,13 +2035,13 @@ export function AllocationsPage() {
                   </>
                 ) : (
                   <>
-                    <p className="mt-2 text-lg font-bold text-ink">{format(actionAllocation.current_amount)}</p>
+                    <p className="mt-2 text-lg font-bold text-ink">{formatSigned(actionAllocation.current_amount, actionAllocation.currency)}</p>
                     {excludedCurrenciesNote(actionAllocation) && (
                       <p className="text-xs text-warn">{excludedCurrenciesNote(actionAllocation)}</p>
                     )}
                     {actionAllocation.target_amount && (
                       <>
-                        <p className="text-sm text-muted">Target {format(actionAllocation.target_amount)}</p>
+                        <p className="text-sm text-muted">Target {formatSigned(actionAllocation.target_amount, actionAllocation.currency)}</p>
                         <div className="mt-2 w-full bg-sunken rounded-full h-2">
                           <div
                             className="bg-ink h-2 rounded-full transition-all duration-300"
@@ -2042,7 +2065,7 @@ export function AllocationsPage() {
               <div className="border border-line p-4">
                 <h3 className="text-sm font-semibold text-body">Details</h3>
                 {actionAllocation.monthly_target != null && !actionAllocationIsBudget && (
-                  <p className="mt-2 text-sm text-muted">Monthly target {format(actionAllocation.monthly_target)}</p>
+                  <p className="mt-2 text-sm text-muted">Monthly target {formatSigned(actionAllocation.monthly_target, actionAllocation.currency)}</p>
                 )}
                 {actionAllocation.target_date && !actionAllocationIsBudget && (
                   <p className="mt-1 text-sm text-muted">Target date {new Date(actionAllocation.target_date).toLocaleDateString()}</p>
@@ -2342,7 +2365,7 @@ export function AllocationsPage() {
                   {allocationForm.allocation_type === 'savings' && editingAllocation && (
                     <div data-testid="savings-current-progress">
                       <p className="block text-sm font-medium text-body">Current progress</p>
-                      <p className="mt-1 text-lg font-semibold text-ink">{format(editingAllocation.current_amount)}</p>
+                      <p className="mt-1 text-lg font-semibold text-ink">{formatSigned(editingAllocation.current_amount, editingAllocation.currency)}</p>
                       {editingAllocation.current_amount_source && (
                         <p className="text-xs text-muted">{editingAllocation.current_amount_source}</p>
                       )}
@@ -2351,6 +2374,25 @@ export function AllocationsPage() {
                           {excludedCurrenciesNote(editingAllocation)}
                         </p>
                       )}
+                    </div>
+                  )}
+
+                  {allocationForm.allocation_type === 'savings' && (
+                    <div>
+                      <label className="block text-sm font-medium text-body" htmlFor="allocation-currency">Currency</label>
+                      <select
+                        id="allocation-currency"
+                        value={savingsCurrency}
+                        onChange={(e) =>
+                          setAllocationForm((prev) => ({ ...prev, currency: e.target.value as CurrencyCode }))
+                        }
+                        className="mt-1 block w-full border border-line px-3 py-2"
+                        data-field="currency"
+                      >
+                        {CURRENCY_OPTIONS.map((c) => (
+                          <option key={c} value={c}>{c} ({getCurrencySymbol(c)})</option>
+                        ))}
+                      </select>
                     </div>
                   )}
 
@@ -2389,6 +2431,12 @@ export function AllocationsPage() {
                           ? 'Spending limit'
                           : 'Target amount (optional)'}
                       </label>
+                <div className="relative">
+                {allocationForm.allocation_type === 'savings' && (
+                  <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-muted sm:text-sm" data-testid="target-amount-symbol">
+                    {getCurrencySymbol(savingsCurrency)}
+                  </span>
+                )}
                 <input
                   type="number"
                   step="0.01"
@@ -2400,12 +2448,13 @@ export function AllocationsPage() {
                             target_amount: parseFloat(e.target.value) || undefined,
                           }))
                         }
-                  className="mt-1 block w-full border border-line px-3 py-2"
+                  className={`mt-1 block w-full border border-line px-3 py-2${allocationForm.allocation_type === 'savings' ? ' pl-9' : ''}`}
                         required={allocationForm.allocation_type === 'budget'}
                         ref={bindField('target_amount')}
                         data-field="target_amount"
                         {...fieldProps('target_amount')}
                       />
+                </div>
                       {renderFieldError('target_amount')}
                       {allocationForm.allocation_type === 'budget' ? (
                         <p className="mt-1 text-xs text-muted">
@@ -2425,6 +2474,10 @@ export function AllocationsPage() {
                         <label className="block text-sm font-medium text-body">
                           Monthly target (optional)
                         </label>
+                <div className="relative">
+                  <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-muted sm:text-sm" data-testid="monthly-target-symbol">
+                    {getCurrencySymbol(savingsCurrency)}
+                  </span>
                 <input
                   type="number"
                   step="0.01"
@@ -2436,11 +2489,12 @@ export function AllocationsPage() {
                               monthly_target: parseFloat(e.target.value) || undefined,
                             }))
                           }
-                  className="mt-1 block w-full border border-line px-3 py-2"
+                  className="mt-1 block w-full border border-line px-3 py-2 pl-9"
                   ref={bindField('monthly_target')}
                   data-field="monthly_target"
                   {...fieldProps('monthly_target')}
                 />
+                </div>
                 {renderFieldError('monthly_target')}
                 <p className="mt-1 text-xs text-muted">
                   Optional amount you'd like to set aside each month.

@@ -44,6 +44,7 @@ const account = (id: number, name: string): Account => ({
 })
 const everyday = account(1, 'Everyday')
 const joint = account(2, 'Joint savings')
+const dollar: Account = { ...account(3, 'Dollar savings'), currency: 'USD' }
 
 const category = (id: number, name: string): Category => ({
   id,
@@ -69,6 +70,18 @@ const baseSavings: Allocation = {
   currency: 'PHP',
   is_active: true,
   created_at: '2026-01-01T00:00:00',
+  configuration: { goal_mode: 'target_balance' },
+}
+const usdSavings: Allocation = {
+  ...baseSavings,
+  id: 24,
+  account_id: dollar.id,
+  name: 'Dollar fund',
+  target_amount: 3000,
+  current_amount: 1200,
+  monthly_target: 100,
+  current_amount_source: 'Balance of Dollar savings',
+  currency: 'USD',
   configuration: { goal_mode: 'target_balance' },
 }
 const incomplete: Allocation = {
@@ -111,14 +124,15 @@ async function openAllocations(page: Page, tab: 'Savings' | 'Budgets', categorie
       apiRoute<Category[]>('GET', '/categories/', categories),
       apiRoute<PaginatedResponse<BudgetEntry>>('GET', '/budget-entries/', page_<BudgetEntry>([])),
       apiRoute<{ items: CardCredit[] }>('GET', '/cards/credit', { items: [] }),
-      apiRoute<PaginatedResponse<Account>>('GET', '/accounts/', page_([everyday, joint])),
+      apiRoute<PaginatedResponse<Account>>('GET', '/accounts/', page_([everyday, joint, dollar])),
     ],
   })
   const api = await signedIn(page, user)
   await mockApi(page, [
-    apiRoute<PaginatedResponse<Allocation>>('GET', '/allocations/', page_([baseSavings, incomplete, budget])),
+    apiRoute<PaginatedResponse<Allocation>>('GET', '/allocations/', page_([baseSavings, incomplete, budget, usdSavings])),
     apiRoute<Allocation>('POST', '/allocations/', baseSavings),
     apiRoute<Allocation>('PUT', `/allocations/${incomplete.id}`, incomplete),
+    apiRoute<Allocation>('PUT', `/allocations/${usdSavings.id}`, usdSavings),
   ])
   await page.goto('/allocations')
   await page.getByRole('button', { name: tab, exact: true }).click()
@@ -138,7 +152,7 @@ const field = (form: Locator, key: string): Locator => form.locator(`[data-field
 const card = (page: Page, name: string): Locator =>
   page.locator('article[role="button"]').filter({ has: page.getByText(name, { exact: true }) })
 
-const SAVINGS_TAIL = ['Name', 'Description', 'Target amount (optional)', 'Monthly target (optional)', 'Target date']
+const SAVINGS_TAIL = ['Name', 'Description', 'Currency', 'Target amount (optional)', 'Monthly target (optional)', 'Target date']
 
 const createBody = (api: ApiMock): Record<string, unknown> => {
   const bodies = api.bodies('POST', '/allocations/') as Record<string, unknown>[]
@@ -273,6 +287,91 @@ test.describe('savings form tracking mode (STU-778)', () => {
     expect(puts[0]).toHaveProperty('account_id', null)
   })
 
+  test('currency defaults from the chosen account in target account balance mode', async ({ page }) => {
+    const api = await openAllocations(page, 'Savings')
+    const form = await addForm(page, /^Create savings tracker/)
+    const currency = form.getByLabel('Currency', { exact: true })
+    await expect(currency).toHaveValue('PHP')
+    await field(form, 'account_id').selectOption(String(dollar.id))
+    await expect(currency).toHaveValue('USD')
+    await expect(form.getByTestId('target-amount-symbol')).toHaveText('$')
+    await field(form, 'account_id').selectOption(String(everyday.id))
+    await expect(currency).toHaveValue('PHP')
+    await field(form, 'account_id').selectOption(String(dollar.id))
+    await field(form, 'name').fill('Dollar trip')
+    await form.getByRole('button', { name: 'Create savings tracker' }).click()
+    await expect.poll(() => api.bodies('POST', '/allocations/').length).toBe(1)
+    expect(createBody(api)).toHaveProperty('currency', 'USD')
+  })
+
+  test('currency defaults from the first aggregated account in combined total mode', async ({ page }) => {
+    const api = await openAllocations(page, 'Savings')
+    const form = await addForm(page, /^Create savings tracker/)
+    await form.getByRole('button', { name: 'Combined account total' }).click()
+    const currency = form.getByLabel('Currency', { exact: true })
+    await expect(currency).toHaveValue('PHP')
+    await field(form, 'savings_account_ids').getByRole('button', { name: /^Dollar savings/ }).click()
+    await field(form, 'savings_account_ids').getByRole('button', { name: /^Everyday/ }).click()
+    await expect(currency).toHaveValue('USD')
+    await field(form, 'name').fill('Mixed fund')
+    await form.getByRole('button', { name: 'Create savings tracker' }).click()
+    await expect.poll(() => api.bodies('POST', '/allocations/').length).toBe(1)
+    expect(createBody(api)).toHaveProperty('currency', 'USD')
+  })
+
+  test('currency is PHP in savings transactions total mode', async ({ page }) => {
+    const api = await openAllocations(page, 'Savings')
+    const form = await addForm(page, /^Create savings tracker/)
+    await field(form, 'account_id').selectOption(String(dollar.id))
+    await form.getByRole('button', { name: 'Savings transactions total' }).click()
+    const currency = form.getByLabel('Currency', { exact: true })
+    await expect(currency).toHaveValue('PHP')
+    await field(form, 'name').fill('Rainy day')
+    await form.getByRole('button', { name: 'Create savings tracker' }).click()
+    await expect.poll(() => api.bodies('POST', '/allocations/').length).toBe(1)
+    expect(createBody(api)).toHaveProperty('currency', 'PHP')
+  })
+
+  test('a currency the user picked survives an account change', async ({ page }) => {
+    const api = await openAllocations(page, 'Savings')
+    const form = await addForm(page, /^Create savings tracker/)
+    const currency = form.getByLabel('Currency', { exact: true })
+    await field(form, 'account_id').selectOption(String(dollar.id))
+    await expect(currency).toHaveValue('USD')
+    await currency.selectOption('EUR')
+    await field(form, 'account_id').selectOption(String(everyday.id))
+    await expect(currency).toHaveValue('EUR')
+    await field(form, 'name').fill('Euro trip')
+    await form.getByRole('button', { name: 'Create savings tracker' }).click()
+    await expect.poll(() => api.bodies('POST', '/allocations/').length).toBe(1)
+    expect(createBody(api)).toHaveProperty('currency', 'EUR')
+  })
+
+  test('the card, action modal and edit form show a USD allocation in USD', async ({ page }) => {
+    const api = await openAllocations(page, 'Savings')
+    const usdCard = card(page, usdSavings.name)
+    await expect(usdCard).toContainText('$1,200.00')
+    await expect(usdCard).toContainText('$3,000.00')
+    await expect(usdCard).toContainText('Monthly $100.00')
+    await expect(card(page, baseSavings.name)).toContainText('₱1,000.00')
+    await usdCard.click()
+    // Only the action modal writes the target as one run of text ("Target $3,000.00").
+    await expect(page.getByText('Target $3,000.00', { exact: true })).toBeVisible()
+    await expect(page.getByText('Monthly target $100.00', { exact: true })).toBeVisible()
+    await expect(page.getByText('$1,200.00', { exact: true })).toHaveCount(2)
+    await page.getByRole('button', { name: 'Edit allocation' }).click()
+    const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Update allocation' }) })
+    await expect(form.getByLabel('Currency', { exact: true })).toHaveValue('USD')
+    await expect(form.getByTestId('savings-current-progress')).toContainText('$1,200.00')
+    await expect(form.getByTestId('target-amount-symbol')).toHaveText('$')
+    await expect(form.getByTestId('monthly-target-symbol')).toHaveText('$')
+    await form.getByRole('button', { name: 'Update allocation' }).click()
+    await expect(form).toBeHidden()
+    const puts = api.bodies('PUT', `/allocations/${usdSavings.id}`) as Record<string, unknown>[]
+    expect(puts).toHaveLength(1)
+    expect(puts[0]).toHaveProperty('currency', 'USD')
+  })
+
   test('the budget form is unchanged', async ({ page }) => {
     const api = await openAllocations(page, 'Budgets')
     const form = await addForm(page, /^Create budget envelope/)
@@ -280,6 +379,7 @@ test.describe('savings form tracking mode (STU-778)', () => {
     await expect(field(form, 'account_id')).toHaveCount(1)
     await expect(field(form, 'current_amount')).toHaveCount(1)
     await expect(form.getByText('Tracking mode')).toHaveCount(0)
+    await expect(form.getByLabel('Currency', { exact: true })).toHaveCount(0)
     await field(form, 'account_id').selectOption(String(everyday.id))
     await field(form, 'name').fill('Dining')
     await field(form, 'target_amount').fill('3000')
@@ -290,5 +390,6 @@ test.describe('savings form tracking mode (STU-778)', () => {
     const body = createBody(api)
     expect(body).toHaveProperty('account_id', everyday.id)
     expect(body).toHaveProperty('current_amount', 250)
+    expect(body).not.toHaveProperty('currency')
   })
 })
