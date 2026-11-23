@@ -138,7 +138,9 @@ class WishlistOutlookMonth(BaseModel):
     rate into the item's currency."""
     month: str  # YYYY-MM
     existing_installments: Optional[float] = None
-    this_item: float
+    # Null only for a purchased item whose installment has no stored rate into
+    # the item's currency.
+    this_item: Optional[float] = None
     total: Optional[float] = None
 
 

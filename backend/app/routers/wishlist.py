@@ -1,17 +1,21 @@
 import math
-from datetime import timedelta
+from datetime import datetime, time, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from app.core import locking
 from app.core.auth import get_current_active_user
 from app.core.context import RequestContext, request_context
 from app.core.database import get_db
 from app.core.access import get_owned_or_404, owned_criterion, require_account, require_owned_ref
 from app.models.account import Account, AccountType
+from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.category import Category
+from app.models.transaction import RecurrenceFrequency
 from app.models.user import User
 from app.models.wishlist_item import WishlistItem, WishlistPaymentPlan
 from app.schemas.wishlist import (
@@ -25,10 +29,13 @@ from app.schemas.wishlist import (
     WishlistPlanResponse,
     WishlistReadiness,
 )
+from app.routers.budget_entries import add_budget_entry
+from app.schemas.budget_entry import BudgetEntryCreate
 from app.services import forecast as forecast_svc
 from app.services import wishlist_outlook
 from app.services.installment_split import TOO_SMALL_MESSAGE, try_installment_split
-from app.core.time import utc_now
+from app.services.fx import FxRates, convert
+from app.core.time import manila_day, utc_now
 
 router = APIRouter()
 
@@ -248,27 +255,121 @@ def get_wishlist_item(
 def update_wishlist_item(
     item_id: int,
     payload: WishlistItemUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    ctx: RequestContext = Depends(request_context),
 ):
-    item = get_owned_or_404(db, WishlistItem, item_id, current_user, "Wishlist item not found")
+    """Edit an item. Marking an installment item purchased creates its card
+    installment in the same change (``_create_installment``, STU-779), once:
+    the item row is locked first (``locking.lock_wishlist_item``), so a repeated
+    or concurrent request reads the link the first one stored and creates
+    nothing. Un-marking it leaves the installment running and says so in
+    ``notice``."""
+    db, current_user = ctx.db, ctx.user
+    item = locking.lock_wishlist_item(db, item_id)
+    if item is None or item.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Wishlist item not found")
 
     update_data = payload.dict(exclude_unset=True)
     if "category_id" in update_data:
         require_owned_ref(db, Category, update_data["category_id"], "Category not found",
                           current_user)
     _validate_payment_update(db, current_user, item, update_data)
-    if update_data.get("is_purchased") and not item.is_purchased:
-        update_data.setdefault("purchased_at", utc_now())
+    purchasing = bool(update_data.get("is_purchased")) and not item.is_purchased
+    unpurchasing = update_data.get("is_purchased") is False and item.is_purchased
+    if purchasing and update_data.get("purchased_at") is None:
+        # Absent or an explicit null: the purchase is now.
+        update_data["purchased_at"] = utc_now()
     for field, value in update_data.items():
         setattr(item, field, value)
+    notice = None
+    if (purchasing and item.payment_plan == WishlistPaymentPlan.INSTALLMENT
+            and item.installment_entry_id is None):
+        entry = _create_installment(ctx, item)
+        item.installment_entry_id = entry.id
+        notice = INSTALLMENT_CREATED_NOTICE.format(
+            count=entry.max_occurrences, currency=getattr(entry.currency, "value", entry.currency))
+    elif unpurchasing and item.installment_entry_id is not None:
+        notice = INSTALLMENT_KEPT_NOTICE
     item.updated_at = utc_now()
     db.commit()
     db.refresh(item)
+    item.notice = notice
     return item
 
 
+INSTALLMENT_CREATED_NOTICE = (
+    "Created a card installment of {count} monthly payments in {currency}; "
+    "it is in Recurring and the forecast")
+INSTALLMENT_KEPT_NOTICE = (
+    "The card installment keeps running in Recurring and the forecast; "
+    "delete it there if this purchase did not happen")
+PURCHASE_NO_RATE_MESSAGE = (
+    "No exchange rate from {base} to {quote} is stored yet, so the installment "
+    "can't be created; try again later")
+
+
+def _create_installment(ctx: RequestContext, item: WishlistItem) -> BudgetEntry:
+    """The card installment an installment item's purchase creates (STU-779),
+    added through the recurring form's own path (``budget_entries.add_budget_entry``),
+    flushed and uncommitted.
+
+    An expense on the item's card, monthly, ``after_occurrences`` with the
+    item's months, in the card's currency: the price is converted at the stored
+    rate when the item's currency differs (409, nothing written, when there is
+    none). Each payment but the last is the split's amount and the last its
+    ``final_amount`` (``installment_split``, the shared rounding). The first
+    date is the purchase's Manila day, which the create path moves to the
+    card's statement close like any card installment's.
+    """
+    db = ctx.db
+    card = db.get(Account, item.account_id) if item.account_id else None
+    if card is None or card.account_type != AccountType.CREDIT:
+        raise HTTPException(status_code=400, detail=INSTALLMENT_CARD_MESSAGE)
+    price = price_of(item.estimated_cost)
+    if card.currency != item.currency:
+        fx = ctx.fx if ctx.fx is not None else FxRates.offline(db)
+        rate = fx.rate(item.currency, card.currency)
+        if rate is None:
+            raise HTTPException(status_code=409, detail=PURCHASE_NO_RATE_MESSAGE.format(
+                base=getattr(item.currency, "value", item.currency),
+                quote=getattr(card.currency, "value", card.currency)))
+        price = convert(price, rate.rate)
+    split = try_installment_split(price, item.installment_months)
+    if split is None:
+        raise HTTPException(status_code=422, detail=TOO_SMALL_MESSAGE.format(
+            months=item.installment_months))
+    day = manila_day(item.purchased_at)
+    try:
+        entry_in = BudgetEntryCreate(
+            name=item.name[:150],
+            entry_type=BudgetEntryType.EXPENSE,
+            amount=float(split.amount),
+            final_amount=split.final_amount,
+            currency=card.currency,
+            cadence=RecurrenceFrequency.MONTHLY,
+            next_occurrence=datetime.combine(day, time(), tzinfo=timezone.utc),
+            end_mode="after_occurrences",
+            max_occurrences=item.installment_months,
+            account_id=card.id,
+            category_id=item.category_id,
+            billing_kind=None,
+        )
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()[0]["msg"]) from None
+    return add_budget_entry(db, ctx.user, entry_in)
+
+
 PAYMENT_FIELDS = ("account_id", "payment_plan", "installment_months")
+# What the linked card installment was built from besides the payment fields.
+LINKED_TERMS = ("estimated_cost", "currency")
+
+
+def _changes(item: WishlistItem, field: str, value) -> bool:
+    """Whether ``value`` differs from the stored field (a price by its money value)."""
+    stored = getattr(item, field)
+    if field == "estimated_cost":
+        return value is None or price_of(value) != price_of(stored)
+    return value != stored
 
 
 def _validate_payment_update(db: Session, user: User, item: WishlistItem,
@@ -278,8 +379,9 @@ def _validate_payment_update(db: Session, user: User, item: WishlistItem,
     Sending ``payment_plan`` "full" without ``installment_months`` clears the
     months. The account's access is checked only when a payment field is
     sent, so an edit of the name alone never fails on it. Once marking the
-    item purchased created its card installment, the payment fields are
-    fixed (409 on a change; resending the stored values passes).
+    item purchased created its card installment, the payment fields and the
+    price and currency it was built from are fixed (409 on a change;
+    resending the stored values passes).
     """
     sent = [f for f in PAYMENT_FIELDS if f in update_data]
     if "payment_plan" in update_data and update_data["payment_plan"] is None:
@@ -288,11 +390,12 @@ def _validate_payment_update(db: Session, user: User, item: WishlistItem,
             and "installment_months" not in update_data):
         update_data["installment_months"] = None
         sent.append("installment_months")
+    if item.installment_entry_id is not None and any(
+            _changes(item, f, update_data[f]) for f in (*sent, *LINKED_TERMS)
+            if f in update_data):
+        raise HTTPException(status_code=409, detail=INSTALLMENT_LINKED_MESSAGE)
     if not sent and "estimated_cost" not in update_data:
         return
-    if item.installment_entry_id is not None and any(
-            update_data[f] != getattr(item, f) for f in sent):
-        raise HTTPException(status_code=409, detail=INSTALLMENT_LINKED_MESSAGE)
     merged = {f: update_data.get(f, getattr(item, f)) for f in PAYMENT_FIELDS}
     validate_payment(db, user, item.user, **merged,
                      cost=update_data.get("estimated_cost") or item.estimated_cost,

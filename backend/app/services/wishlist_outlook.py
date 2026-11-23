@@ -27,7 +27,9 @@ no limit or the caller may not see its credit.
 A missing exchange rate gives ``unknown`` (or a null month figure) with a reason.
 Once marking the item purchased created its installment, that entry is already in
 the disposable figure, the card's hold and the forecast: it is left out of
-``existing_installments`` and both checks compare nothing more (``already_counted``).
+``existing_installments``, ``this_item`` is its own projected payments (on the
+statement closes, converted into the item's currency; null with no stored rate),
+and both checks compare nothing more (``already_counted``).
 """
 from datetime import date, datetime
 from decimal import Decimal
@@ -77,9 +79,12 @@ def this_item_payments(item: WishlistItem, price: Decimal) -> List[Decimal]:
     return [price]
 
 
-def _existing_by_month(ctx: RequestContext, item: WishlistItem, start: date,
-                       count: int) -> tuple:
-    """``([existing installments per month, None when unconverted], any unconverted)``."""
+def _installments_by_month(ctx: RequestContext, item: WishlistItem, start: date,
+                           count: int) -> tuple:
+    """``(existing, linked, any unconverted)``: per month, the card installments
+    already running (``existing``) and the occurrences of the item's own linked
+    entry (``linked``), each from the forecast's events and converted into the
+    item's currency; a month holding a figure with no stored rate is None."""
     db = ctx.db
     begin = datetime.combine(start, datetime.min.time())
     end = datetime.combine(_add_months(start, count), datetime.min.time())
@@ -92,17 +97,20 @@ def _existing_by_month(ctx: RequestContext, item: WishlistItem, start: date,
     accounts = ({a.id: a for a in db.query(Account).filter(Account.id.in_(account_ids))}
                 if account_ids else {})
     money = forecast_svc.Money(db, ctx.fx)
-    totals: List[Optional[Decimal]] = [_ZERO] * count
+    existing: List[Optional[Decimal]] = [_ZERO] * count
+    linked: List[Optional[Decimal]] = [_ZERO] * count
     unconverted = False
     for e in events:
         origin = e.get("origin")
         if not origin or origin[0] is not BudgetEntry:
             continue
         entry = entries.get(origin[1])
-        if entry is None or entry.id == item.installment_entry_id:
+        if entry is None:
             continue
-        if not is_card_installment(entry, accounts.get(entry.account_id)):
+        own = entry.id == item.installment_entry_id
+        if not own and not is_card_installment(entry, accounts.get(entry.account_id)):
             continue
+        totals = linked if own else existing
         when = forecast_svc._naive(e["date"]).date()
         index = (when.year - start.year) * 12 + when.month - start.month
         if not 0 <= index < count:
@@ -114,7 +122,7 @@ def _existing_by_month(ctx: RequestContext, item: WishlistItem, start: date,
             totals[index] = None
         elif totals[index] is not None:
             totals[index] += figure
-    return totals, unconverted
+    return existing, linked, unconverted
 
 
 def _disposable_check(item: WishlistItem, row: Optional[dict], amount: Decimal,
@@ -165,18 +173,24 @@ def outlook(ctx: RequestContext, item: WishlistItem, price: Decimal, row: Option
     payments = this_item_payments(item, price)
     count = max(len(payments), OUTLOOK_MIN_MONTHS)
     start = _add_months(ctx.today, 1)
-    existing, unconverted = _existing_by_month(ctx, item, start, count)
+    existing, linked, unconverted = _installments_by_month(ctx, item, start, count)
+    already_counted = item.installment_entry_id is not None
     months = []
     for i in range(count):
-        mine = payments[i] if i < len(payments) else _ZERO
+        # Once purchased, this item's months are its entry's own projected payments
+        # (charged on the statement close), not the plan's split from next month.
+        if already_counted:
+            mine = linked[i]
+        else:
+            mine = payments[i] if i < len(payments) else _ZERO
         months.append({
             "month": _add_months(start, i).strftime("%Y-%m"),
             "existing_installments": _f(existing[i]),
             "this_item": _f(mine),
-            "total": _f(None if existing[i] is None else existing[i] + mine),
+            "total": _f(None if existing[i] is None or mine is None
+                        else existing[i] + mine),
         })
     installment = item.payment_plan == WishlistPaymentPlan.INSTALLMENT
-    already_counted = item.installment_entry_id is not None
     account = ctx.db.get(Account, item.account_id) if item.account_id else None
     return {
         "item_id": item.id,
