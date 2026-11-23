@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -192,8 +194,6 @@ def get_allocation_progress(
     monthly_progress = 0
     if allocation.monthly_target:
         from app.models.transaction import Transaction, TransactionType
-        from datetime import datetime, timedelta
-        
         # The allocation owner's transactions for it in the current month. Another
         # user's row naming it is a stale reference and never counts.
         start_of_month = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
