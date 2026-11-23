@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, model_validator
-from typing import Optional, List
+from typing import Literal, Optional, List
 from datetime import datetime
 from app.models.wishlist_item import (
     INSTALLMENT_MAX_MONTHS, INSTALLMENT_MIN_MONTHS, WishlistPaymentPlan, WishlistPriority,
@@ -109,7 +109,71 @@ class WishlistPlanItem(BaseModel):
     note: Optional[str] = None
 
 
+class WishlistPlanInstallment(BaseModel):
+    """An installment item, left out of the save-up queue (STU-779): it is paid
+    monthly on its card, not saved up for."""
+    item_id: int
+    name: str
+    estimated_cost: float
+    currency: str
+    account_id: Optional[int] = None
+    installment_months: int
+    monthly_amount: float
+    final_amount: float
+
+
 class WishlistPlanResponse(BaseModel):
     monthly_disposable: float
     savings_rate: float
     items: List[WishlistPlanItem]
+    installments: List[WishlistPlanInstallment] = []
+
+
+CheckStatus = Literal["fits", "over", "unknown"]
+
+
+class WishlistOutlookMonth(BaseModel):
+    """One month of the outlook, in the item's currency. ``existing_installments``
+    (and so ``total``) is null when a card installment that month has no stored
+    rate into the item's currency."""
+    month: str  # YYYY-MM
+    existing_installments: Optional[float] = None
+    this_item: float
+    total: Optional[float] = None
+
+
+class WishlistDisposableCheck(BaseModel):
+    """This item alone (its monthly amount, or the full price) against the monthly
+    disposable income of the item's currency, which already counts every existing
+    recurring expense, card installments included."""
+    status: CheckStatus
+    currency: str
+    amount: float
+    monthly_disposable: Optional[float] = None
+    after_purchase: Optional[float] = None
+    reason: Optional[str] = None
+
+
+class WishlistCreditCheck(BaseModel):
+    """The full price against the card's available credit now, in the card's
+    currency (an installment holds the whole price on the limit)."""
+    status: CheckStatus
+    currency: Optional[str] = None
+    amount: Optional[float] = None
+    available: Optional[float] = None
+    limit: Optional[float] = None
+    reason: Optional[str] = None
+
+
+class WishlistOutlook(BaseModel):
+    item_id: int
+    currency: str
+    payment_plan: WishlistPaymentPlan
+    estimated_cost: float
+    installment_months: Optional[int] = None
+    monthly_amount: Optional[float] = None
+    final_amount: Optional[float] = None
+    months: List[WishlistOutlookMonth]
+    note: Optional[str] = None
+    disposable_check: WishlistDisposableCheck
+    credit_check: Optional[WishlistCreditCheck] = None

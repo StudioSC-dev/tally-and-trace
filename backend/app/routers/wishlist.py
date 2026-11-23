@@ -19,11 +19,14 @@ from app.schemas.wishlist import (
     WishlistItemCreate,
     WishlistItemResponse,
     WishlistItemUpdate,
+    WishlistOutlook,
+    WishlistPlanInstallment,
     WishlistPlanItem,
     WishlistPlanResponse,
     WishlistReadiness,
 )
 from app.services import forecast as forecast_svc
+from app.services import wishlist_outlook
 from app.services.installment_split import TOO_SMALL_MESSAGE, try_installment_split
 from app.core.time import utc_now
 
@@ -146,6 +149,10 @@ def get_wishlist_plan(
     queues only behind earlier items in that same currency. An item whose
     currency has no disposable row gets no date and says so in ``note``.
     The top-level figures stay the default-currency ones.
+
+    An installment item (STU-779) is paid monthly on its card, not saved up
+    for: it is left out of the queue (and of every later item's wait) and
+    listed in ``installments`` with its monthly and final amounts.
     """
     db, current_user = ctx.db, ctx.user
     disposable_data = forecast_svc.get_disposable_income(db, current_user.id)
@@ -167,12 +174,30 @@ def get_wishlist_plan(
         .all()
     )
 
+    installments: List[WishlistPlanInstallment] = []
+    queued = []
+    for item in items:
+        if item.payment_plan != WishlistPaymentPlan.INSTALLMENT:
+            queued.append(item)
+            continue
+        payments = wishlist_outlook.this_item_payments(item, price_of(item.estimated_cost))
+        installments.append(WishlistPlanInstallment(
+            item_id=item.id,
+            name=item.name,
+            estimated_cost=item.estimated_cost,
+            currency=getattr(item.currency, "value", item.currency),
+            account_id=item.account_id,
+            installment_months=item.installment_months,
+            monthly_amount=payments[0],
+            final_amount=payments[-1],
+        ))
+
     now = utc_now()
     cumulative_by_currency: Dict[str, int] = {}
-    currency_rows = forecast_svc.disposable_by_currency(ctx)["by_currency"] if items else []
+    currency_rows = forecast_svc.disposable_by_currency(ctx)["by_currency"] if queued else []
     plan: List[WishlistPlanItem] = []
 
-    for item in items:
+    for item in queued:
         code = getattr(item.currency, "value", item.currency)
         row = item_currency_row(ctx, item, currency_rows)
         if row is None:
@@ -206,6 +231,7 @@ def get_wishlist_plan(
         monthly_disposable=monthly_disposable,
         savings_rate=savings_rate,
         items=plan,
+        installments=installments,
     )
 
 
@@ -282,6 +308,21 @@ def delete_wishlist_item(
     item = get_owned_or_404(db, WishlistItem, item_id, current_user, "Wishlist item not found")
     db.delete(item)
     db.commit()
+
+
+@router.get("/{item_id}/outlook", response_model=WishlistOutlook)
+def get_outlook(
+    item_id: int,
+    ctx: RequestContext = Depends(request_context),
+):
+    """How the purchase sits with the caller's money (STU-779): the monthly and
+    final payments, the months ahead with the card installments already
+    running, and whether this item fits monthly disposable income and, on a
+    card, its available credit (``services/wishlist_outlook.py``)."""
+    item = get_owned_or_404(ctx.db, WishlistItem, item_id, ctx.user, "Wishlist item not found")
+    code = getattr(item.currency, "value", item.currency)
+    return wishlist_outlook.outlook(ctx, item, price_of(item.estimated_cost),
+                                    item_currency_row(ctx, item), no_projection_note(code))
 
 
 @router.get("/{item_id}/readiness", response_model=WishlistReadiness)
