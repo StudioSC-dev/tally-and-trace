@@ -6,6 +6,8 @@
 export interface ConfirmRequest {
   title: string
   message: string
+  /** An in-app link shown under the message (a path with its query, for example `/allocations?tab=recurring`). Following it closes the dialog without accepting. */
+  link?: { label: string; to: string }
   /** An explicit verb: "Delete account", "Stop sharing", "Leave". */
   confirmLabel: string
   /** Defaults to "Cancel". */
