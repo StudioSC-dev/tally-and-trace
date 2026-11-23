@@ -2120,8 +2120,8 @@ export function AllocationsPage() {
                   {allocationForm.allocation_type === 'savings' && (
                     <div className="space-y-3">
               <div>
-                        <label className="block text-sm font-medium text-body">Tracking mode</label>
-                        <div className="mt-1 flex flex-wrap gap-2">
+                        <label className="block text-sm font-medium text-body" id="allocation-tracking-mode-label">Tracking mode</label>
+                        <div className="mt-1 flex flex-wrap gap-2" role="group" aria-labelledby="allocation-tracking-mode-label">
                           {[
                             {
                               value: 'target_balance' as AllocationGoalMode,
@@ -2141,9 +2141,9 @@ export function AllocationsPage() {
                           ].map((option) => {
                             const isSelected = allocationForm.goal_mode === option.value
                             return (
-                              <button
-                                type="button"
+                              <Segment
                                 key={option.value}
+                                selected={isSelected}
                                 onClick={() => {
                                   setFormError('')
                                   setAllocationForm((prev) => ({
@@ -2151,11 +2151,11 @@ export function AllocationsPage() {
                                     goal_mode: option.value,
                                   }))
                                 }}
-                                className={`border px-3 py-2 text-left text-sm transition ${ isSelected ? 'border-ink text-ink' : 'border-line bg-surface hover:border-line-strong' }`}
+                                className="border px-3 py-2 text-left text-sm transition"
                               >
                                 <span className="block font-semibold">{option.label}</span>
                                 <span className="block text-xs text-muted">{option.description}</span>
-                              </button>
+                              </Segment>
                             )
                           })}
                         </div>

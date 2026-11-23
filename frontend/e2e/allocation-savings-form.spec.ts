@@ -156,6 +156,13 @@ test.describe('savings form tracking mode (STU-778)', () => {
     const modeBox = await form.getByRole('button', { name: 'Target account balance' }).boundingBox()
     const accountBox = await field(form, 'account_id').boundingBox()
     expect(modeBox && accountBox && modeBox.y < accountBox.y, 'Tracking mode sits above the Account select').toBe(true)
+    const group = form.getByRole('group', { name: 'Tracking mode', exact: true })
+    await expect(group).toBeVisible()
+    await expect(group.getByRole('button', { name: /^Target account balance/ })).toHaveAttribute('aria-pressed', 'true')
+    await expect(group.getByRole('button', { name: /^Combined account total/ })).toHaveAttribute('aria-pressed', 'false')
+    await group.getByRole('button', { name: /^Savings transactions total/ }).click()
+    await expect(group.getByRole('button', { name: /^Savings transactions total/ })).toHaveAttribute('aria-pressed', 'true')
+    await expect(group.getByRole('button', { name: /^Target account balance/ })).toHaveAttribute('aria-pressed', 'false')
     await shot(page, 'savings-form-target-balance')
   })
 
