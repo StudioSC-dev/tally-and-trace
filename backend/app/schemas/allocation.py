@@ -55,7 +55,8 @@ class AllocationBase(BaseModel):
     current_amount: float = Field(default=0.0, ge=0)
     monthly_target: Optional[float] = Field(None, ge=0)
     # Omitted on create: a target_balance or multi_account savings allocation takes
-    # its account's currency, anything else PHP (STU-777).
+    # its account's currency, anything else the owner's default currency, or PHP
+    # without one (STU-777).
     currency: Optional[CurrencyType] = None
     target_date: Optional[datetime] = None
     period_frequency: Optional[BudgetPeriodFrequency] = None
