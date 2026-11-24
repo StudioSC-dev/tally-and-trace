@@ -132,11 +132,12 @@ def create_allocation(
                                      roles=OWNER_ROLES)
     if allocation_data["currency"] is None:
         # Unsent: a savings allocation tracking its account(s) takes the (first)
-        # account's currency, anything else PHP, the column's default (STU-777).
+        # account's currency, anything else the owner's default currency, or PHP
+        # without one (STU-777). The caller is always the owner.
         tracks_account = (allocation.allocation_type == AllocationType.SAVINGS
                           and goal_mode(allocation.configuration) != TRANSACTION_TOTAL)
         allocation_data["currency"] = (account.currency if tracks_account and account
-                                       else CurrencyType.PHP)
+                                       else current_user.default_currency or CurrencyType.PHP)
 
     db_allocation = Allocation(**allocation_data, user_id=current_user.id)
     db.add(db_allocation)

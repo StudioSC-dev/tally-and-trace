@@ -324,8 +324,17 @@ def test_the_default_currency_is_the_tracked_accounts(world):
     assert multi["currency"] == "PHP"
 
 
+def _default_currency(db, who, currency):
+    from app.models.user import User
+
+    db.query(User).filter(User.id == who["id"]).update(
+        {"default_currency": currency}, synchronize_session=False)
+    db.commit()
+
+
 def test_the_default_currency_is_php_otherwise(world):
     client, me = world["client"], world["me"]
+    _default_currency(world["db"], me, "PHP")
     total = _allocation(client, me, {"goal_mode": "transaction_total",
                                      "savings_category_id": world["savings"]})
     assert total["currency"] == "PHP"
@@ -338,6 +347,53 @@ def test_the_default_currency_is_php_otherwise(world):
     (exported,) = [a for a in _get(client, me, "/data/export.json")["allocations"]
                    if a["id"] == goal["id"]]
     assert exported["currency"] == "PHP"
+
+
+def test_the_default_currency_is_the_owners_otherwise(world):
+    client, me = world["client"], world["me"]
+    _default_currency(world["db"], me, "USD")
+    total = _allocation(client, me, {"goal_mode": "transaction_total",
+                                     "savings_category_id": world["savings"]})
+    assert total["currency"] == "USD"
+    # An account in another currency sent with transaction_total sets no currency.
+    total = _allocation(client, me, {"goal_mode": "transaction_total",
+                                     "savings_category_id": world["savings"]}, world["eur"])
+    assert total["currency"] == "USD"
+    goal = _allocation(client, me, None, world["bpi"], kind="goal")
+    assert goal["currency"] == "USD"
+    budget = _allocation(client, me, {"category_ids": [world["other"]]}, world["checking"],
+                         kind="budget", period_frequency="monthly",
+                         period_start="2026-11-01T00:00:00")
+    assert budget["currency"] == "USD"
+    # A tracked account still sets its own currency.
+    tracked = _allocation(client, me, {"goal_mode": "target_balance"}, world["bpi"])
+    assert tracked["currency"] == "PHP"
+
+
+def test_an_owner_without_a_default_currency_gets_php(world):
+    from sqlalchemy.exc import IntegrityError
+
+    from app.core.auth import get_current_active_user
+    from app.main import app
+    from app.models.user import User
+
+    client, me, db = world["client"], world["me"], world["db"]
+    # The column is NOT NULL, so a null default is never stored...
+    with pytest.raises(IntegrityError):
+        _default_currency(db, me, None)
+    db.rollback()
+    # ...but the model allows one: an owner loaded without it still gets PHP.
+    owner = db.get(User, me["id"])
+    db.expunge(owner)
+    owner.default_currency = None
+    app.dependency_overrides[get_current_active_user] = lambda: owner
+    try:
+        total = _allocation(client, me, {"goal_mode": "transaction_total",
+                                         "savings_category_id": world["savings"]}, world["usd"])
+        goal = _allocation(client, me, None, world["usd"], kind="goal")
+    finally:
+        app.dependency_overrides.pop(get_current_active_user, None)
+    assert (total["currency"], goal["currency"]) == ("PHP", "PHP")
 
 
 def test_an_update_changes_the_currency_and_the_figure_follows(world):
