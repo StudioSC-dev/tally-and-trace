@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
-import type { Account, Allocation, BudgetEntry, CardCredit, Category, PaginatedResponse, User } from '@tally-trace/shared'
+import type { Account, Allocation, BudgetEntry, CardCredit, Category, PaginatedResponse, User, WishlistItem } from '@tally-trace/shared'
+import { householdWishlistRoutes } from './support/fixtures/household'
 import { landingStubs } from './support/landing'
 import { apiRoute, mockApi } from './support/mockApi'
 import type { ApiMock } from './support/mockApi'
@@ -383,6 +384,35 @@ test.describe('savings form tracking mode (STU-778)', () => {
     const puts = api.bodies('PUT', `/allocations/${usdSavings.id}`) as Record<string, unknown>[]
     expect(puts).toHaveLength(1)
     expect(puts[0]).toHaveProperty('currency', 'USD')
+  })
+
+  test("a wishlist item's currency prefills the savings form and beats the account and user defaults", async ({ page }) => {
+    const api = await openAllocations(page, 'Savings')
+    const euroItem: WishlistItem = {
+      id: 811,
+      user_id: user.id,
+      name: 'Euro bike',
+      estimated_cost: 1000,
+      currency: 'EUR',
+      priority: 'medium',
+      is_purchased: false,
+      created_at: '2026-02-01T09:00:00Z',
+    }
+    await mockApi(page, householdWishlistRoutes([euroItem]))
+    await page.getByRole('button', { name: 'Wishlist', exact: true }).click()
+    await page.getByRole('button', { name: 'Savings target' }).click()
+    const form = page.locator('form').filter({ has: page.getByRole('button', { name: /^Create / }) })
+    const currency = form.getByLabel('Currency', { exact: true })
+    await expect(currency).toHaveValue('EUR')
+    await expect(field(form, 'target_amount')).toHaveValue('1000')
+    // The explicit pick wins over the chosen account's currency.
+    await field(form, 'account_id').selectOption(String(dollar.id))
+    await expect(currency).toHaveValue('EUR')
+    await form.getByRole('button', { name: 'Create savings tracker' }).click()
+    await expect.poll(() => api.bodies('POST', '/allocations/').length).toBe(1)
+    const body = createBody(api)
+    expect(body).toHaveProperty('currency', 'EUR')
+    expect(body).toHaveProperty('target_amount', 1000)
   })
 
   test('the budget form is unchanged', async ({ page }) => {

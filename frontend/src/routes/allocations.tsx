@@ -726,6 +726,8 @@ export function AllocationsPage() {
         name: item.name,
         description: `From wishlist: ${item.name}`,
         target_amount: item.estimated_cost || undefined,
+        // A savings target keeps the item's currency as an explicit pick, so an account or user default cannot swap it.
+        currency: kind === 'savings' && CURRENCY_OPTIONS.includes(item.currency) ? item.currency : undefined,
         // A savings target keeps the item's target date; a budget envelope resets monthly.
         target_date: kind === 'savings' && item.target_date ? item.target_date.slice(0, 10) : undefined,
       })
