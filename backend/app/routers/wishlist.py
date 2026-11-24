@@ -257,8 +257,10 @@ def update_wishlist_item(
     payload: WishlistItemUpdate,
     ctx: RequestContext = Depends(request_context),
 ):
-    """Edit an item. Marking an installment item purchased creates its card
-    installment in the same change (``_create_installment``, STU-779), once:
+    """Edit an item. Marking an installment item purchased, or switching an
+    already purchased item to the installment plan, creates its card
+    installment in the same change (``_create_installment``, STU-779; the
+    switch dates it from the item's ``purchased_at``), once:
     the item row is locked first (``locking.lock_wishlist_item``), so a repeated
     or concurrent request reads the link the first one stored and creates
     nothing. Un-marking it leaves the installment running and says so in
@@ -282,8 +284,11 @@ def update_wishlist_item(
     for field, value in update_data.items():
         setattr(item, field, value)
     notice = None
-    if (purchasing and item.payment_plan == WishlistPaymentPlan.INSTALLMENT
+    switching = "payment_plan" in update_data and item.is_purchased
+    if ((purchasing or switching) and item.payment_plan == WishlistPaymentPlan.INSTALLMENT
             and item.installment_entry_id is None):
+        if item.purchased_at is None:
+            item.purchased_at = utc_now()
         entry = _create_installment(ctx, item)
         item.installment_entry_id = entry.id
         notice = INSTALLMENT_CREATED_NOTICE.format(
