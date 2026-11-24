@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { useRouterState } from '@tanstack/react-router'
+import { useRouter, useRouterState } from '@tanstack/react-router'
 import { createConfirmFlow } from '@tally-trace/shared'
 import type { ConfirmRequest } from '@tally-trace/shared'
 import { ConfirmContext } from '../hooks/useConfirm'
@@ -31,6 +31,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const cancelRef = useRef<HTMLButtonElement>(null)
   const openerRef = useRef<Element | null>(null)
+  const router = useRouter()
   const titleId = useId()
   const messageId = useId()
 
@@ -155,6 +156,22 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
               <p id={messageId} className="text-sm text-body" data-testid="confirm-dialog-message">
                 {view.request.message}
               </p>
+              {view.request.link && (
+                <a
+                  href={view.request.link.to}
+                  className="inline-block text-sm text-ink underline"
+                  data-testid="confirm-dialog-link"
+                  onClick={(event) => {
+                    event.preventDefault()
+                    if (view.pending) return
+                    const { to } = view.request.link ?? { to: '' }
+                    flow.dismiss()
+                    router.history.push(to)
+                  }}
+                >
+                  {view.request.link.label}
+                </a>
+              )}
               {view.error && (
                 <p role="alert" data-testid="confirm-dialog-error" className="text-sm text-danger">
                   {view.error}

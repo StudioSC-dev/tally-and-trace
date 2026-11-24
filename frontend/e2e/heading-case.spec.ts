@@ -1736,12 +1736,13 @@ const EXPECTED: Record<string, Expected & { phone?: Partial<Expected> }> = {
   'add wishlist item dialog': {
     headings: ['Add item'],
     titles: ['Add item'],
-    buttons: ['Close wishlist modal', 'Add', 'Cancel'],
+    // STU-780 added the Payment choice's two segments.
+    buttons: ['Close wishlist modal', 'Full', 'Installments', 'Add', 'Cancel'],
   },
   'edit wishlist item dialog': {
     headings: ['Edit item'],
     titles: ['Edit item'],
-    buttons: ['Close wishlist modal', 'Update', 'Cancel'],
+    buttons: ['Close wishlist modal', 'Full', 'Installments', 'Update', 'Cancel'],
   },
   'add account dialog': {
     headings: ['Create account'],

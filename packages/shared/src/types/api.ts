@@ -809,6 +809,9 @@ export interface MaterializeDueResult {
 
 export type WishlistItemPriority = 'low' | 'medium' | 'high' | 'critical'
 
+/** How a wishlist purchase is paid: in full, or as monthly installments on a credit card. */
+export type WishlistPaymentPlan = 'full' | 'installment'
+
 export interface WishlistItem {
   id: number
   user_id: number
@@ -822,8 +825,17 @@ export interface WishlistItem {
   target_date?: string
   is_purchased: boolean
   purchased_at?: string
+  /** The account the purchase is paid from; installments need a credit card. Null when none is chosen. */
+  account_id?: number | null
+  payment_plan: WishlistPaymentPlan
+  /** 2 to 60, on an installment only; null for a full payment. */
+  installment_months?: number | null
+  /** The card installment (a recurring entry) that marking the item purchased created. While set, the payment fields are locked (409). */
+  installment_entry_id?: number | null
   created_at: string
   updated_at?: string
+  /** What a write did besides saving the item, for the client to show (for example, un-marking keeps the installment); null otherwise. */
+  notice?: string | null
 }
 
 export interface WishlistReadiness {
@@ -852,10 +864,74 @@ export interface WishlistPlanItem {
   note?: string | null
 }
 
+/** An installment item, listed apart from the save-up queue: it is paid monthly on its card. */
+export interface WishlistPlanInstallment {
+  item_id: number
+  name: string
+  estimated_cost: number
+  currency: string
+  account_id?: number | null
+  installment_months: number
+  monthly_amount: number
+  final_amount: number
+}
+
 export interface WishlistPlan {
   monthly_disposable: number
   savings_rate: number
   items: WishlistPlanItem[]
+  installments: WishlistPlanInstallment[]
+}
+
+/** `fits` and `over` are verdicts; `unknown` means there is not enough data (see `reason`). */
+export type WishlistCheckStatus = 'fits' | 'over' | 'unknown'
+
+/** One month of the outlook, in the item's currency. */
+export interface WishlistOutlookMonth {
+  /** YYYY-MM */
+  month: string
+  /** Null when a card installment that month has no stored rate into the item's currency. */
+  existing_installments: number | null
+  /** Null when an item whose installment is already linked has no stored rate for the month. */
+  this_item: number | null
+  /** Null whenever `existing_installments` or `this_item` is. */
+  total: number | null
+}
+
+/** This item alone (its monthly amount, or the full price) against the monthly disposable income of the item's currency. */
+export interface WishlistDisposableCheck {
+  status: WishlistCheckStatus
+  currency: string
+  amount: number
+  monthly_disposable?: number | null
+  after_purchase?: number | null
+  reason?: string | null
+}
+
+/** The full price against the card's available credit now, in the card's currency. */
+export interface WishlistCreditCheck {
+  status: WishlistCheckStatus
+  currency?: string | null
+  amount?: number | null
+  available?: number | null
+  limit?: number | null
+  reason?: string | null
+}
+
+/** `GET /wishlist/{id}/outlook`. */
+export interface WishlistOutlook {
+  item_id: number
+  currency: string
+  payment_plan: WishlistPaymentPlan
+  estimated_cost: number
+  installment_months?: number | null
+  monthly_amount?: number | null
+  final_amount?: number | null
+  months: WishlistOutlookMonth[]
+  note?: string | null
+  disposable_check: WishlistDisposableCheck
+  /** Present for an item paid from a credit card account only. */
+  credit_check?: WishlistCreditCheck | null
 }
 
 // ─── Shared Response Wrappers ─────────────────────────────────────────────────
