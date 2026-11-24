@@ -1996,7 +1996,7 @@ const MAIN_EDIT_BODY: Record<string, unknown> = {
   description: 'Grab to Makati and back',
   transaction_type: 'debit',
   transaction_date: '2026-03-11T00:00:00.000Z',
-  posting_date: '2026-03-12T02:00:00.000Z',
+  // STU-784 deliberately omits a blank posting date on Edit, so this body differs from main by that field.
   is_posted: true,
   transfer_fee: 0,
   transfer_from_account_id: null,

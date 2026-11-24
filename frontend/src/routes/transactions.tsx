@@ -10,7 +10,7 @@ import type {
   RecordPermissions,
   SharedFullTransaction,
 } from '../store/api'
-import { entryDay, DEFAULT_SETTLEMENT, canMakeRepeat, formatCadenceLabel, editFormProjectedAmount, fieldErrorProps, repeatFieldControl, repeatingRefusal, repeatScheduleOf, scheduleRequest, schedulePreview, scheduleState, settlementControlState, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, scheduledRange, postedCycleHint, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError, completionShown, pendingTargets } from '@tally-trace/shared'
+import { entryDay, DEFAULT_SETTLEMENT, canMakeRepeat, formatCadenceLabel, editFormProjectedAmount, fieldErrorProps, repeatFieldControl, repeatingRefusal, repeatScheduleOf, scheduleRequest, schedulePreview, scheduleState, settlementControlState, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, scheduledRange, postedCycleHint, postingDateField, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError, completionShown, pendingTargets } from '@tally-trace/shared'
 import { AUTOFILL_FIELDS, autofillForm, cleanFormForType } from '@tally-trace/shared'
 import { cappedPaymentDays, centavosToAmount, installmentInput, installmentScheduleDraft } from '@tally-trace/shared'
 import type { AutofillField, DescriptionSuggestion, TypeFits } from '@tally-trace/shared'
@@ -1797,12 +1797,13 @@ export function TransactionsPage() {
         description: formData.description,
         transaction_type: formData.transaction_type,
         transaction_date: new Date(formData.transaction_date).toISOString(),
-        posting_date:
-          formData.is_posted && formData.posting_date
-            ? new Date(formData.posting_date).toISOString()
-            : formData.is_posted
-            ? new Date().toISOString()
-            : undefined,
+        posting_date: postingDateField(
+          formData.is_posted,
+          formData.posting_date,
+          editingTransaction
+            ? { isPosted: editingTransaction.is_posted, postingDate: editingTransaction.posting_date }
+            : null,
+        ),
         is_posted: formData.is_posted,
         transfer_fee: transferFee,
         // Any other type sends both as null, so an edit away from a transfer clears them.
@@ -1843,7 +1844,6 @@ export function TransactionsPage() {
         }
       } else {
         payload.exchange_rate = undefined
-        payload.posting_date = undefined
       }
 
       // A foreign pending row keeps its retained actual figure: only the projected figure
