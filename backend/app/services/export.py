@@ -66,6 +66,8 @@ from app.models.tag import Tag, account_tags, budget_entry_tags, transaction_tag
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.models.wishlist_item import WishlistItem
+from app.services.fx import FxRates
+from app.services.savings_progress import progress_for
 
 EXPORT_VERSION = 2
 
@@ -190,6 +192,18 @@ def _own_links(db: Session, user: User, table, fields, record_ids) -> list:
     return [dict(zip(fields, row)) for row in rows]
 
 
+def _allocation_rows(db: Session, allocations) -> list:
+    """The allocations, a savings one's ``current_amount`` calculated (STU-777)."""
+    progress = progress_for(db, allocations, FxRates.offline(db))
+    rows = []
+    for allocation in allocations:
+        row = _row(allocation, ALLOCATION_FIELDS)
+        if allocation.id in progress:
+            row["current_amount"] = _value(progress[allocation.id].current_amount)
+        rows.append(row)
+    return rows
+
+
 def build_export(db: Session, user: User) -> Dict[str, object]:
     """The caller's export, as plain JSON-ready data (see the module docstring)."""
     owned = db.query(Account).filter(owned_criterion(Account, user)).order_by(Account.id).all()
@@ -245,7 +259,7 @@ def build_export(db: Session, user: User) -> Dict[str, object]:
         "transactions": [_row(t, TRANSACTION_FIELDS) for t in transactions],
         "budget_entries": [_row(e, BUDGET_ENTRY_FIELDS) for e in entries],
         "categories": [_row(c, CATEGORY_FIELDS) for c in own(Category)],
-        "allocations": [_row(a, ALLOCATION_FIELDS) for a in own(Allocation)],
+        "allocations": _allocation_rows(db, own(Allocation)),
         "wishlist_items": [_row(w, WISHLIST_FIELDS) for w in own(WishlistItem)],
         "others_transactions": [
             _pick(redactor.limited_transaction(t), LIMITED_TRANSACTION_FIELDS)

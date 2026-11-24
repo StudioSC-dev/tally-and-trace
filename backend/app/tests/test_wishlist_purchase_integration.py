@@ -252,6 +252,75 @@ def test_an_explicit_null_purchase_date_means_now(sw_client, sw_db, sw):
     assert _entries_named(sw_db, a["id"]) == [body["installment_entry_id"]]
 
 
+def _purchased_full(client, who, account_id, **fields):
+    """A purchased full-payment item (no entry), bought on a fixed past day."""
+    item = sw_post(client, who, "/wishlist/", {
+        "name": "Laptop", "estimated_cost": 10_000, "account_id": account_id, **fields})["id"]
+    _put(client, who, item, is_purchased=True, purchased_at="2026-01-10T04:00:00Z")
+    return item
+
+
+def test_switching_a_purchased_item_to_installment_creates_the_entry(sw_client, sw_db, sw):
+    from datetime import date
+
+    from app.models.account import Account
+    from app.services.statements import statement_close
+
+    client, a = sw_client, sw["a"]
+    item = _purchased_full(client, a, sw["a_card"])
+    assert _entries_named(sw_db, a["id"]) == []
+    body = _put(client, a, item, payment_plan="installment", installment_months=4,
+                account_id=sw["a_card"])
+    entry_id = body["installment_entry_id"]
+    assert entry_id is not None and body["is_purchased"] is True
+    assert body["notice"] == ("Created a card installment of 4 monthly payments in PHP; "
+                              "it is in Recurring and the forecast")
+    entry = _get(client, a, f"/budget-entries/{entry_id}")
+    # Dated from the stored purchase day, not today.
+    expected = statement_close(sw_db.get(Account, sw["a_card"]), date(2026, 1, 10))
+    assert entry["next_occurrence"][:10] == expected.isoformat()
+    assert expected != _close_of(sw_db, sw["a_card"])[0]
+    assert (entry["max_occurrences"], entry["amount"], entry["kind"]) == (4, 2_500.0, "installment")
+    assert _entries_named(sw_db, a["id"]) == [entry_id]
+    # The terms are fixed once the entry exists.
+    _put(client, a, item, expect=409, installment_months=6)
+
+
+def test_repeating_the_switch_creates_no_second_entry(sw_client, sw_db, sw):
+    client, a = sw_client, sw["a"]
+    item = _purchased_full(client, a, sw["a_card"])
+    fields = {"payment_plan": "installment", "installment_months": 4,
+              "account_id": sw["a_card"]}
+    entry_id = _put(client, a, item, **fields)["installment_entry_id"]
+    again = _put(client, a, item, **fields)
+    assert (again["installment_entry_id"], again["notice"]) == (entry_id, None)
+    assert _entries_named(sw_db, a["id"]) == [entry_id]
+
+
+def test_switching_a_purchased_item_without_a_date_dates_it_today(sw_client, sw_db, sw):
+    client, a = sw_client, sw["a"]
+    item = _purchased_full(client, a, sw["a_card"])
+    sw_db.execute(text("UPDATE wishlist_items SET purchased_at = NULL WHERE id = :i"),
+                  {"i": item})
+    sw_db.commit()
+    body = _put(client, a, item, payment_plan="installment", installment_months=4,
+                account_id=sw["a_card"])
+    assert body["installment_entry_id"] is not None and body["purchased_at"] is not None
+    assert _entries_named(sw_db, a["id"]) == [body["installment_entry_id"]]
+
+
+def test_switching_with_no_rate_refuses_and_changes_nothing(sw_client, sw_db, sw):
+    client, a = sw_client, sw["a"]
+    item = _purchased_full(client, a, sw["a_card"], currency="EUR")
+    r = client.put(f"{API}/wishlist/{item}", headers=a["headers"], json={
+        "payment_plan": "installment", "installment_months": 4, "account_id": sw["a_card"]})
+    assert r.status_code == 409, r.text
+    body = _get(client, a, f"/wishlist/{item}")
+    assert (body["payment_plan"], body["installment_months"], body["installment_entry_id"]) == (
+        "full", None, None)
+    assert _entries_named(sw_db, a["id"]) == []
+
+
 def test_a_purchased_items_months_follow_its_entry(sw_client, sw_db, sw):
     """A card closing today: the first payment falls this month, before the
     outlook's first row, so the rows show the entry's second and last payments
