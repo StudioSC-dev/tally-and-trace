@@ -10,7 +10,7 @@ item per entry) and cleared when that entry is deleted. The downgrade drops the
 four columns, the constraint and the enum type.
 
 Revision ID: a7c3e5f9b1d2
-Revises: f5905076b019
+Revises: b7d4e1a9c3f6
 Create Date: 2026-11-23
 
 """
@@ -19,7 +19,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = "a7c3e5f9b1d2"
-down_revision = "f5905076b019"
+down_revision = "b7d4e1a9c3f6"
 branch_labels = None
 depends_on = None
 

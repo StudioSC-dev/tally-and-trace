@@ -21,7 +21,7 @@ from app.tests.conftest import sw_db_reachable
 pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="no database available")
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
-PREVIOUS = "f5905076b019"
+PREVIOUS = "b7d4e1a9c3f6"
 PAYMENT_PLAN = "a7c3e5f9b1d2"
 NEW_COLUMNS = {"account_id", "payment_plan", "installment_months", "installment_entry_id"}
 
