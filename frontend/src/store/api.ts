@@ -910,9 +910,12 @@ export const accountingApi = createApi({
     }),
     updateWishlistItem: builder.mutation<WishlistItem, { id: number; data: Partial<WishlistItem> }>({
       query: ({ id, data }) => ({ url: `wishlist/${id}`, method: 'PUT', body: data }),
-      // Marking an installment item purchased creates a card installment (a recurring entry) that shows in Due and the card's credit.
+      // Marking an installment item purchased, or changing the plan, card or months of a purchased one, creates or
+      // changes a card installment (a recurring entry) that shows in Due and the card's credit.
       invalidatesTags: (_result, _error, { data }) =>
-        data.is_purchased !== undefined ? ['Wishlist', 'BudgetEntry', 'Due', 'Account'] : ['Wishlist'],
+        data.is_purchased !== undefined || data.payment_plan !== undefined || data.account_id !== undefined || data.installment_months !== undefined
+          ? ['Wishlist', 'BudgetEntry', 'Due', 'Account']
+          : ['Wishlist'],
     }),
     deleteWishlistItem: builder.mutation<void, number>({
       query: (id) => ({ url: `wishlist/${id}`, method: 'DELETE' }),

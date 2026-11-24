@@ -201,8 +201,11 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
     }
     setSaveError(null)
     try {
-      if (editing) await updateItem({ id: editing.id, data: payload }).unwrap()
-      else await createItem(payload).unwrap()
+      if (editing) {
+        const saved = await updateItem({ id: editing.id, data: payload }).unwrap()
+        // Switching a purchased item to Installments creates its card installment in this request; the notice says so.
+        if (saved.notice) showToast(saved.notice)
+      } else await createItem(payload).unwrap()
       closeModal()
     } catch (err) {
       // A refusal (a locked field once the installment exists, a card that cannot take it) shows in the form, with the API's reason.
@@ -557,7 +560,7 @@ function WishlistCard({ item, accountName, error, onCreateAllocationFromItem, on
               >
                 {showOutlook ? 'Hide outlook' : 'Show outlook'}
               </Button>
-              {showOutlook && (outlook ? <InstallmentOutlook id={outlookId} outlook={outlook} /> : <p className="text-xs text-muted mt-2">Loading the outlook…</p>)}
+              {showOutlook && (outlook ? <InstallmentOutlook id={outlookId} outlook={outlook} alreadyCounted={item.installment_entry_id != null} /> : <p className="text-xs text-muted mt-2">Loading the outlook…</p>)}
             </div>
           )}
           {onCreateAllocationFromItem && !item.is_purchased && (
@@ -603,14 +606,15 @@ function WishlistCard({ item, accountName, error, onCreateAllocationFromItem, on
 /**
  * Month by month, in the item's currency: the card installments already running, this item's payment, and what is
  * left of the monthly disposable income after this item. That income already counts the existing installments, so
- * only this item comes off it.
+ * only this item comes off it, unless its own entry already exists (`alreadyCounted`, the API's rule for its
+ * "already counts in your plan" outlook): then that income already counts this item too, and nothing more comes off.
  */
-function InstallmentOutlook({ id, outlook }: { id: string; outlook: WishlistOutlook }) {
+function InstallmentOutlook({ id, outlook, alreadyCounted }: { id: string; outlook: WishlistOutlook; alreadyCounted: boolean }) {
   const currency = outlook.currency as CurrencyCode
   const disposable = outlook.disposable_check.monthly_disposable
   const money = (n: number | null | undefined) => (n == null ? '—' : formatCurrency(n, currency))
   // Nothing is left to name without the disposable income or this item's payment that month.
-  const left = (thisItem: number | null) => (disposable == null || thisItem == null ? null : disposable - thisItem)
+  const left = (thisItem: number | null) => (disposable == null || thisItem == null ? null : alreadyCounted ? disposable : disposable - thisItem)
   return (
     <section id={id} className="mt-3" aria-labelledby={`${id}-heading`} data-testid="installment-outlook">
       <h4 id={`${id}-heading`} className="text-sm font-semibold text-ink">Installment outlook</h4>

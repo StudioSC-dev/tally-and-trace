@@ -42,7 +42,9 @@ const PHONE: WishlistItem = {
   account_id: CARD.id,
   installment_entry_id: 77,
 }
-const ALL = [DESK, LAPTOP, CAMERA, PHONE]
+// Bought in full, with no card installment: switching it to Installments creates one.
+const BOOK: WishlistItem = { ...base, id: 906, name: 'Reading chair', estimated_cost: 18000, priority: 'low', is_purchased: true, purchased_at: '2026-03-02T09:00:00Z', payment_plan: 'full', account_id: PAYROLL.id }
+const ALL = [DESK, LAPTOP, CAMERA, PHONE, BOOK]
 
 const KEPT_NOTICE = 'The card installment keeps running in Recurring and the forecast; delete it there if this purchase did not happen'
 const CREATED_NOTICE = 'Created a card installment of 12 monthly payments in PHP; it is in Recurring and the forecast'
@@ -334,6 +336,37 @@ test.describe('wishlist payment plan', () => {
     await form.getByRole('button', { name: 'Update', exact: true }).click()
     await expect(form.getByRole('alert')).toHaveText(message)
     await expect(form).toBeVisible()
+  })
+
+  test('editing a purchased full item to Installments shows the notice and refreshes the recurring and account data', async ({ page }) => {
+    const mock = await open(page, {
+      906: apiRoute<WishlistItem>('PUT', '/wishlist/906', { ...BOOK, payment_plan: 'installment', installment_months: 12, account_id: CARD.id, installment_entry_id: 79, notice: CREATED_NOTICE }),
+    })
+    await page.getByLabel('Show purchased').check()
+    await cardOf(page, BOOK).getByRole('button', { name: 'Edit', exact: true }).click()
+    const form = formOf(page)
+    await form.getByRole('group', { name: 'Payment' }).getByRole('button', { name: 'Installments', exact: true }).click()
+    await form.getByLabel('Pay from').selectOption(String(CARD.id))
+    await form.getByLabel('Months').fill('12')
+    const accountGets = (): number => mock.requests().filter((r) => r === 'GET /accounts/').length
+    const before = accountGets()
+    await form.getByRole('button', { name: 'Update', exact: true }).click()
+    await expect(form).toHaveCount(0)
+    await expect(toastText(page)).toHaveText(CREATED_NOTICE)
+    expect(mock.bodies('PUT', '/wishlist/906')).toEqual([expect.objectContaining({ payment_plan: 'installment', installment_months: 12, account_id: CARD.id })])
+    // The new recurring entry moves the card's credit, so the accounts are read again (Due and BudgetEntry go the same way).
+    await expect.poll(accountGets).toBeGreaterThan(before)
+  })
+
+  test('a purchased item whose installment already counts shows the full disposable income as left', async ({ page }) => {
+    await open(page)
+    await page.getByLabel('Show purchased').check()
+    const phone = cardOf(page, PHONE)
+    await phone.getByRole('button', { name: 'Show outlook' }).click()
+    const outlook = phone.getByTestId('installment-outlook')
+    // This item's own payment is in the plan's disposable income already, so it is not taken off again.
+    await expect(outlook.getByTestId('outlook-month-2026-04').getByRole('cell')).toHaveText(['₱1,500.00', '₱3,000.00', '₱5,000.00'])
+    await expect(outlook.getByTestId('outlook-month-2027-03').getByRole('cell')).toHaveText(['₱0.00', '₱0.00', '₱5,000.00'])
   })
 
   test('once the card installment exists, the price, currency and payment are locked', async ({ page }) => {
