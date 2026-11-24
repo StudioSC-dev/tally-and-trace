@@ -8,9 +8,13 @@
 // (b) AC2: a posted row with a posting date, saved untouched, sends that date (UTC
 //     midnight) and keeps it;
 // (c) AC3: a date typed into Posting date is sent as UTC midnight of that day and stored;
-// (d) AC4: unticking Mark as posted clears and disables the field and sends no posting_date;
+// (d) AC4: unticking Mark as posted clears and disables the field, sends posting_date null
+//     and the stored row ends with none;
 // (e) guard, out of scope: Create with a posted row and no posting date still sends the
-//     current time, unchanged by this fix.
+//     current time, unchanged by this fix;
+// (f) Edit that posts a pending row with the date cleared still sends the current time;
+// (g) clearing a posted row's posting date on Edit sends null and the stored row has none.
+// Every save checks the server answered 2xx before the stored row is read.
 // Every scenario checks that no browser dialog fired.
 //
 // Starts its own API and web app against a throwaway database (./_local_stack.cjs) and
@@ -88,11 +92,13 @@ async function openEdit(page, description) {
   return modal
 }
 
-/** Saves the open form with `buttonName` and returns the JSON it sent. */
-async function save(page, modal, buttonName, matcher) {
+/** Saves the open form with `buttonName`, checks the server accepted it and returns the JSON it sent. */
+async function save(page, modal, buttonName, matcher, tag) {
   const [request] = await Promise.all([page.waitForRequest(matcher), modal.getByRole('button', { name: buttonName, exact: true }).click()])
   await modal.waitFor({ state: 'detached' })
   await h.waitQuiet(page)
+  const response = await request.response()
+  await h.check(`${tag}.response-ok`, 'G', async () => (response !== null && response.ok()) || `status ${response && response.status()}`)
   return request.postDataJSON()
 }
 
@@ -115,7 +121,7 @@ async function scenarioA(browser) {
   await withPage(browser, 'a', async (page) => {
     const modal = await openEdit(page, 'No posting date')
     await h.check('a.field-empty-on-load', 'B', async () => (await control(modal, 'posting_date').inputValue()) === '' || 'field filled on load')
-    const sent = await save(page, modal, 'Save changes', isUpdate)
+    const sent = await save(page, modal, 'Save changes', isUpdate, 'a')
     await h.check('a.payload-no-posting-date', 'B', async () => !('posting_date' in sent) || `posting_date ${JSON.stringify(sent.posting_date)}`)
     await h.check('a.payload-still-posted', 'B', async () => sent.is_posted === true || `is_posted ${sent.is_posted}`)
     await h.check('a.stored-keeps-none', 'B', async () => (await stored(row.id)) === null || `stored ${await stored(row.id)}`)
@@ -129,7 +135,7 @@ async function scenarioB(browser) {
   await withPage(browser, 'b', async (page) => {
     const modal = await openEdit(page, 'Has posting date')
     await h.check('b.field-shows-date', 'B', async () => (await control(modal, 'posting_date').inputValue()) === day(-2) || 'field not the stored day')
-    const sent = await save(page, modal, 'Save changes', isUpdate)
+    const sent = await save(page, modal, 'Save changes', isUpdate, 'b')
     await h.check('b.payload-same-date', 'B', async () => sent.posting_date === utcMidnight(-2) || `posting_date ${JSON.stringify(sent.posting_date)}`)
     await h.check('b.stored-same-day', 'B', async () => String(await stored(row.id)).startsWith(day(-2)) || `stored ${await stored(row.id)}`)
   })
@@ -142,7 +148,7 @@ async function scenarioC(browser) {
   await withPage(browser, 'c', async (page) => {
     const modal = await openEdit(page, 'Gets posting date')
     await control(modal, 'posting_date').fill(day(-1))
-    const sent = await save(page, modal, 'Save changes', isUpdate)
+    const sent = await save(page, modal, 'Save changes', isUpdate, 'c')
     await h.check('c.payload-utc-midnight', 'B', async () => sent.posting_date === utcMidnight(-1) || `posting_date ${JSON.stringify(sent.posting_date)}`)
     await h.check('c.stored-typed-day', 'B', async () => String(await stored(row.id)).startsWith(day(-1)) || `stored ${await stored(row.id)}`)
   })
@@ -162,10 +168,45 @@ async function scenarioD(browser) {
     })
     // The seeded row has no projected figure, and a pending row needs one.
     await control(modal, 'projected_amount').fill('25')
-    const sent = await save(page, modal, 'Save changes', isUpdate)
+    const sent = await save(page, modal, 'Save changes', isUpdate, 'd')
     await h.check('d.payload-unposted', 'B', async () => sent.is_posted === false || `is_posted ${sent.is_posted}`)
-    await h.check('d.payload-no-posting-date', 'B', async () => !('posting_date' in sent) || `posting_date ${JSON.stringify(sent.posting_date)}`)
-    console.log(`  NOTE stored posting_date after unposting: ${JSON.stringify(await stored(row.id))}`)
+    await h.check('d.payload-null', 'B', async () => ('posting_date' in sent && sent.posting_date === null) || `posting_date ${JSON.stringify(sent.posting_date)}`)
+    await h.check('d.stored-cleared', 'B', async () => (await stored(row.id)) === null || `stored ${await stored(row.id)}`)
+  })
+}
+
+// (f) posting a pending row on Edit with the date cleared still stamps now, as Create does.
+async function scenarioF(browser) {
+  console.log('\n=== (f) Edit that posts a pending row with the posting date cleared stamps now')
+  const row = await seed('Pending to post', { is_posted: false, projected_amount: 25 })
+  await withPage(browser, 'f', async (page) => {
+    const modal = await openEdit(page, 'Pending to post')
+    await postedBox(modal).check()
+    await control(modal, 'posting_date').fill('')
+    const before = Date.now()
+    const sent = await save(page, modal, 'Save changes', isUpdate, 'f')
+    const sentAt = Date.parse(String(sent.posting_date))
+    await h.check('f.payload-posted', 'B', async () => sent.is_posted === true || `is_posted ${sent.is_posted}`)
+    await h.check('f.payload-now', 'B', async () =>
+      (sentAt >= before - 60000 && sentAt <= Date.now() + 60000) || `posting_date ${JSON.stringify(sent.posting_date)}`)
+    await h.check('f.stored-now', 'B', async () => {
+      const at = Date.parse(String(await stored(row.id)))
+      return (at >= before - 60000 && at <= Date.now() + 60000) || `stored ${await stored(row.id)}`
+    })
+  })
+}
+
+// (g) clearing a posted row's posting date on Edit clears the stored one.
+async function scenarioG(browser) {
+  console.log('\n=== (g) clearing the posting date of a posted row clears it')
+  const row = await seed('Clears posting date', { posting_date: wire(-2) })
+  await withPage(browser, 'g', async (page) => {
+    const modal = await openEdit(page, 'Clears posting date')
+    await control(modal, 'posting_date').fill('')
+    const sent = await save(page, modal, 'Save changes', isUpdate, 'g')
+    await h.check('g.payload-null', 'B', async () => ('posting_date' in sent && sent.posting_date === null) || `posting_date ${JSON.stringify(sent.posting_date)}`)
+    await h.check('g.payload-still-posted', 'B', async () => sent.is_posted === true || `is_posted ${sent.is_posted}`)
+    await h.check('g.stored-cleared', 'B', async () => (await stored(row.id)) === null || `stored ${await stored(row.id)}`)
   })
 }
 
@@ -182,7 +223,7 @@ async function scenarioE(browser) {
     await control(modal, 'posting_date').fill('')
     await control(modal, 'amount').fill('15')
     const before = Date.now()
-    const sent = await save(page, modal, 'Add transaction', isCreate)
+    const sent = await save(page, modal, 'Add transaction', isCreate, 'e')
     const sentAt = Date.parse(String(sent.posting_date))
     await h.check('e.create-sends-now', 'G', async () =>
       (sentAt >= before - 60000 && sentAt <= Date.now() + 60000) || `posting_date ${JSON.stringify(sent.posting_date)}`)
@@ -196,7 +237,7 @@ async function setup() {
   })
 }
 
-const SCENARIOS = [['a', scenarioA], ['b', scenarioB], ['c', scenarioC], ['d', scenarioD], ['e', scenarioE]]
+const SCENARIOS = [['a', scenarioA], ['b', scenarioB], ['c', scenarioC], ['d', scenarioD], ['e', scenarioE], ['f', scenarioF], ['g', scenarioG]]
 
 ;(async () => {
   process.on('unhandledRejection', (e) => console.log(`  NOTE unhandled rejection: ${e && e.message ? e.message.split('\n')[0] : e}`))
