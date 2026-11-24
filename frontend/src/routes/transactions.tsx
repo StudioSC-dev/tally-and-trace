@@ -1797,10 +1797,12 @@ export function TransactionsPage() {
         description: formData.description,
         transaction_type: formData.transaction_type,
         transaction_date: new Date(formData.transaction_date).toISOString(),
+        // An edit leaves a blank posting date out, so the row keeps the one it has (none
+        // included): a stamped "now" would move a billed card row onto the next statement.
         posting_date:
           formData.is_posted && formData.posting_date
             ? new Date(formData.posting_date).toISOString()
-            : formData.is_posted
+            : formData.is_posted && !editingTransaction
             ? new Date().toISOString()
             : undefined,
         is_posted: formData.is_posted,
