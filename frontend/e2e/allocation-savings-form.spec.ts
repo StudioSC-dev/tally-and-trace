@@ -117,7 +117,7 @@ const budget: Allocation = {
 
 const page_ = <T>(items: T[]): PaginatedResponse<T> => ({ items, total: items.length, has_more: false })
 
-async function openAllocations(page: Page, tab: 'Savings' | 'Budgets', categories: Category[] = [groceries, savingsCategory]): Promise<ApiMock> {
+async function openAllocations(page: Page, tab: 'Savings' | 'Budgets', categories: Category[] = [groceries, savingsCategory], viewer: User = user): Promise<ApiMock> {
   await mockApi(page, [], {
     allow: [
       ...landingStubs().filter((r) => r.path !== '/allocations/'),
@@ -127,7 +127,7 @@ async function openAllocations(page: Page, tab: 'Savings' | 'Budgets', categorie
       apiRoute<PaginatedResponse<Account>>('GET', '/accounts/', page_([everyday, joint, dollar])),
     ],
   })
-  const api = await signedIn(page, user)
+  const api = await signedIn(page, viewer)
   await mockApi(page, [
     apiRoute<PaginatedResponse<Allocation>>('GET', '/allocations/', page_([baseSavings, incomplete, budget, usdSavings])),
     apiRoute<Allocation>('POST', '/allocations/', baseSavings),
@@ -319,7 +319,20 @@ test.describe('savings form tracking mode (STU-778)', () => {
     expect(createBody(api)).toHaveProperty('currency', 'USD')
   })
 
-  test('currency is PHP in savings transactions total mode', async ({ page }) => {
+  test("currency is the user's default currency in savings transactions total mode", async ({ page }) => {
+    const api = await openAllocations(page, 'Savings', [groceries, savingsCategory], { ...user, default_currency: 'USD' })
+    const form = await addForm(page, /^Create savings tracker/)
+    await field(form, 'account_id').selectOption(String(everyday.id))
+    await form.getByRole('button', { name: 'Savings transactions total' }).click()
+    const currency = form.getByLabel('Currency', { exact: true })
+    await expect(currency).toHaveValue('USD')
+    await field(form, 'name').fill('Rainy day')
+    await form.getByRole('button', { name: 'Create savings tracker' }).click()
+    await expect.poll(() => api.bodies('POST', '/allocations/').length).toBe(1)
+    expect(createBody(api)).toHaveProperty('currency', 'USD')
+  })
+
+  test('currency is PHP in savings transactions total mode for a PHP user', async ({ page }) => {
     const api = await openAllocations(page, 'Savings')
     const form = await addForm(page, /^Create savings tracker/)
     await field(form, 'account_id').selectOption(String(dollar.id))

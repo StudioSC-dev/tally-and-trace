@@ -323,7 +323,7 @@ export function AllocationsPage() {
   const recentAccounts = useRecentPicks('account')
   const recentCategories = useRecentPicks('category')
   const navigate = useNavigate()
-  const { format } = useCurrency()
+  const { format, currencyCode: userCurrency } = useCurrency()
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -914,7 +914,8 @@ export function AllocationsPage() {
     allocationForm.allocation_type === 'budget' || allocationForm.goal_mode === 'target_balance'
 
   // A savings tracker's currency: the user's pick, else the chosen account's (target balance), the first
-  // aggregated account's (combined total), or PHP (savings transactions total).
+  // aggregated account's (combined total), else the signed-in user's default currency (which useCurrency
+  // itself falls back to PHP for). Allocations are private to their owner, so the signed-in user is the owner.
   const defaultSavingsCurrency: CurrencyCode = useMemo(() => {
     const accountId =
       allocationForm.goal_mode === 'target_balance'
@@ -923,8 +924,8 @@ export function AllocationsPage() {
         ? selectedSavingsAccountIds[0]
         : undefined
     const linked = accountId ? ownAccounts.find((a) => a.id === accountId) : undefined
-    return (linked?.currency as CurrencyCode | undefined) ?? 'PHP'
-  }, [allocationForm.goal_mode, allocationForm.account_id, selectedSavingsAccountIds, ownAccounts])
+    return (linked?.currency as CurrencyCode | undefined) ?? userCurrency
+  }, [allocationForm.goal_mode, allocationForm.account_id, selectedSavingsAccountIds, ownAccounts, userCurrency])
   const savingsCurrency: CurrencyCode = allocationForm.currency ?? defaultSavingsCurrency
 
   const handleSubmit = async (e: React.FormEvent) => {
