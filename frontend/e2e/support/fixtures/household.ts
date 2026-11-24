@@ -320,6 +320,9 @@ const alloc = (a: Partial<Allocation> & Pick<Allocation, 'id' | 'name' | 'alloca
   currency: 'PHP',
   is_active: true,
   created_at: '2025-06-01T00:00:00',
+  current_amount_complete: true,
+  current_amount_missing: [],
+  current_amount_source: null,
   ...a,
 })
 /**

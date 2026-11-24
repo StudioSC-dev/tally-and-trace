@@ -358,12 +358,19 @@ export type BudgetPeriodFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly'
 
 export interface Allocation {
   id: number
-  account_id: number
+  /** Null for a savings allocation that tracks transactions (no account). */
+  account_id: number | null
   name: string
   allocation_type: AllocationType
   description?: string
   target_amount?: number
   current_amount: number
+  /** Savings only: false when a currency was left out for want of an exchange rate. */
+  current_amount_complete: boolean
+  /** Savings only: the currencies left out of `current_amount`. */
+  current_amount_missing: string[]
+  /** Savings only: what the figure is, e.g. "Balance of BPI Joint Savings"; null otherwise. */
+  current_amount_source: string | null
   monthly_target?: number
   target_date?: string
   period_frequency?: BudgetPeriodFrequency

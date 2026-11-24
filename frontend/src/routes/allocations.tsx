@@ -51,7 +51,9 @@ import { useDeleteRecurringEntry } from '../hooks/useDeleteRecurringEntry'
 import { useManilaDay } from '../hooks/useManilaDay'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { BudgetUsageBar } from '../components/BudgetUsageBar'
-import { amountClass, formatAmount } from '../utils/amount'
+import { amountClass, formatAmount, formatSigned } from '../utils/amount'
+import { CURRENCY_CONFIGS, getCurrencySymbol } from '../utils/currency'
+import type { CurrencyCode } from '../utils/currency'
 import type { AmountKind } from '../utils/amount'
 import { formatCadenceLabel, formatScheduleLabel } from '../utils/recurringEntry'
 import { createdByLabel, foldFacts, isSharedAccount, viewerDisplayName } from '../utils/createdBy'
@@ -131,11 +133,12 @@ type AllocationFieldKey =
   | 'target_amount'
   | 'monthly_target'
   | 'target_date'
+  | 'currency'
 const isAllocationFieldKey = (key: string | undefined): key is AllocationFieldKey =>
   key !== undefined &&
   [
     'account_id', 'name', 'category_ids', 'savings_account_ids', 'period_frequency', 'period_start',
-    'period_end', 'current_amount', 'target_amount', 'monthly_target', 'target_date',
+    'period_end', 'current_amount', 'target_amount', 'monthly_target', 'target_date', 'currency',
   ].includes(key)
 
 /** The app's own wording for a required field left empty; a bound such as `min` uses the browser's text. */
@@ -280,6 +283,13 @@ const isoToDateInput = (value?: string) => {
   return toDateInputValue(parsed)
 }
 
+/** Which currencies a savings figure leaves out, e.g. "Excludes USD: no exchange rate yet"; null when complete. */
+function excludedCurrenciesNote(allocation: Allocation): string | null {
+  if (allocation.allocation_type !== 'savings' || allocation.current_amount_complete !== false) return null
+  const missing = allocation.current_amount_missing ?? []
+  return missing.length > 0 ? `Excludes ${missing.join(', ')}: no exchange rate yet` : null
+}
+
 type AllocationFormState = {
   account_id: number
   name: string
@@ -294,7 +304,11 @@ type AllocationFormState = {
   period_frequency?: 'daily' | 'weekly' | 'monthly' | 'quarterly'
   period_start?: string
   period_end?: string
+  /** A savings currency the user picked (or the stored one when editing); unset follows the mode's default. */
+  currency?: CurrencyCode
 }
+
+const CURRENCY_OPTIONS = Object.keys(CURRENCY_CONFIGS) as CurrencyCode[]
 
 export const Route = createFileRoute('/allocations')({
   validateSearch: (search: Record<string, unknown>): { tab?: AllocationsTab | 'recurring' } => ({
@@ -309,7 +323,7 @@ export function AllocationsPage() {
   const recentAccounts = useRecentPicks('account')
   const recentCategories = useRecentPicks('category')
   const navigate = useNavigate()
-  const { format } = useCurrency()
+  const { format, currencyCode: userCurrency } = useCurrency()
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -506,7 +520,7 @@ export function AllocationsPage() {
     : actionAllocation?.allocation_type === 'goal'
     ? 'Goal'
     : actionAllocation?.allocation_type ?? ''
-  const actionAllocationAccount = actionAllocation ? accountsById.get(actionAllocation.account_id) ?? null : null
+  const actionAllocationAccount = actionAllocation?.account_id != null ? accountsById.get(actionAllocation.account_id) ?? null : null
   const actionAllocationCategories = Array.isArray(actionAllocationConfig['category_ids'])
     ? (actionAllocationConfig['category_ids'] as unknown[])
         .map((value) => {
@@ -712,6 +726,8 @@ export function AllocationsPage() {
         name: item.name,
         description: `From wishlist: ${item.name}`,
         target_amount: item.estimated_cost || undefined,
+        // A savings target keeps the item's currency as an explicit pick, so an account or user default cannot swap it.
+        currency: kind === 'savings' && CURRENCY_OPTIONS.includes(item.currency) ? item.currency : undefined,
         // A savings target keeps the item's target date; a budget envelope resets monthly.
         target_date: kind === 'savings' && item.target_date ? item.target_date.slice(0, 10) : undefined,
       })
@@ -895,6 +911,25 @@ export function AllocationsPage() {
     await loadBudgetEntriesRef.current()
   }, [loadBudgetEntriesRef])
 
+  // Budgets and target-balance savings pick one account; the other savings modes do not.
+  const needsSingleAccount =
+    allocationForm.allocation_type === 'budget' || allocationForm.goal_mode === 'target_balance'
+
+  // A savings tracker's currency: the user's pick, else the chosen account's (target balance), the first
+  // aggregated account's (combined total), else the signed-in user's default currency (which useCurrency
+  // itself falls back to PHP for). Allocations are private to their owner, so the signed-in user is the owner.
+  const defaultSavingsCurrency: CurrencyCode = useMemo(() => {
+    const accountId =
+      allocationForm.goal_mode === 'target_balance'
+        ? allocationForm.account_id
+        : allocationForm.goal_mode === 'multi_account'
+        ? selectedSavingsAccountIds[0]
+        : undefined
+    const linked = accountId ? ownAccounts.find((a) => a.id === accountId) : undefined
+    return (linked?.currency as CurrencyCode | undefined) ?? userCurrency
+  }, [allocationForm.goal_mode, allocationForm.account_id, selectedSavingsAccountIds, ownAccounts, userCurrency])
+  const savingsCurrency: CurrencyCode = allocationForm.currency ?? defaultSavingsCurrency
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setFieldErrors({})
@@ -904,7 +939,7 @@ export function AllocationsPage() {
         fail('name', 'Please enter a name for this allocation.')
         return
       }
-      if (!allocationForm.account_id) {
+      if (needsSingleAccount && !allocationForm.account_id) {
         fail('account_id', 'Please choose a primary account.')
         return
       }
@@ -981,13 +1016,24 @@ export function AllocationsPage() {
           ? undefined
           : dateInputToWire(allocationForm.target_date)
 
+      // Budgets and a target-balance tracker use the chosen account; a combined total stores
+      // the first aggregated one; a transactions total has none.
+      const payloadAccountId: number | null =
+        allocationForm.allocation_type === 'budget' || allocationForm.goal_mode === 'target_balance'
+          ? allocationForm.account_id
+          : allocationForm.goal_mode === 'multi_account'
+          ? selectedSavingsAccountIds[0] ?? null
+          : null
+
       const allocationPayload = {
-        account_id: allocationForm.account_id,
+        account_id: payloadAccountId,
         name: allocationForm.name.trim(),
         allocation_type: resolvedAllocationType,
         description: allocationForm.description?.trim() || undefined,
         target_amount: allocationForm.target_amount,
-        current_amount: allocationForm.current_amount,
+        // A savings figure is calculated by the API; only a budget's spent amount is sent.
+        current_amount:
+          allocationForm.allocation_type === 'budget' ? allocationForm.current_amount : undefined,
         monthly_target: allocationForm.monthly_target,
         target_date: targetDateIso,
         period_frequency:
@@ -1000,6 +1046,7 @@ export function AllocationsPage() {
           allocationForm.allocation_type === 'budget' && allocationForm.period_end
             ? dateInputToWire(allocationForm.period_end)
             : undefined,
+        currency: allocationForm.allocation_type === 'budget' ? undefined : savingsCurrency,
         is_active: allocationForm.is_active,
         configuration,
       }
@@ -1066,7 +1113,7 @@ export function AllocationsPage() {
       period_end: periodEndInput,
     }
     setAllocationForm({
-      account_id: allocation.account_id,
+      account_id: allocation.account_id ?? 0,
       name: allocation.name,
       allocation_type: normalizedType,
       description: allocation.description || '',
@@ -1074,6 +1121,7 @@ export function AllocationsPage() {
       current_amount: allocation.current_amount,
       monthly_target: normalizedType === 'savings' ? allocation.monthly_target : undefined,
       target_date: normalizedType === 'savings' ? isoToDateInput(allocation.target_date ?? undefined) : undefined,
+      currency: normalizedType === 'savings' ? (allocation.currency as CurrencyCode) : undefined,
       is_active: allocation.is_active,
       goal_mode: normalizedType === 'budget' ? 'target_balance' : derivedGoalMode,
       period_frequency: resolvedCadence,
@@ -1153,7 +1201,7 @@ export function AllocationsPage() {
   }
 
   const renderAllocationCard = (allocation: Allocation) => {
-    const account = accountsById.get(allocation.account_id)
+    const account = allocation.account_id != null ? accountsById.get(allocation.account_id) : undefined
     const isBudget = allocation.allocation_type === 'budget'
     const configuration = (allocation.configuration ?? {}) as Record<string, unknown>
     const budgetCadenceLabel = formatBudgetCadenceLabel(allocation.period_frequency)
@@ -1294,7 +1342,7 @@ export function AllocationsPage() {
               )}
               {allocation.monthly_target != null && !isBudget && (
                 <span className="inline-flex items-center gap-1 px-2 py-1 text-ink">
-                  Monthly {format(allocation.monthly_target)}
+                  Monthly {formatSigned(allocation.monthly_target, allocation.currency)}
                 </span>
               )}
             </div>
@@ -1336,13 +1384,18 @@ export function AllocationsPage() {
               <>
                 <div className="flex items-center justify-between text-sm text-body">
                   <span>Current</span>
-                  <span className="font-semibold text-ink">{format(allocation.current_amount)}</span>
+                  <span className="font-semibold text-ink">{formatSigned(allocation.current_amount, allocation.currency)}</span>
                 </div>
+                {excludedCurrenciesNote(allocation) && (
+                  <p className="text-xs text-warn" data-testid="allocation-card-excluded-note">
+                    {excludedCurrenciesNote(allocation)}
+                  </p>
+                )}
                 {allocation.target_amount && (
                   <>
                     <div className="flex items-center justify-between text-sm text-body">
                       <span>Target</span>
-                      <span className="font-medium">{format(allocation.target_amount)}</span>
+                      <span className="font-medium">{formatSigned(allocation.target_amount, allocation.currency)}</span>
                     </div>
                     <div className="w-full bg-sunken rounded-full h-2">
                       <div
@@ -1985,10 +2038,13 @@ export function AllocationsPage() {
                   </>
                 ) : (
                   <>
-                    <p className="mt-2 text-lg font-bold text-ink">{format(actionAllocation.current_amount)}</p>
+                    <p className="mt-2 text-lg font-bold text-ink">{formatSigned(actionAllocation.current_amount, actionAllocation.currency)}</p>
+                    {excludedCurrenciesNote(actionAllocation) && (
+                      <p className="text-xs text-warn">{excludedCurrenciesNote(actionAllocation)}</p>
+                    )}
                     {actionAllocation.target_amount && (
                       <>
-                        <p className="text-sm text-muted">Target {format(actionAllocation.target_amount)}</p>
+                        <p className="text-sm text-muted">Target {formatSigned(actionAllocation.target_amount, actionAllocation.currency)}</p>
                         <div className="mt-2 w-full bg-sunken rounded-full h-2">
                           <div
                             className="bg-ink h-2 rounded-full transition-all duration-300"
@@ -2012,7 +2068,7 @@ export function AllocationsPage() {
               <div className="border border-line p-4">
                 <h3 className="text-sm font-semibold text-body">Details</h3>
                 {actionAllocation.monthly_target != null && !actionAllocationIsBudget && (
-                  <p className="mt-2 text-sm text-muted">Monthly target {format(actionAllocation.monthly_target)}</p>
+                  <p className="mt-2 text-sm text-muted">Monthly target {formatSigned(actionAllocation.monthly_target, actionAllocation.currency)}</p>
                 )}
                 {actionAllocation.target_date && !actionAllocationIsBudget && (
                   <p className="mt-1 text-sm text-muted">Target date {new Date(actionAllocation.target_date).toLocaleDateString()}</p>
@@ -2087,6 +2143,52 @@ export function AllocationsPage() {
                 
             <form onSubmit={handleSubmit} onChange={handleFormChange} onInvalidCapture={handleInvalid} className="space-y-5">
               <>
+                  {allocationForm.allocation_type === 'savings' && (
+                    <div className="space-y-3">
+              <div>
+                        <label className="block text-sm font-medium text-body" id="allocation-tracking-mode-label">Tracking mode</label>
+                        <div className="mt-1 flex flex-wrap gap-2" role="group" aria-labelledby="allocation-tracking-mode-label">
+                          {[
+                            {
+                              value: 'target_balance' as AllocationGoalMode,
+                              label: 'Target account balance',
+                              description: "Track a single account's balance against a goal.",
+                            },
+                            {
+                              value: 'multi_account' as AllocationGoalMode,
+                              label: 'Combined account total',
+                              description: 'Watch a collection of accounts grow together.',
+                            },
+                            {
+                              value: 'transaction_total' as AllocationGoalMode,
+                              label: 'Savings transactions total',
+                              description: 'Sum the transfers tagged as savings over time.',
+                            },
+                          ].map((option) => {
+                            const isSelected = allocationForm.goal_mode === option.value
+                            return (
+                              <Segment
+                                key={option.value}
+                                selected={isSelected}
+                                onClick={() => {
+                                  setFormError('')
+                                  setAllocationForm((prev) => ({
+                                    ...prev,
+                                    goal_mode: option.value,
+                                  }))
+                                }}
+                                className="border px-3 py-2 text-left text-sm transition"
+                              >
+                                <span className="block font-semibold">{option.label}</span>
+                                <span className="block text-xs text-muted">{option.description}</span>
+                              </Segment>
+                            )
+                          })}
+                        </div>
+              </div>
+                    </div>
+                  )}
+                      {needsSingleAccount && (
               <div>
                 <label className="block text-sm font-medium text-body">Account</label>
                 <select
@@ -2108,7 +2210,42 @@ export function AllocationsPage() {
                 </select>
                 {renderFieldError('account_id')}
               </div>
-              
+                      )}
+                  {allocationForm.allocation_type === 'savings' && (
+                    <div className="space-y-3">
+                      {allocationForm.goal_mode === 'multi_account' && (
+              <div>
+                          <label className="block text-sm font-medium text-body" id="allocation-savings-accounts-label">
+                            Accounts to aggregate
+                          </label>
+                          <div ref={bindField('savings_account_ids')}>
+                            <AccountPicker
+                              mode="multi"
+                              accounts={ownAccounts}
+                              value={selectedSavingsAccountIds}
+                              onChange={(ids) => {
+                                clearFieldErrors('savings_account_ids')
+                                setSelectedSavingsAccountIds(ids.filter((id): id is number => typeof id === 'number'))
+                              }}
+                              recentIds={recentAccounts.recentIds}
+                              pinnedId={user?.main_account_id ?? undefined}
+                              dataField="savings_account_ids"
+                              labelledBy="allocation-savings-accounts-label"
+                              describedBy={fieldProps('savings_account_ids')['aria-describedby']}
+                            />
+                          </div>
+                          {renderFieldError('savings_account_ids')}
+                        </div>
+                      )}
+                      {allocationForm.goal_mode === 'transaction_total' && (
+                        <p className="text-xs text-muted">
+                          {savingsCategory
+                            ? `We'll total any transactions categorized as "${savingsCategory.name}".`
+                            : 'Tip: add a "Savings" category so we know which transactions to roll up.'}
+                        </p>
+                      )}
+                    </div>
+                  )}
               <div>
                 <label className="block text-sm font-medium text-body">Name</label>
                 <input
@@ -2228,88 +2365,45 @@ export function AllocationsPage() {
                     </div>
                   )}
               
-                  {allocationForm.allocation_type === 'savings' && (
-                    <div className="space-y-3">
-              <div>
-                        <label className="block text-sm font-medium text-body">Tracking mode</label>
-                        <div className="mt-1 flex flex-wrap gap-2">
-                          {[
-                            {
-                              value: 'target_balance' as AllocationGoalMode,
-                              label: 'Target account balance',
-                              description: "Track a single account's balance against a goal.",
-                            },
-                            {
-                              value: 'multi_account' as AllocationGoalMode,
-                              label: 'Combined account total',
-                              description: 'Watch a collection of accounts grow together.',
-                            },
-                            {
-                              value: 'transaction_total' as AllocationGoalMode,
-                              label: 'Savings transactions total',
-                              description: 'Sum the transfers tagged as savings over time.',
-                            },
-                          ].map((option) => {
-                            const isSelected = allocationForm.goal_mode === option.value
-                            return (
-                              <button
-                                type="button"
-                                key={option.value}
-                                onClick={() => {
-                                  setFormError('')
-                                  setAllocationForm((prev) => ({
-                                    ...prev,
-                                    goal_mode: option.value,
-                                  }))
-                                }}
-                                className={`border px-3 py-2 text-left text-sm transition ${ isSelected ? 'border-ink text-ink' : 'border-line bg-surface hover:border-line-strong' }`}
-                              >
-                                <span className="block font-semibold">{option.label}</span>
-                                <span className="block text-xs text-muted">{option.description}</span>
-                              </button>
-                            )
-                          })}
-                        </div>
-              </div>
-              
-                      {allocationForm.goal_mode === 'multi_account' && (
-              <div>
-                          <label className="block text-sm font-medium text-body" id="allocation-savings-accounts-label">
-                            Accounts to aggregate
-                          </label>
-                          <div ref={bindField('savings_account_ids')}>
-                            <AccountPicker
-                              mode="multi"
-                              accounts={ownAccounts}
-                              value={selectedSavingsAccountIds}
-                              onChange={(ids) => {
-                                clearFieldErrors('savings_account_ids')
-                                setSelectedSavingsAccountIds(ids.filter((id): id is number => typeof id === 'number'))
-                              }}
-                              recentIds={recentAccounts.recentIds}
-                              pinnedId={user?.main_account_id ?? undefined}
-                              dataField="savings_account_ids"
-                              labelledBy="allocation-savings-accounts-label"
-                              describedBy={fieldProps('savings_account_ids')['aria-describedby']}
-                            />
-                          </div>
-                          {renderFieldError('savings_account_ids')}
-                        </div>
+                  {allocationForm.allocation_type === 'savings' && editingAllocation && (
+                    <div data-testid="savings-current-progress">
+                      <p className="block text-sm font-medium text-body">Current progress</p>
+                      <p className="mt-1 text-lg font-semibold text-ink">{formatSigned(editingAllocation.current_amount, editingAllocation.currency)}</p>
+                      {editingAllocation.current_amount_source && (
+                        <p className="text-xs text-muted">{editingAllocation.current_amount_source}</p>
                       )}
-                      {allocationForm.goal_mode === 'transaction_total' && (
-                        <p className="text-xs text-muted">
-                          {savingsCategory
-                            ? `We'll total any transactions categorized as "${savingsCategory.name}".`
-                            : 'Tip: add a "Savings" category so we know which transactions to roll up.'}
+                      {excludedCurrenciesNote(editingAllocation) && (
+                        <p className="text-xs text-warn" data-testid="savings-excluded-note">
+                          {excludedCurrenciesNote(editingAllocation)}
                         </p>
                       )}
                     </div>
                   )}
 
+                  {allocationForm.allocation_type === 'savings' && (
+                    <div>
+                      <label className="block text-sm font-medium text-body" htmlFor="allocation-currency">Currency</label>
+                      <select
+                        id="allocation-currency"
+                        value={savingsCurrency}
+                        onChange={(e) =>
+                          setAllocationForm((prev) => ({ ...prev, currency: e.target.value as CurrencyCode }))
+                        }
+                        className="mt-1 block w-full border border-line px-3 py-2"
+                        data-field="currency"
+                      >
+                        {CURRENCY_OPTIONS.map((c) => (
+                          <option key={c} value={c}>{c} ({getCurrencySymbol(c)})</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {allocationForm.allocation_type === 'budget' && (
                     <div>
                       <label className="block text-sm font-medium text-body">
-                        {allocationForm.allocation_type === 'budget' ? 'Amount already spent' : 'Current amount'}
+                        Amount already spent
                       </label>
                 <input
                   type="number"
@@ -2329,18 +2423,23 @@ export function AllocationsPage() {
                   {...fieldProps('current_amount')}
                 />
                 {renderFieldError('current_amount')}
-                      {allocationForm.allocation_type === 'budget' && (
-                        <p className="mt-1 text-xs text-muted">
-                          Track how much of the envelope has already been used this period.
-                        </p>
-                      )}
+                      <p className="mt-1 text-xs text-muted">
+                        Track how much of the envelope has already been used this period.
+                      </p>
               </div>
+                    )}
               <div>
                       <label className="block text-sm font-medium text-body">
                         {allocationForm.allocation_type === 'budget'
                           ? 'Spending limit'
                           : 'Target amount (optional)'}
                       </label>
+                <div className="relative">
+                {allocationForm.allocation_type === 'savings' && (
+                  <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-muted sm:text-sm" data-testid="target-amount-symbol">
+                    {getCurrencySymbol(savingsCurrency)}
+                  </span>
+                )}
                 <input
                   type="number"
                   step="0.01"
@@ -2352,12 +2451,13 @@ export function AllocationsPage() {
                             target_amount: parseFloat(e.target.value) || undefined,
                           }))
                         }
-                  className="mt-1 block w-full border border-line px-3 py-2"
+                  className={`mt-1 block w-full border border-line px-3 py-2${allocationForm.allocation_type === 'savings' ? ' pl-9' : ''}`}
                         required={allocationForm.allocation_type === 'budget'}
                         ref={bindField('target_amount')}
                         data-field="target_amount"
                         {...fieldProps('target_amount')}
                       />
+                </div>
                       {renderFieldError('target_amount')}
                       {allocationForm.allocation_type === 'budget' ? (
                         <p className="mt-1 text-xs text-muted">
@@ -2375,8 +2475,12 @@ export function AllocationsPage() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                         <label className="block text-sm font-medium text-body">
-                          Monthly target
+                          Monthly target (optional)
                         </label>
+                <div className="relative">
+                  <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-muted sm:text-sm" data-testid="monthly-target-symbol">
+                    {getCurrencySymbol(savingsCurrency)}
+                  </span>
                 <input
                   type="number"
                   step="0.01"
@@ -2388,12 +2492,16 @@ export function AllocationsPage() {
                               monthly_target: parseFloat(e.target.value) || undefined,
                             }))
                           }
-                  className="mt-1 block w-full border border-line px-3 py-2"
+                  className="mt-1 block w-full border border-line px-3 py-2 pl-9"
                   ref={bindField('monthly_target')}
                   data-field="monthly_target"
                   {...fieldProps('monthly_target')}
                 />
+                </div>
                 {renderFieldError('monthly_target')}
+                <p className="mt-1 text-xs text-muted">
+                  Optional amount you'd like to set aside each month.
+                </p>
               </div>
               <div>
                         <label className="block text-sm font-medium text-body">
