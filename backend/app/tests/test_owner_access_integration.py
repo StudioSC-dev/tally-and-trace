@@ -251,6 +251,7 @@ def _id_routes(w):
         ("put", f"/wishlist/{w['wish']}", {"json": {"name": "Taken"}}),
         ("delete", f"/wishlist/{w['wish']}", {}),
         ("get", f"/wishlist/{w['wish']}/readiness", {}),
+        ("get", f"/wishlist/{w['wish']}/outlook", {}),
         ("get", f"/tags/{w['tag']}", {}),
         ("put", f"/tags/{w['tag']}", {"json": {"name": "Taken"}}),
         ("delete", f"/tags/{w['tag']}", {}),

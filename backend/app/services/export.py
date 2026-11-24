@@ -114,7 +114,8 @@ ALLOCATION_FIELDS = (
 
 WISHLIST_FIELDS = (
     "id", "name", "estimated_cost", "currency", "priority", "category_id", "url", "notes",
-    "target_date", "is_purchased", "purchased_at", "created_at", "updated_at",
+    "target_date", "account_id", "payment_plan", "installment_months", "installment_entry_id",
+    "is_purchased", "purchased_at", "created_at", "updated_at",
 )
 
 CARD_STATEMENT_MINIMUM_FIELDS = (
