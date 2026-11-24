@@ -334,7 +334,7 @@ test.describe('amount classes', () => {
     const amountMarkup = /(text-lg font-bold|text-2xl font-bold \$\{|usedAmount\)|current_amount\)|Transfer Fee|transferFeeLabel|upcoming-occurrence-amount|account-transaction-amount)/
     const sourceOf = Object.fromEntries(sites.map((site) => [site, readFrontend(site)] as const))
     for (const site of sites) {
-      const literal = lines(sourceOf[site], /className=/).filter((l) => amountMarkup.test(l) && /\btext-(ok|ink|danger|body|muted)\b/.test(l) && !/row\.amount|format\(allocation\.current_amount\)|current_amount\)\}<\/p>/.test(l))
+      const literal = lines(sourceOf[site], /className=/).filter((l) => amountMarkup.test(l) && /\btext-(ok|ink|danger|body|muted)\b/.test(l) && !/row\.amount|format\(allocation\.current_amount\)|current_amount(, \w+\.currency)?\)\}<\/p>/.test(l))
       expect(literal, `${site}: no amount element names a literal text colour`).toEqual([])
     }
     const expectCalls = (site: string, pattern: RegExp, n: number, what: string): void => {
