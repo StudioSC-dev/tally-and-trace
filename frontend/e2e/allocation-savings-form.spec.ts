@@ -396,6 +396,7 @@ test.describe('savings form tracking mode (STU-778)', () => {
       currency: 'EUR',
       priority: 'medium',
       is_purchased: false,
+      payment_plan: 'full',
       created_at: '2026-02-01T09:00:00Z',
     }
     await mockApi(page, householdWishlistRoutes([euroItem]))
