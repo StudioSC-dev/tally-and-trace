@@ -95,6 +95,10 @@ def test_backfill_numbers_each_user_by_created_at_then_id(scratch_url):
                 "other-older": 1, "other-newer": 2, "other-budget": None}
 
         _alembic(scratch_url, "downgrade", BEFORE_RANK)
+        with engine.begin() as c:
+            assert c.execute(text(
+                "SELECT count(*) FROM information_schema.columns "
+                "WHERE table_name = 'allocations' AND column_name = 'rank'")).scalar_one() == 0
         _alembic(scratch_url, "upgrade", "head")
         with engine.begin() as c:
             assert _db_ranks(c, second)["other-older"] == 1
@@ -201,7 +205,7 @@ def test_an_edit_that_changes_neither_flag_keeps_the_rank(sw_client, sw_people):
 def test_soft_delete_clears_the_rank_and_closes_the_gap(sw_client, sw_people):
     me = sw_people()
     bank = _bank(sw_client, me)
-    a, b, c = (_goal(sw_client, me, bank, n) for n in "ABC")
+    _, b, _ = (_goal(sw_client, me, bank, n) for n in "ABC")
 
     _delete(sw_client, me, b["id"])
 
@@ -213,7 +217,6 @@ def test_soft_delete_clears_the_rank_and_closes_the_gap(sw_client, sw_people):
     assert _order(sw_client, me) == [("A", 1), ("C", 2)]
     # A new goal still lands at the bottom, with no hole left.
     assert _goal(sw_client, me, bank, "D")["rank"] == 3
-    assert a["rank"] == 1 and c["rank"] == 3
 
 
 def test_type_change_out_of_the_set_closes_the_gap_and_in_lands_at_the_bottom(
@@ -230,7 +233,6 @@ def test_type_change_out_of_the_set_closes_the_gap_and_in_lands_at_the_bottom(
     back = _put(sw_client, me, f"/allocations/{a['id']}", {"allocation_type": "goal"})
     assert back["rank"] == 3
     assert _order(sw_client, me) == [("B", 1), ("C", 2), ("A", 3)]
-    assert b["id"] and c["id"]
 
 
 def test_a_budget_made_active_or_inactive_stays_unranked(sw_client, sw_people):
@@ -293,7 +295,6 @@ def test_reorder_with_a_foreign_id_is_not_found_and_leaves_both_orders_alone(
 
     assert _order(sw_client, me) == [("B", 1), ("A", 2)]
     assert _order(sw_client, other) == [("X", 1), ("Y", 2)]
-    assert y["id"]
 
 
 def test_ranked_list_is_complete_with_more_than_ten_allocations(sw_client, sw_people):
@@ -360,12 +361,22 @@ def test_ranked_routes_need_a_login(sw_client):
 def test_the_seeded_demo_goals_are_ranked_from_one(sw_client, sw_db):
     from app.core.seed import DEMO_EMAIL, _seed
     from app.models.allocation import Allocation
+    from app.models.demo_state import DemoState
     from app.models.user import User
 
+    def demo_rows():
+        demo = sw_db.query(User).filter(User.email == DEMO_EMAIL).one()
+        return sw_db.query(Allocation).filter(Allocation.user_id == demo.id).all()
+
+    before = {a.id for a in demo_rows()}
+    # No state row: the seed is not current, so it really replaces the demo data.
+    sw_db.query(DemoState).delete()
+    sw_db.commit()
     _seed(sw_db)
-    demo = sw_db.query(User).filter(User.email == DEMO_EMAIL).one()
-    rows = sw_db.query(Allocation).filter(Allocation.user_id == demo.id).all()
-    ranked = sorted(a.rank for a in rows if a.rank is not None)
+    sw_db.expire_all()
+
+    rows = demo_rows()
+    assert rows and not before & {a.id for a in rows}
     expected = [a for a in rows if a.is_active and a.allocation_type.value in ("savings", "goal")]
-    assert ranked == list(range(1, len(expected) + 1))
+    assert sorted(a.rank for a in expected) == list(range(1, len(expected) + 1))
     assert all(a.rank is None for a in rows if a not in expected)
