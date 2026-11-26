@@ -149,6 +149,7 @@ import type {
   WishlistItem,
   WishlistPlan,
   WishlistOutlook,
+  WishlistFreeFlow,
   LoanPaymentRequest,
   LoanPrepaymentRequest,
   LoanScheduleResponse,
@@ -252,7 +253,7 @@ export const accountingApi = createApi({
   // A save's invalidation runs inside its own settle, so its reload is already pending
   // when the save resolves.
   invalidationBehavior: 'immediately',
-  tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist', 'Tag', 'Share', 'ReceivedShare', 'HouseholdShare', 'ReceivedHouseholdShare', 'Household', 'QuickBalances', 'Due', 'Balance'],
+  tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist', 'Tag', 'Share', 'ReceivedShare', 'HouseholdShare', 'ReceivedHouseholdShare', 'Household', 'QuickBalances', 'Due', 'Balance', 'FreeFlow'],
   endpoints: (builder) => ({
     // ── Accounts ──────────────────────────────────────────────────────────────
     // `Balance` marks the figures a transaction save moves (balances, loan schedules). A list read only
@@ -419,6 +420,8 @@ export const accountingApi = createApi({
     // the screen settles on what the server holds. The caller shows a refusal's reason.
     reorderRankedAllocations: builder.mutation<RankedAllocations, number[]>({
       query: (ids) => ({ url: 'allocations/ranked', method: 'PUT', body: { ids } }),
+      // The order decides which goal gives way, so each goal's pace and flag are read again (STU-790).
+      invalidatesTags: ['FreeFlow'],
       async onQueryStarted(ids, { dispatch, queryFulfilled }) {
         let before: number[] = []
         dispatch(
@@ -944,6 +947,11 @@ export const accountingApi = createApi({
       query: () => 'wishlist/plan',
       providesTags: ['Wishlist', 'BudgetEntry'],
     }),
+    // Each goal's monthly pace and underfunded flag, and the notes. Allocation writes and reorders refresh it (STU-790).
+    getWishlistFreeFlow: builder.query<WishlistFreeFlow, void>({
+      query: () => 'wishlist/free-flow',
+      providesTags: ['Allocation', 'FreeFlow'],
+    }),
     // The outlook reads the recurring entries, the forecast and the card's credit, so those writes refresh it.
     getWishlistOutlook: builder.query<WishlistOutlook, number>({
       query: (id) => `wishlist/${id}/outlook`,
@@ -1099,6 +1107,7 @@ export const {
   useGetWishlistQuery,
   useGetWishlistPlanQuery,
   useGetWishlistOutlookQuery,
+  useGetWishlistFreeFlowQuery,
   useCreateWishlistItemMutation,
   useUpdateWishlistItemMutation,
   useDeleteWishlistItemMutation,
