@@ -3838,7 +3838,7 @@
           "Delete allocation"
         ],
         "requests": [
-          "GET /allocations/?limit=10&offset=0",
+          "GET /allocations/?ranked=false&limit=10&offset=0",
           "PUT /allocations/66 {\"is_active\":false}"
         ]
       },
@@ -3895,7 +3895,7 @@
           "Wishlist"
         ],
         "requests": [
-          "GET /allocations/?limit=10&offset=0",
+          "GET /allocations/?ranked=false&limit=10&offset=0",
           "POST /allocations/ {\"account_id\":11,\"name\":\"Pet care\",\"allocation_type\":\"budget\",\"target_amount\":3000,\"current_amount\":0,\"period_frequency\":\"monthly\",\"period_start\":\"2026-03-01T00:00:00Z\",\"period_end\":\"2026-04-01T00:00:00Z\",\"is_active\":true,\"configuration\":{\"category_ids\":[23]}}"
         ]
       },
@@ -7291,7 +7291,7 @@
         "requests": [
           "GET /accounts/?is_active=true&limit=100",
           "GET /accounts/?limit=200",
-          "GET /allocations/?limit=10&offset=0",
+          "GET /allocations/?ranked=false&limit=10&offset=0",
           "GET /budget-entries/705/occurrences?include=2026-04-09",
           "GET /budget-entries/?entry_type=expense&limit=100",
           "GET /budget-entries/?entry_type=income&limit=100",
@@ -7412,7 +7412,7 @@
         "requests": [
           "GET /accounts/?is_active=true&limit=100",
           "GET /accounts/?limit=200",
-          "GET /allocations/?limit=10&offset=0",
+          "GET /allocations/?ranked=false&limit=10&offset=0",
           "GET /budget-entries/705/occurrences?include=2026-04-09",
           "GET /budget-entries/?entry_type=expense&limit=100",
           "GET /budget-entries/?entry_type=income&limit=100",
@@ -7535,7 +7535,7 @@
           "Mark received"
         ],
         "requests": [
-          "GET /allocations/?limit=10&offset=0",
+          "GET /allocations/?ranked=false&limit=10&offset=0",
           "GET /budget-entries/?entry_type=expense&limit=100",
           "GET /budget-entries/?entry_type=income&limit=100",
           "GET /cards/credit",
@@ -15553,7 +15553,7 @@
           "Allocations"
         ],
         "requests": [
-          "GET /allocations/?limit=10&offset=0",
+          "GET /allocations/?ranked=false&limit=10&offset=0",
           "PUT /allocations/66 {\"is_active\":false}"
         ]
       },
@@ -15608,7 +15608,7 @@
           "Allocations"
         ],
         "requests": [
-          "GET /allocations/?limit=10&offset=0",
+          "GET /allocations/?ranked=false&limit=10&offset=0",
           "POST /allocations/ {\"account_id\":11,\"name\":\"Pet care\",\"allocation_type\":\"budget\",\"target_amount\":3000,\"current_amount\":0,\"period_frequency\":\"monthly\",\"period_start\":\"2026-03-01T00:00:00Z\",\"period_end\":\"2026-04-01T00:00:00Z\",\"is_active\":true,\"configuration\":{\"category_ids\":[23]}}"
         ]
       },
@@ -19011,7 +19011,7 @@
         "requests": [
           "GET /accounts/?is_active=true&limit=100",
           "GET /accounts/?limit=200",
-          "GET /allocations/?limit=10&offset=0",
+          "GET /allocations/?ranked=false&limit=10&offset=0",
           "GET /budget-entries/705/occurrences?include=2026-04-09",
           "GET /budget-entries/?entry_type=expense&limit=100",
           "GET /budget-entries/?entry_type=income&limit=100",
@@ -19138,7 +19138,7 @@
         "requests": [
           "GET /accounts/?is_active=true&limit=100",
           "GET /accounts/?limit=200",
-          "GET /allocations/?limit=10&offset=0",
+          "GET /allocations/?ranked=false&limit=10&offset=0",
           "GET /budget-entries/705/occurrences?include=2026-04-09",
           "GET /budget-entries/?entry_type=expense&limit=100",
           "GET /budget-entries/?entry_type=income&limit=100",
@@ -19267,7 +19267,7 @@
           "Allocations"
         ],
         "requests": [
-          "GET /allocations/?limit=10&offset=0",
+          "GET /allocations/?ranked=false&limit=10&offset=0",
           "GET /budget-entries/?entry_type=expense&limit=100",
           "GET /budget-entries/?entry_type=income&limit=100",
           "GET /cards/credit",

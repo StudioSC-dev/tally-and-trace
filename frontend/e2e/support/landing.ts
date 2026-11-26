@@ -67,6 +67,7 @@ const emptyQuickBalances: QuickBalances = { pinned: false, max_tiles: 4, tiles: 
 export const landingStubs = (): ApiRoute[] => [
   apiRoute<PaginatedResponse<Account>>('GET', '/accounts/', emptyPage<Account>()),
   apiRoute<PaginatedResponse<Allocation>>('GET', '/allocations/', emptyPage<Allocation>()),
+  apiRoute<{ items: Allocation[] }>('GET', '/allocations/ranked', { items: [] }),
   apiRoute<QuickBalances>('GET', '/dashboard/quick-balances', emptyQuickBalances),
   apiRoute<DashboardSnapshot>('GET', '/dashboard/snapshot', emptySnapshot),
   apiRoute<CashflowTimeline>('GET', '/forecast/timeline', emptyTimeline),

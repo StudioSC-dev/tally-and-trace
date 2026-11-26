@@ -5,6 +5,7 @@ import {
   useGetAccountsQuery,
   useGetCardCreditsQuery,
   useGetCategoriesQuery,
+  useGetRankedAllocationsQuery,
   useCreateAllocationMutation,
   useUpdateAllocationMutation,
   useDeleteAllocationMutation,
@@ -69,6 +70,7 @@ import { TagFilter } from '../components/TagFilter'
 import { MarkPaidDialog } from '../components/MarkPaidDialog'
 import { InstallmentReviewDialog } from '../components/InstallmentReviewDialog'
 import { useToast } from '../hooks/useToast'
+import { RankedGoals } from '../components/RankedGoals'
 import { apiErrorMessage } from '../utils/apiError'
 import { SkeletonRows } from '../components/Loading'
 import { Segment } from '../components/SegmentedControl'
@@ -434,6 +436,9 @@ export function AllocationsPage() {
     { skip: !isAuthenticated }
   )
   
+  // The ranked section reads the same list; here it only decides what the lower Savings list says when it is empty.
+  const { data: rankedData } = useGetRankedAllocationsQuery(undefined, { skip: !isAuthenticated || activeTab !== 'savings' })
+  const hasRankedGoals = (rankedData?.items.length ?? 0) > 0
   const [createAllocation] = useCreateAllocationMutation()
   const [updateAllocation] = useUpdateAllocationMutation()
   const [deleteAllocation] = useDeleteAllocationMutation()
@@ -563,7 +568,9 @@ export function AllocationsPage() {
       // reset begins before it lands.
       const isCurrent = beginAllocationsRequest(reset)
       const nextOffset = reset ? 0 : offsetRef.current
+      // The ranked goals have their own section; the paged list holds the rest, so its pages and totals add up.
       const params = {
+        ranked: false,
         limit,
         offset: nextOffset,
       }
@@ -1190,6 +1197,8 @@ export function AllocationsPage() {
       if (actionAllocation?.id === allocation.id) {
         setActionAllocation(updatedAllocation)
       }
+      // A goal pausing or resuming moves between the ranked section and this list (STU-787).
+      await loadAllocations(true)
     } catch (error) {
       console.error('Error updating allocation status:', error)
     }
@@ -1814,9 +1823,6 @@ export function AllocationsPage() {
     )
   }
 
-  const activeAllocationList =
-    activeTab === 'budgets' ? budgetEnvelopes : activeTab === 'savings' ? savingsAndGoals : []
-
   if (authLoading) {
   return (
       <div className="min-h-screen flex items-center justify-center">
@@ -1900,12 +1906,16 @@ export function AllocationsPage() {
           'Create a budget envelope'
         )}
 
+      {activeTab === 'savings' && <RankedGoals renderCard={renderAllocationCard} />}
+
       {activeTab === 'savings' &&
         renderAllocationSection(
           'Savings & investment targets',
           'Longer-term goals and rainy-day funds that should steadily grow over time.',
           savingsAndGoals,
-          'No savings or goal envelopes yet. Create one to start building your future plans.',
+          hasRankedGoals
+            ? 'No paused or other savings goals. Your active goals are in the ranked list above.'
+            : 'No savings or goal envelopes yet. Create one to start building your future plans.',
           'Create a savings target'
         )}
 
@@ -1938,7 +1948,7 @@ export function AllocationsPage() {
           )}
           <div className="flex justify-end px-4">
             <p className="text-xs text-muted">
-              Showing {activeAllocationList.length} of {totalAllocations} envelopes
+              Showing {allocationItems.length} of {totalAllocations} envelopes
             </p>
           </div>
         </>

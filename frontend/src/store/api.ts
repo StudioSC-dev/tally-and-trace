@@ -221,6 +221,14 @@ const HOUSEHOLD_SHARE_CHANGED = [
 ] as const
 
 /** One queued save as sent: `url` relative to the API root, `idempotencyKey` on creates. */
+/** The tag id of the ranked list alone, next to the plain `Allocation` tag every allocation query shares. */
+const RANKED_TAG_ID = 'RANKED'
+
+/** `GET` and `PUT /allocations/ranked`: the caller's ranked goals in rank order. */
+export interface RankedAllocations {
+  items: Allocation[]
+}
+
 /** An allocation edit: a date sent as null is cleared, one left out is kept. */
 export type AllocationUpdate = Omit<Partial<Allocation>, 'target_date' | 'period_start' | 'period_end'> & {
   target_date?: string | null
@@ -395,9 +403,46 @@ export const accountingApi = createApi({
     }),
 
     // ── Allocations ───────────────────────────────────────────────────────────
-    getAllocations: builder.query<PaginatedResponse<Allocation>, { account_id?: number; allocation_type?: string; is_active?: boolean; limit?: number; offset?: number }>({
+    getAllocations: builder.query<PaginatedResponse<Allocation>, { account_id?: number; allocation_type?: string; is_active?: boolean; ranked?: boolean; limit?: number; offset?: number }>({
       query: (params) => ({ url: 'allocations/', params }),
       providesTags: ['Allocation'],
+    }),
+    // The caller's ranked goals, top first, never paged (STU-786). It carries its own tag as well, so a reorder can
+    // refresh this list without refreshing every other allocation query.
+    getRankedAllocations: builder.query<RankedAllocations, void>({
+      query: () => 'allocations/ranked',
+      providesTags: [{ type: 'Allocation', id: RANKED_TAG_ID }],
+    }),
+    // Sends the complete order. The list on screen changes at once. When the answer comes, success or refusal, the
+    // answer's own list is never written (it may be older than what the list now holds); a refusal puts the old
+    // order back only if the list still holds the order this save put there, and the ranked list is read again so
+    // the screen settles on what the server holds. The caller shows a refusal's reason.
+    reorderRankedAllocations: builder.mutation<RankedAllocations, number[]>({
+      query: (ids) => ({ url: 'allocations/ranked', method: 'PUT', body: { ids } }),
+      async onQueryStarted(ids, { dispatch, queryFulfilled }) {
+        let before: number[] = []
+        dispatch(
+          accountingApi.util.updateQueryData('getRankedAllocations', undefined, (draft) => {
+            before = draft.items.map((item) => item.id)
+            const byId = new Map(draft.items.map((item) => [item.id, item]))
+            const ordered = ids.map((id) => byId.get(id)).filter((item): item is Allocation => item !== undefined)
+            if (ordered.length === draft.items.length) draft.items = ordered
+          }),
+        )
+        try {
+          await queryFulfilled
+        } catch {
+          dispatch(
+            accountingApi.util.updateQueryData('getRankedAllocations', undefined, (draft) => {
+              const now = draft.items.map((item) => item.id)
+              if (now.length !== ids.length || now.some((id, index) => id !== ids[index])) return
+              const byId = new Map(draft.items.map((item) => [item.id, item]))
+              draft.items = before.flatMap((id) => byId.get(id) ?? [])
+            }),
+          )
+        }
+        dispatch(accountingApi.util.invalidateTags([{ type: 'Allocation', id: RANKED_TAG_ID }]))
+      },
     }),
     getAllocation: builder.query<Allocation, number>({
       query: (id) => `allocations/${id}`,
@@ -958,6 +1003,8 @@ export const {
   // Allocation hooks
   useGetAllocationsQuery,
   useLazyGetAllocationsQuery,
+  useGetRankedAllocationsQuery,
+  useReorderRankedAllocationsMutation,
   useGetAllocationQuery,
   useCreateAllocationMutation,
   useUpdateAllocationMutation,
