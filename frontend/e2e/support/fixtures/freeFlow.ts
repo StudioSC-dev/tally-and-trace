@@ -9,6 +9,9 @@
 import type { WishlistFreeFlow, WishlistFreeFlowGoal, WishlistFreeFlowRow } from '@tally-trace/shared'
 import type { HouseholdData } from './household'
 
+/** The default answer: no rows and no goals, so no pace, flag or note shows. */
+export const NO_FREE_FLOW: WishlistFreeFlow = { rows: [], goals: [], limitations: [] }
+
 export const GOAL_IDS = { emergency: 61, japan: 62, laptop: 63, gifts: 64, car: 68 } as const
 
 /** The household with the Japan trip goal kept in dollars, so the section holds a goal in a second currency. */
