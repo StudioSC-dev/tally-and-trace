@@ -892,6 +892,58 @@ export interface WishlistPlan {
   installments: WishlistPlanInstallment[]
 }
 
+/**
+ * A free-flow row's status, first match: `not_estimated` (no full month of history),
+ * `incomplete` (money or goals in more than one currency), `no_projection` (no income
+ * in the currency), `ok`.
+ */
+export type FreeFlowStatus = 'not_estimated' | 'incomplete' | 'no_projection' | 'ok'
+
+/** One currency's monthly free flow, averaged over the last `sample_months` full months. */
+export interface WishlistFreeFlowRow {
+  currency: string
+  status: FreeFlowStatus
+  sample_months: number
+  /** Null when `not_estimated`. When `incomplete`, from the rows that could be read (partial). */
+  income: number | null
+  spending: number | null
+  debt_paid: number | null
+  saved: number | null
+  /** Null unless the status is `ok`. */
+  net_flow: number | null
+  /** Null when `not_estimated` or `incomplete`. */
+  goal_top_up: number | null
+  reserved: number | null
+  /** Null unless the status is `ok`. 0 in every currency when any currency has a shortfall. */
+  free_flow: number | null
+  shortfall: number | null
+}
+
+/** A savings goal that can reserve, in rank order, in its own currency. */
+export interface WishlistFreeFlowGoal {
+  allocation_id: number
+  rank: number | null
+  currency: string
+  /** The four figures are null when the caller is `not_estimated` or `incomplete`. */
+  pace: number | null
+  fed: number | null
+  top_up: number | null
+  /** Set only in a currency whose row is `ok`: the top-up not covered, 0 when covered. */
+  underfunded: number | null
+  /** A top-up in a currency with no income: it cannot be placed. */
+  unreserved: boolean
+  /** Past its target date: it reserves all it still needs, every month. */
+  overdue: boolean
+}
+
+/** `GET /wishlist/free-flow`. */
+export interface WishlistFreeFlow {
+  rows: WishlistFreeFlowRow[]
+  goals: WishlistFreeFlowGoal[]
+  /** The known limitations, for the "based on your last N full months" note. */
+  limitations: string[]
+}
+
 /** `fits` and `over` are verdicts; `unknown` means there is not enough data (see `reason`). */
 export type WishlistCheckStatus = 'fits' | 'over' | 'unknown'
 
