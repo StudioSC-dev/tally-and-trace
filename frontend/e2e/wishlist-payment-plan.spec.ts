@@ -75,7 +75,7 @@ function outlookOf(item: WishlistItem, checks: Checks, monthly?: number, final?:
       const mine = !installment ? (i === 0 ? item.estimated_cost : 0) : i < count - 1 ? (monthly ?? 0) : i === count - 1 ? (final ?? 0) : 0
       return { month, existing_installments: existing, this_item: mine, total: existing + mine }
     }),
-    disposable_check: { status: checks.disposable, currency: item.currency, amount: monthly ?? item.estimated_cost, monthly_disposable: checks.disposable === 'unknown' ? null : DISPOSABLE },
+    disposable_check: { status: checks.disposable, currency: item.currency, amount: monthly ?? item.estimated_cost, monthly_disposable: checks.disposable === 'unknown' ? null : DISPOSABLE, available: checks.disposable === 'unknown' ? null : DISPOSABLE },
     credit_check: checks.credit ? { status: checks.credit, currency: 'PHP', amount: item.estimated_cost, available: 80000, limit: 120000 } : null,
   }
 }
@@ -358,14 +358,15 @@ test.describe('wishlist payment plan', () => {
     await expect.poll(accountGets).toBeGreaterThan(before)
   })
 
-  test('a purchased item whose installment already counts shows the full disposable income as left', async ({ page }) => {
+  test('a purchased item whose installment is linked is compared like any other: available less its payment', async ({ page }) => {
     await open(page)
     await page.getByLabel('Show purchased').check()
     const phone = cardOf(page, PHONE)
     await phone.getByRole('button', { name: 'Show outlook' }).click()
     const outlook = phone.getByTestId('installment-outlook')
-    // This item's own payment is in the plan's disposable income already, so it is not taken off again.
-    await expect(outlook.getByTestId('outlook-month-2026-04').getByRole('cell')).toHaveText(['₱1,500.00', '₱3,000.00', '₱5,000.00'])
+    // STU-791: the API's rate is built from posted transactions, which do not count an unposted installment, so the
+    // old "already counts in your plan" shortcut is gone and this item's payment comes off the rate like any other.
+    await expect(outlook.getByTestId('outlook-month-2026-04').getByRole('cell')).toHaveText(['₱1,500.00', '₱3,000.00', '₱2,000.00'])
     await expect(outlook.getByTestId('outlook-month-2027-03').getByRole('cell')).toHaveText(['₱0.00', '₱0.00', '₱5,000.00'])
   })
 

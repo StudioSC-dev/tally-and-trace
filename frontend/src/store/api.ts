@@ -773,7 +773,8 @@ export const accountingApi = createApi({
     // The backend's projection in one call (available cash, payables, closings).
     getDashboardSnapshot: builder.query<DashboardSnapshot, { tag?: number } | void>({
       query: (params) => ({ url: 'dashboard/snapshot', params: params ?? {} }),
-      providesTags: ['Account', 'BudgetEntry', 'Transaction', 'Allocation'],
+      // `wishlist_next_up` dates the top three wishlist items, so a wishlist write refreshes it (STU-791).
+      providesTags: ['Account', 'BudgetEntry', 'Transaction', 'Allocation', 'Wishlist'],
     }),
 
     // The Transactions page's Due card in one request (docs/dashboard-due.md): the snapshot's due
@@ -945,17 +946,18 @@ export const accountingApi = createApi({
     }),
     getWishlistPlan: builder.query<WishlistPlan, void>({
       query: () => 'wishlist/plan',
-      providesTags: ['Wishlist', 'BudgetEntry'],
+      // Dated from free flow, which reads accounts, transactions and savings goals (STU-791).
+      providesTags: ['Wishlist', 'BudgetEntry', 'Allocation', 'Account', 'Transaction', 'FreeFlow'],
     }),
     // Each goal's monthly pace and underfunded flag, and the notes. Allocation writes and reorders refresh it (STU-790).
     getWishlistFreeFlow: builder.query<WishlistFreeFlow, void>({
       query: () => 'wishlist/free-flow',
-      providesTags: ['Allocation', 'FreeFlow'],
+      providesTags: ['Allocation', 'FreeFlow', 'Account', 'Transaction'],
     }),
     // The outlook reads the recurring entries, the forecast and the card's credit, so those writes refresh it.
     getWishlistOutlook: builder.query<WishlistOutlook, number>({
       query: (id) => `wishlist/${id}/outlook`,
-      providesTags: ['Wishlist', 'BudgetEntry', 'Account'],
+      providesTags: ['Wishlist', 'BudgetEntry', 'Account', 'Allocation', 'Transaction', 'FreeFlow'],
     }),
     createWishlistItem: builder.mutation<WishlistItem, Partial<WishlistItem>>({
       query: (body) => ({ url: 'wishlist/', method: 'POST', body }),

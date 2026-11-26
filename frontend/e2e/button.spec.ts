@@ -43,6 +43,7 @@ import {
   withInstallmentReview,
 } from './support/fixtures/household'
 import type { HouseholdData } from './support/fixtures/household'
+import { WISHLIST_WORDING } from './support/fixtures/wishlistPlan'
 
 // This spec lives in <repo>/frontend/e2e.
 const FRONTEND = fileURLToPath(new URL('..', import.meta.url))
@@ -85,17 +86,32 @@ const REMOVED_ALLOCATIONS_HELP = 'Switch tabs to view recurring subscriptions, m
  */
 const WISHLIST_BADGE = 'Fits your monthly budget'
 const WISHLIST_PAYMENT_TEXT = ['Pay from', 'No account', ...WISHLIST_PAY_FROM_OPTIONS, 'Payment', 'Full', 'Installments'].join('')
-const WISHLIST_SEGMENTS = new Set(['Full', 'Installments'])
+const WISHLIST_SEGMENTS = new Set(['Full', 'Installments', ...WISHLIST_WORDING.levelButtons])
 const WISHLIST_NEW_READS = new Set(['GET /accounts/?is_active=true&limit=100', 'GET /budget-entries/?entry_type=expense&limit=100', 'GET /cards/credit'])
 const WISHLIST_OUTLOOK_READ = /^GET \/wishlist\/\d+\/outlook$/
 const WISHLIST_PAYMENT_FIELDS = ',"account_id":null,"payment_plan":"full","installment_months":null'
+/**
+ * STU-791's wording on a wishlist surface, put back to the recorded text (`textOf` joins elements with no separator, so
+ * the sentences keep their own spaces): the new header line and priority choice become the old ones, and the note goes.
+ */
+const PRIORITY_NOW = ['Priority', 'Critical', 'An urgent need. It comes before your savings.', 'A want', 'Saved for after your savings, in this order.', 'High', 'Medium', 'Low'].join('')
+const PRIORITY_OLD = 'Prioritycriticalhighmediumlow'
+const wishlistBaselineText = (text: string): string =>
+  text
+    .replaceAll(WISHLIST_BADGE, '')
+    .replace(WISHLIST_PAYMENT_TEXT, '')
+    .replace(WISHLIST_WORDING.header.now, WISHLIST_WORDING.header.old)
+    .replace(WISHLIST_WORDING.purchaseNote, '')
+    .replace(PRIORITY_NOW, PRIORITY_OLD)
+/** The form's priority was a select (`select-one:<level>`) and is now two radios; the recorded field is dropped, and the radios are. */
+const PRIORITY_SELECT = /^select-one:(critical|high|medium|low)$/
 const isWishlist = (key: string): boolean => key.includes('wishlist')
 /** `opensForm`: the click opened the wishlist form (Add item, Edit), whose fields gain "Pay from"; other dialogs keep theirs. */
 const withoutWishlistAdditions = (effect: Effect, opensForm: boolean): Effect => ({
   ...effect,
   requests: effect.requests.filter((r) => !WISHLIST_NEW_READS.has(r) && !WISHLIST_OUTLOOK_READ.test(r)).map((r) => r.replace(WISHLIST_PAYMENT_FIELDS, '')),
   buttons: opensForm ? effect.buttons.filter((b) => !WISHLIST_SEGMENTS.has(b)) : effect.buttons,
-  fields: opensForm ? effect.fields.filter((f) => f !== 'select-one:0') : effect.fields,
+  fields: opensForm ? effect.fields.filter((f) => f !== 'select-one:0' && !f.startsWith('radio:')) : effect.fields,
   rows: effect.rows.map((r) => r.replace(WISHLIST_BADGE, '')),
 })
 
@@ -1120,7 +1136,7 @@ test.describe('AC6: button migration preserves surrounding behavior and layout',
       await s.open(page)
       const scope = scopeOf(page, s)
       const controls = (await controlsIn(scope)).filter((c) => !(isWishlist(s.key) && WISHLIST_SEGMENTS.has(c.name)))
-      const text = isWishlist(s.key) ? (await textOf(scope)).replaceAll(WISHLIST_BADGE, '').replace(WISHLIST_PAYMENT_TEXT, '') : await textOf(scope)
+      const text = isWishlist(s.key) ? wishlistBaselineText(await textOf(scope)) : await textOf(scope)
       await capture(page, s, `layout-${s.key}`)
       const project = testInfo.project.name
       if (RECORD) {
@@ -1167,7 +1183,8 @@ test.describe('AC6: button migration preserves surrounding behavior and layout',
           })
           return
         }
-        const base = readBaseline()[project]?.effects[c.key]
+        const recorded = readBaseline()[project]?.effects[c.key]
+        const base = recorded && isWishlist(s.key) ? { ...recorded, fields: recorded.fields.filter((f) => !PRIORITY_SELECT.test(f)) } : recorded
         expect(effect === null, `${c.name} is disabled now as it was at the base`).toBe(base === undefined)
         expect(effect, `activating ${c.name} does what it did at the base`).toEqual(base ?? null)
       })
