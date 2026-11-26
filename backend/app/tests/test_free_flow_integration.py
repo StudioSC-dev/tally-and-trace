@@ -764,6 +764,15 @@ def test_ac13_a_higher_goal_takes_shared_money_first_whatever_its_account_order(
     assert goal(w.compute(), tagged).pace == D(2_000)      # current 0
 
 
+def test_ac13_a_negative_savings_balance_counts_in_a_combined_current(w):
+    # Audit finding 6: the -10,000 balance was clamped to 0 and the goal read as done.
+    _income(w)
+    up = w.account("savings", balance=10_000)
+    down = w.account("savings", balance=-10_000)
+    g = w.goal(mode="multi_account", accounts=[up, down], target=10_000, due=DUE)
+    assert goal(w.compute(), g).pace == D(2_000)           # combined balance 0
+
+
 # --- AC14: fed ----------------------------------------------------------------------------
 
 def _monthly(w, savings, cat, first="balance"):

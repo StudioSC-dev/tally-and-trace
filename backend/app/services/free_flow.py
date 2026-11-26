@@ -556,7 +556,11 @@ def _give_out_current(goals: List[_Goal], own: Dict[int, _Own],
         if target is None:
             continue
         if g.kind == BALANCE:
-            need = max(target, ZERO)
+            # A negative balance counts against the goal, as its combined balance
+            # does; claims are taken from the positive balances only.
+            owed = sum((min(own[i].balance, ZERO) for i in g.accounts), ZERO)
+            g.current = owed
+            need = max(target - owed, ZERO)
             # Two passes: the shared (tagged) money on every tracked account
             # first, whatever the list order, then the rest.
             for shared_only in (True, False):
