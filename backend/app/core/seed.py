@@ -59,6 +59,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
+from app.core import locking
 from app.core.auth import get_password_hash
 from app.core.database import SessionLocal
 from app.core.time import manila_midnight
@@ -73,6 +74,7 @@ from app.models.tag_share import TagShare
 from app.models.transaction import RecurrenceFrequency, TransactionType
 from app.models.user import CurrencyType
 from app.models.wishlist_item import WishlistItem
+from app.services import allocation_rank
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +132,10 @@ def _seed(db: Session) -> None:
     _reset_demo_user(user, "User", onboarded=False)
     _reset_demo_user(partner, "Partner", onboarded=True)
     db.flush()
+    # The owner lock before any allocation is deleted or created, held to the commit
+    # (STU-786), in ascending user id so two seeders never wait on each other.
+    for owner_id in sorted((user.id, partner.id)):
+        locking.lock_owner_budgets(db, owner_id)
     _delete_demo_data(db, [user, partner])
     household = ensure_household_tag(db, user)  # kept across reseeds, like the user row
     ensure_household_tag(db, partner)
@@ -376,6 +382,9 @@ def _load_seed_data(db: Session, default_user: User, household: Tag, partner: Us
         db.add(allocation)
         allocations.append(allocation)
     db.flush()
+    for allocation in allocations:
+        if allocation_rank.is_ranked(allocation.allocation_type, allocation.is_active):
+            allocation_rank.place_at_bottom(db, allocation)
 
     # Refresh to get IDs and create mapping
     for i, allocation in enumerate(allocations):

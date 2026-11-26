@@ -13,11 +13,12 @@ from app.models.category import Category
 from app.models.allocation import Allocation, AllocationType
 from app.schemas.allocation import (
     MULTI_ACCOUNT, TRANSACTION_TOTAL, AllocationCreate, AllocationResponse, AllocationUpdate, AllocationListResponse,
-    account_rule_error, goal_mode,
+    AllocationRankedResponse, AllocationRankOrder, account_rule_error, goal_mode,
 )
 from app.models.user import CurrencyType, User
 from app.core.time import utc_now
 from app.routers.transactions import _lock_allocations, _recompute_budget_total
+from app.services import allocation_rank
 from app.services.fx import FxRates, get_fx
 from app.services.savings_progress import progress_for
 
@@ -79,6 +80,7 @@ def get_allocations(
     account_id: Optional[int] = Query(None, description="Filter by account ID"),
     allocation_type: Optional[str] = Query(None, description="Filter by allocation type"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    ranked: Optional[bool] = Query(None, description="Only ranked goals (true) or only the others (false)"),
     limit: int = Query(10, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     fx: FxRates = Depends(get_fx),
@@ -98,7 +100,10 @@ def get_allocations(
             raise HTTPException(status_code=400, detail=f"Invalid allocation type: {allocation_type}")
     if is_active is not None:
         query = query.filter(Allocation.is_active == is_active)
-    
+    if ranked is not None:
+        # Ranked rows are the ones holding a rank (STU-786); totals and pages follow.
+        query = query.filter(Allocation.rank.is_not(None) if ranked else Allocation.rank.is_(None))
+
     total = query.count()
     allocations = (
         query.order_by(Allocation.created_at.desc(), Allocation.id.desc())
@@ -108,6 +113,28 @@ def get_allocations(
     )
     has_more = offset + len(allocations) < total
     return {"items": _responses(db, allocations, fx), "total": total, "has_more": has_more}
+
+@router.get("/ranked", response_model=AllocationRankedResponse)
+def get_ranked_allocations(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    fx: FxRates = Depends(get_fx),
+):
+    """All of the caller's ranked goals, top first. Never paged (STU-786)."""
+    allocations = allocation_rank.ranked_for(db, current_user.id)
+    return {"items": _responses(db, allocations, fx)}
+
+@router.put("/ranked", response_model=AllocationRankedResponse)
+def reorder_ranked_allocations(
+    order: AllocationRankOrder,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    fx: FxRates = Depends(get_fx),
+):
+    """Set the caller's ranked goals to the given complete order (STU-786)."""
+    allocations = allocation_rank.reorder(db, current_user.id, order.ids)
+    db.commit()
+    return {"items": _responses(db, allocations, fx)}
 
 @router.post("/", response_model=AllocationResponse)
 def create_allocation(
@@ -144,6 +171,7 @@ def create_allocation(
     db_allocation = Allocation(**allocation_data, user_id=current_user.id)
     db.add(db_allocation)
     db.flush()
+    allocation_rank.sync_membership(db, db_allocation, was_ranked=False)
     if db_allocation.allocation_type == AllocationType.BUDGET:
         # A budget's total is derived from its rows (STU-222): a sent one is ignored.
         _recompute_budget_total(db, db_allocation, [None])
@@ -194,6 +222,7 @@ def apply_allocation_update(db: Session, user: User, allocation: Allocation,
         # Deleted between the caller's ownership check and the lock.
         raise HTTPException(status_code=404, detail="Allocation not found")
     (allocation,) = locked
+    was_ranked = allocation_rank.is_ranked(allocation.allocation_type, allocation.is_active)
     update_data = dict(update_data)
     if "currency" in update_data and update_data["currency"] is None:
         update_data.pop("currency")  # a null currency is no change, never a null column
@@ -221,6 +250,7 @@ def apply_allocation_update(db: Session, user: User, allocation: Allocation,
 
     allocation.updated_at = utc_now()
     db.flush()
+    allocation_rank.sync_membership(db, allocation, was_ranked)
     if allocation.allocation_type == AllocationType.BUDGET:
         _recompute_budget_total(db, allocation, [None])
     return allocation
@@ -232,9 +262,12 @@ def delete_allocation(
     current_user: User = Depends(get_current_active_user),
 ):
     """Soft delete an allocation (mark as inactive)"""
+    # The owner's lock first, then the read, so the rank gap closes on current ranks (STU-786).
+    locking.lock_owner_budgets(db, current_user.id)
     db_allocation = get_owned_or_404(db, Allocation, allocation_id, current_user, "Allocation not found")
     db_allocation.is_active = False
     db_allocation.updated_at = utc_now()
+    allocation_rank.clear_and_close_gap(db, db_allocation)
     db.commit()
     return {"message": "Allocation deleted successfully"}
 
