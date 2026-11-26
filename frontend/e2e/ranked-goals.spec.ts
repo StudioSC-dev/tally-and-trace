@@ -8,7 +8,9 @@ import { shot } from './support/shot'
 // STU-787: the Savings tab's "Savings goals" section. The user's ranked goals sit in rank order above the paged list;
 // a goal moves by pointer drag or by its move-up and move-down buttons, and each move sends the complete order.
 // The API is faked in the browser, with a small stateful stand-in for the ranking routes (GET and PUT
-// /allocations/ranked, and the create, pause and delete calls that change who is ranked); there is no backend.
+// /allocations/ranked, the paged GET, and the create, pause and delete calls that change who is ranked); there is no
+// backend. The stand-in can hold a reorder or a ranked read until the test releases it, so a test can act while a
+// request is still in flight.
 
 test.use({ locale: 'en-US' })
 
@@ -17,7 +19,13 @@ const START = [EMERGENCY, JAPAN, LAPTOP, GIFTS, CAR]
 const START_NAMES = START.map((g) => g.name)
 const START_IDS = START.map((g) => g.id)
 const NEW_GOAL_ID = 90
-const REFUSAL = 'Your goals changed on another device. Reload and try again.'
+/** A refusal as the API words one: a 422 with a string `detail`. */
+const REFUSAL = 'ids must list every ranked goal exactly once'
+
+/** A request the fake is holding until the test lets it answer. */
+interface Held {
+  release: () => void
+}
 
 interface Fake {
   /** The PUT /allocations/ranked bodies, in order. */
@@ -26,17 +34,45 @@ interface Fake {
   pagedQueries: string[]
   /** How many GET /allocations/ranked calls were made. */
   rankedGets: () => number
-  /** Makes the next reorders answer 409 with `REFUSAL`. */
-  refuseReorders: () => void
+  /**
+   * Holds the next PUT /allocations/ranked. `commit` applies the order when the request arrives and answers 200 with
+   * the list as it was then; `refuse` answers 422 and applies nothing. The answer goes out on `release()`.
+   */
+  holdNextReorder: (kind: 'commit' | 'refuse') => Held
+  /** Holds the next GET /allocations/ranked: it reads the list when it arrives and answers on `release()`. */
+  holdNextRankedGet: () => Held
+}
+
+const hold = (): { held: Held; wait: Promise<void> } => {
+  let release = (): void => undefined
+  const wait = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  return { held: { release }, wait }
 }
 
 /** The ranking routes, answering from one list so a reorder, create, pause or delete shows on the next GET. */
-async function fakeRanking(page: Page): Promise<Fake> {
-  const all: Allocation[] = household.allocations.map((a) => ({ ...a }))
+async function fakeRanking(page: Page, extra: Allocation[] = []): Promise<Fake> {
+  const all: Allocation[] = [...household.allocations.map((a) => ({ ...a })), ...extra]
   let order: number[] = [...START_IDS]
-  let refuse = false
   let rankedGets = 0
-  const fake: Fake = { puts: [], pagedQueries: [], rankedGets: () => rankedGets, refuseReorders: () => { refuse = true } }
+  const reorderQueue: { kind: 'commit' | 'refuse'; wait: Promise<void> }[] = []
+  const rankedQueue: Promise<void>[] = []
+  const fake: Fake = {
+    puts: [],
+    pagedQueries: [],
+    rankedGets: () => rankedGets,
+    holdNextReorder: (kind) => {
+      const { held, wait } = hold()
+      reorderQueue.push({ kind, wait })
+      return held
+    },
+    holdNextRankedGet: () => {
+      const { held, wait } = hold()
+      rankedQueue.push(wait)
+      return held
+    },
+  }
 
   const ranked = (): Allocation[] =>
     order.flatMap((id, index) => {
@@ -54,19 +90,32 @@ async function fakeRanking(page: Page): Promise<Fake> {
     const idMatch = /^\/allocations\/(\d+)$/.exec(path)
     if (path === '/allocations/ranked' && method === 'GET') {
       rankedGets += 1
-      return json(route, 200, { items: ranked() })
+      const snapshot = ranked()
+      const wait = rankedQueue.shift()
+      if (wait) await wait
+      return json(route, 200, { items: snapshot })
     }
     if (path === '/allocations/ranked' && method === 'PUT') {
       const body = request.postDataJSON() as { ids: number[] }
       fake.puts.push(body)
-      if (refuse) return json(route, 409, { detail: REFUSAL })
-      order = [...body.ids]
-      return json(route, 200, { items: ranked() })
+      const held = reorderQueue.shift()
+      if (!held) {
+        order = [...body.ids]
+        return json(route, 200, { items: ranked() })
+      }
+      if (held.kind === 'commit') order = [...body.ids]
+      const snapshot = ranked()
+      await held.wait
+      if (held.kind === 'refuse') return json(route, 422, { detail: REFUSAL })
+      return json(route, 200, { items: snapshot })
     }
     if (path === '/allocations/' && method === 'GET') {
       fake.pagedQueries.push(url.search)
-      const items = url.searchParams.get('ranked') === 'false' ? all.filter((a) => !order.includes(a.id)) : all
-      return json(route, 200, { items, total: items.length, has_more: false })
+      const rest = url.searchParams.get('ranked') === 'false' ? all.filter((a) => !order.includes(a.id)) : all
+      const limit = Number(url.searchParams.get('limit') ?? rest.length)
+      const offset = Number(url.searchParams.get('offset') ?? 0)
+      const items = rest.slice(offset, offset + limit)
+      return json(route, 200, { items, total: rest.length, has_more: offset + items.length < rest.length })
     }
     if (path === '/allocations/' && method === 'POST') {
       const body = request.postDataJSON() as Partial<Allocation>
@@ -96,10 +145,10 @@ async function fakeRanking(page: Page): Promise<Fake> {
   return fake
 }
 
-async function open(page: Page): Promise<Fake> {
+async function open(page: Page, extra: Allocation[] = []): Promise<Fake> {
   await mockHousehold(page, household)
   await addRoutes(page, [...householdViewRoutes(household), ...householdWishlistRoutes()])
-  const fake = await fakeRanking(page)
+  const fake = await fakeRanking(page, extra)
   await page.goto('/allocations?tab=savings')
   await expect(page.getByRole('heading', { level: 1, name: 'Allocations' })).toBeVisible({ timeout: 15_000 })
   await expect(page.getByTestId('ranked-goals')).toBeVisible()
@@ -111,8 +160,8 @@ async function open(page: Page): Promise<Fake> {
 const rows = (page: Page): Locator => page.getByTestId('ranked-goal')
 const namesOf = (page: Page): Promise<string[]> =>
   rows(page).evaluateAll((all) => all.map((row) => row.querySelector('p.font-semibold')?.textContent?.trim() ?? ''))
-const handleOf = (page: Page, name: string): Locator =>
-  rows(page).filter({ has: page.getByText(name, { exact: true }) }).getByTestId('ranked-goal-handle')
+const rowOf = (page: Page, name: string): Locator => rows(page).filter({ has: page.getByText(name, { exact: true }) })
+const handleOf = (page: Page, name: string): Locator => rowOf(page, name).getByTestId('ranked-goal-handle')
 const upOf = (page: Page, name: string): Locator => page.getByRole('button', { name: `Move ${name} up`, exact: true })
 const downOf = (page: Page, name: string): Locator => page.getByRole('button', { name: `Move ${name} down`, exact: true })
 
@@ -123,13 +172,24 @@ const downOf = (page: Page, name: string): Locator => page.getByRole('button', {
 async function drag(page: Page, from: string, onto: string, half: 'top' | 'bottom' = 'top'): Promise<void> {
   await handleOf(page, from).scrollIntoViewIfNeeded()
   const start = await handleOf(page, from).boundingBox()
-  const target = await rows(page).filter({ has: page.getByText(onto, { exact: true }) }).boundingBox()
+  const target = await rowOf(page, onto).boundingBox()
   if (!start || !target) throw new Error('no box to drag between')
   const x = start.x + start.width / 2
   await page.mouse.move(x, start.y + start.height / 2)
   await page.mouse.down()
   await page.mouse.move(x, half === 'top' ? target.y + 4 : target.y + target.height - 4, { steps: 12 })
   await page.mouse.up()
+}
+
+/** Adds a savings goal through the create form. */
+async function createGoal(page: Page, name: string): Promise<void> {
+  await page.getByRole('button', { name: 'Add allocation' }).click()
+  const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Create savings tracker' }) })
+  await form.locator('[data-field="name"]').fill(name)
+  const savingsAccount = household.accounts.find((a) => a.account_type === 'savings' && a.my_role === 'owner')
+  if (!savingsAccount) throw new Error('the household has no savings account of its own')
+  await form.locator('[data-field="account_id"]').selectOption(String(savingsAccount.id))
+  await form.getByRole('button', { name: 'Create savings tracker' }).click()
 }
 
 test.describe('ranked savings goals (STU-787)', () => {
@@ -209,7 +269,7 @@ test.describe('ranked savings goals (STU-787)', () => {
     await drag(page, JAPAN.name, JAPAN.name)
     await handleOf(page, GIFTS.name).scrollIntoViewIfNeeded()
     const start = await handleOf(page, GIFTS.name).boundingBox()
-    const above = await rows(page).filter({ has: page.getByText(LAPTOP.name, { exact: true }) }).boundingBox()
+    const above = await rowOf(page, LAPTOP.name).boundingBox()
     if (!start || !above) throw new Error('no handle')
     await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2)
     await page.mouse.down()
@@ -233,11 +293,16 @@ test.describe('ranked savings goals (STU-787)', () => {
     expect(sent.ids).toEqual([JAPAN.id, EMERGENCY.id, LAPTOP.id, GIFTS.id, CAR.id])
   })
 
-  test('AC4: a refused reorder restores the previous order and shows the error', async ({ page }) => {
+  test('AC4: a refused reorder shows the attempted order while pending, then restores the previous order and shows the error', async ({ page }) => {
     const fake = await open(page)
-    fake.refuseReorders()
+    const refusal = fake.holdNextReorder('refuse')
     await downOf(page, EMERGENCY.name).click()
     await expect.poll(() => fake.puts.length).toBe(1)
+    // Pending: the screen already shows the attempted order, and the request carries the complete list.
+    expect(fake.puts[0]).toEqual({ ids: [JAPAN.id, EMERGENCY.id, LAPTOP.id, GIFTS.id, CAR.id] })
+    await expect.poll(() => namesOf(page)).toEqual([JAPAN.name, EMERGENCY.name, LAPTOP.name, GIFTS.name, CAR.name])
+    await expect(page.getByTestId('toast-message')).toHaveCount(0)
+    refusal.release()
     await expect(page.getByTestId('toast-message')).toHaveText(REFUSAL)
     await expect.poll(() => namesOf(page)).toEqual(START_NAMES)
     await shot(page, 'refused')
@@ -245,13 +310,7 @@ test.describe('ranked savings goals (STU-787)', () => {
 
   test('AC5: a new goal appears at the bottom of the section', async ({ page }) => {
     await open(page)
-    await page.getByRole('button', { name: 'Add allocation' }).click()
-    const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Create savings tracker' }) })
-    await form.locator('[data-field="name"]').fill('Wedding fund')
-    const savingsAccount = household.accounts.find((a) => a.account_type === 'savings' && a.my_role === 'owner')
-    if (!savingsAccount) throw new Error('the household has no savings account of its own')
-    await form.locator('[data-field="account_id"]').selectOption(String(savingsAccount.id))
-    await form.getByRole('button', { name: 'Create savings tracker' }).click()
+    await createGoal(page, 'Wedding fund')
     await expect(rows(page)).toHaveCount(START.length + 1)
     expect((await namesOf(page)).at(-1)).toBe('Wedding fund')
     expect((await namesOf(page)).slice(0, START.length)).toEqual(START_NAMES)
@@ -260,7 +319,7 @@ test.describe('ranked savings goals (STU-787)', () => {
 
   test('AC5: a deactivated goal leaves the section and joins the paged list', async ({ page }) => {
     await open(page)
-    await rows(page).filter({ has: page.getByText(JAPAN.name, { exact: true }) }).locator('article[role="button"]').click()
+    await rowOf(page, JAPAN.name).locator('article[role="button"]').click()
     await page.getByRole('button', { name: 'Pause allocation' }).click()
     await expect(rows(page)).toHaveCount(START.length - 1)
     expect(await namesOf(page)).toEqual(START_NAMES.filter((n) => n !== JAPAN.name))
@@ -272,7 +331,7 @@ test.describe('ranked savings goals (STU-787)', () => {
 
   test('AC5: a deleted goal leaves the section', async ({ page }) => {
     await open(page)
-    await rows(page).filter({ has: page.getByText(GIFTS.name, { exact: true }) }).locator('article[role="button"]').click()
+    await rowOf(page, GIFTS.name).locator('article[role="button"]').click()
     await page.getByRole('button', { name: 'Delete allocation' }).click()
     await page.getByTestId('confirm-dialog-confirm').click()
     await expect(rows(page)).toHaveCount(START.length - 1)
