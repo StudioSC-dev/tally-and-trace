@@ -5,6 +5,7 @@ import {
   useGetAccountsQuery,
   useGetCardCreditsQuery,
   useGetCategoriesQuery,
+  useGetRankedAllocationsQuery,
   useCreateAllocationMutation,
   useUpdateAllocationMutation,
   useDeleteAllocationMutation,
@@ -435,6 +436,9 @@ export function AllocationsPage() {
     { skip: !isAuthenticated }
   )
   
+  // The ranked section reads the same list; here it only decides what the lower Savings list says when it is empty.
+  const { data: rankedData } = useGetRankedAllocationsQuery(undefined, { skip: !isAuthenticated || activeTab !== 'savings' })
+  const hasRankedGoals = (rankedData?.items.length ?? 0) > 0
   const [createAllocation] = useCreateAllocationMutation()
   const [updateAllocation] = useUpdateAllocationMutation()
   const [deleteAllocation] = useDeleteAllocationMutation()
@@ -1819,9 +1823,6 @@ export function AllocationsPage() {
     )
   }
 
-  const activeAllocationList =
-    activeTab === 'budgets' ? budgetEnvelopes : activeTab === 'savings' ? savingsAndGoals : []
-
   if (authLoading) {
   return (
       <div className="min-h-screen flex items-center justify-center">
@@ -1912,7 +1913,9 @@ export function AllocationsPage() {
           'Savings & investment targets',
           'Longer-term goals and rainy-day funds that should steadily grow over time.',
           savingsAndGoals,
-          'No savings or goal envelopes yet. Create one to start building your future plans.',
+          hasRankedGoals
+            ? 'No paused or other savings goals. Your active goals are in the ranked list above.'
+            : 'No savings or goal envelopes yet. Create one to start building your future plans.',
           'Create a savings target'
         )}
 
@@ -1945,7 +1948,7 @@ export function AllocationsPage() {
           )}
           <div className="flex justify-end px-4">
             <p className="text-xs text-muted">
-              Showing {activeAllocationList.length} of {totalAllocations} envelopes
+              Showing {allocationItems.length} of {totalAllocations} envelopes
             </p>
           </div>
         </>

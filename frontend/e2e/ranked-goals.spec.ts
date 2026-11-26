@@ -51,6 +51,10 @@ const hold = (): { held: Held; wait: Promise<void> } => {
   return { held: { release }, wait }
 }
 
+/** Paused savings goals added to the fake's list, so the paged list runs past one page. */
+const pausedGoals = (count: number): Allocation[] =>
+  Array.from({ length: count }, (_, i) => ({ ...START[0], id: 200 + i, name: `Paused goal ${i + 1}`, is_active: false, rank: null }))
+
 /** The ranking routes, answering from one list so a reorder, create, pause or delete shows on the next GET. */
 async function fakeRanking(page: Page, extra: Allocation[] = []): Promise<Fake> {
   const all: Allocation[] = [...household.allocations.map((a) => ({ ...a })), ...extra]
@@ -215,6 +219,29 @@ test.describe('ranked savings goals (STU-787)', () => {
     // Each ranked goal shows once on the page: in the section, not again in the paged list.
     for (const name of START_NAMES) await expect(page.locator('main').getByText(name, { exact: true })).toHaveCount(1)
     await expect(page.getByTestId('ranked-goals').getByText(EMERGENCY.name, { exact: true })).toHaveCount(1)
+  })
+
+  test('AC2: beside a full ranked section the lower list says what it holds and its footer counts one scope', async ({ page }) => {
+    await open(page)
+    const lower = page.getByRole('heading', { name: 'Savings & investment targets' }).locator('xpath=ancestor::section[1]')
+    await expect(lower.getByText('No savings or goal envelopes yet', { exact: false })).toHaveCount(0)
+    await expect(lower.getByText('No paused or other savings goals. Your active goals are in the ranked list above.')).toBeVisible()
+    // The footer counts what the paged list loaded against what it holds: the five budgets, never the ranked five.
+    await expect(page.getByText(/^Showing \d+ of \d+ envelopes$/)).toHaveText('Showing 5 of 5 envelopes')
+  })
+
+  test('AC2: the paged list pages on with ranked=false, and the footer counts the same rows it shows', async ({ page }) => {
+    const fake = await open(page, pausedGoals(8))
+    // 5 budgets and 8 paused goals are not ranked: 13 rows, 10 to a page.
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+    await expect.poll(() => fake.pagedQueries.map((q) => new URLSearchParams(q).get('offset'))).toEqual(['0', '10'])
+    for (const query of fake.pagedQueries) {
+      const q = new URLSearchParams(query)
+      expect(q.get('ranked')).toBe('false')
+      expect(q.get('limit')).toBe('10')
+    }
+    await expect(page.getByText(/^Showing \d+ of \d+ envelopes$/)).toHaveText('Showing 13 of 13 envelopes')
+    for (let i = 1; i <= 8; i += 1) await expect(page.locator('main').getByText(`Paused goal ${i}`, { exact: true })).toHaveCount(1)
   })
 
   test('AC3: a goal moves with the move-up and move-down buttons', async ({ page }) => {
