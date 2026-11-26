@@ -164,6 +164,7 @@ const rowOf = (page: Page, name: string): Locator => rows(page).filter({ has: pa
 const handleOf = (page: Page, name: string): Locator => rowOf(page, name).getByTestId('ranked-goal-handle')
 const upOf = (page: Page, name: string): Locator => page.getByRole('button', { name: `Move ${name} up`, exact: true })
 const downOf = (page: Page, name: string): Locator => page.getByRole('button', { name: `Move ${name} down`, exact: true })
+const tab = (page: Page, name: 'Budgets' | 'Savings'): Locator => page.getByRole('button', { name, exact: true })
 
 /**
  * Drags a goal's handle with real pointer events: into the top half of the goal's row `onto` (to go above it) or the
@@ -280,6 +281,29 @@ test.describe('ranked savings goals (STU-787)', () => {
     await page.mouse.up()
     expect(fake.puts).toHaveLength(0)
     expect(await namesOf(page)).toEqual(START_NAMES)
+  })
+
+  test('AC3: while a reorder is in flight no second one starts, also after a tab switch, and the saving state shows', async ({ page }) => {
+    const fake = await open(page)
+    const first = fake.holdNextReorder('commit')
+    await downOf(page, EMERGENCY.name).click()
+    await expect.poll(() => fake.puts.length).toBe(1)
+    await expect(downOf(page, EMERGENCY.name)).toHaveAttribute('aria-disabled', 'true')
+    await expect(handleOf(page, EMERGENCY.name)).toHaveAttribute('aria-disabled', 'true')
+    // Leave the Savings tab and come back: a new section is mounted over the same request.
+    await tab(page, 'Budgets').click()
+    await tab(page, 'Savings').click()
+    await expect(rows(page)).toHaveCount(START.length)
+    await expect(downOf(page, EMERGENCY.name)).toHaveAttribute('aria-disabled', 'true')
+    await expect(upOf(page, EMERGENCY.name)).toHaveAttribute('aria-disabled', 'true')
+    await expect(handleOf(page, EMERGENCY.name)).toHaveAttribute('aria-disabled', 'true')
+    await downOf(page, EMERGENCY.name).dispatchEvent('click')
+    await drag(page, JAPAN.name, EMERGENCY.name)
+    expect(fake.puts, 'no second PUT while the first is in flight').toHaveLength(1)
+    first.release()
+    await expect(downOf(page, EMERGENCY.name)).not.toHaveAttribute('aria-disabled', 'true')
+    expect(await namesOf(page)).toEqual([JAPAN.name, EMERGENCY.name, LAPTOP.name, GIFTS.name, CAR.name])
+    expect(fake.puts).toHaveLength(1)
   })
 
   test('AC4: a reorder sends the complete ordered list', async ({ page }) => {

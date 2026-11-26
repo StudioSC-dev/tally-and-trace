@@ -7,6 +7,12 @@ import { apiErrorMessage } from '../utils/apiError'
 import { Button } from './Button'
 import { Icon } from './Icon'
 
+/**
+ * One shared mutation entry for every reorder, so the "saving" state outlives the component: a tab switch unmounts
+ * the section while a reorder is in flight, and the section that comes back still sees it and sends no second one.
+ */
+const REORDER_KEY = 'ranked-allocations-reorder'
+
 /** A drag in progress: the goal held, where it started and the place it would drop into. */
 interface Drag {
   id: number
@@ -30,7 +36,7 @@ function moved<T>(items: readonly T[], from: number, to: number): T[] {
  */
 export function RankedGoals({ renderCard }: { renderCard: (goal: Allocation) => ReactNode }) {
   const { data, isLoading, isError, refetch } = useGetRankedAllocationsQuery()
-  const [reorder, { isLoading: isSaving }] = useReorderRankedAllocationsMutation()
+  const [reorder, { isLoading: isSaving }] = useReorderRankedAllocationsMutation({ fixedCacheKey: REORDER_KEY })
   const showToast = useToast()
   const goals = data?.items
 
@@ -159,7 +165,7 @@ export function RankedGoals({ renderCard }: { renderCard: (goal: Allocation) => 
                   <Button
                     variant="quiet"
                     aria-label={`Move ${goal.name} up`}
-                    aria-disabled={index === 0 || undefined}
+                    aria-disabled={index === 0 || isSaving || undefined}
                     data-move="up"
                     data-testid="ranked-goal-up"
                     className="min-h-11 min-w-11 px-2"
@@ -169,9 +175,10 @@ export function RankedGoals({ renderCard }: { renderCard: (goal: Allocation) => 
                   </Button>
                   <span
                     aria-hidden="true"
+                    aria-disabled={isSaving || undefined}
                     data-testid="ranked-goal-handle"
                     title="Drag to reorder"
-                    className="inline-flex min-h-11 min-w-11 cursor-grab touch-none select-none items-center justify-center text-muted active:cursor-grabbing"
+                    className={`inline-flex min-h-11 min-w-11 touch-none select-none items-center justify-center text-muted ${isSaving ? 'cursor-not-allowed opacity-50' : 'cursor-grab active:cursor-grabbing'}`}
                     onPointerDown={(event) => startDrag(event, index)}
                     onPointerMove={moveDrag}
                     onPointerUp={endDrag}
@@ -182,7 +189,7 @@ export function RankedGoals({ renderCard }: { renderCard: (goal: Allocation) => 
                   <Button
                     variant="quiet"
                     aria-label={`Move ${goal.name} down`}
-                    aria-disabled={index === goals.length - 1 || undefined}
+                    aria-disabled={index === goals.length - 1 || isSaving || undefined}
                     data-move="down"
                     data-testid="ranked-goal-down"
                     className="min-h-11 min-w-11 px-2"
