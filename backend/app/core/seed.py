@@ -133,7 +133,7 @@ def _seed(db: Session) -> None:
     _reset_demo_user(partner, "Partner", onboarded=True)
     db.flush()
     # The owner lock before any allocation is deleted or created, held to the commit
-    # (STU-786), in ascending user id so two seeders never wait on each other.
+    # (STU-786), in a fixed order, so no lock-order cycle is possible.
     for owner_id in sorted((user.id, partner.id)):
         locking.lock_owner_budgets(db, owner_id)
     _delete_demo_data(db, [user, partner])

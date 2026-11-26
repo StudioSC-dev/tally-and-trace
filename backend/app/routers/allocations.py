@@ -133,8 +133,10 @@ def reorder_ranked_allocations(
 ):
     """Set the caller's ranked goals to the given complete order (STU-786)."""
     allocations = allocation_rank.reorder(db, current_user.id, order.ids)
+    # Built while the owner lock is held; the commit releases it.
+    items = _responses(db, allocations, fx)
     db.commit()
-    return {"items": _responses(db, allocations, fx)}
+    return {"items": items}
 
 @router.post("/", response_model=AllocationResponse)
 def create_allocation(
@@ -199,6 +201,8 @@ def update_allocation(
     fx: FxRates = Depends(get_fx),
 ):
     """Update an existing allocation"""
+    # The owner's lock first, then the read (STU-786).
+    locking.lock_owner_budgets(db, current_user.id)
     db_allocation = get_owned_or_404(db, Allocation, allocation_id, current_user, "Allocation not found")
     db_allocation = apply_allocation_update(
         db, current_user, db_allocation, allocation_update.dict(exclude_unset=True))
