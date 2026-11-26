@@ -1156,6 +1156,18 @@ export function withTransferFees(data: HouseholdData, fee: number): TransactionS
   }
 }
 
+/** The goals the ranking holds: active savings and goals, in list order, numbered from 1 (STU-786). */
+export const rankedGoals = (list: Allocation[]): Allocation[] =>
+  list.filter((a) => a.is_active && (a.allocation_type === 'savings' || a.allocation_type === 'goal')).map((a, index) => ({ ...a, rank: index + 1 }))
+
+/** `GET /allocations/` with its `ranked` filter: `true` the ranked goals, `false` the rest, absent all. */
+const allocationsFor = (list: Allocation[], q: URLSearchParams): PaginatedResponse<Allocation> => {
+  const ranked = rankedGoals(list)
+  const rankedIds = new Set(ranked.map((a) => a.id))
+  const filter = q.get('ranked')
+  return pageOf(filter === 'true' ? ranked : filter === 'false' ? list.filter((a) => !rankedIds.has(a.id)) : list)
+}
+
 const pageOf = <T>(items: T[]): PaginatedResponse<T> => ({ items, total: items.length, has_more: false })
 
 /** Throws on a query parameter outside `known`, so the fake never ignores a filter a page sends. */
@@ -1273,7 +1285,8 @@ const minimumDuePreset: MinimumDuePreset = {
 /** Every call the dashboard, Transactions, Allocations and the account form make on load, answered from `data`. */
 export const householdRoutes = (data: HouseholdData = household): ApiRoute[] => [
   apiRoute<PaginatedResponse<Account>>('GET', '/accounts/', pageOf(data.accounts)),
-  apiRoute<PaginatedResponse<Allocation>>('GET', '/allocations/', pageOf(data.allocations)),
+  queryRoute<PaginatedResponse<Allocation>>('GET', '/allocations/', (q) => allocationsFor(data.allocations, q)),
+  apiRoute<{ items: Allocation[] }>('GET', '/allocations/ranked', { items: rankedGoals(data.allocations) }),
   apiRoute<QuickBalances>('GET', '/dashboard/quick-balances', data.quickBalances),
   apiRoute<DashboardSnapshot>('GET', '/dashboard/snapshot', data.snapshot),
   apiRoute<CashflowTimeline>('GET', '/forecast/timeline', data.timeline),
