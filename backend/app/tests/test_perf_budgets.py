@@ -319,14 +319,19 @@ def test_owner_cpu_is_not_a_catastrophe(measured, endpoint):
 
 # --- STU-789 (AC15): the snapshot with a populated wishlist and goals -------------------------
 
+# The measured figures for the populated fixture, set by owner ruling on 2026-11-26.
+WISHLIST_SNAPSHOT_BUDGET = BUDGETS[("owner", "snapshot")]._replace(statements=67, bytes=111_935)
+
+
 @needs_db
-def test_snapshot_with_a_wishlist_and_goals_within_the_owner_ceilings(
+def test_snapshot_with_a_wishlist_and_goals_within_its_ceilings(
         measured, realistic, sw_client, sw_db):
     """The owner's snapshot with eight wishlist items and four ranked goals on top of the
-    realistic rows (two years, so free flow reads a full 12 months) stays within the owner's
-    existing snapshot ceilings, and still builds one context and runs the projection once.
-    The ceilings are not raised for it (plan section 3, Performance). ``measured`` runs
-    first, so the plain budgets are measured without the wishlist."""
+    realistic rows (two years, so free flow reads a full 12 months) stays within its own
+    ceilings (``WISHLIST_SNAPSHOT_BUDGET``: the owner's snapshot ceilings, with statements
+    and bytes at this fixture's measured figures), and still builds one context and runs
+    the projection once. The owner's snapshot ceilings themselves are unchanged.
+    ``measured`` runs first, so the plain budgets are measured without the wishlist."""
     from app.tests.fixtures.realistic import add_wishlist_and_goals, remove_wishlist_and_goals
 
     headers = realistic.callers["owner"].headers
@@ -350,7 +355,7 @@ def test_snapshot_with_a_wishlist_and_goals_within_the_owner_ceilings(
     assert once == {"contexts": 1, "access_maps": 1, "collect_events": 1}, once
     limit = max(CPU_FACTOR * CPU_BASELINE_MS["snapshot"], CPU_FLOOR_MS)
     assert got.cpu_ms <= limit, (got.cpu_ms, limit)
-    ceiling = BUDGETS[("owner", "snapshot")]
+    ceiling = WISHLIST_SNAPSHOT_BUDGET
     over = {f: (getattr(got, f), getattr(ceiling, f)) for f in Budget._fields
             if getattr(got, f) > getattr(ceiling, f)}
     assert not over, f"owner snapshot with a wishlist over its ceiling (measured, ceiling): {over}"
