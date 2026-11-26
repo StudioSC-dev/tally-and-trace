@@ -246,6 +246,43 @@ test.describe('wishlist plan and priority wording (STU-791)', () => {
     await shot(page, 'urgent')
   })
 
+  test('AC3: a negative net flow after the purchase reads red, and a positive one does not', async ({ page }) => {
+    const plan: WishlistPlan = { ...PLAN_OK, items: [repairItem({ net_flow_after: -6000, from_saving: 24000 }), ...PLAN_OK.items.slice(1)] }
+    await open(page, plan)
+    const amount = planItem(page, IDS.repair).getByTestId('plan-net-flow-after-amount')
+    await expect(amount).toBeVisible()
+    await expect(amount).toHaveText('₱-6,000.00')
+    await expect(amount).toHaveClass(/amount-negative/)
+    await expect(planItem(page, IDS.repair).getByTestId('plan-from-saving')).toHaveClass(/text-warn/)
+    await expect(planItem(page, IDS.repair).getByTestId('plan-from-saving')).not.toHaveClass(/text-danger/)
+  })
+
+  test('AC3: a positive net flow after the purchase is not red, and nothing out of saving is muted', async ({ page }) => {
+    await open(page, PLAN_TWO_URGENT)
+    await expect(planItem(page, IDS.repair).getByTestId('plan-net-flow-after-amount')).toBeVisible()
+    await expect(planItem(page, IDS.repair).getByTestId('plan-net-flow-after-amount')).not.toHaveClass(/amount-negative/)
+    await expect(planItem(page, IDS.boiler).getByTestId('plan-from-saving')).toHaveClass(/text-muted/)
+  })
+
+  test('AC4: shortfall, status and no-date notes are warnings, and a paid-from-savings note is plain', async ({ page }) => {
+    await open(page, PLAN_SHORT)
+    await expect(panel(page).getByTestId('flow-shortfall')).toHaveClass(/text-warn/)
+    await expect(panel(page).getByTestId('flow-shortfall')).not.toHaveClass(/text-danger/)
+    await expect(planItem(page, IDS.desk).getByTestId('plan-note')).toHaveClass(/text-warn/)
+    await expect(planItem(page, IDS.desk).getByTestId('plan-note')).not.toHaveClass(/text-danger/)
+  })
+
+  test('AC4: a paid-from-savings note is muted, not a warning', async ({ page }) => {
+    await open(page, PLAN_OK)
+    await expect(planItem(page, IDS.vault).getByTestId('plan-note')).toHaveClass(/text-muted/)
+  })
+
+  test('AC2: a status with no figures is a warning, not red', async ({ page }) => {
+    await open(page, PLAN_NOT_ESTIMATED)
+    await expect(panel(page).getByTestId('flow-status')).toHaveClass(/text-warn/)
+    await expect(panel(page).getByTestId('flow-status')).not.toHaveClass(/text-danger/)
+  })
+
   test('AC3: Wants follows Urgent needs, in the API order, and holds no critical item', async ({ page }) => {
     await open(page, PLAN_OK)
     const urgent = panel(page).getByTestId('plan-urgent')

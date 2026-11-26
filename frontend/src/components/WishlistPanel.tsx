@@ -767,7 +767,7 @@ function PlanWhen({ item, defaultCurrency }: { item: WishlistPlanItem; defaultCu
       <p className="text-sm font-semibold text-ink" data-testid="plan-cost">{formatCurrency(item.estimated_cost, currency)}</p>
       {date
         ? <p className="text-xs text-muted" data-testid="plan-date">~{longDate(date)} · {item.cumulative_months} mo</p>
-        : <p className="text-xs text-warn break-words" data-testid="plan-note">{note ?? 'No date yet'}</p>}
+        : <p className={`text-xs break-words ${item.projection_status === 'paid_from_savings' ? 'text-muted' : 'text-warn'}`} data-testid="plan-note">{note ?? 'No date yet'}</p>}
     </div>
   )
 }
@@ -783,15 +783,15 @@ function UrgentRow({ item, row, defaultCurrency }: { item: WishlistPlanItem; row
         <PlanWhen item={item} defaultCurrency={defaultCurrency} />
       </div>
       {(item.net_flow_after != null || item.from_saving != null) && (
-        <div className="border-t border-line pt-3 space-y-1 text-sm text-warn">
+        <div className="border-t border-line pt-3 space-y-1 text-sm text-body">
           {item.net_flow_after != null && (
             <p data-testid="plan-net-flow-after">
-              Net flow if you bought it this month: {formatCurrency(item.net_flow_after, currency)}
+              Net flow if you bought it this month: <span className={item.net_flow_after < 0 ? 'amount-negative' : undefined} data-testid="plan-net-flow-after-amount">{formatCurrency(item.net_flow_after, currency)}</span>
               {before != null && ` instead of ${formatCurrency(before, currency)}`}
             </p>
           )}
           {item.from_saving != null && (
-            <p data-testid="plan-from-saving">
+            <p className={item.from_saving > 0 ? 'text-warn' : 'text-muted'} data-testid="plan-from-saving">
               {item.from_saving > 0 ? `About ${formatCurrency(item.from_saving, currency)} of it comes out of saving` : 'None of it comes out of saving'}
             </p>
           )}
