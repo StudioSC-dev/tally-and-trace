@@ -36,11 +36,22 @@ function moved<T>(items: readonly T[], from: number, to: number): T[] {
 /** Why no pace shows, by the free-flow rows' status: the caller-wide statuses `not_estimated` and `incomplete` (STU-788). */
 const NOT_ESTIMATED_NOTE = 'Monthly pace shows once you have one full month of history.'
 const INCOMPLETE_NOTE = 'Money in more than one currency is involved, so this cannot be estimated yet.'
+const unreservedNote = (currency: string): string =>
+  `A goal needs saving in ${currency}, but there is no ${currency} income to reserve it from, so this cannot be estimated yet.`
 
-/** The note for the whole section, or null when the rows hold figures. Both statuses are set for every row at once. */
+/**
+ * The note for the whole section, or null when the rows hold figures. Both statuses are set for every row at once.
+ * `incomplete` has more than one cause (STU-788): money or goals in two currencies, or a top-up in a currency with no
+ * income, which marks the goal `unreserved`. With a single currency row and an unreserved goal the second is the only
+ * cause the response states, so the note says that rather than naming a second currency.
+ */
 function noteFor(flow: WishlistFreeFlow | undefined): string | null {
   if (!flow) return null
-  if (flow.rows.some((row) => row.status === 'incomplete')) return INCOMPLETE_NOTE
+  if (flow.rows.some((row) => row.status === 'incomplete')) {
+    const only = flow.rows.length === 1 ? flow.rows[0] : undefined
+    if (only && flow.goals.some((goal) => goal.unreserved)) return unreservedNote(only.currency)
+    return INCOMPLETE_NOTE
+  }
   if (flow.rows.some((row) => row.status === 'not_estimated')) return NOT_ESTIMATED_NOTE
   return null
 }

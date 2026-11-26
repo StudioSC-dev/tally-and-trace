@@ -9,6 +9,7 @@ import {
   CROSS_CURRENCY,
   GOAL_IDS,
   NOT_ESTIMATED,
+  PHP_ONLY_UNRESERVED,
   SHORT_BY_4000,
   SHORT_BY_4000_CAR_UP,
   SHORT_BY_500,
@@ -43,6 +44,7 @@ const ALL = [EMERGENCY, JAPAN, LAPTOP, GIFTS, CAR]
 
 const FLOW_PATH = '/wishlist/free-flow'
 const INCOMPLETE_NOTE = 'Money in more than one currency is involved, so this cannot be estimated yet.'
+const NO_INCOME_NOTE = 'A goal needs saving in PHP, but there is no PHP income to reserve it from, so this cannot be estimated yet.'
 const NO_HISTORY_NOTE = 'Monthly pace shows once you have one full month of history.'
 
 /** Opens the Savings tab with `routes` answering after the household's own, and waits for the section to settle. */
@@ -145,6 +147,15 @@ test.describe('goal pace and underfunded flag (STU-790)', () => {
     await expect(flags(page)).toHaveCount(0)
     await expect(page.getByTestId('ranked-goal')).toHaveCount(ALL.length)
     await shot(page, 'cross-currency')
+  })
+
+  test('AC4: a single-currency caller with an unreserved goal is told about the missing income, not a second currency', async ({ page }) => {
+    await open(page, flowRoute(PHP_ONLY_UNRESERVED))
+    await expect(page.getByTestId('ranked-goals-flow-note')).toHaveText(NO_INCOME_NOTE)
+    await expect(page.getByTestId('ranked-goals-flow-note')).not.toContainText('more than one currency')
+    await expect(row(page, EMERGENCY).getByTestId('ranked-goal-unreserved')).toHaveText('Unreserved')
+    await expect(page.getByTestId('ranked-goal-pace')).toHaveCount(0)
+    await expect(flags(page)).toHaveCount(0)
   })
 
   test('AC4: a user with no full month of history sees no pace or flag, and the note', async ({ page }) => {

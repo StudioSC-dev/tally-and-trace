@@ -181,3 +181,19 @@ export const NOT_ESTIMATED: WishlistFreeFlow = {
   ],
   limitations: [],
 }
+
+/**
+ * A caller whose only currency is pesos, with a goal that needs a top-up but no peso income to place it from: the Emergency
+ * fund is unreserved and every row is `incomplete`, though no second currency is involved.
+ */
+export const PHP_ONLY_UNRESERVED: WishlistFreeFlow = {
+  rows: [row('PHP', { status: 'incomplete', income: 0, net_flow: null, goal_top_up: null, reserved: null, free_flow: null, shortfall: null })],
+  goals: [
+    goal(GOAL_IDS.emergency, 1, 'PHP', { ...NO_FIGURES, unreserved: true }),
+    goal(GOAL_IDS.japan, 2, 'PHP', NO_FIGURES),
+    goal(GOAL_IDS.laptop, 3, 'PHP', NO_FIGURES),
+    goal(GOAL_IDS.gifts, 4, 'PHP', NO_FIGURES),
+    goal(GOAL_IDS.car, 5, 'PHP', NO_FIGURES),
+  ],
+  limitations: [],
+}
