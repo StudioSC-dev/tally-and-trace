@@ -366,6 +366,72 @@ def build_realistic(client, db, today: date, tag: str = "perf") -> Realistic:
         entries=entries, transaction_count=len(rows), build_seconds=time.perf_counter() - t0)
 
 
+def add_wishlist_and_goals(db, world: Realistic) -> None:
+    """Give the owner a populated wishlist and ranked savings goals (STU-789), on top of
+    the two years of rows the build made (free flow reads the last 12 full months).
+
+    Eight unpurchased items (every priority, one paid from a savings account, one card
+    installment, one in a currency with no row) and four goals, one per goal mode, so
+    the snapshot's next-up list and the plan run the free-flow service in full.
+    ``remove_wishlist_and_goals`` takes them away again.
+    """
+    from decimal import Decimal
+
+    from app.models.allocation import Allocation, AllocationType
+    from app.models.category import Category
+    from app.models.user import CurrencyType
+    from app.models.wishlist_item import WishlistItem, WishlistPaymentPlan, WishlistPriority
+
+    owner, acc, today = world.callers["owner"].id, world.accounts, world.today
+    category = db.query(Category.id).filter(Category.user_id == owner).order_by(
+        Category.id).first()[0]
+    due = datetime(today.year + 1, today.month, 1)
+    goals = [
+        dict(account_id=acc["savings0"], target_amount=Decimal("400000"), target_date=due,
+             configuration={"goal_mode": "target_balance"}),
+        dict(account_id=acc["savings1"], monthly_target=Decimal("5000"),
+             configuration={"goal_mode": "multi_account",
+                            "account_ids": [acc["savings0"], acc["savings1"]]}),
+        dict(target_amount=Decimal("60000"), monthly_target=Decimal("3000"),
+             configuration={"goal_mode": "transaction_total", "savings_category_id": category}),
+    ]
+    for rank, fields in enumerate(goals, start=1):
+        db.add(Allocation(user_id=owner, name=f"Goal {rank}",
+                          allocation_type=AllocationType.SAVINGS, rank=rank, is_active=True,
+                          currency=CurrencyType.PHP, **fields))
+    db.add(Allocation(user_id=owner, name="Goal 4", allocation_type=AllocationType.GOAL,
+                      rank=len(goals) + 1, is_active=True, currency=CurrencyType.PHP,
+                      target_amount=Decimal("90000"), current_amount=Decimal("10000"),
+                      target_date=due))
+    items = [
+        ("Roof repair", 80_000, WishlistPriority.CRITICAL, {}),
+        ("Dentist", 15_000, WishlistPriority.CRITICAL, {}),
+        ("Laptop", 70_000, WishlistPriority.HIGH, {}),
+        ("Phone", 36_000, WishlistPriority.HIGH,
+         {"account_id": acc["card_a"], "payment_plan": WishlistPaymentPlan.INSTALLMENT,
+          "installment_months": 12}),
+        ("Sofa", 45_000, WishlistPriority.MEDIUM, {"account_id": acc["bank0"]}),
+        ("Holiday", 120_000, WishlistPriority.MEDIUM, {"account_id": acc["savings1"]}),
+        ("Camera", 900, WishlistPriority.LOW, {"currency": CurrencyType.EUR}),
+        ("Lamp", 2_500, WishlistPriority.LOW, {}),
+    ]
+    for name, cost, priority, extra in items:
+        db.add(WishlistItem(user_id=owner, name=name, estimated_cost=cost, priority=priority,
+                            **{"currency": CurrencyType.PHP, **extra}))
+    db.commit()
+
+
+def remove_wishlist_and_goals(db, world: Realistic) -> None:
+    from app.models.allocation import Allocation
+    from app.models.wishlist_item import WishlistItem
+
+    owner = world.callers["owner"].id
+    db.rollback()
+    for model in (WishlistItem, Allocation):
+        db.query(model).filter(model.user_id == owner).delete(synchronize_session=False)
+    db.commit()
+
+
 # --- the pytest fixture ---------------------------------------------------------------------
 
 def pin_clock(monkeypatch, when: datetime) -> None:

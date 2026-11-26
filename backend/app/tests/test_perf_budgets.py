@@ -317,6 +317,50 @@ def test_owner_cpu_is_not_a_catastrophe(measured, endpoint):
                           f"{CPU_BASELINE_MS[endpoint]} ms (limit {limit:.0f} ms)")
 
 
+# --- STU-789 (AC15): the snapshot with a populated wishlist and goals -------------------------
+
+# The measured figures for the populated fixture, set by owner ruling on 2026-11-26.
+WISHLIST_SNAPSHOT_BUDGET = BUDGETS[("owner", "snapshot")]._replace(statements=67, bytes=111_935)
+
+
+@needs_db
+def test_snapshot_with_a_wishlist_and_goals_within_its_ceilings(
+        measured, realistic, sw_client, sw_db):
+    """The owner's snapshot with eight wishlist items and four ranked goals on top of the
+    realistic rows (two years, so free flow reads a full 12 months) stays within its own
+    ceilings (``WISHLIST_SNAPSHOT_BUDGET``: the owner's snapshot ceilings, with statements
+    and bytes at this fixture's measured figures), and still builds one context and runs
+    the projection once. The owner's snapshot ceilings themselves are unchanged.
+    ``measured`` runs first, so the plain budgets are measured without the wishlist."""
+    from app.tests.fixtures.realistic import add_wishlist_and_goals, remove_wishlist_and_goals
+
+    headers = realistic.callers["owner"].headers
+    add_wishlist_and_goals(sw_db, realistic)
+    try:
+        got = perf.measure(sw_client, headers, "/dashboard/snapshot", runs=5)
+        next_up = sw_client.get(f"{API}/dashboard/snapshot", headers=headers).json()[
+            "wishlist_next_up"]
+        flow = sw_client.get(f"{API}/wishlist/free-flow", headers=headers).json()
+    finally:
+        remove_wishlist_and_goals(sw_db, realistic)
+    # The fixture really ran free flow: a full year, the goals, and a status per item.
+    (php,) = [r for r in flow["rows"] if r["currency"] == "PHP"]
+    assert php["sample_months"] == 12
+    assert len(flow["goals"]) == 4
+    assert len(next_up) == 3 and all(i["projection_status"] for i in next_up)
+    print(f"\nSTU-789 owner snapshot with wishlist and goals: {got}; PHP row {php['status']}; "
+          f"next-up {[i['projection_status'] for i in next_up]}")
+
+    once = {f: getattr(got, f) for f in ("contexts", "access_maps", "collect_events")}
+    assert once == {"contexts": 1, "access_maps": 1, "collect_events": 1}, once
+    limit = max(CPU_FACTOR * CPU_BASELINE_MS["snapshot"], CPU_FLOOR_MS)
+    assert got.cpu_ms <= limit, (got.cpu_ms, limit)
+    ceiling = WISHLIST_SNAPSHOT_BUDGET
+    over = {f: (getattr(got, f), getattr(ceiling, f)) for f in Budget._fields
+            if getattr(got, f) > getattr(ceiling, f)}
+    assert not over, f"owner snapshot with a wishlist over its ceiling (measured, ceiling): {over}"
+
+
 # --- the awkward cases and the access relationships the budgets depend on --------------------
 # The ceilings are upper bounds, so a fixture that quietly lost one of these would still
 # pass them. These fail instead.

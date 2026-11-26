@@ -100,10 +100,14 @@ def test_unmarking_keeps_the_entry_and_says_so(sw_client, sw_db, sw):
     _put(client, a, item, expect=409, installment_months=6)
     _put(client, a, item, expect=409, payment_plan="full")
     _put(client, a, item, installment_months=3, account_id=sw["a_card"])
-    # The outlook counts it once: out of the running installments, nothing more checked.
+    # The outlook counts it once: out of the running installments, nothing more held
+    # on the card. Free flow is read from posted rows, which hold no installment yet,
+    # so the disposable check compares its monthly amount (STU-789, AC10): the
+    # "already counts in your plan" shortcut is gone.
     outlook = _get(client, a, f"/wishlist/{item}/outlook")
     assert outlook["months"][0]["existing_installments"] == 0.0
-    assert outlook["disposable_check"]["amount"] == 0.0
+    assert outlook["disposable_check"]["amount"] == 3_333.33
+    assert outlook["disposable_check"]["reason"] != "This item's installment already counts in your plan"
     assert outlook["credit_check"]["amount"] == 0.0
 
 

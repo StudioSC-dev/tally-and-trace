@@ -3,7 +3,7 @@ import type {
   CardStatements, CashflowResponse, CashflowTimeline, DisposableResponse, LimitedCardStatements, TransactionSummary,
   UpcomingResponse,
 } from '../index'
-import type { DashboardSnapshot } from '../index'
+import type { DashboardSnapshot, WishlistOutlook, WishlistPlan, WishlistReadiness } from '../index'
 import { isLimitedEvent } from '../index'
 
 // A real GET /dashboard/snapshot body (a sharee of a joint account, from a local
@@ -94,6 +94,13 @@ const snapshot = {
       id: 5, name: 'Camera', cost: 900, priority: 'low', affordable_by: null,
       note: "No projected income or expenses in EUR, so this can't be judged yet.",
     },
+    // STU-789: the projection status and note, as routers/dashboard.py builds them now.
+    {
+      id: 6, name: 'Bike', cost: 5000, priority: 'medium', affordable_by: null,
+      note: 'Paid from a savings account, so it is not estimated',
+      projection_status: 'paid_from_savings',
+      projection_note: 'Paid from a savings account, so it is not estimated',
+    },
   ],
   available_cash: 7000.0,
   account_closings: [
@@ -170,6 +177,16 @@ describe('DashboardSnapshot', () => {
     expect(estimated?.original_currency).toBe('USD')
     expect(unconverted?.amount).toBeNull()
     expect(typed.fx.unconverted_count).toBe(1)
+  })
+
+  it('keeps every wishlist next-up field, with the STU-789 fields optional', () => {
+    const typed: DashboardSnapshot = snapshot
+    const [dated, , paid] = typed.wishlist_next_up
+    expect(Object.keys(paid ?? {}).sort()).toEqual([
+      'affordable_by', 'cost', 'id', 'name', 'note', 'priority', 'projection_note', 'projection_status',
+    ])
+    expect(dated?.projection_status).toBeUndefined()
+    expect(paid?.affordable_by).toBeNull()
   })
 
   it('narrows upcoming items into limited and full events', () => {
@@ -254,5 +271,76 @@ describe('per-currency projection responses', () => {
     expect(summary.household_private[0]?.category_breakdown.Utilities).toBe(55.55)
     expect(full.statements[0]?.incomplete).toBe(true)
     expect(Object.keys(limited.statements[0] ?? {})).toContain('incomplete')
+  })
+})
+
+// The wishlist responses (routers/wishlist.py) before and after STU-789. A body in the old
+// shape still type-checks (every new field is optional); a body in the new shape keeps every
+// old field with its type.
+describe('wishlist responses on free flow (STU-789)', () => {
+  it('types the plan in the old and the new shape', () => {
+    const old = {
+      monthly_disposable: 12000.0, savings_rate: 6000.0, installments: [],
+      items: [{ item_id: 1, name: 'Sofa', estimated_cost: 15000, estimated_purchase_date: '2027-01-25', cumulative_months: 2, note: null }],
+    } satisfies WishlistPlan
+    const now = {
+      monthly_disposable: 12000.0, savings_rate: 15000.0, installments: [],
+      items: [
+        {
+          item_id: 2, name: 'Roof', estimated_cost: 50000, estimated_purchase_date: '2027-02-24', cumulative_months: 3,
+          note: null, currency: 'PHP', priority: 'critical', basis: 'net_flow', projection_status: 'dated',
+          projection_note: null, queue_note: null, net_flow_after: -30000.0, from_saving: 5000.0,
+        },
+        {
+          item_id: 3, name: 'Lamp', estimated_cost: 15000, estimated_purchase_date: null, cumulative_months: 101,
+          note: 'Waits behind an urgent need that has no date yet', currency: 'PHP', priority: 'high', basis: 'free_flow',
+          projection_status: 'dated', projection_note: null, queue_note: 'Waits behind an urgent need that has no date yet',
+          net_flow_after: null, from_saving: null,
+        },
+      ],
+      net_flow: [{
+        currency: 'PHP', status: 'ok', sample_months: 1, income: 30000.0, spending: 10000.0, debt_paid: 0.0,
+        net_flow: 20000.0, saved: 5000.0, goal_top_up: 0.0, reserved: 5000.0, free_flow: 15000.0, shortfall: 0.0,
+      }],
+    } satisfies WishlistPlan
+    expect(Object.keys(old).sort()).toEqual(['installments', 'items', 'monthly_disposable', 'savings_rate'])
+    expect(Object.keys(now).sort()).toEqual(['installments', 'items', 'monthly_disposable', 'net_flow', 'savings_rate'])
+    expect(now.items[1]?.estimated_purchase_date).toBeNull()
+  })
+
+  it('types readiness with the legacy fields kept and estimated_date added', () => {
+    const old = {
+      item_id: 1, name: 'Sofa', estimated_cost: 15000, currency: 'PHP', monthly_disposable: 12000.0,
+      savings_rate: 6000.0, months_needed: 3, estimated_purchase_date: '2027-02-24', affordable_now: false, note: null,
+    } satisfies WishlistReadiness
+    const now = {
+      ...old, savings_rate: 0.0, months_needed: 9999, estimated_purchase_date: '2054-04-12',
+      note: 'Paid from a savings account, so it is not estimated', estimated_date: null, basis: 'free_flow',
+      projection_status: 'paid_from_savings', projection_note: 'Paid from a savings account, so it is not estimated',
+    } satisfies WishlistReadiness
+    expect(typeof now.months_needed).toBe('number')
+    expect(typeof now.estimated_purchase_date).toBe('string')
+    expect(now.estimated_date).toBeNull()
+  })
+
+  it('types the outlook disposable check with basis and available', () => {
+    const base = {
+      item_id: 1, currency: 'PHP', payment_plan: 'full' as const, estimated_cost: 15000,
+      months: [{ month: '2026-12', existing_installments: 0.0, this_item: 15000.0, total: 15000.0 }],
+      note: null, credit_check: null,
+    }
+    const old = {
+      ...base,
+      disposable_check: { status: 'fits', currency: 'PHP', amount: 15000, monthly_disposable: 20000, after_purchase: 5000, reason: null },
+    } satisfies WishlistOutlook
+    const now = {
+      ...base, projection_status: 'dated', projection_note: null,
+      disposable_check: {
+        status: 'fits', currency: 'PHP', amount: 15000, monthly_disposable: null, after_purchase: 0, reason: null,
+        basis: 'free_flow', available: 15000,
+      },
+    } satisfies WishlistOutlook
+    expect(old.disposable_check.status).toBe('fits')
+    expect(now.disposable_check.available).toBe(15000)
   })
 })
