@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
-import type { Allocation, DashboardSnapshot, WishlistItem, WishlistOutlook, WishlistPlan } from '@tally-trace/shared'
+import type { Allocation, DashboardSnapshot, WishlistFreeFlow, WishlistItem, WishlistOutlook, WishlistPlan } from '@tally-trace/shared'
 import {
   createAccountRoute,
   createdAccount,
@@ -9,7 +9,9 @@ import {
   householdViewRoutes,
   mockHousehold,
   newAccountInput,
+  rankedGoals,
 } from './support/fixtures/household'
+import { COVERED, SHORT_BY_500 } from './support/fixtures/freeFlow'
 import {
   IDS,
   INCOMPLETE_NOTE,
@@ -46,6 +48,7 @@ import { shot } from './support/shot'
 
 test.use({ locale: 'en-US' })
 
+const SHORTFALL_TEXT = 'Your savings goals are short by ₱3,000.00 a month, so nothing is free for the wishlist.'
 const PLAN_PATH = '/wishlist/plan'
 const SNAPSHOT_PATH = '/dashboard/snapshot'
 const outlookPath = (id: number): string => `/wishlist/${id}/outlook`
@@ -154,7 +157,7 @@ test.describe('wishlist plan and priority wording (STU-791)', () => {
     await open(page, PLAN_SHORT)
     const shortfall = panel(page).getByTestId('flow-shortfall')
     await expect(shortfall).toBeVisible()
-    await expect(shortfall).toHaveText('Your savings goals are short by ₱3,000.00 a month, so nothing is free for the wishlist.')
+    await expect(shortfall).toHaveText(SHORTFALL_TEXT)
     await expect(figureValue(page, 'free')).toHaveText('₱0.00')
     await shot(page, 'shortfall')
   })
@@ -376,68 +379,57 @@ test.describe('wishlist plan and priority wording (STU-791)', () => {
     await shot(page, 'purchase-note')
   })
 
-  test('AC10: an allocation write reads the plan and the outlook again, and the new figures show', async ({ page }) => {
+  test('AC10: an allocation write refreshes the plan, outlook, free flow and dashboard reads', async ({ page }) => {
     const created: Allocation = { ...household.allocations[0], id: 99, name: 'Standing desk' }
-    const api = await open(
-      page,
-      sequenceRoute<WishlistPlan>('GET', PLAN_PATH, [{ body: PLAN_OK }, { body: PLAN_AFTER_WRITE }]),
-      [apiRoute<Allocation>('POST', '/allocations/', created, 201)],
-      [sequenceRoute<WishlistOutlook>('GET', outlookPath(IDS.desk), [{ body: outlookOf(ITEM_BY_ID(IDS.desk), 18000) }, { body: overBudget() }])],
-    )
-    await expect(figureValue(page, 'net')).toHaveText('₱60,000.00')
-    await expect(cardOf(page, IDS.desk).getByTestId('budget-badge')).toHaveText('Fits your monthly budget')
-    expect(api.count('GET', PLAN_PATH)).toBe(1)
-    expect(api.count('GET', outlookPath(IDS.desk))).toBe(1)
-
+    const api = await openEverything(page, [apiRoute<Allocation>('POST', '/allocations/', created, 201)])
     await cardOf(page, IDS.desk).getByRole('button', { name: 'Savings target' }).click()
     const form = page.locator('form').filter({ has: page.getByRole('button', { name: /^Create / }) })
     await form.locator('[data-field="account_id"]').selectOption({ label: 'Metrobank Savings' })
     await form.getByRole('button', { name: 'Create savings tracker' }).click()
     await expect.poll(() => api.count('POST', '/allocations/')).toBe(1)
+    // Every read the page can have cached is read a second time, and its new answer is on screen. The web has no
+    // readiness query, so there is nothing to refresh or assert for readiness.
+    await goTo(page, 'nav-home', 'Dashboard')
+    await expect.poll(() => api.count('GET', SNAPSHOT_PATH)).toBe(2)
+    await expect(leadingFigure(page)).toHaveText('₱73,210.50')
+    await visitWishlistTab(page)
     await expect.poll(() => api.count('GET', PLAN_PATH)).toBe(2)
-    await expect.poll(() => api.count('GET', outlookPath(IDS.desk))).toBe(2)
     await expect(figureValue(page, 'net')).toHaveText('₱64,000.00')
-    await expect(planItem(page, IDS.repair).getByTestId('plan-net-flow-after')).toContainText('₱40,000.00')
+    await expect.poll(() => api.count('GET', outlookPath(IDS.desk))).toBe(2)
     await expect(cardOf(page, IDS.desk).getByTestId('budget-badge')).toHaveText('Over your monthly budget')
-    await shot(page, 'after-allocation-write')
+    await page.getByRole('button', { name: 'Savings', exact: true }).click()
+    await expect.poll(() => api.count('GET', FLOW_PATH)).toBe(2)
+    await expect(page.getByTestId('ranked-goal-underfunded')).toBeVisible()
+    await expect(page.getByTestId('ranked-goal-underfunded')).toHaveText('Underfunded by ₱500.00 a month')
   })
 
-  test('AC10: an account write reads the plan and the outlook again when the wishlist is opened next', async ({ page }) => {
+  test('AC10: an account write refreshes the plan, outlook, free flow and dashboard reads', async ({ page }) => {
     const created = createdAccount(household, 90, { ...newAccountInput, tag_ids: [...newAccountInput.tag_ids] })
-    const api = await open(
-      page,
-      sequenceRoute<WishlistPlan>('GET', PLAN_PATH, [{ body: PLAN_OK }, { body: PLAN_AFTER_WRITE }]),
-      [createAccountRoute([created])],
-      [sequenceRoute<WishlistOutlook>('GET', outlookPath(IDS.desk), [{ body: outlookOf(ITEM_BY_ID(IDS.desk), 18000) }, { body: overBudget() }])],
-    )
-    await expect(figureValue(page, 'net')).toHaveText('₱60,000.00')
-    expect(api.count('GET', PLAN_PATH)).toBe(1)
-
+    const api = await openEverything(page, [createAccountRoute([created])])
     await goTo(page, 'nav-accounts', 'Accounts')
     await page.getByRole('button', { name: 'Add account', exact: true }).click()
     const dialog = page.locator('.fixed.inset-0.overflow-y-auto').last()
     await dialog.getByPlaceholder('Enter account name').fill(newAccountInput.name)
     await dialog.getByRole('button', { name: 'Create account', exact: true }).click()
     await expect.poll(() => api.count('POST', '/accounts/')).toBe(1)
-
-    await goTo(page, 'nav-allocations', 'Allocations')
-    await page.getByRole('button', { name: 'Wishlist', exact: true }).click()
+    // Every read the page can have cached is read a second time, and its new answer is on screen. The web has no
+    // readiness query, so there is nothing to refresh or assert for readiness.
+    await goTo(page, 'nav-home', 'Dashboard')
+    await expect.poll(() => api.count('GET', SNAPSHOT_PATH)).toBe(2)
+    await expect(leadingFigure(page)).toHaveText('₱73,210.50')
+    await visitWishlistTab(page)
     await expect.poll(() => api.count('GET', PLAN_PATH)).toBe(2)
-    await expect.poll(() => api.count('GET', outlookPath(IDS.desk))).toBe(2)
     await expect(figureValue(page, 'net')).toHaveText('₱64,000.00')
+    await expect.poll(() => api.count('GET', outlookPath(IDS.desk))).toBe(2)
     await expect(cardOf(page, IDS.desk).getByTestId('budget-badge')).toHaveText('Over your monthly budget')
+    await page.getByRole('button', { name: 'Savings', exact: true }).click()
+    await expect.poll(() => api.count('GET', FLOW_PATH)).toBe(2)
+    await expect(page.getByTestId('ranked-goal-underfunded')).toBeVisible()
+    await expect(page.getByTestId('ranked-goal-underfunded')).toHaveText('Underfunded by ₱500.00 a month')
   })
 
-  test('AC10: a transaction write reads the plan and the outlook again when the wishlist is opened next', async ({ page }) => {
-    const api = await open(
-      page,
-      sequenceRoute<WishlistPlan>('GET', PLAN_PATH, [{ body: PLAN_OK }, { body: PLAN_AFTER_WRITE }]),
-      householdCreateRoutes(household).filter((r) => r.path === '/transactions/'),
-      [sequenceRoute<WishlistOutlook>('GET', outlookPath(IDS.desk), [{ body: outlookOf(ITEM_BY_ID(IDS.desk), 18000) }, { body: overBudget() }])],
-    )
-    await expect(figureValue(page, 'net')).toHaveText('₱60,000.00')
-    expect(api.count('GET', PLAN_PATH)).toBe(1)
-
+  test('AC10: a transaction write refreshes the plan, outlook, free flow and dashboard reads', async ({ page }) => {
+    const api = await openEverything(page, householdCreateRoutes(household).filter((r) => r.path === '/transactions/'))
     await goTo(page, 'nav-transactions', 'Transactions')
     await page.getByRole('button', { name: 'Add transaction', exact: true }).first().click()
     const dialog = page.locator('.fixed.inset-0.overflow-y-auto').last()
@@ -447,54 +439,198 @@ test.describe('wishlist plan and priority wording (STU-791)', () => {
     await dialog.locator('input[type="number"][placeholder="0.00"]').first().fill('120')
     await dialog.getByRole('button', { name: 'Add transaction', exact: true }).click()
     await expect.poll(() => api.count('POST', '/transactions/')).toBe(1)
-
-    await goTo(page, 'nav-allocations', 'Allocations')
-    await page.getByRole('button', { name: 'Wishlist', exact: true }).click()
-    await expect.poll(() => api.count('GET', PLAN_PATH)).toBe(2)
-    await expect.poll(() => api.count('GET', outlookPath(IDS.desk))).toBe(2)
-    await expect(figureValue(page, 'net')).toHaveText('₱64,000.00')
-    await expect(cardOf(page, IDS.desk).getByTestId('budget-badge')).toHaveText('Over your monthly budget')
-  })
-
-  test('AC10: marking an item purchased refreshes the dashboard next-up list when the dashboard is opened next', async ({ page }) => {
-    const api = await openDashboardFirst(page)
-    await goTo(page, 'nav-allocations', 'Allocations')
-    await page.getByRole('button', { name: 'Wishlist', exact: true }).click()
-    await expect(cardOf(page, IDS.desk)).toBeVisible()
-    await cardOf(page, IDS.desk).getByRole('button', { name: 'Mark as purchased', exact: true }).click()
-    await expect.poll(() => api.bodies('PUT', `/wishlist/${IDS.desk}`).length).toBe(1)
+    // Every read the page can have cached is read a second time, and its new answer is on screen. The web has no
+    // readiness query, so there is nothing to refresh or assert for readiness.
     await goTo(page, 'nav-home', 'Dashboard')
     await expect.poll(() => api.count('GET', SNAPSHOT_PATH)).toBe(2)
-    // The dashboard draws no next-up list yet, so what its second answer shows is the page settling on it.
-    await expect(page.getByRole('heading', { name: 'Financial snapshot' })).toBeVisible()
+    await expect(leadingFigure(page)).toHaveText('₱73,210.50')
+    await visitWishlistTab(page)
+    await expect.poll(() => api.count('GET', PLAN_PATH)).toBe(2)
+    await expect(figureValue(page, 'net')).toHaveText('₱64,000.00')
+    await expect.poll(() => api.count('GET', outlookPath(IDS.desk))).toBe(2)
+    await expect(cardOf(page, IDS.desk).getByTestId('budget-badge')).toHaveText('Over your monthly budget')
+    await page.getByRole('button', { name: 'Savings', exact: true }).click()
+    await expect.poll(() => api.count('GET', FLOW_PATH)).toBe(2)
+    await expect(page.getByTestId('ranked-goal-underfunded')).toBeVisible()
+    await expect(page.getByTestId('ranked-goal-underfunded')).toHaveText('Underfunded by ₱500.00 a month')
   })
 
-  test('AC10: deleting an item, a write that touches nothing but the wishlist, refreshes the dashboard next-up list', async ({ page }) => {
-    const api = await openDashboardFirst(page, [apiRoute<Record<string, never>>('DELETE', `/wishlist/${IDS.desk}`, {})])
-    await goTo(page, 'nav-allocations', 'Allocations')
-    await page.getByRole('button', { name: 'Wishlist', exact: true }).click()
+  test('AC10: reordering savings goals refreshes the plan, outlook, free flow and dashboard reads', async ({ page }) => {
+    const goals = rankedGoals(household.allocations)
+    const order = goals.map((g) => g.id)
+    const last = goals[goals.length - 1]
+    ;[order[order.length - 2], order[order.length - 1]] = [order[order.length - 1], order[order.length - 2]]
+    const api = await openEverything(page, [
+      apiRoute<{ items: Allocation[] }>('PUT', '/allocations/ranked', { items: order.flatMap((id, index) => goals.filter((g) => g.id === id).map((g) => ({ ...g, rank: index + 1 }))) }),
+    ])
+    await page.getByRole('button', { name: 'Savings', exact: true }).click()
+    await page.getByRole('button', { name: `Move ${last.name} up`, exact: true }).click()
+    await expect.poll(() => api.bodies('PUT', '/allocations/ranked').length).toBe(1)
+    // Every read the page can have cached is read a second time, and its new answer is on screen. The web has no
+    // readiness query, so there is nothing to refresh or assert for readiness.
+    await goTo(page, 'nav-home', 'Dashboard')
+    await expect.poll(() => api.count('GET', SNAPSHOT_PATH)).toBe(2)
+    await expect(leadingFigure(page)).toHaveText('₱73,210.50')
+    await visitWishlistTab(page)
+    await expect.poll(() => api.count('GET', PLAN_PATH)).toBe(2)
+    await expect(figureValue(page, 'net')).toHaveText('₱64,000.00')
+    await expect.poll(() => api.count('GET', outlookPath(IDS.desk))).toBe(2)
+    await expect(cardOf(page, IDS.desk).getByTestId('budget-badge')).toHaveText('Over your monthly budget')
+    await page.getByRole('button', { name: 'Savings', exact: true }).click()
+    await expect.poll(() => api.count('GET', FLOW_PATH)).toBe(2)
+    await expect(page.getByTestId('ranked-goal-underfunded')).toBeVisible()
+    await expect(page.getByTestId('ranked-goal-underfunded')).toHaveText('Underfunded by ₱500.00 a month')
+  })
+
+  test('AC10: adding a wishlist item refreshes the plan, outlook, free flow and dashboard reads', async ({ page }) => {
+    const api = await openEverything(page)
+    await page.getByRole('button', { name: 'Add item', exact: true }).click()
+    const form = page.locator('form').filter({ has: page.getByPlaceholder('What are you saving for?') })
+    await form.getByPlaceholder('What are you saving for?').fill('Added item')
+    await form.getByPlaceholder('0.00').first().fill('9000')
+    await form.getByRole('button', { name: 'Add', exact: true }).click()
+    await expect.poll(() => api.bodies('POST', '/wishlist/').length).toBe(1)
+    // Every read the page can have cached is read a second time, and its new answer is on screen. The web has no
+    // readiness query, so there is nothing to refresh or assert for readiness.
+    await goTo(page, 'nav-home', 'Dashboard')
+    await expect.poll(() => api.count('GET', SNAPSHOT_PATH)).toBe(2)
+    await expect(leadingFigure(page)).toHaveText('₱73,210.50')
+    await visitWishlistTab(page)
+    await expect.poll(() => api.count('GET', PLAN_PATH)).toBe(2)
+    await expect(figureValue(page, 'net')).toHaveText('₱64,000.00')
+    await expect.poll(() => api.count('GET', outlookPath(IDS.desk))).toBe(2)
+    await expect(cardOf(page, IDS.desk).getByTestId('budget-badge')).toHaveText('Over your monthly budget')
+    await page.getByRole('button', { name: 'Savings', exact: true }).click()
+    await expect.poll(() => api.count('GET', FLOW_PATH)).toBe(2)
+    await expect(page.getByTestId('ranked-goal-underfunded')).toBeVisible()
+    await expect(page.getByTestId('ranked-goal-underfunded')).toHaveText('Underfunded by ₱500.00 a month')
+  })
+
+  test('AC10: deleting a wishlist item refreshes the plan, outlook, free flow and dashboard reads', async ({ page }) => {
+    const api = await openEverything(page, [apiRoute<Record<string, never>>('DELETE', `/wishlist/${IDS.desk}`, {})])
     await cardOf(page, IDS.desk).getByRole('button', { name: 'Delete', exact: true }).click()
     await page.getByRole('button', { name: 'Delete item', exact: true }).click()
     await expect.poll(() => api.count('DELETE', `/wishlist/${IDS.desk}`)).toBe(1)
+    // Every read the page can have cached is read a second time, and its new answer is on screen. The web has no
+    // readiness query, so there is nothing to refresh or assert for readiness.
     await goTo(page, 'nav-home', 'Dashboard')
     await expect.poll(() => api.count('GET', SNAPSHOT_PATH)).toBe(2)
-    await expect(page.getByRole('heading', { name: 'Financial snapshot' })).toBeVisible()
+    await expect(leadingFigure(page)).toHaveText('₱73,210.50')
+    await visitWishlistTab(page)
+    await expect.poll(() => api.count('GET', PLAN_PATH)).toBe(2)
+    await expect(figureValue(page, 'net')).toHaveText('₱64,000.00')
+    await expect.poll(() => api.count('GET', outlookPath(IDS.desk))).toBe(2)
+    await expect(cardOf(page, IDS.desk).getByTestId('budget-badge')).toHaveText('Over your monthly budget')
+    await page.getByRole('button', { name: 'Savings', exact: true }).click()
+    await expect.poll(() => api.count('GET', FLOW_PATH)).toBe(2)
+    await expect(page.getByTestId('ranked-goal-underfunded')).toBeVisible()
+    await expect(page.getByTestId('ranked-goal-underfunded')).toHaveText('Underfunded by ₱500.00 a month')
   })
 
-  test('AC10: editing an item refreshes the dashboard next-up list when the dashboard is opened next', async ({ page }) => {
-    const api = await openDashboardFirst(page)
-    await goTo(page, 'nav-allocations', 'Allocations')
-    await page.getByRole('button', { name: 'Wishlist', exact: true }).click()
+  test('AC10: editing a wishlist item refreshes the plan, outlook, free flow and dashboard reads', async ({ page }) => {
+    const api = await openEverything(page)
     await cardOf(page, IDS.desk).getByRole('button', { name: 'Edit', exact: true }).click()
     const form = page.locator('form').filter({ has: page.getByPlaceholder('What are you saving for?') })
     await form.getByPlaceholder('What are you saving for?').fill('Standing desk, oak')
     await form.getByRole('button', { name: 'Update', exact: true }).click()
     await expect.poll(() => api.bodies('PUT', `/wishlist/${IDS.desk}`).length).toBe(1)
+    // Every read the page can have cached is read a second time, and its new answer is on screen. The web has no
+    // readiness query, so there is nothing to refresh or assert for readiness.
     await goTo(page, 'nav-home', 'Dashboard')
     await expect.poll(() => api.count('GET', SNAPSHOT_PATH)).toBe(2)
-    await expect(page.getByRole('heading', { name: 'Financial snapshot' })).toBeVisible()
+    await expect(leadingFigure(page)).toHaveText('₱73,210.50')
+    await visitWishlistTab(page)
+    await expect.poll(() => api.count('GET', PLAN_PATH)).toBe(2)
+    await expect(figureValue(page, 'net')).toHaveText('₱64,000.00')
+    await expect.poll(() => api.count('GET', outlookPath(IDS.desk))).toBe(2)
+    await expect(cardOf(page, IDS.desk).getByTestId('budget-badge')).toHaveText('Over your monthly budget')
+    await page.getByRole('button', { name: 'Savings', exact: true }).click()
+    await expect.poll(() => api.count('GET', FLOW_PATH)).toBe(2)
+    await expect(page.getByTestId('ranked-goal-underfunded')).toBeVisible()
+    await expect(page.getByTestId('ranked-goal-underfunded')).toHaveText('Underfunded by ₱500.00 a month')
+  })
+
+  test('AC10: marking a wishlist item purchased refreshes the plan, outlook, free flow and dashboard reads', async ({ page }) => {
+    const api = await openEverything(page)
+    await cardOf(page, IDS.desk).getByRole('button', { name: 'Mark as purchased', exact: true }).click()
+    await expect.poll(() => api.bodies('PUT', `/wishlist/${IDS.desk}`).length).toBe(1)
+    // Every read the page can have cached is read a second time, and its new answer is on screen. The web has no
+    // readiness query, so there is nothing to refresh or assert for readiness.
+    await goTo(page, 'nav-home', 'Dashboard')
+    await expect.poll(() => api.count('GET', SNAPSHOT_PATH)).toBe(2)
+    await expect(leadingFigure(page)).toHaveText('₱73,210.50')
+    await visitWishlistTab(page)
+    await expect.poll(() => api.count('GET', PLAN_PATH)).toBe(2)
+    await expect(figureValue(page, 'net')).toHaveText('₱64,000.00')
+    await expect.poll(() => api.count('GET', outlookPath(IDS.desk))).toBe(2)
+    await expect(cardOf(page, IDS.desk).getByTestId('budget-badge')).toHaveText('Over your monthly budget')
+    await page.getByRole('button', { name: 'Savings', exact: true }).click()
+    await expect.poll(() => api.count('GET', FLOW_PATH)).toBe(2)
+    await expect(page.getByTestId('ranked-goal-underfunded')).toBeVisible()
+    await expect(page.getByTestId('ranked-goal-underfunded')).toHaveText('Underfunded by ₱500.00 a month')
   })
 })
+
+const FLOW_PATH = '/wishlist/free-flow'
+
+/** The household's snapshot with its available cash and next-up list changed: what the API answers after a write. */
+function snapshotWith(availableCash: number, nextUp: DashboardSnapshot['wishlist_next_up']): DashboardSnapshot {
+  const { snapshot } = household
+  return {
+    ...snapshot,
+    wishlist_next_up: nextUp,
+    balances: { ...snapshot.balances, by_currency: snapshot.balances.by_currency.map((r) => (r.currency === 'PHP' ? { ...r, available_cash: availableCash } : r)) },
+  }
+}
+const NEXT_UP_BEFORE: DashboardSnapshot['wishlist_next_up'] = [
+  { id: IDS.desk, name: 'Standing desk', cost: 27000, priority: 'high', affordable_by: '2026-06-25', note: null, projection_status: 'dated', projection_note: null },
+]
+const NEXT_UP_AFTER: DashboardSnapshot['wishlist_next_up'] = [
+  { id: IDS.lens, name: 'Camera lens', cost: 45000, priority: 'medium', affordable_by: '2026-09-25', note: null, projection_status: 'dated', projection_note: null },
+]
+const SNAPSHOT_BEFORE = snapshotWith(48200, NEXT_UP_BEFORE)
+const SNAPSHOT_AFTER = snapshotWith(73210.5, NEXT_UP_AFTER)
+
+const leadingFigure = (page: Page): Locator => page.getByTestId('leading-figure-amount')
+
+/**
+ * Opens the dashboard, then the Savings tab, then the Wishlist tab, each by following a link so the store keeps what
+ * it holds. Every read the page can have cached is then cached with its first answer: the dashboard snapshot, the
+ * free flow and ranked goals, the plan and the desk's outlook. Each is registered to answer differently the second time.
+ */
+async function openEverything(page: Page, extra: ApiRoute[] = []): Promise<ApiMock> {
+  await mockHousehold(page, household)
+  const api = await addRoutes(page, [
+    ...householdViewRoutes(household),
+    ...wishlistRoutes(
+      sequenceRoute<WishlistPlan>('GET', PLAN_PATH, [{ body: PLAN_OK }, { body: PLAN_AFTER_WRITE }]),
+      ITEMS,
+      [sequenceRoute<WishlistOutlook>('GET', outlookPath(IDS.desk), [{ body: outlookOf(ITEM_BY_ID(IDS.desk), 18000) }, { body: overBudget() }])],
+    ),
+    sequenceRoute<DashboardSnapshot>('GET', SNAPSHOT_PATH, [{ body: SNAPSHOT_BEFORE }, { body: SNAPSHOT_AFTER }]),
+    sequenceRoute<WishlistFreeFlow>('GET', FLOW_PATH, [{ body: COVERED }, { body: SHORT_BY_500 }]),
+    ...extra,
+  ])
+  await page.goto('/')
+  await expect(leadingFigure(page)).toHaveText('₱48,200.00', { timeout: 15_000 })
+  await goTo(page, 'nav-allocations', 'Allocations')
+  await page.getByRole('button', { name: 'Savings', exact: true }).click()
+  await expect(page.getByTestId('ranked-goal-pace').first()).toBeVisible()
+  await page.getByRole('button', { name: 'Wishlist', exact: true }).click()
+  await expect(figureValue(page, 'net')).toHaveText('₱60,000.00')
+  await expect(cardOf(page, IDS.desk).getByTestId('budget-badge')).toHaveText('Fits your monthly budget')
+  await page.waitForLoadState('networkidle')
+  for (const path of [SNAPSHOT_PATH, PLAN_PATH, FLOW_PATH, outlookPath(IDS.desk)]) {
+    expect(api.count('GET', path), `${path} is read once before the write`).toBe(1)
+  }
+  return api
+}
+
+/** Back on the Wishlist tab by following links, so what the store holds is kept. */
+async function visitWishlistTab(page: Page): Promise<void> {
+  await goTo(page, 'nav-allocations', 'Allocations')
+  await page.getByRole('button', { name: 'Wishlist', exact: true }).click()
+}
 
 /** The desk's outlook after a write: its price no longer fits the month. */
 function overBudget(): WishlistOutlook {
@@ -507,21 +643,4 @@ function overBudget(): WishlistOutlook {
 async function goTo(page: Page, marker: string, title: string): Promise<void> {
   await page.locator(`[data-onboarding="${marker}"]:visible`).first().click()
   await expect(page.locator('main h1').first()).toHaveText(title)
-}
-
-/** Opens the dashboard first, with its snapshot answered twice and the wishlist's reads ready for a later visit. */
-async function openDashboardFirst(page: Page, extra: ApiRoute[] = []): Promise<ApiMock> {
-  await mockHousehold(page, household)
-  const next: DashboardSnapshot = { ...household.snapshot }
-  const api = await addRoutes(page, [
-    ...householdViewRoutes(household),
-    ...wishlistRoutes(planRoute(PLAN_OK)),
-    sequenceRoute<DashboardSnapshot>('GET', SNAPSHOT_PATH, [{ body: household.snapshot }, { body: next }]),
-    ...extra,
-  ])
-  await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'Financial snapshot' })).toBeVisible({ timeout: 15_000 })
-  await page.waitForLoadState('networkidle')
-  expect(api.count('GET', SNAPSHOT_PATH)).toBe(1)
-  return api
 }

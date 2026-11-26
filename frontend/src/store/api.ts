@@ -773,8 +773,8 @@ export const accountingApi = createApi({
     // The backend's projection in one call (available cash, payables, closings).
     getDashboardSnapshot: builder.query<DashboardSnapshot, { tag?: number } | void>({
       query: (params) => ({ url: 'dashboard/snapshot', params: params ?? {} }),
-      // `wishlist_next_up` dates the top three wishlist items, so a wishlist write refreshes it (STU-791).
-      providesTags: ['Account', 'BudgetEntry', 'Transaction', 'Allocation', 'Wishlist'],
+      // `wishlist_next_up` dates the top three wishlist items from free flow, so a wishlist write or a reorder refreshes it (STU-791).
+      providesTags: ['Account', 'BudgetEntry', 'Transaction', 'Allocation', 'Wishlist', 'FreeFlow'],
     }),
 
     // The Transactions page's Due card in one request (docs/dashboard-due.md): the snapshot's due
@@ -952,7 +952,7 @@ export const accountingApi = createApi({
     // Each goal's monthly pace and underfunded flag, and the notes. Allocation writes and reorders refresh it (STU-790).
     getWishlistFreeFlow: builder.query<WishlistFreeFlow, void>({
       query: () => 'wishlist/free-flow',
-      providesTags: ['Allocation', 'FreeFlow', 'Account', 'Transaction'],
+      providesTags: ['Allocation', 'FreeFlow', 'Account', 'Transaction', 'Wishlist'],
     }),
     // The outlook reads the recurring entries, the forecast and the card's credit, so those writes refresh it.
     getWishlistOutlook: builder.query<WishlistOutlook, number>({
