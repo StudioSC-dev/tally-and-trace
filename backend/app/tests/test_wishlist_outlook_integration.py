@@ -5,8 +5,10 @@ Owner A (default PHP): a PHP bank, a PHP card with a 50,000 limit closing on the
 running on the card: 3,000 a month for six months, from the close in the month
 after next month starts. So disposable income is 12,000 a month (the installment
 is already subtracted) and the card's available credit is 32,000 (its whole
-remaining 18,000 is held). Exchange rates: USD and PHP only (no EUR).
-Skips without a database.
+remaining 18,000 is held). Posted last month on the bank (``fixtures/posted_flow``):
+40,000 in and 28,000 out, so net flow and free flow are 12,000 a month too: the
+disposable check compares an item with that rate (STU-789). Exchange rates: USD
+and PHP only (no EUR). Skips without a database.
 """
 from datetime import date
 
@@ -14,6 +16,7 @@ import pytest
 
 from app.core.time import manila_today
 from app.tests.conftest import API, sw_db_reachable, sw_post, sw_share
+from app.tests.fixtures import posted_flow
 
 pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="no database available")
 
@@ -32,7 +35,7 @@ def _entry(client, who, name, amount, account_id, entry_type="expense", **extra)
 
 
 @pytest.fixture
-def ol(sw_client, sw_people):
+def ol(sw_client, sw_db, sw_people):
     client = sw_client
     a = sw_people("Olive", "Outlook")
     bank = sw_post(client, a, "/accounts/", {
@@ -45,6 +48,7 @@ def ol(sw_client, sw_people):
     existing = _entry(client, a, "Phone", 3_000, card, end_mode="after_occurrences",
                       max_occurrences=6,
                       next_occurrence=f"{_month(1).replace(day=6).isoformat()}T00:00:00Z")
+    posted_flow.flow(sw_db, a["id"], bank, income=40_000, spending=28_000)
     return {"a": a, "bank": bank, "card": card, "existing": existing}
 
 
@@ -89,13 +93,14 @@ def test_a_full_payment_shows_twelve_months(sw_client, ol):
 
 def test_disposable_compares_only_this_item(sw_client, ol):
     client, a = sw_client, ol["a"]
-    # 10,000 a month fits 12,000 disposable, though with the running 3,000
-    # installment the month totals 13,000: that 3,000 is already subtracted.
+    # 10,000 a month fits a 12,000 free flow, though with the running 3,000
+    # installment the month totals 13,000: the months are context only.
     fits = _outlook(client, a, _item(client, a, 120_000, payment_plan="installment",
                                      installment_months=12, account_id=ol["card"]))
     assert fits["disposable_check"] == {
         "status": "fits", "currency": "PHP", "amount": 10_000.0,
-        "monthly_disposable": 12_000.0, "after_purchase": 2_000.0, "reason": None}
+        "monthly_disposable": 12_000.0, "after_purchase": 2_000.0, "reason": None,
+        "basis": "free_flow", "available": 12_000.0}
     assert fits["months"][0]["total"] == 13_000.0
     over = _outlook(client, a, _item(client, a, 156_000, payment_plan="installment",
                                      installment_months=12, account_id=ol["card"]))
@@ -156,17 +161,18 @@ def test_a_missing_rate_is_unknown_with_a_reason(sw_client, ol):
     assert usd["months"][0]["existing_installments"] == round(3_000 / 58, 2)
 
 
-def test_no_income_is_unknown(sw_client, sw_people):
+def test_no_income_is_unknown(sw_client, sw_db, sw_people):
     client = sw_client
     b = sw_people("Nell", "NoIncome")
     bank = sw_post(client, b, "/accounts/", {
         "name": "Bank", "account_type": "checking", "balance": 1_000})["id"]
     _entry(client, b, "Rent", 500, bank)
+    posted_flow.flow(sw_db, b["id"], bank, spending=500)   # no income posted
     body = _outlook(client, b, _item(client, b, 100, account_id=bank))
     assert body["disposable_check"] == {
         "status": "unknown", "currency": "PHP", "amount": 100.0, "monthly_disposable": None,
-        "after_purchase": None,
-        "reason": "No projected income in PHP, so this can't be judged yet."}
+        "after_purchase": None, "basis": "free_flow", "available": None,
+        "reason": "No projected income or expenses in PHP, so this can't be judged yet."}
 
 
 def test_household_roles_and_ownership(sw_client, sw_db, sw):
@@ -202,9 +208,10 @@ def test_plan_lists_installments_apart_from_the_queue(sw_client, ol):
     r = client.get(f"{API}/wishlist/plan", headers=a["headers"])
     assert r.status_code == 200, r.text
     body = r.json()
-    # The save-up queue: 6,000 a month (half of 12,000), so 1 then 1 + 2 months.
+    # The save-up queue: the critical item at a 12,000 net flow, 1 month; the want
+    # behind it at a 12,000 free flow, 1 + 1 months.
     assert [(i["estimated_cost"], i["cumulative_months"]) for i in body["items"]] == [
-        (6_000.0, 1), (12_000.0, 3)]
+        (6_000.0, 1), (12_000.0, 2)]
     assert body["installments"] == [{
         "item_id": inst, "name": "Laptop", "estimated_cost": 10_000.0, "currency": "PHP",
         "account_id": ol["card"], "installment_months": 3, "monthly_amount": 3_333.33,

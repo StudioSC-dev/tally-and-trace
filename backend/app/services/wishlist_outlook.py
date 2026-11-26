@@ -13,11 +13,15 @@ at its own amount converted into the item's currency), this item (its monthly
 amount, the final payment in its last month; a full payment in the first month),
 and their total. The rows are context only: nothing below subtracts them.
 
-**Disposable check.** Monthly disposable income (``forecast.disposable_by_currency``,
-the item's currency) already subtracts every recurring expense, existing card
-installments included, so only this item is compared with it: its monthly amount
-(an installment) or its full price. ``after_purchase`` is disposable less this
-item. ``unknown`` when the currency has no disposable row or no income.
+**Disposable check** (STU-789). This item alone, its monthly amount (an
+installment, linked or not) or its full price, against its rate from free flow
+(``wishlist_projection``): ``available`` is the item's net flow (critical) or
+free flow (a want) in its currency, and ``basis`` says which. ``fits`` or ``over``
+when the item has a rate (its currency row is ``ok`` and it is not paid from
+savings), else ``unknown`` with the projection's note as ``reason``.
+``after_purchase`` is ``available`` less this item. ``monthly_disposable`` keeps
+the recurring-entry figure (``forecast.disposable_by_currency``, the item's
+currency, null with no row or no income), for compatibility only.
 
 **Credit check.** Card accounts only: the full price, converted into the card's
 currency, against the card's available credit now (``card_credit.credit_for_cards``);
@@ -26,10 +30,10 @@ no limit or the caller may not see its credit.
 
 A missing exchange rate gives ``unknown`` (or a null month figure) with a reason.
 Once marking the item purchased created its installment, that entry is already in
-the disposable figure, the card's hold and the forecast: it is left out of
-``existing_installments``, ``this_item`` is its own projected payments (on the
-statement closes, converted into the item's currency; null with no stored rate),
-and both checks compare nothing more (``already_counted``).
+the card's hold and the forecast: it is left out of ``existing_installments``,
+``this_item`` is its own projected payments (on the statement closes, converted
+into the item's currency; null with no stored rate), and the credit check
+compares nothing more (``already_counted``).
 """
 from datetime import date, datetime
 from decimal import Decimal
@@ -43,12 +47,12 @@ from app.services import card_credit
 from app.services import forecast as forecast_svc
 from app.services.installment_split import installment_split
 from app.services.recurring_kinds import is_card_installment
+from app.services.wishlist_projection import Projection
 
 OUTLOOK_MIN_MONTHS = 12
 _ZERO = Decimal("0")
 
 ALREADY_COUNTED = "This item's installment already counts in your plan"
-NO_INCOME = "No projected income in {currency}, so this can't be judged yet."
 NO_LIMIT = "This card has no credit limit set"
 NO_CREDIT_ACCESS = "Only the card's owner or an admin can see its available credit"
 NO_RATE = "No exchange rate from {base} to {quote} is stored yet"
@@ -126,21 +130,21 @@ def _installments_by_month(ctx: RequestContext, item: WishlistItem, start: date,
 
 
 def _disposable_check(item: WishlistItem, row: Optional[dict], amount: Decimal,
-                      no_row_note: str, already_counted: bool) -> dict:
+                      projection: Projection) -> dict:
     currency = _code(item.currency)
-    if already_counted:
-        amount = _ZERO
-    if row is None or row["monthly_income"] <= 0:
-        return {"status": "unknown", "currency": currency, "amount": _f(amount),
-                "reason": no_row_note if row is None else NO_INCOME.format(currency=currency)}
-    disposable = Decimal(str(row["monthly_disposable"]))
+    disposable = (Decimal(str(row["monthly_disposable"]))
+                  if row is not None and row["monthly_income"] > 0 else None)
+    out = {"currency": currency, "amount": _f(amount), "monthly_disposable": _f(disposable),
+           "basis": projection.basis}
+    if projection.rate is None:
+        return {**out, "status": "unknown", "reason": projection.note}
+    available = projection.rate
     return {
-        "status": "fits" if amount <= disposable else "over",
-        "currency": currency,
-        "amount": _f(amount),
-        "monthly_disposable": _f(disposable),
-        "after_purchase": _f(disposable - amount),
-        "reason": ALREADY_COUNTED if already_counted else None,
+        **out,
+        "status": "fits" if amount <= available else "over",
+        "available": _f(available),
+        "after_purchase": _f(available - amount),
+        "reason": None,
     }
 
 
@@ -166,10 +170,10 @@ def _credit_check(ctx: RequestContext, item: WishlistItem, account: Optional[Acc
 
 
 def outlook(ctx: RequestContext, item: WishlistItem, price: Decimal, row: Optional[dict],
-            no_row_note: str) -> dict:
+            projection: Projection) -> dict:
     """The outlook (module docstring). ``price`` is the item's price as money,
     ``row`` the disposable row of its currency (None when there is none) and
-    ``no_row_note`` what an item with no row says."""
+    ``projection`` the item's own (``wishlist_projection.project``)."""
     payments = this_item_payments(item, price)
     count = max(len(payments), OUTLOOK_MIN_MONTHS)
     start = _add_months(ctx.today, 1)
@@ -204,6 +208,8 @@ def outlook(ctx: RequestContext, item: WishlistItem, price: Decimal, row: Option
         "note": UNCONVERTED_INSTALLMENTS.format(currency=_code(item.currency))
         if unconverted else None,
         "disposable_check": _disposable_check(
-            item, row, payments[0] if installment else price, no_row_note, already_counted),
+            item, row, payments[0] if installment else price, projection),
         "credit_check": _credit_check(ctx, item, account, price, already_counted),
+        "projection_status": projection.status,
+        "projection_note": projection.note,
     }

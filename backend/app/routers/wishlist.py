@@ -1,6 +1,5 @@
-import math
 from dataclasses import asdict
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, time, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Dict, List, Optional
 
@@ -36,19 +35,12 @@ from app.schemas.budget_entry import BudgetEntryCreate
 from app.services import forecast as forecast_svc
 from app.services import free_flow
 from app.services import wishlist_outlook
+from app.services import wishlist_projection as projection_svc
 from app.services.installment_split import TOO_SMALL_MESSAGE, try_installment_split
 from app.services.fx import FxRates, convert
 from app.core.time import manila_day, utc_now
 
 router = APIRouter()
-
-SAVINGS_RATE_FACTOR = 0.5  # Assume 50% of disposable income goes to wishlist savings
-
-
-def no_projection_note(currency: str) -> str:
-    """What an item in a currency with no disposable row says (STU-304)."""
-    return f"No projected income or expenses in {currency}, so this can't be judged yet."
-
 
 def item_currency_row(ctx: RequestContext, item, rows: Optional[List[dict]] = None) -> Optional[dict]:
     """The ``by_currency`` disposable row of the item's own currency, or None
@@ -149,16 +141,94 @@ def create_wishlist_item(
     return item
 
 
+QUEUE_BEYOND_NOTE = "More than 5 years away behind earlier items"
+QUEUE_BEHIND_UNDATED_NOTE = "Waits behind an urgent need that has no date yet"
+_WANT_ORDER = {"high": 0, "medium": 1, "low": 2}
+
+
+def _queue(items: List[WishlistItem], projections: Dict[int, projection_svc.Projection],
+           costs: Dict[int, Decimal]) -> Dict[int, dict]:
+    """The plan's queue in one currency (STU-789, plan section 3): ``{item id:
+    {cumulative_months, date, queue_note}}`` for the queued items, those whose
+    currency row is ``ok`` and that are not paid from savings.
+
+    Critical items first by ``created_at``, each at ``ceil(cumulative critical
+    cost / net_flow)``; wants after them by priority then ``created_at``, each at
+    the critical block (the last critical item's count, 0 with none) plus
+    ``ceil(cumulative want cost / free_flow)``. A queued item with no rate (its
+    rate is 0) has no count, so 0. Only an item that is ``dated`` on its own and
+    whose count is at most 60 gets a date, and a want gets none while any queued
+    critical item in its currency has none."""
+    queued = [i for i in items if projections[i.id].row is not None]
+    if not queued:
+        return {}
+    row = projections[queued[0].id].row
+    critical = sorted((i for i in queued if projection_svc.is_critical(i)),
+                      key=lambda i: (i.created_at, i.id))
+    wants = sorted((i for i in queued if not projection_svc.is_critical(i)),
+                   key=lambda i: (_WANT_ORDER[getattr(i.priority, "value", i.priority)],
+                                  i.created_at, i.id))
+    out: Dict[int, dict] = {}
+    total, block, critical_undated = Decimal("0"), 0, False
+    for item in critical:
+        total += costs[item.id]
+        months = projection_svc.months_for(total, row.net_flow) if row.net_flow > 0 else 0
+        own_dated = projections[item.id].dated
+        dated = own_dated and months <= projection_svc.HORIZON_MONTHS
+        critical_undated = critical_undated or not dated
+        block = months
+        out[item.id] = {
+            "cumulative_months": months,
+            "date": projection_svc.due_date(months) if dated else None,
+            "queue_note": QUEUE_BEYOND_NOTE if own_dated and not dated else None,
+        }
+    total = Decimal("0")
+    for item in wants:
+        total += costs[item.id]
+        months = (block + projection_svc.months_for(total, row.free_flow)
+                  if row.free_flow > 0 else 0)
+        own_dated = projections[item.id].dated
+        dated = own_dated and not critical_undated and months <= projection_svc.HORIZON_MONTHS
+        if critical_undated:
+            note = QUEUE_BEHIND_UNDATED_NOTE
+        elif own_dated and not dated:
+            note = QUEUE_BEYOND_NOTE
+        else:
+            note = None
+        out[item.id] = {
+            "cumulative_months": months,
+            "date": projection_svc.due_date(months) if dated else None,
+            "queue_note": note,
+        }
+    return out
+
+
+def _critical_figures(item, p: projection_svc.Projection, cost: Decimal) -> dict:
+    """``net_flow_after`` and ``from_saving`` for a critical item whose currency
+    row is ``ok`` (and that is not paid from savings), on its own, dated or not;
+    empty otherwise. The figures of several critical items do not add up."""
+    if not projection_svc.is_critical(item) or p.row is None:
+        return {}
+    net, free = p.row.net_flow, p.row.free_flow
+    from_saving = None
+    if net > 0:
+        from_saving = max(cost - projection_svc.months_for(cost, net) * free, Decimal("0"))
+    return {"net_flow_after": float(net - cost),
+            "from_saving": None if from_saving is None else float(from_saving)}
+
+
 @router.get("/plan", response_model=WishlistPlanResponse)
 def get_wishlist_plan(
     ctx: RequestContext = Depends(request_context),
 ):
     """
-    Purchase timeline for all unpurchased items ordered by priority. Each item
-    is timed against the disposable income of its own currency (STU-649), and
-    queues only behind earlier items in that same currency. An item whose
-    currency has no disposable row gets no date and says so in ``note``.
-    The top-level figures stay the default-currency ones.
+    Purchase timeline for all unpurchased items (STU-789, plan section 3). Each
+    item carries its own ``projection_status`` from free flow
+    (``services/wishlist_projection.py``); the queue in its currency then sets
+    its date (``_queue``). An item that is not queued has no date and
+    ``cumulative_months`` 0. ``monthly_disposable`` is the recurring-entry figure,
+    kept for compatibility; ``savings_rate`` is the default currency's free flow
+    when that row is ``ok``, else 0; ``net_flow`` lists the free-flow rows.
 
     An installment item (STU-779) is paid monthly on its card, not saved up
     for: it is left out of the queue (and of every later item's wait) and
@@ -167,7 +237,6 @@ def get_wishlist_plan(
     db, current_user = ctx.db, ctx.user
     disposable_data = forecast_svc.get_disposable_income(db, current_user.id)
     monthly_disposable = disposable_data["monthly_disposable"]
-    savings_rate = max(monthly_disposable * SAVINGS_RATE_FACTOR, 0.01)
 
     from sqlalchemy import case
     priority_order = case(
@@ -202,46 +271,46 @@ def get_wishlist_plan(
             final_amount=payments[-1],
         ))
 
-    now = utc_now()
-    cumulative_by_currency: Dict[str, int] = {}
-    currency_rows = forecast_svc.disposable_by_currency(ctx)["by_currency"] if queued else []
-    plan: List[WishlistPlanItem] = []
-
+    flow = free_flow.compute(ctx)
+    costs = {item.id: price_of(item.estimated_cost) for item in queued}
+    projections = {item.id: projection_svc.project(ctx, item, costs[item.id])
+                   for item in queued}
+    by_currency: Dict[str, List[WishlistItem]] = {}
     for item in queued:
-        code = getattr(item.currency, "value", item.currency)
-        row = item_currency_row(ctx, item, currency_rows)
-        if row is None:
-            plan.append(
-                WishlistPlanItem(
-                    item_id=item.id,
-                    name=item.name,
-                    estimated_cost=item.estimated_cost,
-                    estimated_purchase_date=None,
-                    cumulative_months=cumulative_by_currency.get(code, 0),
-                    note=no_projection_note(code),
-                )
-            )
-            continue
-        item_rate = max(row["monthly_disposable"] * SAVINGS_RATE_FACTOR, 0.01)
-        months_needed = math.ceil(float(item.estimated_cost) / item_rate)
-        cumulative_months = cumulative_by_currency.get(code, 0) + months_needed
-        cumulative_by_currency[code] = cumulative_months
-        purchase_date = now + timedelta(days=cumulative_months * 30)
-        plan.append(
-            WishlistPlanItem(
-                item_id=item.id,
-                name=item.name,
-                estimated_cost=item.estimated_cost,
-                estimated_purchase_date=purchase_date.date().isoformat(),
-                cumulative_months=cumulative_months,
-            )
-        )
+        by_currency.setdefault(getattr(item.currency, "value", item.currency), []).append(item)
+    queue: Dict[int, dict] = {}
+    for group in by_currency.values():
+        queue.update(_queue(group, projections, costs))
 
+    plan: List[WishlistPlanItem] = []
+    for item in queued:
+        p = projections[item.id]
+        q = queue.get(item.id, {"cumulative_months": 0, "date": None, "queue_note": None})
+        plan.append(WishlistPlanItem(
+            item_id=item.id,
+            name=item.name,
+            estimated_cost=item.estimated_cost,
+            estimated_purchase_date=q["date"],
+            cumulative_months=q["cumulative_months"],
+            note=None if q["date"] is not None else (p.note or q["queue_note"]),
+            currency=getattr(item.currency, "value", item.currency),
+            priority=item.priority,
+            basis=p.basis,
+            projection_status=p.status,
+            projection_note=p.note,
+            queue_note=q["queue_note"],
+            **_critical_figures(item, p, costs[item.id]),
+        ))
+
+    default = flow.row(ctx.default_currency)
+    savings_rate = (float(default.free_flow)
+                    if default is not None and default.status == free_flow.OK else 0.0)
     return WishlistPlanResponse(
         monthly_disposable=monthly_disposable,
         savings_rate=savings_rate,
         items=plan,
         installments=installments,
+        net_flow=[asdict(r) for r in flow.rows],
     )
 
 
@@ -443,12 +512,12 @@ def get_outlook(
 ):
     """How the purchase sits with the caller's money (STU-779): the monthly and
     final payments, the months ahead with the card installments already
-    running, and whether this item fits monthly disposable income and, on a
-    card, its available credit (``services/wishlist_outlook.py``)."""
+    running, and whether this item fits its rate from free flow (STU-789) and,
+    on a card, its available credit (``services/wishlist_outlook.py``)."""
     item = get_owned_or_404(ctx.db, WishlistItem, item_id, ctx.user, "Wishlist item not found")
-    code = getattr(item.currency, "value", item.currency)
-    return wishlist_outlook.outlook(ctx, item, price_of(item.estimated_cost),
-                                    item_currency_row(ctx, item), no_projection_note(code))
+    price = price_of(item.estimated_cost)
+    return wishlist_outlook.outlook(ctx, item, price, item_currency_row(ctx, item),
+                                    projection_svc.project(ctx, item, price))
 
 
 @router.get("/{item_id}/readiness", response_model=WishlistReadiness)
@@ -457,30 +526,23 @@ def get_readiness(
     ctx: RequestContext = Depends(request_context),
 ):
     """
-    Advisory: Given disposable income in the item's own currency, calculate when
-    the user can afford this item. An item in a currency with no disposable row
-    is not affordable, and says so in ``note``.
+    Advisory (STU-789): when the caller can afford this item, from its rate
+    (``services/wishlist_projection.py``). ``savings_rate`` is the rate, 0 when
+    there is none; ``affordable_now`` is ``cost <= rate`` when there is one.
+    ``estimated_date`` is set only for a ``dated`` item. The legacy
+    ``months_needed`` and ``estimated_purchase_date`` follow from the rate for a
+    ``dated`` item and otherwise keep the zero-rate values (9999 and the date that
+    follows); they are deprecated. ``monthly_disposable`` is the recurring-entry
+    figure, kept for compatibility.
     """
     item = get_owned_or_404(ctx.db, WishlistItem, item_id, ctx.user, "Wishlist item not found")
     currency = getattr(item.currency, "value", item.currency)
-
     row = item_currency_row(ctx, item)
-    note = None
-    if row is None:
-        monthly_disposable = 0.0
-        note = no_projection_note(currency)
-    else:
-        monthly_disposable = row["monthly_disposable"]
-    savings_rate = monthly_disposable * SAVINGS_RATE_FACTOR
+    monthly_disposable = 0.0 if row is None else row["monthly_disposable"]
 
-    if savings_rate <= 0:
-        months_needed = 9999
-        affordable_now = False
-    else:
-        months_needed = math.ceil(float(item.estimated_cost) / savings_rate)
-        affordable_now = float(item.estimated_cost) <= monthly_disposable
-
-    estimated_date = (utc_now() + timedelta(days=months_needed * 30)).date().isoformat()
+    cost = price_of(item.estimated_cost)
+    p = projection_svc.project(ctx, item, cost)
+    months_needed = p.months if p.dated else 9999
 
     return WishlistReadiness(
         item_id=item.id,
@@ -488,9 +550,13 @@ def get_readiness(
         estimated_cost=item.estimated_cost,
         currency=currency,
         monthly_disposable=monthly_disposable,
-        savings_rate=savings_rate,
+        savings_rate=float(p.rate) if p.rate is not None else 0.0,
         months_needed=months_needed,
-        estimated_purchase_date=estimated_date,
-        affordable_now=affordable_now,
-        note=note,
+        estimated_purchase_date=projection_svc.due_date(months_needed),
+        affordable_now=p.rate is not None and cost <= p.rate,
+        note=p.note,
+        estimated_date=p.date,
+        basis=p.basis,
+        projection_status=p.status,
+        projection_note=p.note,
     )
