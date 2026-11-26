@@ -332,6 +332,19 @@ test.describe('ranked savings goals (STU-787)', () => {
     await shot(page, 'refused')
   })
 
+  test('AC4: a reorder answer that arrives after a new goal was added does not take the goal away', async ({ page }) => {
+    const fake = await open(page)
+    const pending = fake.holdNextReorder('commit')
+    await downOf(page, EMERGENCY.name).click()
+    await expect.poll(() => fake.puts.length).toBe(1)
+    await createGoal(page, 'Wedding fund')
+    await expect(rows(page)).toHaveCount(START.length + 1)
+    pending.release()
+    await expect(downOf(page, EMERGENCY.name)).not.toHaveAttribute('aria-disabled', 'true')
+    await expect(rows(page)).toHaveCount(START.length + 1)
+    expect(await namesOf(page)).toEqual([JAPAN.name, EMERGENCY.name, LAPTOP.name, GIFTS.name, CAR.name, 'Wedding fund'])
+  })
+
   test('AC5: a new goal appears at the bottom of the section', async ({ page }) => {
     await open(page)
     await createGoal(page, 'Wedding fund')
