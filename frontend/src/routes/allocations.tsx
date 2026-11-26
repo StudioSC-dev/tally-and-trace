@@ -69,6 +69,7 @@ import { TagFilter } from '../components/TagFilter'
 import { MarkPaidDialog } from '../components/MarkPaidDialog'
 import { InstallmentReviewDialog } from '../components/InstallmentReviewDialog'
 import { useToast } from '../hooks/useToast'
+import { RankedGoals } from '../components/RankedGoals'
 import { apiErrorMessage } from '../utils/apiError'
 import { SkeletonRows } from '../components/Loading'
 import { Segment } from '../components/SegmentedControl'
@@ -563,7 +564,9 @@ export function AllocationsPage() {
       // reset begins before it lands.
       const isCurrent = beginAllocationsRequest(reset)
       const nextOffset = reset ? 0 : offsetRef.current
+      // The ranked goals have their own section; the paged list holds the rest, so its pages and totals add up.
       const params = {
+        ranked: false,
         limit,
         offset: nextOffset,
       }
@@ -1190,6 +1193,8 @@ export function AllocationsPage() {
       if (actionAllocation?.id === allocation.id) {
         setActionAllocation(updatedAllocation)
       }
+      // A goal pausing or resuming moves between the ranked section and this list (STU-787).
+      await loadAllocations(true)
     } catch (error) {
       console.error('Error updating allocation status:', error)
     }
@@ -1899,6 +1904,8 @@ export function AllocationsPage() {
           'No budget envelopes yet. Create one to keep monthly spending in check.',
           'Create a budget envelope'
         )}
+
+      {activeTab === 'savings' && <RankedGoals renderCard={renderAllocationCard} />}
 
       {activeTab === 'savings' &&
         renderAllocationSection(

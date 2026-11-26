@@ -855,11 +855,12 @@ const EXPECTED: Record<string, Expected & { phone?: Partial<Expected> }> = {
     },
   },
   'allocations, savings': {
-    headings: ['Allocations', 'Savings & investment targets'],
+    // STU-787: the ranked section's heading comes first.
+    headings: ['Allocations', 'Savings goals', 'Savings & investment targets'],
     titles: [],
-    buttons: ['Toggle theme', 'MS Mara Santos', 'Add allocation', 'Recurring', 'Budgets', 'Savings', 'Wishlist'],
+    buttons: ['Toggle theme', 'MS Mara Santos', 'Add allocation', 'Recurring', 'Budgets', 'Savings', 'Wishlist', 'Move Emergency fund up', 'Move Emergency fund down', 'Move Japan trip, October up', 'Move Japan trip, October down', 'Move New laptop up', 'Move New laptop down', 'Move Christmas gifts up', 'Move Christmas gifts down', 'Move Car maintenance up', 'Move Car maintenance down', 'Create a savings target'],
     phone: {
-      buttons: ['Toggle theme', 'MS', 'Add allocation', 'Recurring', 'Budgets', 'Savings', 'Wishlist'],
+      buttons: ['Toggle theme', 'MS', 'Add allocation', 'Recurring', 'Budgets', 'Savings', 'Wishlist', 'Move Emergency fund up', 'Move Emergency fund down', 'Move Japan trip, October up', 'Move Japan trip, October down', 'Move New laptop up', 'Move New laptop down', 'Move Christmas gifts up', 'Move Christmas gifts down', 'Move Car maintenance up', 'Move Car maintenance down', 'Create a savings target'],
     },
   },
   'allocations, wishlist': {
@@ -1115,7 +1116,7 @@ const EXPECTED: Record<string, Expected & { phone?: Partial<Expected> }> = {
   },
   'allocations, savings, empty': {
     // STU-692: the empty list's own next step, a primary button under its sentence.
-    headings: ['Allocations', 'Savings & investment targets'],
+    headings: ['Allocations', 'Savings goals', 'Savings & investment targets'],
     titles: [],
     buttons: ['Toggle theme', 'MS Mara Santos', 'Add allocation', 'Recurring', 'Budgets', 'Savings', 'Wishlist', 'Create a savings target'],
     phone: {

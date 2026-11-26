@@ -11,6 +11,7 @@ import { ChartPieSliceIcon } from '@phosphor-icons/react/dist/csr/ChartPieSlice'
 import { CheckIcon } from '@phosphor-icons/react/dist/csr/Check'
 import { CheckCircleIcon } from '@phosphor-icons/react/dist/csr/CheckCircle'
 import { CircleIcon } from '@phosphor-icons/react/dist/csr/Circle'
+import { DotsSixVerticalIcon } from '@phosphor-icons/react/dist/csr/DotsSixVertical'
 import { EnvelopeIcon } from '@phosphor-icons/react/dist/csr/Envelope'
 import { EyeIcon } from '@phosphor-icons/react/dist/csr/Eye'
 import { EyeSlashIcon } from '@phosphor-icons/react/dist/csr/EyeSlash'
@@ -50,6 +51,7 @@ const ICONS = {
   check: CheckIcon,
   close: XIcon,
   delete: TrashIcon,
+  'drag-handle': DotsSixVerticalIcon,
   edit: PencilSimpleIcon,
   error: XCircleIcon,
   'external-link': ArrowUpRightIcon,

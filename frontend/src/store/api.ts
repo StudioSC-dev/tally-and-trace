@@ -221,6 +221,11 @@ const HOUSEHOLD_SHARE_CHANGED = [
 ] as const
 
 /** One queued save as sent: `url` relative to the API root, `idempotencyKey` on creates. */
+/** `GET` and `PUT /allocations/ranked`: the caller's ranked goals in rank order. */
+export interface RankedAllocations {
+  items: Allocation[]
+}
+
 /** An allocation edit: a date sent as null is cleared, one left out is kept. */
 export type AllocationUpdate = Omit<Partial<Allocation>, 'target_date' | 'period_start' | 'period_end'> & {
   target_date?: string | null
@@ -395,9 +400,34 @@ export const accountingApi = createApi({
     }),
 
     // ── Allocations ───────────────────────────────────────────────────────────
-    getAllocations: builder.query<PaginatedResponse<Allocation>, { account_id?: number; allocation_type?: string; is_active?: boolean; limit?: number; offset?: number }>({
+    getAllocations: builder.query<PaginatedResponse<Allocation>, { account_id?: number; allocation_type?: string; is_active?: boolean; ranked?: boolean; limit?: number; offset?: number }>({
       query: (params) => ({ url: 'allocations/', params }),
       providesTags: ['Allocation'],
+    }),
+    // The caller's ranked goals, top first, never paged (STU-786).
+    getRankedAllocations: builder.query<RankedAllocations, void>({
+      query: () => 'allocations/ranked',
+      providesTags: ['Allocation'],
+    }),
+    // Sends the complete order. The list on screen changes at once; a refused order puts the old one back, and
+    // the caller shows the reason. Nothing is invalidated: the reply is the new order, written into the list.
+    reorderRankedAllocations: builder.mutation<RankedAllocations, number[]>({
+      query: (ids) => ({ url: 'allocations/ranked', method: 'PUT', body: { ids } }),
+      async onQueryStarted(ids, { dispatch, queryFulfilled }) {
+        const patch = dispatch(
+          accountingApi.util.updateQueryData('getRankedAllocations', undefined, (draft) => {
+            const byId = new Map(draft.items.map((item) => [item.id, item]))
+            const ordered = ids.map((id) => byId.get(id)).filter((item): item is Allocation => item !== undefined)
+            if (ordered.length === draft.items.length) draft.items = ordered
+          }),
+        )
+        try {
+          const { data } = await queryFulfilled
+          dispatch(accountingApi.util.updateQueryData('getRankedAllocations', undefined, () => data))
+        } catch {
+          patch.undo()
+        }
+      },
     }),
     getAllocation: builder.query<Allocation, number>({
       query: (id) => `allocations/${id}`,
@@ -958,6 +988,8 @@ export const {
   // Allocation hooks
   useGetAllocationsQuery,
   useLazyGetAllocationsQuery,
+  useGetRankedAllocationsQuery,
+  useReorderRankedAllocationsMutation,
   useGetAllocationQuery,
   useCreateAllocationMutation,
   useUpdateAllocationMutation,
