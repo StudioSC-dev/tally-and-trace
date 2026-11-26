@@ -110,4 +110,8 @@ def test_allocation_update_lock_order_unchanged(sw_client, sw_people, monkeypatc
                    headers=me["headers"])
 
     assert r.status_code == 200, r.text
-    assert calls == ["lock_owner_budgets", "_lock_allocations"]
+    # The route takes the owner lock before its first read and the helper takes it again
+    # (re-entrant); the row lock comes after every owner lock (STU-786).
+    assert calls[0] == "lock_owner_budgets"
+    assert calls.count("_lock_allocations") == 1
+    assert calls.index("_lock_allocations") == len(calls) - 1
