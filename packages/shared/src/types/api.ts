@@ -847,30 +847,65 @@ export interface WishlistItem {
   notice?: string | null
 }
 
+/**
+ * A wishlist item's projection status, first match: `paid_from_savings` (paid from one of
+ * your own savings accounts), `not_estimated` (no full month of history), `incomplete`
+ * (money or goals in more than one currency), `no_projection` (no income in its currency),
+ * `no_room` (its rate is 0), `beyond_horizon` (more than 60 months away), `dated`.
+ * Only a `dated` item has a date.
+ */
+export type WishlistProjectionStatus =
+  | 'paid_from_savings' | 'not_estimated' | 'incomplete' | 'no_projection' | 'no_room'
+  | 'beyond_horizon' | 'dated'
+
+/** The free-flow figure an item's rate is: a critical item's net flow, a want's free flow. */
+export type WishlistRateBasis = 'net_flow' | 'free_flow'
+
 export interface WishlistReadiness {
   item_id: number
   name: string
   estimated_cost: number
   /** The item's currency: `monthly_disposable` is that currency's disposable row. */
   currency: string
+  /** The recurring-entry figure, kept for compatibility. */
   monthly_disposable: number
+  /** The item's rate (its `basis` figure), 0 when it has none. */
   savings_rate: number
+  /** @deprecated Read `estimated_date`: 9999 unless the item is `dated`. */
   months_needed: number
+  /** @deprecated Read `estimated_date`: a placeholder date unless the item is `dated`. */
   estimated_purchase_date: string
   affordable_now: boolean
-  /** Set when the projection has no row for the item's currency (never affordable). */
+  /** Why there is no date, when there isn't one (the projection note). */
   note: string | null
+  /** Set only when `projection_status` is `dated`. */
+  estimated_date?: string | null
+  basis?: WishlistRateBasis | null
+  projection_status?: WishlistProjectionStatus | null
+  projection_note?: string | null
 }
 
 export interface WishlistPlanItem {
   item_id: number
   name: string
   estimated_cost: number
-  /** Null when the item's currency has no projected income or expenses. */
+  /** Null unless the item is `dated` and the queue in its currency dates it. */
   estimated_purchase_date: string | null
+  /** Months behind every earlier queued item in its currency; 0 outside the queue or with no rate. */
   cumulative_months: number
   /** Why there is no date, when there isn't one. */
   note?: string | null
+  currency?: string | null
+  priority?: WishlistItemPriority | null
+  basis?: WishlistRateBasis | null
+  /** The item on its own; the queue may still leave a `dated` item without a date (`queue_note`). */
+  projection_status?: WishlistProjectionStatus | null
+  projection_note?: string | null
+  queue_note?: string | null
+  /** A critical item whose currency row is `ok` only: the month's net flow if bought now. */
+  net_flow_after?: number | null
+  /** A critical item only: about how much of it comes out of saving; null with no net flow. */
+  from_saving?: number | null
 }
 
 /** An installment item, listed apart from the save-up queue: it is paid monthly on its card. */
@@ -886,10 +921,14 @@ export interface WishlistPlanInstallment {
 }
 
 export interface WishlistPlan {
+  /** The recurring-entry figure, kept for compatibility. */
   monthly_disposable: number
+  /** The default currency's free flow when that row is `ok`, else 0. */
   savings_rate: number
   items: WishlistPlanItem[]
   installments: WishlistPlanInstallment[]
+  /** The free-flow rows the items are dated from, per currency. */
+  net_flow?: WishlistFreeFlowRow[]
 }
 
 /**
@@ -959,14 +998,19 @@ export interface WishlistOutlookMonth {
   total: number | null
 }
 
-/** This item alone (its monthly amount, or the full price) against the monthly disposable income of the item's currency. */
+/** This item alone (its monthly amount, or the full price) against its rate (`available`). */
 export interface WishlistDisposableCheck {
   status: WishlistCheckStatus
   currency: string
   amount: number
+  /** The recurring-entry figure, kept for compatibility. */
   monthly_disposable?: number | null
+  /** `available` less this item. */
   after_purchase?: number | null
   reason?: string | null
+  basis?: WishlistRateBasis | null
+  /** The item's rate; null when it has none (`status` is then `unknown`). */
+  available?: number | null
 }
 
 /** The full price against the card's available credit now, in the card's currency. */
@@ -993,6 +1037,8 @@ export interface WishlistOutlook {
   disposable_check: WishlistDisposableCheck
   /** Present for an item paid from a credit card account only. */
   credit_check?: WishlistCreditCheck | null
+  projection_status?: WishlistProjectionStatus | null
+  projection_note?: string | null
 }
 
 // ─── Shared Response Wrappers ─────────────────────────────────────────────────
@@ -2395,9 +2441,11 @@ export interface DashboardSnapshot {
     name: string
     cost: number
     priority: WishlistItemPriority
-    /** Null when the projection has no row for the item's currency; `note` says so. */
+    /** Null unless `projection_status` is `dated`; `note` says why. */
     affordable_by: string | null
     note: string | null
+    projection_status?: WishlistProjectionStatus | null
+    projection_note?: string | null
   }>
   /** Pooled projection cash (card balances are owed, not held). */
   /** The default currency's pooled projection cash; see `balances.by_currency`. */

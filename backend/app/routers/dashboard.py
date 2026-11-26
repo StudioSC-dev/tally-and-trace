@@ -2,7 +2,6 @@
 Unified dashboard snapshot endpoint for Tally & Trace.
 Returns everything the front-end needs in a single call.
 """
-import math
 import sys
 
 from datetime import datetime, timedelta
@@ -24,14 +23,14 @@ from app.models.allocation import Allocation, AllocationType
 from app.models.user import User
 from app.models.wishlist_item import WishlistItem
 from app.schemas.dashboard import DashboardDue
-from app.routers.wishlist import no_projection_note
+from app.routers.wishlist import price_of
 from app.services import card_charges as card_charges_svc
 from app.services import card_credit as card_credit_svc
 from app.services import forecast as forecast_svc
 from app.services import missed as missed_svc
 from app.services import quick_balances as quick_balances_svc
+from app.services import wishlist_projection
 from app.services.fx import FxRates, get_fx
-from app.core.time import utc_now
 
 router = APIRouter()
 
@@ -46,8 +45,6 @@ class QuickBalancePins(BaseModel):
         if len(set(ids)) != len(ids):
             raise ValueError("account_ids must be distinct")
         return ids
-
-SAVINGS_RATE_FACTOR = 0.5
 
 
 def _due_lists(ctx: RequestContext, upcoming: list, *, tag_id: Optional[int],
@@ -230,9 +227,9 @@ def get_snapshot(
     # -----------------------------------------------------------------------
     # 6. Top 3 wishlist items (unpurchased) with affordability
     # -----------------------------------------------------------------------
-    # Each item is judged against the disposable row of its own currency (STU-304).
-    rows_by_currency = {r["currency"]: r for r in disposable["by_currency"]}
-
+    # Each item on its own, at its rate from free flow (STU-789,
+    # services/wishlist_projection.py): no queue, and the tag filter does not
+    # change it. An installment item keeps the full-cost arithmetic.
     from sqlalchemy import case
     priority_order = case(
         {"critical": 0, "high": 1, "medium": 2, "low": 3},
@@ -249,19 +246,10 @@ def get_snapshot(
         .all()
     )
 
-    from datetime import timedelta
     wishlist_next_up = []
     for item in wishlist_items:
-        code = item.currency.value
-        row = rows_by_currency.get(code)
-        if row is None:
-            # No row for this currency: not affordable, and it says so.
-            affordable_by, note = None, no_projection_note(code)
-        else:
-            savings_rate = max(row["monthly_disposable"] * SAVINGS_RATE_FACTOR, 0.01)
-            months_needed = math.ceil(float(item.estimated_cost) / savings_rate)
-            affordable_by = (utc_now() + timedelta(days=months_needed * 30)).date().isoformat()
-            note = None
+        projection = wishlist_projection.project(ctx, item, price_of(item.estimated_cost))
+        affordable_by, note = projection.date, projection.note
         wishlist_next_up.append({
             "id": item.id,
             "name": item.name,
@@ -269,6 +257,8 @@ def get_snapshot(
             "priority": item.priority.value,
             "affordable_by": affordable_by,
             "note": note,
+            "projection_status": projection.status,
+            "projection_note": projection.note,
         })
 
     # -----------------------------------------------------------------------

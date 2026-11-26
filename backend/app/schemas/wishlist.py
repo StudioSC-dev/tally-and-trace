@@ -87,17 +87,32 @@ class WishlistItemResponse(BaseModel):
         from_attributes = True
 
 
+# An item's projection status (STU-789, ``services/wishlist_projection.py``), first match.
+ProjectionStatus = Literal["paid_from_savings", "not_estimated", "incomplete", "no_projection",
+                           "no_room", "beyond_horizon", "dated"]
+# Which free-flow figure an item's rate is: a critical item's net flow, a want's free flow.
+RateBasis = Literal["net_flow", "free_flow"]
+
+
 class WishlistReadiness(BaseModel):
     item_id: int
     name: str
     estimated_cost: float
     currency: str
     monthly_disposable: float
+    # The item's rate (its basis's figure), 0 when it has none.
     savings_rate: float
-    months_needed: int
-    estimated_purchase_date: str
+    months_needed: int = Field(
+        ..., deprecated="Read estimated_date: 9999 unless the item is dated")
+    estimated_purchase_date: str = Field(
+        ..., deprecated="Read estimated_date: a placeholder date unless the item is dated")
     affordable_now: bool
     note: Optional[str] = None
+    # STU-789: set only when ``projection_status`` is ``dated``.
+    estimated_date: Optional[str] = None
+    basis: Optional[RateBasis] = None
+    projection_status: Optional[ProjectionStatus] = None
+    projection_note: Optional[str] = None
 
 
 class WishlistPlanItem(BaseModel):
@@ -105,8 +120,21 @@ class WishlistPlanItem(BaseModel):
     name: str
     estimated_cost: float
     estimated_purchase_date: Optional[str] = None
+    # Months until the item is bought behind every earlier queued item in its
+    # currency; 0 for an item outside the queue, and for a queued item with no rate.
     cumulative_months: int
+    # Why there is no date, when there isn't one.
     note: Optional[str] = None
+    # STU-789: the item on its own, then what the queue says.
+    currency: Optional[str] = None
+    priority: Optional[WishlistPriority] = None
+    basis: Optional[RateBasis] = None
+    projection_status: Optional[ProjectionStatus] = None
+    projection_note: Optional[str] = None
+    queue_note: Optional[str] = None
+    # A critical item whose currency row is ``ok`` only.
+    net_flow_after: Optional[float] = None
+    from_saving: Optional[float] = None
 
 
 class WishlistPlanInstallment(BaseModel):
@@ -120,13 +148,6 @@ class WishlistPlanInstallment(BaseModel):
     installment_months: int
     monthly_amount: float
     final_amount: float
-
-
-class WishlistPlanResponse(BaseModel):
-    monthly_disposable: float
-    savings_rate: float
-    items: List[WishlistPlanItem]
-    installments: List[WishlistPlanInstallment] = []
 
 
 FreeFlowStatus = Literal["not_estimated", "incomplete", "no_projection", "ok"]
@@ -171,6 +192,16 @@ class WishlistFreeFlow(BaseModel):
     limitations: List[str] = []
 
 
+class WishlistPlanResponse(BaseModel):
+    monthly_disposable: float
+    # The default currency's free flow when that row is ``ok``, else 0 (STU-789).
+    savings_rate: float
+    items: List[WishlistPlanItem]
+    installments: List[WishlistPlanInstallment] = []
+    # STU-789: the free-flow rows the items are dated from, per currency.
+    net_flow: List[WishlistFreeFlowRow] = []
+
+
 CheckStatus = Literal["fits", "over", "unknown"]
 
 
@@ -187,15 +218,18 @@ class WishlistOutlookMonth(BaseModel):
 
 
 class WishlistDisposableCheck(BaseModel):
-    """This item alone (its monthly amount, or the full price) against the monthly
-    disposable income of the item's currency, which already counts every existing
-    recurring expense, card installments included."""
+    """This item alone (its monthly amount, or the full price) against its rate
+    (STU-789): ``available``, the item's net flow (critical) or free flow (a want)
+    in its currency. ``unknown`` when the item has no rate. ``monthly_disposable``
+    is the recurring-entry figure, kept for compatibility."""
     status: CheckStatus
     currency: str
     amount: float
     monthly_disposable: Optional[float] = None
     after_purchase: Optional[float] = None
     reason: Optional[str] = None
+    basis: Optional[RateBasis] = None
+    available: Optional[float] = None
 
 
 class WishlistCreditCheck(BaseModel):
@@ -221,3 +255,6 @@ class WishlistOutlook(BaseModel):
     note: Optional[str] = None
     disposable_check: WishlistDisposableCheck
     credit_check: Optional[WishlistCreditCheck] = None
+    # STU-789: the item on its own (``services/wishlist_projection.py``).
+    projection_status: Optional[ProjectionStatus] = None
+    projection_note: Optional[str] = None
