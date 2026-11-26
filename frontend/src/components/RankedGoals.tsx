@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent, ReactNode } from 'react'
-import type { Allocation } from '@tally-trace/shared'
-import { useGetRankedAllocationsQuery, useReorderRankedAllocationsMutation } from '../store/api'
+import type { Allocation, WishlistFreeFlow, WishlistFreeFlowGoal } from '@tally-trace/shared'
+import { useGetRankedAllocationsQuery, useGetWishlistFreeFlowQuery, useReorderRankedAllocationsMutation } from '../store/api'
 import { useToast } from '../hooks/useToast'
 import { apiErrorMessage } from '../utils/apiError'
+import { formatCurrency } from '../utils/currency'
+import type { CurrencyCode } from '../utils/currency'
 import { Button } from './Button'
 import { Icon } from './Icon'
+import { StatusText } from './StatusText'
 
 /**
  * One shared mutation entry for every reorder, so the "saving" state outlives the component: a tab switch unmounts
@@ -30,6 +33,52 @@ function moved<T>(items: readonly T[], from: number, to: number): T[] {
   return next
 }
 
+/** Why no pace shows, by the free-flow rows' status: the caller-wide statuses `not_estimated` and `incomplete` (STU-788). */
+const NOT_ESTIMATED_NOTE = 'Monthly pace shows once you have one full month of history.'
+const INCOMPLETE_NOTE = 'Money in more than one currency is involved, so this cannot be estimated yet.'
+
+/** The note for the whole section, or null when the rows hold figures. Both statuses are set for every row at once. */
+function noteFor(flow: WishlistFreeFlow | undefined): string | null {
+  if (!flow) return null
+  if (flow.rows.some((row) => row.status === 'incomplete')) return INCOMPLETE_NOTE
+  if (flow.rows.some((row) => row.status === 'not_estimated')) return NOT_ESTIMATED_NOTE
+  return null
+}
+
+/**
+ * A goal's monthly pace, its underfunded flag and its overdue and unreserved labels, as the API decided them. The
+ * pace and the flag are null for a caller with no estimate, and then only the labels can show.
+ */
+function GoalFlow({ goal }: { goal: WishlistFreeFlowGoal }) {
+  const currency = goal.currency as CurrencyCode
+  const uncovered = goal.underfunded !== null && goal.underfunded > 0 ? goal.underfunded : null
+  if (goal.pace === null && !goal.overdue && !goal.unreserved) return null
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-sm" data-testid="ranked-goal-flow">
+      {goal.pace !== null && (
+        <span className="text-body" data-testid="ranked-goal-pace">
+          {goal.pace > 0 ? `Needs ${formatCurrency(goal.pace, currency)} a month` : 'No monthly saving needed'}
+        </span>
+      )}
+      {uncovered !== null && (
+        <StatusText tone="danger" data-testid="ranked-goal-underfunded">
+          Underfunded by {formatCurrency(uncovered, currency)} a month
+        </StatusText>
+      )}
+      {goal.overdue && (
+        <StatusText tone="warn" data-testid="ranked-goal-overdue">
+          Overdue
+        </StatusText>
+      )}
+      {goal.unreserved && (
+        <StatusText tone="warn" data-testid="ranked-goal-unreserved">
+          Unreserved
+        </StatusText>
+      )}
+    </div>
+  )
+}
+
 /**
  * The "Savings goals" section (STU-787): the user's ranked goals in rank order, top first. The order decides which
  * goal gives way first when money is short. A goal moves by dragging its handle (native pointer events) or by its
@@ -41,6 +90,9 @@ export function RankedGoals({ renderCard }: { renderCard: (goal: Allocation) => 
   const [reorder, { isLoading: isSaving }] = useReorderRankedAllocationsMutation({ fixedCacheKey: REORDER_KEY })
   const showToast = useToast()
   const goals = data?.items
+  const { data: flow } = useGetWishlistFreeFlowQuery()
+  const flowByGoal = useMemo(() => new Map((flow?.goals ?? []).map((entry) => [entry.allocation_id, entry])), [flow])
+  const flowNote = noteFor(flow)
 
   const rowRefs = useRef(new Map<number, HTMLLIElement>())
   const [drag, setDrag] = useState<Drag | null>(null)
@@ -131,6 +183,11 @@ export function RankedGoals({ renderCard }: { renderCard: (goal: Allocation) => 
           Put your goals in order. When money is short, the goal at the bottom gives way first.
         </p>
       </header>
+      {flowNote && (
+        <p className="text-sm text-muted" data-testid="ranked-goals-flow-note">
+          {flowNote}
+        </p>
+      )}
       {isError && (
         <div className="card p-4 space-y-3" role="alert" data-testid="ranked-goals-error">
           <p className="text-sm text-danger">Could not load your savings goals.</p>
@@ -148,6 +205,7 @@ export function RankedGoals({ renderCard }: { renderCard: (goal: Allocation) => 
       {goals && goals.length > 0 && (
         <ul ref={listRef} className="grid grid-cols-1 gap-3" data-testid="ranked-goals-list" aria-label="Savings goals, top first">
           {goals.map((goal, index) => {
+            const goalFlow = flowByGoal.get(goal.id)
             const isHeld = drag?.id === goal.id
             const isTarget = drag !== null && drag.over === index && drag.id !== goal.id
             return (
@@ -204,7 +262,10 @@ export function RankedGoals({ renderCard }: { renderCard: (goal: Allocation) => 
                     <Icon name="caret-down" />
                   </Button>
                 </div>
-                <div className="min-w-0 flex-1">{renderCard(goal)}</div>
+                <div className="min-w-0 flex-1 space-y-2">
+                  {renderCard(goal)}
+                  {goalFlow && <GoalFlow goal={goalFlow} />}
+                </div>
               </li>
             )
           })}
