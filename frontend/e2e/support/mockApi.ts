@@ -1,6 +1,6 @@
 import { expect } from '@playwright/test'
 import type { Page, Route } from '@playwright/test'
-import type { TokenResponse, User } from '@tally-trace/shared'
+import type { TokenResponse, User, WishlistFreeFlow } from '@tally-trace/shared'
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
@@ -149,10 +149,18 @@ async function answer(state: MockState, route: Route): Promise<void> {
   })
 }
 
+/**
+ * The free-flow read the ranked Savings goals section makes on every page that shows it (STU-790), answered with no
+ * rows and no goals so no pace, flag or note shows. A spec that tests the pace registers its own `GET /wishlist/free-flow`,
+ * which replaces this one.
+ */
+const NO_FREE_FLOW: WishlistFreeFlow = { rows: [], goals: [], limitations: [] }
+
 async function stateFor(page: Page): Promise<MockState> {
   const existing = states.get(page)
   if (existing) return existing
   const state: MockState = { routes: new Map(), counts: new Map(), seen: [] }
+  state.routes.set(keyOf('GET', '/wishlist/free-flow'), { method: 'GET', path: '/wishlist/free-flow', body: NO_FREE_FLOW })
   states.set(page, state)
   await page.route('**/api/v1/**', (route) => answer(state, route))
   return state
