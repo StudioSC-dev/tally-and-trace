@@ -414,6 +414,34 @@ def test_ac7_the_figures_as_defined(w):
     assert goal(result, g).fed == D(0)
 
 
+def test_ac7_net_flow_is_rounded_from_the_exact_averages(w):
+    # Audit finding 8: 100 income and 0.01 spending over two months is 49.995 a month,
+    # which rounds to 50.00, not 50.00 - 0.01.
+    checking = w.account()
+    w.anchor(checking, day=datetime(2026, 8, 10))     # window Sep..Oct
+    w.txn(checking, "credit", 100)
+    w.txn(checking, "debit", "0.01")
+    f = figures(w.compute())
+    assert (f["sample_months"], f["net_flow"], f["free_flow"]) == (2, D("50.00"), D("50.00"))
+
+
+def test_ac14_displayed_fed_never_adds_up_past_saved(w):
+    # Audit finding 8: two 0.005 feeds each showed 0.01 against 0.01 saved, and both
+    # top-ups vanished.
+    checking = w.account()
+    w.anchor(checking, day=datetime(2026, 8, 10))
+    w.txn(checking, "credit", 100)
+    one, two = w.account("savings"), w.account("savings")
+    w.txn(checking, "transfer", "0.01", to=one)
+    w.txn(checking, "transfer", "0.01", to=two)
+    g1 = w.goal(mode="target_balance", account=one, monthly="0.01")
+    g2 = w.goal(mode="target_balance", account=two, monthly="0.01")
+    result = w.compute()
+    assert figures(result)["saved"] == D("0.01")
+    assert (goal(result, g1).fed, goal(result, g2).fed) == (D("0.01"), D(0))
+    assert (goal(result, g1).top_up, goal(result, g2).top_up) == (D(0), D("0.01"))
+
+
 def test_ac7_saving_that_comes_back_lowers_saved_never_below_zero(w):
     checking, savings = w.account(), w.account("savings", balance=50_000)
     w.anchor(checking)

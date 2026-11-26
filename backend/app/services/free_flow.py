@@ -744,8 +744,12 @@ def _compute(ctx) -> FreeFlow:
 
     flows: Dict[int, FreeFlowGoal] = {}
     top_up: Dict[str, Decimal] = defaultdict(lambda: ZERO)
+    # Displayed fed, in cents, never adds up past the currency's displayed saved:
+    # the cents are given out in rank order. Pace stays rounded up.
+    fed_left = {c: _cents(v) for c, v in saved_exact.items()}
     for g in goals:
-        fed = _cents(g.fed)
+        fed = max(min(_cents(g.fed), fed_left.get(g.currency, ZERO)), ZERO)
+        fed_left[g.currency] = fed_left.get(g.currency, ZERO) - fed
         flow = FreeFlowGoal(g.id, g.allocation.rank, g.currency, pace=g.pace, fed=fed,
                             top_up=max(g.pace - fed, ZERO), overdue=overdue[g.id])
         if flow.top_up > ZERO and avg[g.currency].income <= ZERO:
@@ -755,6 +759,7 @@ def _compute(ctx) -> FreeFlow:
         flows[g.id] = flow
 
     rows: List[FreeFlowRow] = []
+    net_exact: Dict[str, Decimal] = {}
     for c in sorted(currencies):
         t = avg[c]
         income, spending, debt_paid = _cents(t.income), _cents(t.spending), _cents(t.debt_paid)
@@ -763,14 +768,16 @@ def _compute(ctx) -> FreeFlow:
             rows.append(FreeFlowRow(c, INCOMPLETE, months, income=income, spending=spending,
                                     debt_paid=debt_paid, saved=saved))
             continue
-        reserved = saved + top_up[c]
+        # Derived figures from the exact amounts, rounded once at the end.
+        reserved = saved_exact[c] + top_up[c]
+        net_exact[c] = t.income - t.spending - t.debt_paid
         row = FreeFlowRow(c, NO_PROJECTION if income <= ZERO else OK, months, income=income,
                           spending=spending, debt_paid=debt_paid, saved=saved,
-                          goal_top_up=top_up[c], reserved=reserved)
+                          goal_top_up=top_up[c], reserved=_cents(reserved))
         if row.status == OK:
-            row.net_flow = income - spending - debt_paid
-            row.shortfall = max(reserved - row.net_flow, ZERO)
-            row.free_flow = max(row.net_flow - reserved, ZERO)
+            row.net_flow = _cents(net_exact[c])
+            row.shortfall = _cents(max(reserved - net_exact[c], ZERO))
+            row.free_flow = _cents(max(net_exact[c] - reserved, ZERO))
         rows.append(row)
 
     goal_flows = [flows[g.id] for g in goals]
@@ -787,11 +794,12 @@ def _compute(ctx) -> FreeFlow:
 
     # Underfunded (2.5): in each ok currency, max(net_flow - saved, 0) is given out
     # in rank order to the top-ups reserved there.
-    pool = {r.currency: max(r.net_flow - r.saved, ZERO) for r in rows if r.status == OK}
+    pool = {r.currency: max(net_exact[r.currency] - saved_exact[r.currency], ZERO)
+            for r in rows if r.status == OK}
     for flow in goal_flows:
         if flow.currency not in pool:
             continue
         covered = min(pool[flow.currency], flow.top_up)
         pool[flow.currency] -= covered
-        flow.underfunded = flow.top_up - covered
+        flow.underfunded = _cents(flow.top_up - covered)
     return FreeFlow(OK, months, rows, goal_flows)
