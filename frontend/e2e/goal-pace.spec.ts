@@ -62,6 +62,11 @@ const flowRoute = (flow: WishlistFreeFlow): ApiRoute => apiRoute<WishlistFreeFlo
 const row = (page: Page, name: string): Locator => page.getByTestId('ranked-goal').filter({ has: page.getByText(name, { exact: true }) })
 const paceOf = (page: Page, name: string): Locator => row(page, name).getByTestId('ranked-goal-pace')
 const flagOf = (page: Page, name: string): Locator => row(page, name).getByTestId('ranked-goal-underfunded')
+/** The text is on the page and the element can be seen: a hidden element holds its text too. */
+async function shows(locator: Locator, text: string): Promise<void> {
+  await expect(locator).toBeVisible()
+  await expect(locator).toHaveText(text)
+}
 const flags = (page: Page): Locator => page.getByTestId('ranked-goal-underfunded')
 
 /** The ranked list as the API answers it after a reorder, for `PUT /allocations/ranked`. */
@@ -77,12 +82,12 @@ test.describe('goal pace and underfunded flag (STU-790)', () => {
   test('AC1: each goal shows its monthly pace from GET /wishlist/free-flow, in its own currency', async ({ page }) => {
     const api = await open(page, flowRoute(COVERED))
     expect(api.count('GET', FLOW_PATH)).toBeGreaterThan(0)
-    await expect(paceOf(page, EMERGENCY)).toHaveText('Needs ₱10,000.00 a month')
-    await expect(paceOf(page, LAPTOP)).toHaveText('Needs ₱6,000.00 a month')
-    await expect(paceOf(page, GIFTS)).toHaveText('Needs ₱2,000.00 a month')
-    await expect(paceOf(page, CAR)).toHaveText('Needs ₱2,500.00 a month')
+    await shows(paceOf(page, EMERGENCY), 'Needs ₱10,000.00 a month')
+    await shows(paceOf(page, LAPTOP), 'Needs ₱6,000.00 a month')
+    await shows(paceOf(page, GIFTS), 'Needs ₱2,000.00 a month')
+    await shows(paceOf(page, CAR), 'Needs ₱2,500.00 a month')
     // The Japan trip is a dollar goal: its pace is in dollars, never converted to pesos.
-    await expect(paceOf(page, JAPAN)).toHaveText('Needs $800.00 a month')
+    await shows(paceOf(page, JAPAN), 'Needs $800.00 a month')
     await expect(page.getByTestId('ranked-goal-pace')).toHaveCount(ALL.length)
     await expect(page.getByTestId('ranked-goals-flow-note')).toHaveCount(0)
     await shot(page, 'pace')
@@ -94,25 +99,25 @@ test.describe('goal pace and underfunded flag (STU-790)', () => {
       goals: COVERED.goals.filter((g) => g.allocation_id !== GOAL_IDS.car).map((g) => (g.allocation_id === GOAL_IDS.gifts ? { ...g, pace: 0, top_up: 0 } : g)),
     }
     await open(page, flowRoute(reached))
-    await expect(paceOf(page, GIFTS)).toHaveText('No monthly saving needed')
+    await shows(paceOf(page, GIFTS), 'No monthly saving needed')
     await expect(row(page, CAR).getByTestId('ranked-goal-flow')).toHaveCount(0)
   })
 
   test('AC2: a small shortfall flags only the lowest-ranked goal, with the amount it is short', async ({ page }) => {
     await open(page, flowRoute(SHORT_BY_500))
     await expect(flags(page)).toHaveCount(1)
-    await expect(flagOf(page, CAR)).toHaveText('Underfunded by ₱500.00 a month')
+    await shows(flagOf(page, CAR), 'Underfunded by ₱500.00 a month')
     for (const name of [EMERGENCY, JAPAN, LAPTOP, GIFTS]) await expect(flagOf(page, name)).toHaveCount(0)
     // The pace still shows beside the flag.
-    await expect(paceOf(page, CAR)).toHaveText('Needs ₱2,500.00 a month')
+    await shows(paceOf(page, CAR), 'Needs ₱2,500.00 a month')
     await shot(page, 'underfunded-one')
   })
 
   test('AC2: a larger shortfall flags the lowest-ranked goal first, then the next one up', async ({ page }) => {
     await open(page, flowRoute(SHORT_BY_4000))
     await expect(flags(page)).toHaveCount(2)
-    await expect(flagOf(page, CAR)).toHaveText('Underfunded by ₱2,500.00 a month')
-    await expect(flagOf(page, GIFTS)).toHaveText('Underfunded by ₱1,500.00 a month')
+    await shows(flagOf(page, CAR), 'Underfunded by ₱2,500.00 a month')
+    await shows(flagOf(page, GIFTS), 'Underfunded by ₱1,500.00 a month')
     for (const name of [EMERGENCY, JAPAN, LAPTOP]) await expect(flagOf(page, name)).toHaveCount(0)
     // The goals above the flagged ones are covered, and nothing marks them.
     const order = await page.getByTestId('ranked-goal').evaluateAll((all) => all.map((r) => r.getAttribute('data-goal-id')))
@@ -127,22 +132,22 @@ test.describe('goal pace and underfunded flag (STU-790)', () => {
 
   test('AC3: an overdue goal is labelled Overdue, and the others are not', async ({ page }) => {
     await open(page, flowRoute(WITH_OVERDUE))
-    await expect(row(page, LAPTOP).getByTestId('ranked-goal-overdue')).toHaveText('Overdue')
+    await shows(row(page, LAPTOP).getByTestId('ranked-goal-overdue'), 'Overdue')
     await expect(page.getByTestId('ranked-goal-overdue')).toHaveCount(1)
-    await expect(paceOf(page, LAPTOP)).toHaveText('Needs ₱43,200.00 a month')
+    await shows(paceOf(page, LAPTOP), 'Needs ₱43,200.00 a month')
     await shot(page, 'overdue')
   })
 
   test('AC3: a goal whose top-up cannot be placed is labelled Unreserved, and the others are not', async ({ page }) => {
     await open(page, flowRoute(CROSS_CURRENCY))
-    await expect(row(page, JAPAN).getByTestId('ranked-goal-unreserved')).toHaveText('Unreserved')
+    await shows(row(page, JAPAN).getByTestId('ranked-goal-unreserved'), 'Unreserved')
     await expect(page.getByTestId('ranked-goal-unreserved')).toHaveCount(1)
     await shot(page, 'unreserved')
   })
 
   test('AC4: a caller with money in more than one currency sees no pace or flag, and the note', async ({ page }) => {
     await open(page, flowRoute(CROSS_CURRENCY))
-    await expect(page.getByTestId('ranked-goals-flow-note')).toHaveText(INCOMPLETE_NOTE)
+    await shows(page.getByTestId('ranked-goals-flow-note'), INCOMPLETE_NOTE)
     await expect(page.getByTestId('ranked-goal-pace')).toHaveCount(0)
     await expect(flags(page)).toHaveCount(0)
     await expect(page.getByTestId('ranked-goal')).toHaveCount(ALL.length)
@@ -151,16 +156,16 @@ test.describe('goal pace and underfunded flag (STU-790)', () => {
 
   test('AC4: a single-currency caller with an unreserved goal is told about the missing income, not a second currency', async ({ page }) => {
     await open(page, flowRoute(PHP_ONLY_UNRESERVED))
-    await expect(page.getByTestId('ranked-goals-flow-note')).toHaveText(NO_INCOME_NOTE)
+    await shows(page.getByTestId('ranked-goals-flow-note'), NO_INCOME_NOTE)
     await expect(page.getByTestId('ranked-goals-flow-note')).not.toContainText('more than one currency')
-    await expect(row(page, EMERGENCY).getByTestId('ranked-goal-unreserved')).toHaveText('Unreserved')
+    await shows(row(page, EMERGENCY).getByTestId('ranked-goal-unreserved'), 'Unreserved')
     await expect(page.getByTestId('ranked-goal-pace')).toHaveCount(0)
     await expect(flags(page)).toHaveCount(0)
   })
 
   test('AC4: a user with no full month of history sees no pace or flag, and the note', async ({ page }) => {
     await open(page, flowRoute(NOT_ESTIMATED))
-    await expect(page.getByTestId('ranked-goals-flow-note')).toHaveText(NO_HISTORY_NOTE)
+    await shows(page.getByTestId('ranked-goals-flow-note'), NO_HISTORY_NOTE)
     await expect(page.getByTestId('ranked-goal-pace')).toHaveCount(0)
     await expect(flags(page)).toHaveCount(0)
     await expect(page.getByTestId('ranked-goal-unreserved')).toHaveCount(0)
@@ -175,12 +180,12 @@ test.describe('goal pace and underfunded flag (STU-790)', () => {
       sequenceRoute<WishlistFreeFlow>('GET', FLOW_PATH, [{ body: SHORT_BY_4000 }, { body: SHORT_BY_4000_CAR_UP }]),
       rankedAfter(order),
     )
-    await expect(flagOf(page, GIFTS)).toHaveText('Underfunded by ₱1,500.00 a month')
+    await shows(flagOf(page, GIFTS), 'Underfunded by ₱1,500.00 a month')
     await expect.poll(() => api.count('GET', FLOW_PATH)).toBe(1)
     await page.getByRole('button', { name: `Move ${CAR} up`, exact: true }).click()
     await expect.poll(() => api.count('GET', FLOW_PATH)).toBe(2)
-    await expect(flagOf(page, CAR)).toHaveText('Underfunded by ₱2,000.00 a month')
-    await expect(flagOf(page, GIFTS)).toHaveText('Underfunded by ₱2,000.00 a month')
+    await shows(flagOf(page, CAR), 'Underfunded by ₱2,000.00 a month')
+    await shows(flagOf(page, GIFTS), 'Underfunded by ₱2,000.00 a month')
     expect(api.bodies('PUT', '/allocations/ranked')).toEqual([{ ids: order }])
     await shot(page, 'after-reorder')
   })
@@ -193,13 +198,13 @@ test.describe('goal pace and underfunded flag (STU-790)', () => {
       sequenceRoute<WishlistFreeFlow>('GET', FLOW_PATH, [{ body: SHORT_BY_4000_CAR_UP }, { body: AFTER_EMERGENCY_TARGET_CUT }]),
       apiRoute<Allocation>('PUT', `/allocations/${GOAL_IDS.japan}`, { ...japan, is_active: false }),
     )
-    await expect(paceOf(page, EMERGENCY)).toHaveText('Needs ₱10,000.00 a month')
+    await shows(paceOf(page, EMERGENCY), 'Needs ₱10,000.00 a month')
     await expect.poll(() => api.count('GET', FLOW_PATH)).toBe(1)
     await row(page, JAPAN).locator('article[role="button"]').click()
     await page.getByRole('button', { name: 'Pause allocation' }).click()
     await expect.poll(() => api.count('GET', FLOW_PATH)).toBe(2)
-    await expect(paceOf(page, EMERGENCY)).toHaveText('Needs ₱9,000.00 a month')
-    await expect(flagOf(page, CAR)).toHaveText('Underfunded by ₱1,000.00 a month')
+    await shows(paceOf(page, EMERGENCY), 'Needs ₱9,000.00 a month')
+    await shows(flagOf(page, CAR), 'Underfunded by ₱1,000.00 a month')
     expect(api.bodies('PUT', `/allocations/${GOAL_IDS.japan}`)).toHaveLength(1)
   })
 })
