@@ -41,15 +41,21 @@ def test_update_vanished_allocation_404(sw_client, sw_people, monkeypatch):
     me = sw_people()
     _, allocation = _allocation(client, me)
     real = locking.lock_owner_budgets
+    calls = []
 
     def vanish_then_lock(db, owner_id):
         real(db, owner_id)
-        _delete_row(allocation)
+        # The route locks, then looks the row up, then ``apply_allocation_update`` locks
+        # again: vanish on the second lock, so the row goes after the lookup.
+        calls.append(owner_id)
+        if len(calls) == 2:
+            _delete_row(allocation)
 
     monkeypatch.setattr(locking, "lock_owner_budgets", vanish_then_lock)
     r = client.put(f"{API}/allocations/{allocation}", json={"name": "Renamed"},
                    headers=me["headers"])
 
+    assert len(calls) == 2
     assert r.status_code == 404, r.text
     assert r.json()["detail"] == "Allocation not found"
 
@@ -95,6 +101,11 @@ def test_allocation_update_lock_order_unchanged(sw_client, sw_people, monkeypatc
     _, allocation = _allocation(client, me)
     calls = []
     real_owner, real_rows = locking.lock_owner_budgets, router._lock_allocations
+    real_lookup = router.get_owned_or_404
+
+    def spy_lookup(*args, **kwargs):
+        calls.append("get_owned_or_404")
+        return real_lookup(*args, **kwargs)
 
     def spy_owner(db, owner_id):
         calls.append("lock_owner_budgets")
@@ -106,8 +117,14 @@ def test_allocation_update_lock_order_unchanged(sw_client, sw_people, monkeypatc
 
     monkeypatch.setattr(locking, "lock_owner_budgets", spy_owner)
     monkeypatch.setattr(router, "_lock_allocations", spy_rows)
+    monkeypatch.setattr(router, "get_owned_or_404", spy_lookup)
     r = client.put(f"{API}/allocations/{allocation}", json={"name": "Renamed"},
                    headers=me["headers"])
 
     assert r.status_code == 200, r.text
-    assert calls == ["lock_owner_budgets", "_lock_allocations"]
+    # The route takes the owner lock before its first read and the helper takes it again
+    # (re-entrant); the row lock comes after every owner lock (STU-786).
+    assert calls[0] == "lock_owner_budgets"
+    assert calls.index("lock_owner_budgets") < calls.index("get_owned_or_404")
+    assert calls.count("_lock_allocations") == 1
+    assert calls.index("_lock_allocations") == len(calls) - 1

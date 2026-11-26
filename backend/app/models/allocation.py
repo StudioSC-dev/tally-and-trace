@@ -59,6 +59,9 @@ class Allocation(Base):
     # Goal settings
     target_date = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)
+    # 1 is the top of the owner's ranked goals (active savings and goal allocations,
+    # STU-786); null on every other row. Only ``services.allocation_rank`` writes it.
+    rank = Column(Integer, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

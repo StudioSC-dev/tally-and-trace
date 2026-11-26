@@ -104,6 +104,8 @@ class AllocationResponse(AllocationBase):
     current_amount_source: Optional[str] = None
     # Always set; a legacy row stored without one is PHP, the column's default.
     currency: CurrencyType = CurrencyType.PHP
+    # Place among the owner's ranked goals, 1 at the top; None on any other row (STU-786).
+    rank: Optional[int] = None
     id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -115,6 +117,15 @@ class AllocationResponse(AllocationBase):
 
     class Config:
         from_attributes = True
+
+
+class AllocationRankOrder(BaseModel):
+    # The caller's complete ranked list, top first (STU-786).
+    ids: List[int]
+
+
+class AllocationRankedResponse(BaseModel):
+    items: List[AllocationResponse]
 
 
 class AllocationListResponse(BaseModel):

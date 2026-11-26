@@ -378,6 +378,8 @@ export interface Allocation {
   period_end?: string
   currency: CurrencyCode
   is_active: boolean
+  /** Place among the caller's ranked goals (active savings and goals), 1 at the top; null on any other row. */
+  rank?: number | null
   created_at: string
   updated_at?: string
   configuration?: Record<string, unknown>
