@@ -22,8 +22,11 @@ import {
   PAID_FROM_SAVINGS_NOTE,
   PLAN_AFTER_WRITE,
   PLAN_INCOMPLETE,
+  PLAN_INSTALLMENTS_ONLY,
+  PLAN_INSTALLMENTS_ONLY_NOT_ESTIMATED,
   PLAN_NOT_ESTIMATED,
   PLAN_NO_PROJECTION,
+  PLAN_OVERSPENT,
   PLAN_OK,
   PLAN_SHORT,
   PLAN_TWO_CURRENCIES,
@@ -48,7 +51,7 @@ import { shot } from './support/shot'
 
 test.use({ locale: 'en-US' })
 
-const SHORTFALL_TEXT = 'Your savings goals are short by ₱3,000.00 a month, so nothing is free for the wishlist.'
+const SHORTFALL_TEXT = 'Net flow is ₱3,000.00 a month short of what you keep for saving, so nothing is free for the wishlist.'
 const PLAN_PATH = '/wishlist/plan'
 const SNAPSHOT_PATH = '/dashboard/snapshot'
 const outlookPath = (id: number): string => `/wishlist/${id}/outlook`
@@ -169,6 +172,59 @@ test.describe('wishlist plan and priority wording (STU-791)', () => {
     await expect(panel(page).getByTestId('flow-status')).toHaveCount(0)
   })
 
+  test('AC2: outgoings above income with nothing kept for saving is a shortfall that does not blame goals', async ({ page }) => {
+    await open(page, PLAN_OVERSPENT)
+    const shortfall = panel(page).getByTestId('flow-shortfall')
+    await expect(shortfall).toBeVisible()
+    await expect(shortfall).toHaveText(SHORTFALL_TEXT)
+    await expect(shortfall).not.toContainText('goals')
+    await expect(figureValue(page, 'net')).toHaveText('₱-3,000.00')
+    await expect(figureValue(page, 'kept')).toHaveText('₱0.00')
+    await shot(page, 'overspent')
+  })
+
+  test('AC1: a plan with only installment items still shows the three figures and the note', async ({ page }) => {
+    await mockHousehold(page, household)
+    await addRoutes(page, [...householdViewRoutes(household), ...wishlistRoutes(planRoute(PLAN_INSTALLMENTS_ONLY), ITEMS.filter((i) => i.id === IDS.phone))])
+    await page.goto('/allocations?tab=wishlist')
+    await expect(panel(page)).toBeVisible({ timeout: 15_000 })
+    await expect(panel(page).getByTestId('plan-installments')).toBeVisible()
+    await expect(panel(page).getByTestId('plan-wants')).toHaveCount(0)
+    for (const which of ['net', 'kept', 'free'] as const) await expect(figure(page, which)).toBeVisible()
+    await expect(figureValue(page, 'net')).toHaveText('₱60,000.00')
+    await expect(panel(page).getByTestId('flow-sample')).toHaveText('Based on your last 4 full months')
+  })
+
+  test('AC2: a plan with only installment items still says when there is no estimate', async ({ page }) => {
+    await mockHousehold(page, household)
+    await addRoutes(page, [...householdViewRoutes(household), ...wishlistRoutes(planRoute(PLAN_INSTALLMENTS_ONLY_NOT_ESTIMATED), ITEMS.filter((i) => i.id === IDS.phone))])
+    await page.goto('/allocations?tab=wishlist')
+    await expect(panel(page).getByTestId('plan-installments')).toBeVisible({ timeout: 15_000 })
+    await expect(panel(page).getByTestId('flow-status')).toBeVisible()
+    await expect(panel(page).getByTestId('flow-status')).toHaveText(NOT_ESTIMATED_NOTE)
+  })
+
+  test('AC4: a long projection note fits its row, beside the name and below it, on every viewport', async ({ page }) => {
+    await open(page, PLAN_INCOMPLETE)
+    const viewport = page.viewportSize()
+    for (const id of [IDS.repair, IDS.desk]) {
+      const item = planItem(page, id)
+      const note = item.getByTestId('plan-note')
+      await expect(note).toBeVisible()
+      await expect(note).toHaveText(INCOMPLETE_NOTE)
+      const [itemBox, noteBox, scroll] = await Promise.all([
+        item.boundingBox(),
+        note.boundingBox(),
+        item.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth })),
+      ])
+      expect(itemBox && noteBox && noteBox.x >= itemBox.x - 0.5 && noteBox.x + noteBox.width <= itemBox.x + itemBox.width + 0.5, `the note sits inside item ${id}`).toBe(true)
+      expect(scroll.scroll, `item ${id} does not scroll sideways`).toBeLessThanOrEqual(scroll.client)
+    }
+    const page_ = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }))
+    expect(page_.scroll, `the page does not scroll sideways at ${viewport?.width}px`).toBeLessThanOrEqual(page_.client)
+    await shot(page, 'long-note')
+  })
+
   test('AC3: Urgent needs lists each critical item with its net flow after the purchase and what comes out of saving', async ({ page }) => {
     await open(page, PLAN_TWO_URGENT)
     const urgent = panel(page).getByTestId('plan-urgent')
@@ -180,12 +236,12 @@ test.describe('wishlist plan and priority wording (STU-791)', () => {
 
     const repair = planItem(page, IDS.repair)
     await expect(repair.getByTestId('plan-net-flow-after')).toBeVisible()
-    await expect(repair.getByTestId('plan-net-flow-after')).toHaveText('Net flow the month you buy it: ₱36,000.00 instead of ₱60,000.00')
+    await expect(repair.getByTestId('plan-net-flow-after')).toHaveText('Net flow if you bought it this month: ₱36,000.00 instead of ₱60,000.00')
     await expect(repair.getByTestId('plan-from-saving')).toBeVisible()
     await expect(repair.getByTestId('plan-from-saving')).toHaveText('About ₱6,000.00 of it comes out of saving')
     // The second need takes nothing out of saving.
     const boiler = planItem(page, IDS.boiler)
-    await expect(boiler.getByTestId('plan-net-flow-after')).toHaveText('Net flow the month you buy it: ₱42,000.00 instead of ₱60,000.00')
+    await expect(boiler.getByTestId('plan-net-flow-after')).toHaveText('Net flow if you bought it this month: ₱42,000.00 instead of ₱60,000.00')
     await expect(boiler.getByTestId('plan-from-saving')).toHaveText('None of it comes out of saving')
     await shot(page, 'urgent')
   })
@@ -201,7 +257,8 @@ test.describe('wishlist plan and priority wording (STU-791)', () => {
     await expect(wants.getByTestId(`plan-item-${IDS.repair}`)).toHaveCount(0)
     const names = await wants.getByTestId('plan-queue').locator('li').evaluateAll((rows) => rows.map((r) => r.querySelector('.font-medium')?.textContent))
     expect(names).toEqual(['Standing desk', 'Camera lens', 'Espresso machine', 'Piano'])
-    await expect(wants.getByTestId('plan-queue').locator('li').first()).toContainText('1')
+    // Each currency has its own queue and a paid-from-savings item is outside it, so no row carries a shared position.
+    for (const row of await wants.getByTestId('plan-queue').locator('li').all()) await expect(row).not.toHaveText(/^\d/)
   })
 
   test('AC3: with no critical item there is no Urgent needs section', async ({ page }) => {
@@ -290,10 +347,9 @@ test.describe('wishlist plan and priority wording (STU-791)', () => {
     await cardOf(page, phone.id).getByRole('button', { name: 'Show outlook' }).click()
     const month = page.getByTestId('outlook-month-2026-04')
     await expect(month).toBeVisible()
-    // The other columns still show; the leftover cell has a dash and no amount.
+    // The other columns still show; the leftover cell is empty.
     await expect(month.locator('td').nth(1)).toHaveText('₱4,000.00')
-    await expect(month.locator('td').last()).toHaveText('—')
-    await expect(month.locator('td').last()).not.toContainText('₱')
+    await expect(month.locator('td').last()).toBeEmpty()
   })
 
   test("AC7: each amount reads in its item's own currency", async ({ page }) => {
@@ -313,7 +369,7 @@ test.describe('wishlist plan and priority wording (STU-791)', () => {
     await open(page, plan)
     const line = planItem(page, IDS.repair).getByTestId('plan-net-flow-after')
     await expect(line).toBeVisible()
-    await expect(line).toHaveText('Net flow the month you buy it: $100.00 instead of $900.00')
+    await expect(line).toHaveText('Net flow if you bought it this month: $100.00 instead of $900.00')
     await expect(planItem(page, IDS.repair).getByTestId('plan-from-saving')).toHaveText('About $50.00 of it comes out of saving')
   })
 

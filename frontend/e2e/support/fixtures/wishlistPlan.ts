@@ -166,6 +166,14 @@ export const PLAN_SHORT: WishlistPlan = planOf(
   [phpRow({ free_flow: 0, shortfall: 3000, reserved: 63000 })],
 )
 
+/** Outgoings above income by 3,000 a month with nothing kept for saving: the shortfall is 3,000 and no goal is behind it. */
+export const PLAN_OVERSPENT: WishlistPlan = planOf(
+  [
+    deskItem({ estimated_purchase_date: null, cumulative_months: 0, projection_status: 'no_room', projection_note: 'Nothing is left after your savings goals', note: 'Nothing is left after your savings goals' }),
+  ],
+  [phpRow({ income: 37000, spending: 40000, saved: 0, net_flow: -3000, goal_top_up: 0, reserved: 0, free_flow: 0, shortfall: 3000 })],
+)
+
 const undated = (item: WishlistItem, status: 'not_estimated' | 'incomplete' | 'no_projection', note: string): WishlistPlanItem =>
   planItem(item, { projection_status: status, projection_note: note, note, basis: item.priority === 'critical' ? 'net_flow' : 'free_flow' })
 
@@ -228,6 +236,15 @@ export const WISHLIST_WORDING = {
 
 /** The same plan with the installment item listed apart, for the page that opens its outlook. */
 export const PLAN_WITH_INSTALLMENT: WishlistPlan = { ...PLAN_OK, installments: [INSTALLMENT] }
+
+/** Only a card installment on the wishlist: no item is saved up for, but the currency still has its row. */
+export const PLAN_INSTALLMENTS_ONLY: WishlistPlan = { ...planOf([], [phpRow()]), installments: [INSTALLMENT] }
+
+/** The same, for a caller with no full month of history. */
+export const PLAN_INSTALLMENTS_ONLY_NOT_ESTIMATED: WishlistPlan = {
+  ...planOf([], [phpRow({ status: 'not_estimated', sample_months: 0, ...NO_FIGURES })]),
+  installments: [INSTALLMENT],
+}
 
 const MONTHS = ['2026-04', '2026-05', '2026-06', '2026-07', '2026-08', '2026-09']
 

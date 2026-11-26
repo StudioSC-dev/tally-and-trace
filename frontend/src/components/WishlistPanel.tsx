@@ -302,9 +302,9 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
           <div className="p-4 sm:p-6 border-b border-line space-y-3">
             <div className="flex items-baseline justify-between gap-4">
               <h3 className="text-base font-semibold text-ink">Purchase plan</h3>
-              {plan.items.length > 0 && flowRows.length > 0 && <span className="text-sm text-muted">Per month</span>}
+              {flowRows.length > 0 && <span className="text-sm text-muted">Per month</span>}
             </div>
-            {plan.items.length > 0 && flowRows.map((row) => <FlowSummary key={row.currency} row={row} showCurrency={flowRows.length > 1} />)}
+            {flowRows.map((row) => <FlowSummary key={row.currency} row={row} showCurrency={flowRows.length > 1} />)}
           </div>
           {urgentItems.length > 0 && (
             <section className="p-4 sm:p-6 border-b border-line space-y-3" aria-labelledby="plan-urgent-heading" data-testid="plan-urgent">
@@ -326,14 +326,11 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
                 <p className="text-sm text-muted">Saved for from what is left after your savings, in priority order.</p>
               </div>
               <ol className="divide-y divide-line/50 mt-2" data-testid="plan-queue">
-                {wantItems.map((p, i) => (
-                  <li key={p.item_id} className="p-4 sm:px-6 flex items-center justify-between gap-4" data-testid={`plan-item-${p.item_id}`}>
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-ink text-xs font-semibold">{i + 1}</span>
-                      <div className="min-w-0">
-                        <span className="font-medium text-ink truncate block">{p.name}</span>
-                        {p.priority && <span className="text-xs text-muted capitalize">{p.priority}</span>}
-                      </div>
+                {wantItems.map((p) => (
+                  <li key={p.item_id} className="p-4 sm:px-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4" data-testid={`plan-item-${p.item_id}`}>
+                    <div className="min-w-0">
+                      <span className="font-medium text-ink truncate block">{p.name}</span>
+                      {p.priority && <span className="text-xs text-muted capitalize">{p.priority}</span>}
                     </div>
                     <PlanWhen item={p} defaultCurrency={defaultCurrency} />
                   </li>
@@ -672,13 +669,16 @@ function WishlistCard({ item, accountName, error, onCreateAllocationFromItem, on
 /**
  * Month by month, in the item's currency: the card installments already running, this item's payment, and what is
  * left of the item's rate (the outlook's `available`: net flow for an urgent need, free flow for a want) after this
- * item. Nothing shows when the item has no rate (`available` is null) or its payment that month is unknown.
+ * item. The leftover cell is empty when the item has no rate (`available` is null), and a dash when its payment that
+ * month is unknown.
  */
 function InstallmentOutlook({ id, outlook }: { id: string; outlook: WishlistOutlook }) {
   const currency = outlook.currency as CurrencyCode
   const available = outlook.disposable_check.available
   const money = (n: number | null | undefined) => (n == null ? '—' : formatCurrency(n, currency))
   const left = (thisItem: number | null) => (available == null || thisItem == null ? null : available - thisItem)
+  // With no rate to take the payment from the leftover is empty; with a rate but no payment that month it is a dash.
+  const leftover = (thisItem: number | null) => (available == null ? null : money(left(thisItem)))
   return (
     <section id={id} className="mt-3" aria-labelledby={`${id}-heading`} data-testid="installment-outlook">
       <h4 id={`${id}-heading`} className="text-sm font-semibold text-ink">Installment outlook</h4>
@@ -698,7 +698,7 @@ function InstallmentOutlook({ id, outlook }: { id: string; outlook: WishlistOutl
                 <th scope="row" className="py-1 pr-3 font-normal text-body whitespace-nowrap">{monthLabel(m.month)}</th>
                 <td className="py-1 pr-3 text-right text-body">{money(m.existing_installments)}</td>
                 <td className="py-1 pr-3 text-right text-body">{money(m.this_item)}</td>
-                <td className={`py-1 text-right ${left(m.this_item) != null && (left(m.this_item) ?? 0) < 0 ? 'text-danger' : 'text-ink'}`}>{money(left(m.this_item))}</td>
+                <td className={`py-1 text-right ${left(m.this_item) != null && (left(m.this_item) ?? 0) < 0 ? 'text-danger' : 'text-ink'}`}>{leftover(m.this_item)}</td>
               </tr>
             ))}
           </tbody>
@@ -748,7 +748,7 @@ function FlowSummary({ row, showCurrency }: { row: WishlistFreeFlowRow; showCurr
       )}
       {shortfall != null && (
         <p className="text-sm text-warn" data-testid="flow-shortfall">
-          Your savings goals are short by {formatCurrency(shortfall, currency)} a month, so nothing is free for the wishlist.
+          Net flow is {formatCurrency(shortfall, currency)} a month short of what you keep for saving, so nothing is free for the wishlist.
         </p>
       )}
       {sample && <p className="text-sm text-muted" data-testid="flow-sample">{sample}</p>}
@@ -763,11 +763,11 @@ function PlanWhen({ item, defaultCurrency }: { item: WishlistPlanItem; defaultCu
   const date = !item.projection_status || item.projection_status === 'dated' ? item.estimated_purchase_date : null
   const note = item.note ?? item.projection_note ?? item.queue_note
   return (
-    <div className="text-right flex-shrink-0">
+    <div className="min-w-0 sm:max-w-[60%] sm:text-right">
       <p className="text-sm font-semibold text-ink" data-testid="plan-cost">{formatCurrency(item.estimated_cost, currency)}</p>
       {date
         ? <p className="text-xs text-muted" data-testid="plan-date">~{longDate(date)} · {item.cumulative_months} mo</p>
-        : <p className="text-xs text-warn" data-testid="plan-note">{note ?? 'No date yet'}</p>}
+        : <p className="text-xs text-warn break-words" data-testid="plan-note">{note ?? 'No date yet'}</p>}
     </div>
   )
 }
@@ -778,7 +778,7 @@ function UrgentRow({ item, row, defaultCurrency }: { item: WishlistPlanItem; row
   const before = row?.status === 'ok' ? row.net_flow : null
   return (
     <li className="border border-line p-4 space-y-3" data-testid={`plan-item-${item.item_id}`}>
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <span className="font-medium text-ink">{item.name}</span>
         <PlanWhen item={item} defaultCurrency={defaultCurrency} />
       </div>
@@ -786,7 +786,7 @@ function UrgentRow({ item, row, defaultCurrency }: { item: WishlistPlanItem; row
         <div className="border-t border-line pt-3 space-y-1 text-sm text-warn">
           {item.net_flow_after != null && (
             <p data-testid="plan-net-flow-after">
-              Net flow the month you buy it: {formatCurrency(item.net_flow_after, currency)}
+              Net flow if you bought it this month: {formatCurrency(item.net_flow_after, currency)}
               {before != null && ` instead of ${formatCurrency(before, currency)}`}
             </p>
           )}
