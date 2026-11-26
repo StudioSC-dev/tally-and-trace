@@ -65,14 +65,8 @@ const paceOf = (page: Page, name: string): Locator => row(page, name).getByTestI
 const flagOf = (page: Page, name: string): Locator => row(page, name).getByTestId('ranked-goal-underfunded')
 const flags = (page: Page): Locator => page.getByTestId('ranked-goal-underfunded')
 
-/** The ranked list as the API answers it after a reorder, for `PUT /allocations/ranked`. */
-const rankedAfter = (order: number[]): ApiRoute =>
-  apiRoute<{ items: Allocation[] }>('PUT', '/allocations/ranked', {
-    items: order.flatMap((id, index) => {
-      const goal = GOALS.find((g) => g.id === id)
-      return goal ? [{ ...goal, rank: index + 1 }] : []
-    }),
-  })
+/** A route that answers from state each time it is called, so a write changes what the next read returns. */
+const live = (method: ApiRoute['method'], path: string, respond: () => unknown, status = 200): ApiRoute => ({ method, path, status, body: {}, respond })
 
 test.describe('goal pace and underfunded flag (STU-790)', () => {
   test('AC1: each goal shows its monthly pace from GET /wishlist/free-flow, in its own currency', async ({ page }) => {
@@ -194,10 +188,22 @@ test.describe('goal pace and underfunded flag (STU-790)', () => {
 
   test('AC5: a reorder reads the free flow again and the flags follow the new order', async ({ page }) => {
     const order = [GOAL_IDS.emergency, GOAL_IDS.japan, GOAL_IDS.laptop, GOAL_IDS.car, GOAL_IDS.gifts]
+    // The fake holds the order: the reorder's PUT writes it and the ranked reads that follow answer it.
+    let held = GOALS.map((g) => g.id)
+    const rankedNow = (): { items: Allocation[] } => ({
+      items: held.flatMap((id, index) => {
+        const goal = GOALS.find((g) => g.id === id)
+        return goal ? [{ ...goal, rank: index + 1 }] : []
+      }),
+    })
     const api = await open(
       page,
       sequenceRoute<WishlistFreeFlow>('GET', FLOW_PATH, [{ body: SHORT_BY_4000 }, { body: SHORT_BY_4000_CAR_UP }]),
-      rankedAfter(order),
+      live('GET', '/allocations/ranked', rankedNow),
+      live('PUT', '/allocations/ranked', () => {
+        held = order
+        return rankedNow()
+      }),
     )
     await expect(flagOf(page, GIFTS)).toBeVisible()
     await expect(flagOf(page, GIFTS)).toHaveText('Underfunded by ₱1,500.00 a month')
@@ -212,6 +218,9 @@ test.describe('goal pace and underfunded flag (STU-790)', () => {
     await expect(flagOf(page, GIFTS)).toHaveText('Underfunded by ₱2,000.00 a month')
     await expect(flagOf(page, GIFTS)).toHaveAttribute('data-status', 'warn')
     expect(api.bodies('PUT', '/allocations/ranked')).toEqual([{ ids: order }])
+    await expect.poll(() => page.getByTestId('ranked-goal').evaluateAll((all) => all.map((r) => Number(r.getAttribute('data-goal-id'))))).toEqual(order)
+    await expect(page.getByTestId('ranked-goal').nth(3)).toContainText(CAR)
+    await expect(page.getByTestId('ranked-goal').nth(4)).toContainText(GIFTS)
     await shot(page, 'after-reorder')
   })
 
@@ -221,7 +230,6 @@ test.describe('goal pace and underfunded flag (STU-790)', () => {
    */
   async function openWithWrites(page: Page): Promise<ApiMock> {
     const held: Allocation[] = GOALS.map((g) => ({ ...g }))
-    const live = (method: ApiRoute['method'], path: string, respond: () => unknown, status = 200): ApiRoute => ({ method, path, status, body: {}, respond })
     const without = (id: number): Allocation | undefined => {
       const index = held.findIndex((g) => g.id === id)
       return index < 0 ? undefined : held.splice(index, 1)[0]
