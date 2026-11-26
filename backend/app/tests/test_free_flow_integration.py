@@ -736,6 +736,19 @@ def test_ac13_a_higher_balance_goal_takes_the_shared_transfers_first(w):
     assert goal(result, tagged).pace == D(1_600)           # 8,000 / 5: nothing left
 
 
+def test_ac13_one_category_claim_is_taken_once_across_several_balances(w):
+    # Audit finding 3: a 10,000 claim came off each of two accounts in full.
+    checking = _income(w)
+    a = w.account("savings", balance=10_000)
+    b = w.account("savings", balance=10_000)
+    cat = w.category()
+    w.txn(checking, "transfer", 10_000, to=a, category=cat, day=datetime(2026, 8, 1))
+    w.txn(checking, "transfer", 10_000, to=b, category=cat, day=datetime(2026, 8, 1))
+    w.goal(mode="transaction_total", category=cat, target=10_000, due=DUE)
+    both = w.goal(mode="multi_account", accounts=[a, b], target=20_000, due=DUE)
+    assert goal(w.compute(), both).pace == D(2_000)        # current 10,000
+
+
 # --- AC14: fed ----------------------------------------------------------------------------
 
 def _monthly(w, savings, cat, first="balance"):

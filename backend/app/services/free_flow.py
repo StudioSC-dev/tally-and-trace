@@ -578,12 +578,16 @@ def _give_out_current(goals: List[_Goal], own: Dict[int, _Own],
         available = max(count - taken[g.category] - lost[g.category], ZERO)
         g.current = min(available, max(target, ZERO))
         taken[g.category] += g.current
+        # The take is given out once across the places its tagged money may be,
+        # and only where a balance still holds it.
+        rest = g.current
         located = tag_left.get(g.category, {})
         for account_id in sorted(located):
-            k = min(located[account_id], g.current)
+            k = min(located[account_id], rest, balance_left.get(account_id, ZERO))
             if k > ZERO:
                 located[account_id] -= k
-                balance_left[account_id] = max(balance_left.get(account_id, ZERO) - k, ZERO)
+                balance_left[account_id] -= k
+                rest -= k
 
 
 def pace_of(allocation: Allocation, current: Decimal, today: date) -> Tuple[Decimal, bool]:
