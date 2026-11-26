@@ -72,12 +72,12 @@ function GoalFlow({ goal }: { goal: WishlistFreeFlowGoal }) {
         </span>
       )}
       {uncovered !== null && (
-        <StatusText tone="danger" data-testid="ranked-goal-underfunded">
+        <StatusText tone="warn" data-testid="ranked-goal-underfunded">
           Underfunded by {formatCurrency(uncovered, currency)} a month
         </StatusText>
       )}
       {goal.overdue && (
-        <StatusText tone="warn" data-testid="ranked-goal-overdue">
+        <StatusText tone="danger" data-testid="ranked-goal-overdue">
           Overdue
         </StatusText>
       )}
