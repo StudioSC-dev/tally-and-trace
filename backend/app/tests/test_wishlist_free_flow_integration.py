@@ -222,7 +222,9 @@ def test_ac5_paid_from_own_savings_on_all_four_surfaces(sw_client, standard):
     note = "Paid from a savings account, so it is not estimated"
     assert (planned["projection_status"], planned["estimated_purchase_date"],
             planned["cumulative_months"], planned["note"]) == ("paid_from_savings", None, 0, note)
-    assert (planned["net_flow_after"], planned["from_saving"]) == (None, None)
+    # AC8 still holds ("each critical item whose row is ``ok``, dated or not"), by hand:
+    # 20,000 - 50,000; 50,000 - ceil(50,000 / 20,000) * 15,000.
+    assert (planned["net_flow_after"], planned["from_saving"]) == (-30_000.0, 5_000.0)
     assert (readiness["estimated_date"], readiness["affordable_now"], readiness["savings_rate"],
             readiness["months_needed"]) == (None, False, 0.0, 9999)
     check = outlook["disposable_check"]

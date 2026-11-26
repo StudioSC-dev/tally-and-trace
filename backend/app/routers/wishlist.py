@@ -205,13 +205,13 @@ def _queue(items: List[WishlistItem], projections: Dict[int, projection_svc.Proj
     return out
 
 
-def _critical_figures(item, p: projection_svc.Projection, cost: Decimal) -> dict:
+def _critical_figures(item, row: Optional[free_flow.FreeFlowRow], cost: Decimal) -> dict:
     """``net_flow_after`` and ``from_saving`` for a critical item whose currency
-    row is ``ok`` (and that is not paid from savings), on its own, dated or not;
+    row is ``ok``, on its own, dated or not, paid from savings included (AC8);
     empty otherwise. The figures of several critical items do not add up."""
-    if not projection_svc.is_critical(item) or p.row is None:
+    if not projection_svc.is_critical(item) or row is None or row.status != free_flow.OK:
         return {}
-    net, free = p.row.net_flow, p.row.free_flow
+    net, free = row.net_flow, row.free_flow
     from_saving = None
     if net > 0:
         from_saving = max(cost - projection_svc.months_for(cost, net) * free, Decimal("0"))
@@ -301,7 +301,8 @@ def get_wishlist_plan(
             projection_status=p.status,
             projection_note=p.note,
             queue_note=q["queue_note"],
-            **_critical_figures(item, p, costs[item.id]),
+            **_critical_figures(item, flow.row(getattr(item.currency, "value", item.currency)),
+                                costs[item.id]),
         ))
 
     default = flow.row(ctx.default_currency)
