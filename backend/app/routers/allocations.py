@@ -230,6 +230,8 @@ def apply_allocation_update(db: Session, user: User, allocation: Allocation,
     update_data = dict(update_data)
     if "currency" in update_data and update_data["currency"] is None:
         update_data.pop("currency")  # a null currency is no change, never a null column
+    if "is_active" in update_data and update_data["is_active"] is None:
+        update_data.pop("is_active")  # a null is_active is no change, never a null column
     if {"allocation_type", "configuration", "account_id"} & update_data.keys():
         # The account each mode needs (STU-777), judged on the allocation as edited.
         allocation_type = update_data.get("allocation_type", allocation.allocation_type)

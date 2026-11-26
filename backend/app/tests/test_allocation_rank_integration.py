@@ -202,6 +202,20 @@ def test_an_edit_that_changes_neither_flag_keeps_the_rank(sw_client, sw_people):
     assert _order(sw_client, me) == [("A", 1), ("B2", 2), ("C", 3)]
 
 
+def test_a_null_is_active_is_no_change(sw_client, sw_people):
+    me = sw_people()
+    bank = _bank(sw_client, me)
+    a = _goal(sw_client, me, bank, "A")
+    _goal(sw_client, me, bank, "B")
+    before = _order(sw_client, me)
+
+    updated = _put(sw_client, me, f"/allocations/{a['id']}", {"is_active": None})
+    assert updated["is_active"] is True and updated["rank"] == 1
+    assert _order(sw_client, me) == before == [("A", 1), ("B", 2)]
+    r = sw_client.get(f"{API}/allocations/", params={"ranked": "false"}, headers=me["headers"])
+    assert r.status_code == 200, r.text
+
+
 def test_soft_delete_clears_the_rank_and_closes_the_gap(sw_client, sw_people):
     me = sw_people()
     bank = _bank(sw_client, me)
