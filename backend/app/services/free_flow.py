@@ -86,6 +86,15 @@ LIMITATIONS = (
     "goal is edited.",
     "Saving recorded as a debit in a savings category is counted as spending, and saving "
     "toward a goal-type goal is never matched to it, so both are reserved cautiously.",
+    "When two goals track the same savings category but were created on different days, "
+    "money tagged before the later goal existed may be counted by both that goal and a balance "
+    "goal on the account it was paid into.",
+    "A transfer between your savings accounts is treated as possibly carrying "
+    "category-tagged money even when it happened before the tagged deposit, so a balance goal "
+    "on the receiving account may be treated as sharing that money and reserve more than "
+    "needed.",
+    "Any money leaving a savings account is taken from its category-tagged money first, even "
+    "untagged money, so a goal tracking that category may reserve more than it needs.",
 )
 
 

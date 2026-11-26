@@ -1071,6 +1071,12 @@ def test_ac20_the_limitations_list_the_relabelled_account_cases_as_not_detected(
     assert len(relabel) == 1
     assert "re-stamped" in relabel[0] and "no rows" in relabel[0]
     assert "neither is detected" in relabel[0]
+    # Audit findings 2 and 4, and the cautious cost of the finding 1 bound.
+    assert any("created on different days" in t and "counted by both" in t
+               for t in LIMITATIONS)
+    assert any("before the tagged deposit" in t and "reserve more than needed" in t
+               for t in LIMITATIONS)
+    assert any("taken from its category-tagged money first" in t for t in LIMITATIONS)
 
     # A savings account relabelled by hand, with no rows in the window, is not detected.
     _income(w)
