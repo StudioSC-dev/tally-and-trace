@@ -129,6 +129,48 @@ class WishlistPlanResponse(BaseModel):
     installments: List[WishlistPlanInstallment] = []
 
 
+FreeFlowStatus = Literal["not_estimated", "incomplete", "no_projection", "ok"]
+
+
+class WishlistFreeFlowRow(BaseModel):
+    """One currency's monthly free flow (STU-788). A figure the status leaves out is null."""
+    currency: str
+    status: FreeFlowStatus
+    sample_months: int
+    income: Optional[float] = None
+    spending: Optional[float] = None
+    debt_paid: Optional[float] = None
+    net_flow: Optional[float] = None
+    saved: Optional[float] = None
+    goal_top_up: Optional[float] = None
+    reserved: Optional[float] = None
+    free_flow: Optional[float] = None
+    shortfall: Optional[float] = None
+
+
+class WishlistFreeFlowGoal(BaseModel):
+    """One of the caller's goals that can reserve, in rank order (STU-788). The
+    figures are null when the caller is not estimated or crosses currencies;
+    ``underfunded`` is set only in a currency whose row is ``ok``."""
+    allocation_id: int
+    rank: Optional[int] = None
+    currency: str
+    pace: Optional[float] = None
+    fed: Optional[float] = None
+    top_up: Optional[float] = None
+    underfunded: Optional[float] = None
+    unreserved: bool = False
+    overdue: bool = False
+
+
+class WishlistFreeFlow(BaseModel):
+    """``GET /wishlist/free-flow``: per-currency rows, the goals, and the known
+    limitations the "based on your last N full months" note lists."""
+    rows: List[WishlistFreeFlowRow]
+    goals: List[WishlistFreeFlowGoal]
+    limitations: List[str] = []
+
+
 CheckStatus = Literal["fits", "over", "unknown"]
 
 
