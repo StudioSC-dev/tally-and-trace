@@ -1,4 +1,5 @@
 import math
+from dataclasses import asdict
 from datetime import datetime, time, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Dict, List, Optional
@@ -20,6 +21,7 @@ from app.models.user import User
 from app.models.wishlist_item import WishlistItem, WishlistPaymentPlan
 from app.schemas.wishlist import (
     months_rule,
+    WishlistFreeFlow,
     WishlistItemCreate,
     WishlistItemResponse,
     WishlistItemUpdate,
@@ -32,6 +34,7 @@ from app.schemas.wishlist import (
 from app.routers.budget_entries import add_budget_entry
 from app.schemas.budget_entry import BudgetEntryCreate
 from app.services import forecast as forecast_svc
+from app.services import free_flow
 from app.services import wishlist_outlook
 from app.services.installment_split import TOO_SMALL_MESSAGE, try_installment_split
 from app.services.fx import FxRates, convert
@@ -239,6 +242,21 @@ def get_wishlist_plan(
         savings_rate=savings_rate,
         items=plan,
         installments=installments,
+    )
+
+
+@router.get("/free-flow", response_model=WishlistFreeFlow)
+def get_free_flow(
+    ctx: RequestContext = Depends(request_context),
+):
+    """The caller's monthly free flow per currency, from their posted
+    transactions and savings goals (STU-788, ``services/free_flow.py``).
+    Registered before ``/{item_id}`` so the path is not read as an id."""
+    result = free_flow.compute(ctx)
+    return WishlistFreeFlow(
+        rows=[asdict(r) for r in result.rows],
+        goals=[asdict(g) for g in result.goals],
+        limitations=list(result.limitations),
     )
 
 
