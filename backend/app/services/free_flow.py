@@ -557,20 +557,26 @@ def _give_out_current(goals: List[_Goal], own: Dict[int, _Own],
             continue
         if g.kind == BALANCE:
             need = max(target, ZERO)
-            for account_id in g.accounts:
-                take = min(balance_left.get(account_id, ZERO), need)
-                if take <= ZERO:
-                    continue
-                balance_left[account_id] -= take
-                need -= take
-                g.current += take
-                rest = take
-                for category in sorted(tag_left):
-                    k = min(tag_left[category].get(account_id, ZERO), rest)
-                    if k > ZERO:
-                        tag_left[category][account_id] -= k
-                        lost[category] += k
-                        rest -= k
+            # Two passes: the shared (tagged) money on every tracked account
+            # first, whatever the list order, then the rest.
+            for shared_only in (True, False):
+                for account_id in g.accounts:
+                    take = min(balance_left.get(account_id, ZERO), need)
+                    if shared_only:
+                        take = min(take, sum((t.get(account_id, ZERO)
+                                              for t in tag_left.values()), ZERO))
+                    if take <= ZERO:
+                        continue
+                    balance_left[account_id] -= take
+                    need -= take
+                    g.current += take
+                    rest = take
+                    for category in sorted(tag_left):
+                        k = min(tag_left[category].get(account_id, ZERO), rest)
+                        if k > ZERO:
+                            tag_left[category][account_id] -= k
+                            lost[category] += k
+                            rest -= k
             continue
         if g.category is None:
             continue

@@ -749,6 +749,21 @@ def test_ac13_one_category_claim_is_taken_once_across_several_balances(w):
     assert goal(w.compute(), both).pace == D(2_000)        # current 10,000
 
 
+@pytest.mark.parametrize("listed", ["untagged_first", "tagged_first"])
+def test_ac13_a_higher_goal_takes_shared_money_first_whatever_its_account_order(w, listed):
+    # Audit finding 5: listing the untagged account first let the higher goal skip
+    # the shared deposit.
+    checking = _income(w)
+    untagged = w.account("savings", balance=10_000)
+    tagged_into = w.account("savings", balance=10_000)
+    cat = w.category()
+    w.txn(checking, "transfer", 10_000, to=tagged_into, category=cat, day=datetime(2026, 8, 1))
+    ids = [untagged, tagged_into] if listed == "untagged_first" else [tagged_into, untagged]
+    w.goal(mode="multi_account", accounts=ids, target=10_000, due=DUE)
+    tagged = w.goal(mode="transaction_total", category=cat, target=10_000, due=DUE)
+    assert goal(w.compute(), tagged).pace == D(2_000)      # current 0
+
+
 # --- AC14: fed ----------------------------------------------------------------------------
 
 def _monthly(w, savings, cat, first="balance"):
