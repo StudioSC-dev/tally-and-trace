@@ -882,6 +882,35 @@ def test_ac14_a_tagged_deposit_that_left_its_account_feeds_nothing(w, left_to):
     assert goal(result, g).fed == D(0)
 
 
+@pytest.mark.parametrize("left_to", ["pool", "savings"])
+def test_ac14_a_tagged_deposit_that_left_is_not_revived_by_an_untagged_one(w, left_to):
+    # Audit finding 1: an untagged replacement in the same account does not back the tag.
+    checking = _income(w)
+    s, other = w.account("savings"), w.account("savings")
+    cat = w.category()
+    w.txn(checking, "transfer", 10_000, to=s, category=cat)
+    w.txn(s, "transfer", 10_000, to=checking if left_to == "pool" else other)
+    w.txn(checking, "transfer", 10_000, to=s)                       # untagged replacement
+    g = w.goal(mode="transaction_total", category=cat, monthly=10_000)
+    got = goal(w.compute(), g)
+    assert (got.fed, got.top_up) == (D(0), D(10_000))
+
+
+def test_ac14_an_untagged_withdrawal_uses_up_tagged_money_cautiously(w):
+    # Deliberate: totals carry no order or tag on the way out, so any outflow from an
+    # account is taken from its tagged money first. Here 5,000 untagged left, yet only
+    # 5,000 of the 10,000 tag feeds the goal; the goal reserves more, never less.
+    checking = _income(w)
+    s = w.account("savings")
+    cat = w.category()
+    w.txn(checking, "transfer", 10_000, to=s, category=cat)
+    w.txn(checking, "transfer", 5_000, to=s)
+    w.txn(s, "transfer", 5_000, to=checking)
+    g = w.goal(mode="transaction_total", category=cat, monthly=10_000)
+    got = goal(w.compute(), g)
+    assert (got.fed, got.top_up) == (D(5_000), D(5_000))
+
+
 def test_ac14_salary_credited_to_a_checking_account_a_goal_tracks_is_not_fed(w):
     checking = _income(w)
     g = w.goal(mode="target_balance", account=checking, monthly=1_000)

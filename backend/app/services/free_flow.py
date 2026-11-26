@@ -631,11 +631,24 @@ def _feed(goals: List[_Goal], own: Dict[int, _Own], classified: _Classified,
     account, its own net Pool-to-Savings money (rows 6 - 7 - savings_spent -
     row 13 out); per currency, that currency's ``saved``. A balance goal takes
     an account's tagged money first, as for ``current``.
+
+    An account's tagged money is also capped at what can still be in it: its
+    tagged deposits less all of its outflows (row 7, savings_spent, row 13 out).
+    Totals carry no order, so an untagged withdrawal uses up tagged money too;
+    that errs cautious.
     """
     n = Decimal(months)
     cap = {i: f.net() / n for i, f in classified.savings.items()}
     saved_left = dict(saved)
-    tagged = {c: {i: v / n for i, v in by_account.items()}
+    tagged_total: Dict[int, Decimal] = defaultdict(lambda: ZERO)
+    for by_account in classified.tagged_in.values():
+        for i, v in by_account.items():
+            tagged_total[i] += v
+    kept = {}
+    for i, total in tagged_total.items():
+        f = classified.savings[i]
+        kept[i] = max(total - f.pool_out - f.spent - f.to_savings, ZERO)
+    tagged = {c: {i: min(v, kept[i]) / n for i, v in by_account.items()}
               for c, by_account in classified.tagged_in.items()}
     for g in goals:
         g.fed = ZERO
