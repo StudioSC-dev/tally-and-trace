@@ -41,6 +41,7 @@ from app.models.allocation import Allocation, AllocationType
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.allocation import TRANSACTION_TOTAL, goal_mode
 from app.services.allocation_rank import RANKED_TYPES
+from app.services.fx import FxRates
 from app.services.savings_progress import _account_ids, _code, _savings_category_id, since
 
 ZERO = Decimal("0")
@@ -382,6 +383,7 @@ class _Goal:
     currency: str
     kind: str
     accounts: List[int] = field(default_factory=list)   # own Savings accounts it counts
+    inputs: List[int] = field(default_factory=list)     # every own account it names
     category: Optional[int] = None
     counted: Dict[str, Decimal] = field(default_factory=dict)   # category goals, by currency
     tagged: Dict[int, Decimal] = field(default_factory=dict)    # into own Savings, by account
@@ -426,8 +428,9 @@ def _goals(db: Session, uid: int, own: Dict[int, _Own]) -> List[_Goal]:
         if mode == TRANSACTION_TOTAL:
             goals.append(_Goal(a, currency, CATEGORY, category=_savings_category_id(a)))
         else:
-            ids = [i for i in _account_ids(a, mode) if i in own and own[i].cls == SAVINGS]
-            goals.append(_Goal(a, currency, BALANCE, accounts=ids))
+            named = [i for i in _account_ids(a, mode) if i in own]
+            goals.append(_Goal(a, currency, BALANCE, inputs=named,
+                               accounts=[i for i in named if own[i].cls == SAVINGS]))
     return goals
 
 
@@ -717,8 +720,15 @@ def _compute(ctx) -> FreeFlow:
     currencies |= classified.currencies
 
     cross = classified.cross
+    fx = ctx.fx if ctx.fx is not None else FxRates.offline(db)
     for g in goals:   # a goal counting anything in another currency
         if g.kind == BALANCE and any(own[i].currency != g.currency for i in g.accounts):
+            cross = True
+        # Its progress has a missing rate: an own account it names (of any class,
+        # though only Savings ones are counted here) whose currency has no rate.
+        if g.kind == BALANCE and any(
+                own[i].currency != g.currency and fx.rate(own[i].currency, g.currency) is None
+                for i in g.inputs):
             cross = True
         if g.kind == CATEGORY and any(c != g.currency for c in g.counted):
             cross = True

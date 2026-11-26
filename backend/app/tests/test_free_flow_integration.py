@@ -504,6 +504,24 @@ def test_ac8_a_goal_with_a_missing_rate(w):
     _assert_incomplete_everywhere(w.compute())
 
 
+def test_ac8_a_missing_rate_is_a_trigger_on_its_own(w):
+    # Audit finding 7: a PHP goal naming an own EUR checking account (no EUR rate)
+    # counts nothing there, but its progress has a missing rate.
+    _two_incomes(w)
+    w.goal(mode="target_balance", account=w.account("checking", "EUR", balance=500),
+           monthly=100)
+    _assert_incomplete_everywhere(w.compute())
+
+
+def test_ac8_another_currency_with_a_rate_outside_savings_does_not_trigger(w):
+    _two_incomes(w)
+    g = w.goal(mode="target_balance", account=w.account("checking", "USD", balance=500),
+               monthly=100)
+    result = w.compute()
+    assert statuses(result) == {"PHP": "ok", "USD": "ok"}
+    assert goal(result, g).top_up == D(100)
+
+
 def test_ac8_a_goal_with_a_top_up_in_a_currency_with_no_income(w):
     _two_incomes(w)
     g = w.goal(kind="goal", monthly=100, currency="EUR")
