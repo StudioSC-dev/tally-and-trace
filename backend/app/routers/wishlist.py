@@ -163,11 +163,13 @@ def _queue(items: List[WishlistItem], projections: Dict[int, projection_svc.Proj
     if not queued:
         return {}
     row = projections[queued[0].id].row
+    # ``created_at`` can be null: such an item queues last in its group. Two nulls
+    # compare equal, so the tuple goes on to the id and never compares None.
     critical = sorted((i for i in queued if projection_svc.is_critical(i)),
-                      key=lambda i: (i.created_at, i.id))
+                      key=lambda i: (i.created_at is None, i.created_at, i.id))
     wants = sorted((i for i in queued if not projection_svc.is_critical(i)),
                    key=lambda i: (_WANT_ORDER[getattr(i.priority, "value", i.priority)],
-                                  i.created_at, i.id))
+                                  i.created_at is None, i.created_at, i.id))
     out: Dict[int, dict] = {}
     total, block, critical_undated = Decimal("0"), 0, False
     for item in critical:

@@ -283,6 +283,25 @@ def test_ac6_ac8_queue_critical_block_added_once_and_hand_worked_figures(sw_clie
     assert (php["status"], php["net_flow"], php["free_flow"]) == ("ok", NET, FREE)
 
 
+def test_ac6_a_null_created_at_queues_last_and_never_raises(sw_client, sw_db, standard):
+    from app.models.wishlist_item import WishlistItem
+
+    me = standard["me"]
+    # ``wishlist_items.created_at`` allows null (it has only a server default).
+    undated_need = item(sw_client, me, "Old need", 20_000, "critical")
+    item(sw_client, me, "New need", 20_000, "critical")
+    undated_want = item(sw_client, me, "Old want", 15_000, "high")
+    item(sw_client, me, "New want", 15_000, "high")
+    for item_id in (undated_need, undated_want):
+        sw_db.get(WishlistItem, item_id).created_at = None
+    sw_db.commit()
+    _, items = plan(sw_client, me)
+    # Nulls queue last in their group: critical 1 then 2; block 2; wants 2 + 1, then 2 + 2.
+    assert [(name, items[name]["cumulative_months"])
+            for name in ("New need", "Old need", "New want", "Old want")] == [
+        ("New need", 1), ("Old need", 2), ("New want", 3), ("Old want", 4)]
+
+
 def test_ac6_critical_block_is_zero_in_a_currency_with_no_critical_item(
         sw_client, sw_db, standard):
     me = standard["me"]
