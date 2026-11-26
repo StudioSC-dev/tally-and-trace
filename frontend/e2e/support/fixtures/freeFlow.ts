@@ -200,3 +200,37 @@ export const PHP_ONLY_UNRESERVED: WishlistFreeFlow = {
   ],
   limitations: [],
 }
+
+/** The id of the goal the create scenario adds, "Wedding fund", a peso goal that joins at the bottom. */
+export const NEW_GOAL_ID = 90
+
+/** Each goal's monthly pace, for `flowForGoals`. */
+const GOAL_PACES: Record<number, number> = {
+  [GOAL_IDS.emergency]: 10000,
+  [GOAL_IDS.japan]: 800,
+  [GOAL_IDS.laptop]: 6000,
+  [GOAL_IDS.gifts]: 2000,
+  [GOAL_IDS.car]: 2500,
+  [NEW_GOAL_ID]: 1500,
+}
+
+/** The pesos of net flow left for goals after what is already being saved, in `flowForGoals`. */
+const PESOS_FOR_GOALS = 16500
+
+/**
+ * The free flow a stateful fake answers for the goals it currently holds, in rank order: the pesos for goals are given
+ * out top down, so the lowest-ranked peso goal gives way first, as the API's answer does. It is the fake's stand-in
+ * for the API (the page never works this out); dollar goals are always covered.
+ */
+export const flowForGoals = (held: { id: number; currency: string }[]): WishlistFreeFlow => {
+  let left = PESOS_FOR_GOALS
+  const goals = held.map(({ id, currency }, index) => {
+    const pace = GOAL_PACES[id] ?? 0
+    if (currency !== 'PHP') return goal(id, index + 1, currency, { pace, top_up: pace })
+    const covered = Math.min(left, pace)
+    left -= covered
+    return goal(id, index + 1, currency, { pace, top_up: pace, underfunded: pace - covered })
+  })
+  const shortfall = goals.reduce((sum, g) => sum + (g.currency === 'PHP' ? (g.underfunded ?? 0) : 0), 0)
+  return okFlow(goals, shortfall)
+}

@@ -4,10 +4,11 @@ import type { Allocation, WishlistFreeFlow } from '@tally-trace/shared'
 import { household, householdViewRoutes, householdWishlistRoutes, mockHousehold, rankedGoals } from './support/fixtures/household'
 import type { HouseholdData } from './support/fixtures/household'
 import {
-  AFTER_EMERGENCY_TARGET_CUT,
   COVERED,
   CROSS_CURRENCY,
+  flowForGoals,
   GOAL_IDS,
+  NEW_GOAL_ID,
   NOT_ESTIMATED,
   PHP_ONLY_UNRESERVED,
   SHORT_BY_4000,
@@ -190,21 +191,78 @@ test.describe('goal pace and underfunded flag (STU-790)', () => {
     await shot(page, 'after-reorder')
   })
 
-  test('AC5: an allocation write reads the free flow again', async ({ page }) => {
-    const japan = GOALS.find((g) => g.id === GOAL_IDS.japan)
-    if (!japan) throw new Error('no Japan trip goal')
-    const api = await open(
+  /**
+   * The Savings tab with a stateful fake of the ranked goals and the free flow: a pause, delete or create changes the
+   * goals the fake holds, and the free flow it answers next is worked out from them (`flowForGoals`).
+   */
+  async function openWithWrites(page: Page): Promise<ApiMock> {
+    const held: Allocation[] = GOALS.map((g) => ({ ...g }))
+    const live = (method: ApiRoute['method'], path: string, respond: () => unknown, status = 200): ApiRoute => ({ method, path, status, body: {}, respond })
+    const without = (id: number): Allocation | undefined => {
+      const index = held.findIndex((g) => g.id === id)
+      return index < 0 ? undefined : held.splice(index, 1)[0]
+    }
+    const created: Allocation = { ...GOALS[0], id: NEW_GOAL_ID, name: 'Wedding fund', currency: 'PHP', is_active: true }
+    return open(
       page,
-      sequenceRoute<WishlistFreeFlow>('GET', FLOW_PATH, [{ body: SHORT_BY_4000_CAR_UP }, { body: AFTER_EMERGENCY_TARGET_CUT }]),
-      apiRoute<Allocation>('PUT', `/allocations/${GOAL_IDS.japan}`, { ...japan, is_active: false }),
+      live('GET', '/allocations/ranked', () => ({ items: held.map((g, index) => ({ ...g, rank: index + 1 })) })),
+      live('GET', FLOW_PATH, () => flowForGoals(held)),
+      live('PUT', `/allocations/${GOAL_IDS.gifts}`, () => ({ ...without(GOAL_IDS.gifts), is_active: false })),
+      live('DELETE', `/allocations/${GOAL_IDS.laptop}`, () => {
+        without(GOAL_IDS.laptop)
+        return { message: 'Allocation deleted successfully' }
+      }),
+      live('POST', '/allocations/', () => {
+        held.push(created)
+        return created
+      }, 201),
     )
-    await shows(paceOf(page, EMERGENCY), 'Needs ₱10,000.00 a month')
+  }
+
+  test('AC5: pausing a goal reads the free flow again, and the paused goal leaves it', async ({ page }) => {
+    const api = await openWithWrites(page)
+    await shows(flagOf(page, GIFTS), 'Underfunded by ₱1,500.00 a month')
+    await shows(flagOf(page, CAR), 'Underfunded by ₱2,500.00 a month')
     await expect.poll(() => api.count('GET', FLOW_PATH)).toBe(1)
-    await row(page, JAPAN).locator('article[role="button"]').click()
+    await row(page, GIFTS).locator('article[role="button"]').click()
     await page.getByRole('button', { name: 'Pause allocation' }).click()
-    await expect.poll(() => api.count('GET', FLOW_PATH)).toBe(2)
-    await shows(paceOf(page, EMERGENCY), 'Needs ₱9,000.00 a month')
-    await shows(flagOf(page, CAR), 'Underfunded by ₱1,000.00 a month')
-    expect(api.bodies('PUT', `/allocations/${GOAL_IDS.japan}`)).toHaveLength(1)
+    await expect.poll(() => api.count('GET', FLOW_PATH)).toBeGreaterThanOrEqual(2)
+    // The gifts no longer hold back the car: it now gets the 500 pesos left over.
+    await expect(row(page, GIFTS)).toHaveCount(0)
+    await shows(flagOf(page, CAR), 'Underfunded by ₱2,000.00 a month')
+    await expect(flags(page)).toHaveCount(1)
+    expect(api.bodies('PUT', `/allocations/${GOAL_IDS.gifts}`)).toHaveLength(1)
+  })
+
+  test('AC5: deleting a goal reads the free flow again, and the goals below it are covered', async ({ page }) => {
+    const api = await openWithWrites(page)
+    await expect(flags(page)).toHaveCount(2)
+    await expect.poll(() => api.count('GET', FLOW_PATH)).toBe(1)
+    await row(page, LAPTOP).locator('article[role="button"]').click()
+    await page.getByRole('button', { name: 'Delete allocation' }).click()
+    await page.getByTestId('confirm-dialog-confirm').click()
+    await expect.poll(() => api.count('GET', FLOW_PATH)).toBeGreaterThanOrEqual(2)
+    await expect(row(page, LAPTOP)).toHaveCount(0)
+    // Without the laptop's 6,000, the gifts and the car fit.
+    await expect(flags(page)).toHaveCount(0)
+    await shows(paceOf(page, CAR), 'Needs ₱2,500.00 a month')
+  })
+
+  test('AC5: creating a goal reads the free flow again, and the new goal gets its pace at the bottom', async ({ page }) => {
+    const api = await openWithWrites(page)
+    await expect.poll(() => api.count('GET', FLOW_PATH)).toBe(1)
+    await page.getByRole('button', { name: 'Add allocation' }).click()
+    const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Create savings tracker' }) })
+    await form.locator('[data-field="name"]').fill('Wedding fund')
+    const savingsAccount = household.accounts.find((a) => a.account_type === 'savings' && a.my_role === 'owner')
+    if (!savingsAccount) throw new Error('the household has no savings account of its own')
+    await form.locator('[data-field="account_id"]').selectOption(String(savingsAccount.id))
+    await form.getByRole('button', { name: 'Create savings tracker' }).click()
+    await expect.poll(() => api.count('GET', FLOW_PATH)).toBeGreaterThanOrEqual(2)
+    await expect(page.getByTestId('ranked-goal')).toHaveCount(ALL.length + 1)
+    // Only the new read knows the new goal: its pace and the shortfall it adds.
+    await shows(paceOf(page, 'Wedding fund'), 'Needs ₱1,500.00 a month')
+    await shows(flagOf(page, 'Wedding fund'), 'Underfunded by ₱1,500.00 a month')
+    await expect(flags(page)).toHaveCount(3)
   })
 })
