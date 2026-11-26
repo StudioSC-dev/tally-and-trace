@@ -13,10 +13,12 @@ import { Icon } from './Icon'
  */
 const REORDER_KEY = 'ranked-allocations-reorder'
 
-/** A drag in progress: the goal held, where it started and the place it would drop into. */
+/**
+ * A drag in progress: the goal held and the place it would drop into. The goal is held by its id, never by the place
+ * it started from: the ranked list can refresh mid-drag, and its places move.
+ */
 interface Drag {
   id: number
-  from: number
   over: number
 }
 
@@ -90,12 +92,14 @@ export function RankedGoals({ renderCard }: { renderCard: (goal: Allocation) => 
   const startDrag = (event: PointerEvent<HTMLElement>, index: number) => {
     if (!goals || isSaving || event.button !== 0) return
     event.currentTarget.setPointerCapture(event.pointerId)
-    updateDrag({ id: goals[index].id, from: index, over: index })
+    updateDrag({ id: goals[index].id, over: index })
   }
   const moveDrag = (event: PointerEvent<HTMLElement>) => {
     const current = dragRef.current
-    if (!current) return
-    const over = overAt(event.clientY, current.from)
+    if (!current || !goals) return
+    const from = goals.findIndex((goal) => goal.id === current.id)
+    if (from < 0) return
+    const over = overAt(event.clientY, from)
     if (over !== current.over) updateDrag({ ...current, over })
   }
   const endDrag = (event: PointerEvent<HTMLElement>) => {
@@ -103,7 +107,9 @@ export function RankedGoals({ renderCard }: { renderCard: (goal: Allocation) => 
     if (!current) return
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
     updateDrag(null)
-    void send(current.from, current.over)
+    // Where the goal is now, and where the pointer is now: the list may have changed since the pick-up.
+    const from = goals?.findIndex((goal) => goal.id === current.id) ?? -1
+    if (from >= 0) void send(from, overAt(event.clientY, from))
   }
   const cancelDrag = () => updateDrag(null)
   // Escape drops a drag without moving anything.
@@ -143,7 +149,7 @@ export function RankedGoals({ renderCard }: { renderCard: (goal: Allocation) => 
         <ul ref={listRef} className="grid grid-cols-1 gap-3" data-testid="ranked-goals-list" aria-label="Savings goals, top first">
           {goals.map((goal, index) => {
             const isHeld = drag?.id === goal.id
-            const isTarget = drag !== null && drag.over === index && drag.from !== index
+            const isTarget = drag !== null && drag.over === index && drag.id !== goal.id
             return (
               <li
                 key={goal.id}

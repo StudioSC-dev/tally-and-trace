@@ -306,6 +306,32 @@ test.describe('ranked savings goals (STU-787)', () => {
     expect(fake.puts).toHaveLength(1)
   })
 
+  test('AC3: a drag keeps hold of its goal when the ranked list refreshes under it', async ({ page }) => {
+    const fake = await open(page)
+    // Pausing Emergency fund drops it from the ranked list; the refresh is held while Japan trip is picked up.
+    const refresh = fake.holdNextRankedGet()
+    await rowOf(page, EMERGENCY.name).locator('article[role="button"]').click()
+    await page.getByRole('button', { name: 'Pause allocation' }).click()
+    await expect.poll(() => fake.rankedGets()).toBeGreaterThan(1)
+    await page.getByRole('button', { name: 'Close allocation actions modal' }).click()
+    await expect(rows(page)).toHaveCount(START.length)
+    const start = await handleOf(page, JAPAN.name).boundingBox()
+    if (!start) throw new Error('no handle')
+    const x = start.x + start.width / 2
+    await page.mouse.move(x, start.y + start.height / 2)
+    await page.mouse.down()
+    refresh.release()
+    await expect(rows(page)).toHaveCount(START.length - 1)
+    // Japan trip is first now. Drop it on the lower half of the second goal.
+    const target = await rowOf(page, LAPTOP.name).boundingBox()
+    if (!target) throw new Error('no target')
+    await page.mouse.move(x, target.y + target.height - 4, { steps: 10 })
+    await page.mouse.up()
+    await expect.poll(() => fake.puts.length).toBe(1)
+    expect(fake.puts[0]).toEqual({ ids: [LAPTOP.id, JAPAN.id, GIFTS.id, CAR.id] })
+    await expect.poll(() => namesOf(page)).toEqual([LAPTOP.name, JAPAN.name, GIFTS.name, CAR.name])
+  })
+
   test('AC4: a reorder sends the complete ordered list', async ({ page }) => {
     const fake = await open(page)
     await downOf(page, EMERGENCY.name).click()
