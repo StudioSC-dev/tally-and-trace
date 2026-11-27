@@ -393,7 +393,12 @@ export interface Allocation {
    * send `carry_over` instead.
    */
   carry_over_from?: string | null
-  /** Budgets only, the current window: what carries in from the windows before it (0 when carry is off). */
+  /**
+   * Budgets only, the current window: what carries in from the windows before it (0 when carry
+   * is off). A create or update response doesn't replay the carry chain: while carry is on,
+   * there `carry_in`, `available`, `provisional` and `inherited_missing` are null; the list
+   * and detail have them.
+   */
   carry_in?: number | null
   /** Budgets only, the current window: limit plus carry-in; null without a limit. */
   available?: number | null
