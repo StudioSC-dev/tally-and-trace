@@ -617,7 +617,7 @@ test.describe('Recurring sections', () => {
     await pickStatus(page, 'cash', 'Paused')
     await page.getByTestId('tag-filter').selectOption('42')
     await expect(page.getByTestId('tag-filter')).toHaveValue('42')
-    expect(await titles(page, 'subscription')).toEqual(['Netflix 01', 'Netflix 02'])
+    await expect.poll(() => titles(page, 'subscription')).toEqual(['Netflix 01', 'Netflix 02'])
     const cash = section(page, 'cash')
     await expect(cash.getByRole('heading', { name: 'Cash expenses' })).toBeVisible()
     await expect(page.getByTestId('cash-empty')).toContainText('No matching entries in this section')
@@ -628,7 +628,7 @@ test.describe('Recurring sections', () => {
     // With no filter left the tag alone lets the section go.
     await page.getByTestId('tag-filter').selectOption('')
     await expect(page.getByTestId('cash-empty')).toHaveCount(0)
-    expect(await titles(page, 'cash')).toEqual(['Plain rent', 'Old gym'])
+    await expect.poll(() => titles(page, 'cash'), { message: 'the reload without the tag brings the Cash rows back' }).toEqual(['Plain rent', 'Old gym'])
   })
 
   test('preserves existing Recurring entry actions and behavior in the other Allocations tabs', async ({ page }) => {
