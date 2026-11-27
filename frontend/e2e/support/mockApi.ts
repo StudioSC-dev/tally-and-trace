@@ -1,6 +1,7 @@
 import { expect } from '@playwright/test'
 import type { Page, Route } from '@playwright/test'
 import type { TokenResponse, User } from '@tally-trace/shared'
+import { NO_FREE_FLOW } from './fixtures/freeFlow'
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
@@ -149,10 +150,15 @@ async function answer(state: MockState, route: Route): Promise<void> {
   })
 }
 
+/**
+ * Every page that shows the ranked Savings goals section reads `GET /wishlist/free-flow` (STU-790). It is answered with
+ * `NO_FREE_FLOW` unless a spec registers its own route, which replaces this one.
+ */
 async function stateFor(page: Page): Promise<MockState> {
   const existing = states.get(page)
   if (existing) return existing
   const state: MockState = { routes: new Map(), counts: new Map(), seen: [] }
+  state.routes.set(keyOf('GET', '/wishlist/free-flow'), { method: 'GET', path: '/wishlist/free-flow', body: NO_FREE_FLOW })
   states.set(page, state)
   await page.route('**/api/v1/**', (route) => answer(state, route))
   return state
