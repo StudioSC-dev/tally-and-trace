@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from '@tanstack/react-router'
 import { formatEntryDate, transactionDate, transactionDescription } from '@tally-trace/shared'
 import type { Allocation, BudgetPeriod, BudgetTransaction } from '@tally-trace/shared'
@@ -17,6 +19,9 @@ import { StatusText } from './StatusText'
 /** Counted transactions per page. */
 export const COUNTED_PAGE_SIZE = 10
 
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
 interface Props {
   allocation: Allocation
   /**
@@ -25,6 +30,8 @@ interface Props {
    */
   refresh: (id: number) => Promise<Allocation>
   onClose: () => void
+  /** The element focus goes back to on close (the envelope's card); the element focused at open when it is gone. */
+  restoreFocus?: () => HTMLElement | null
 }
 
 /** A window as dates: its first day to its last (the stored end is exclusive), read from the UTC components. */
@@ -37,15 +44,38 @@ const windowLabel = (period: Pick<BudgetPeriod, 'start' | 'end'>): string => {
 /**
  * One envelope's history (STU-798), opened from its snapshot dialog: the last 12 windows, newest first, and the
  * transactions the selected window counts, 10 to a page. The envelope is refetched first; the two history reads
- * wait for it. A failed read shows its error in its own section, never the figures it replaces.
+ * wait for it, and the dialog is drawn from the copy it returns (a rename or a currency change shows at once). A
+ * failed read shows its error in its own section, never the figures it replaces.
+ *
+ * Rendered through a portal; while it is open the app root is `inert`, focus is held inside, Escape closes it, and focus
+ * returns to the envelope's card.
  */
-export function BudgetEnvelopeDetail({ allocation, refresh, onClose }: Props) {
-  const { id, currency } = allocation
-  const money = (amount: number) => formatSigned(amount, currency)
+export function BudgetEnvelopeDetail({ allocation, refresh, onClose, restoreFocus }: Props) {
+  const { id } = allocation
+  const titleId = useId()
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const closeRef = useRef<HTMLButtonElement>(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+  const restoreRef = useRef(restoreFocus)
+  restoreRef.current = restoreFocus
+  // The envelope as the refetch returned it; until then, the copy the dialog was opened with.
+  const [fresh, setFresh] = useState<Allocation | null>(null)
+  const envelope = fresh ?? allocation
+  const money = (amount: number) => formatSigned(amount, envelope.currency)
   const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading')
   const [attempt, setAttempt] = useState(0)
   const [selectedStart, setSelectedStart] = useState<string | null>(null)
-  const [page, setPage] = useState(1)
+  const [page, setPageState] = useState(1)
+  // An answer counts only when it arrived after the dialog opened (periods) or after the window or page was last
+  // changed (rows). A cached answer from an earlier open or an earlier visit is therefore never drawn, not even for the
+  // one render before its refetch starts.
+  const [openedAt] = useState(() => Date.now())
+  const [changedAt, setChangedAt] = useState(openedAt)
+  const setPage = (next: number) => {
+    setChangedAt(Date.now())
+    setPageState(next)
+  }
   const refreshRef = useRef(refresh)
   refreshRef.current = refresh
 
@@ -54,8 +84,10 @@ export function BudgetEnvelopeDetail({ allocation, refresh, onClose }: Props) {
     setPhase('loading')
     refreshRef
       .current(id)
-      .then(() => {
-        if (current) setPhase('ready')
+      .then((envelopeNow) => {
+        if (!current) return
+        setFresh(envelopeNow)
+        setPhase('ready')
       })
       .catch(() => {
         if (current) setPhase('error')
@@ -65,9 +97,52 @@ export function BudgetEnvelopeDetail({ allocation, refresh, onClose }: Props) {
     }
   }, [id, attempt])
 
+  // Focus into the dialog, make the page behind inert, and undo both on close.
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const root = document.getElementById('root')
+    root?.setAttribute('inert', '')
+    closeRef.current?.focus()
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.stopPropagation()
+      onCloseRef.current()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      // Inert off first: an inert element can't take focus back.
+      root?.removeAttribute('inert')
+      const target = restoreRef.current?.() ?? (opener?.isConnected ? opener : null)
+      target?.focus()
+    }
+  }, [])
+
+  const trapTab = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Tab') return
+    const items = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])
+    const first = items[0]
+    const last = items[items.length - 1]
+    if (!first || !last) return
+    const active = document.activeElement
+    if (!dialogRef.current?.contains(active)) {
+      event.preventDefault()
+      first.focus()
+    } else if (event.shiftKey && active === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }, [])
+
   const ready = phase === 'ready'
+  // A cached answer is never drawn while the request for this open is in flight: after a roll it would still name the
+  // old window as current and ask for its transactions.
   const periodsQuery = useGetBudgetPeriodsQuery(id, { skip: !ready, refetchOnMountOrArgChange: true })
-  const periods = ready && !periodsQuery.isError ? periodsQuery.currentData : undefined
+  const periodsFresh = (periodsQuery.fulfilledTimeStamp ?? 0) >= openedAt
+  const periods = ready && !periodsQuery.isError && !periodsQuery.isFetching && periodsFresh ? periodsQuery.currentData : undefined
   const selected: BudgetPeriod | undefined = periods
     ? periods.find((p) => p.start === selectedStart) ?? periods.find((p) => p.is_current) ?? periods[0]
     : undefined
@@ -76,7 +151,8 @@ export function BudgetEnvelopeDetail({ allocation, refresh, onClose }: Props) {
     { id, period_start: selected?.start, limit: COUNTED_PAGE_SIZE, offset: (page - 1) * COUNTED_PAGE_SIZE },
     { skip: !ready || !selected, refetchOnMountOrArgChange: true },
   )
-  const counted = ready && selected && !countedQuery.isError ? countedQuery.currentData : undefined
+  const countedFresh = (countedQuery.fulfilledTimeStamp ?? 0) >= changedAt
+  const counted = ready && selected && !countedQuery.isError && !countedQuery.isFetching && countedFresh ? countedQuery.currentData : undefined
 
   const selectWindow = (start: string) => {
     if (start === selected?.start) return
@@ -109,25 +185,28 @@ export function BudgetEnvelopeDetail({ allocation, refresh, onClose }: Props) {
     )
   }
 
-  return (
+  return createPortal(
     <div className="modal-backdrop fixed inset-0 z-50 overflow-y-auto bg-scrim/60" onClick={onClose}>
       <div className="min-h-full flex items-center justify-center">
         <div
+          ref={dialogRef}
           className="w-full max-w-2xl bg-surface p-6"
           role="dialog"
           aria-modal="true"
-          aria-labelledby="budget-detail-title"
+          aria-labelledby={titleId}
           data-testid="budget-detail"
           onClick={(event) => event.stopPropagation()}
+          onKeyDown={trapTab}
         >
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 id="budget-detail-title" className="text-xl font-semibold text-ink">{allocation.name}</h2>
+              <h2 id={titleId} className="text-xl font-semibold text-ink">{envelope.name}</h2>
               <p className="text-sm text-muted">Budget envelope history</p>
             </div>
             <button
+              ref={closeRef}
               onClick={onClose}
-              className="text-muted hover:text-body transition-colors duration-200"
+              className="tap-target inline-flex items-center justify-center text-muted hover:text-body transition-colors duration-200"
               aria-label="Close envelope history"
             >
               <Icon name="close" />
@@ -210,9 +289,14 @@ export function BudgetEnvelopeDetail({ allocation, refresh, onClose }: Props) {
                     </div>
                   )}
                   {!countedQuery.isError && !counted && <SkeletonRows rows={3} />}
-                  {counted && counted.items.length > 0 && (
+                  {counted && counted.total > 0 && (
                     <>
-                      <ListSheet data-testid="counted-list">{counted.items.map(row)}</ListSheet>
+                      {counted.items.length > 0 ? (
+                        <ListSheet data-testid="counted-list">{counted.items.map(row)}</ListSheet>
+                      ) : (
+                        // The offset passed the last row: the pager below stays, so the way back is not lost.
+                        <p className="text-sm text-muted" data-testid="counted-page-empty">No transactions on this page.</p>
+                      )}
                       <Pager
                         total={counted.total}
                         page={page}
@@ -227,7 +311,7 @@ export function BudgetEnvelopeDetail({ allocation, refresh, onClose }: Props) {
                       </div>
                     </>
                   )}
-                  {counted && counted.items.length === 0 && (
+                  {counted && counted.total === 0 && counted.items.length === 0 && (
                     <>
                       <div data-testid="counted-empty">
                         <EmptyState message="No transactions are counted in this period." />
@@ -244,6 +328,7 @@ export function BudgetEnvelopeDetail({ allocation, refresh, onClose }: Props) {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

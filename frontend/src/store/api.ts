@@ -234,8 +234,9 @@ export interface RankedAllocations {
 }
 
 /** An allocation edit: a date sent as null is cleared, one left out is kept; a budget's `target_amount` sent as null clears its limit. */
-export type AllocationUpdate = Omit<Partial<Allocation>, 'target_date' | 'period_start' | 'period_end' | 'target_amount'> & AllocationCarryOverInput & {
+export type AllocationUpdate = Omit<Partial<Allocation>, 'target_date' | 'period_start' | 'period_end' | 'target_amount' | 'monthly_target'> & AllocationCarryOverInput & {
   target_amount?: number | null
+  monthly_target?: number | null
   target_date?: string | null
   period_start?: string | null
   period_end?: string | null

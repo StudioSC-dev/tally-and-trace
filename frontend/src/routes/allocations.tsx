@@ -63,6 +63,7 @@ import { useDeleteRecurringEntry } from '../hooks/useDeleteRecurringEntry'
 import { useManilaDay } from '../hooks/useManilaDay'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { BudgetFigures } from '../components/BudgetFigures'
+import { budgetLimit } from '../utils/budgetFigures'
 import { BudgetEnvelopeDetail } from '../components/BudgetEnvelopeDetail'
 import { amountClass, formatAmount, formatSigned } from '../utils/amount'
 import { withSelection } from '../utils/selection'
@@ -549,6 +550,11 @@ export function AllocationsPage() {
     return map
   }, [categories])
   // Which accounts a budget counts: its `configuration.account_ids`, or every account when there are none.
+  // Saved accounts the picker no longer lists (archived, or not loaded) still filter the envelope: each one shows as a
+  // chip that can be removed.
+  const inactiveBudgetAccountIds = accountsLoaded
+    ? selectedBudgetAccountIds.filter((id) => !ownAccounts.some((a) => a.id === id))
+    : []
   const budgetAccountLabel = (allocation: Allocation): string => {
     const raw = (allocation.configuration ?? {})['account_ids']
     const ids = Array.isArray(raw) ? raw.map((id) => Number(id)).filter((id) => Number.isFinite(id)) : []
@@ -1225,8 +1231,9 @@ export function AllocationsPage() {
           period_start: editedDate(isBudget, allocationForm.period_start, baseline.period_start),
           period_end: editedDate(isBudget, allocationForm.period_end, baseline.period_end),
         }
-        // An edit that clears a budget's limit sends null, which the API reads as no limit (undefined is left as it is).
-        const limitChange = isBudget && allocationForm.target_amount === undefined ? { target_amount: null } : {}
+        // An edit that clears a budget's limit sends null for both limit fields: the API reads a limit as
+        // target_amount, else monthly_target, so a legacy monthly_target would otherwise stay in force.
+        const limitChange = isBudget && allocationForm.target_amount === undefined ? { target_amount: null, monthly_target: null } : {}
         await updateAllocation({ id: editingAllocation.id, data: { ...fields, ...dateChanges, ...limitChange } }).unwrap()
         setEditingAllocation(null)
       } else {
@@ -1242,7 +1249,10 @@ export function AllocationsPage() {
     } catch (error) {
       console.error('Error saving allocation data:', error)
       // The form stays open with what was typed; the list changes only after a save the API accepted.
-      setFormError(apiErrorMessage(error) || 'Could not save this allocation. Please try again.')
+      // Only a budget shows the refusal; savings and goals keep their behaviour.
+      if (allocationForm.allocation_type === 'budget') {
+        setFormError(apiErrorMessage(error) || 'Could not save this allocation. Please try again.')
+      }
     }
   }
 
@@ -1275,7 +1285,8 @@ export function AllocationsPage() {
       name: allocation.name,
       allocation_type: normalizedType,
       description: allocation.description || '',
-      target_amount: allocation.target_amount,
+      // A budget's limit is read the way the card and the API read it: target_amount, else monthly_target.
+      target_amount: normalizedType === 'budget' ? budgetLimit(allocation) ?? undefined : allocation.target_amount,
       monthly_target: normalizedType === 'savings' ? allocation.monthly_target : undefined,
       target_date: normalizedType === 'savings' ? isoToDateInput(allocation.target_date ?? undefined) : undefined,
       currency: normalizedType === 'savings' ? (allocation.currency as CurrencyCode) : undefined,
@@ -1355,25 +1366,31 @@ export function AllocationsPage() {
     },
     [triggerAllocation]
   )
-  const [snapshotRead, setSnapshotRead] = useState<'loading' | 'ok' | 'error'>('loading')
+  // How the open snapshot's read went, keyed by the budget and attempt it belongs to: a read from an earlier open or
+  // attempt counts as still loading, so Retry never shows the last list copy while its request is pending.
+  const [snapshotResult, setSnapshotResult] = useState<{ key: string; status: 'ok' | 'error' } | null>(null)
   const [snapshotAttempt, setSnapshotAttempt] = useState(0)
   // The budget whose snapshot dialog is open.
   const snapshotBudgetId = isActionModalOpen && actionAllocation?.allocation_type === 'budget' ? actionAllocation.id : null
+  const snapshotKey = `${snapshotBudgetId}:${snapshotAttempt}`
+  const snapshotRead: 'loading' | 'ok' | 'error' = snapshotResult?.key === snapshotKey ? snapshotResult.status : 'loading'
   useEffect(() => {
-    if (snapshotBudgetId === null) return
+    if (snapshotBudgetId === null) {
+      setSnapshotResult(null)
+      return
+    }
     let current = true
-    setSnapshotRead('loading')
     refreshEnvelope(snapshotBudgetId)
       .then(() => {
-        if (current) setSnapshotRead('ok')
+        if (current) setSnapshotResult({ key: snapshotKey, status: 'ok' })
       })
       .catch(() => {
-        if (current) setSnapshotRead('error')
+        if (current) setSnapshotResult({ key: snapshotKey, status: 'error' })
       })
     return () => {
       current = false
     }
-  }, [snapshotBudgetId, snapshotAttempt, refreshEnvelope])
+  }, [snapshotBudgetId, snapshotAttempt, snapshotKey, refreshEnvelope])
   // The budget whose history dialog is open.
   const [historyFor, setHistoryFor] = useState<Allocation | null>(null)
 
@@ -1447,6 +1464,7 @@ export function AllocationsPage() {
     return (
       <article
         key={allocation.id}
+        data-allocation-id={allocation.id}
         className={`card p-4 sm:p-5 cursor-pointer ${ allocation.is_active ? '' : 'opacity-60' }`}
         onClick={() => openActionModal(allocation)}
         role="button"
@@ -2355,6 +2373,10 @@ export function AllocationsPage() {
                       <p className="text-sm text-danger">Could not refresh this envelope. Its figures are hidden until it loads.</p>
                       <Button variant="secondary" onClick={() => setSnapshotAttempt((n) => n + 1)}>Retry</Button>
                     </div>
+                  ) : snapshotRead === 'loading' ? (
+                    <div className="mt-2" data-testid="snapshot-loading">
+                      <SkeletonRows rows={3} />
+                    </div>
                   ) : (
                     <div className="mt-2">
                       <BudgetFigures allocation={actionAllocation} prefix="snapshot" spentLabel="Spent" />
@@ -2669,6 +2691,22 @@ export function AllocationsPage() {
                           ]}
                         />
                       </div>
+                      {inactiveBudgetAccountIds.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-2" data-testid="budget-inactive-accounts">
+                          {inactiveBudgetAccountIds.map((id) => (
+                            <Segment
+                              key={id}
+                              selected
+                              data-account-id={id}
+                              onClick={() => setSelectedBudgetAccountIds((ids) => ids.filter((x) => x !== id))}
+                              className="px-3 py-1 text-sm"
+                            >
+                              Inactive account {id}
+                              <Icon name="close" />
+                            </Segment>
+                          ))}
+                        </div>
+                      )}
                       {renderFieldError('budget_account_ids')}
                     </div>
                     <p className="mt-2 text-xs text-muted" data-testid="budget-history-note">
@@ -2790,7 +2828,13 @@ export function AllocationsPage() {
                         onChange={(e) =>
                           setAllocationForm((prev) => ({
                             ...prev,
-                            target_amount: parseFloat(e.target.value) || undefined,
+                            // A budget keeps a typed 0 (a limit of nothing); only an empty field means no limit.
+                            target_amount:
+                              prev.allocation_type === 'budget'
+                                ? e.target.value === '' || Number.isNaN(parseFloat(e.target.value))
+                                  ? undefined
+                                  : parseFloat(e.target.value)
+                                : parseFloat(e.target.value) || undefined,
                           }))
                         }
                   className={`mt-1 block w-full border border-line px-3 py-2${allocationForm.allocation_type === 'savings' ? ' pl-9' : ''}`}
@@ -2949,6 +2993,7 @@ export function AllocationsPage() {
           key={historyFor.id}
           allocation={historyFor}
           refresh={refreshEnvelope}
+          restoreFocus={() => document.querySelector<HTMLElement>(`article[data-allocation-id="${historyFor.id}"]`)}
           onClose={() => setHistoryFor(null)}
         />
       )}
