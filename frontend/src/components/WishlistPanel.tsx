@@ -1,8 +1,13 @@
 import { useMemo, useState } from 'react'
 import { accountPickerGroups, centavosToAmount, queryPhase, trySplitInstallment } from '@tally-trace/shared'
-import type { WishlistCheckStatus, WishlistOutlook, WishlistPaymentPlan } from '@tally-trace/shared'
+import type {
+  WishlistCheckStatus,
+  WishlistFreeFlowRow,
+  WishlistOutlook,
+  WishlistPaymentPlan,
+  WishlistPlanItem,
+} from '@tally-trace/shared'
 import { useAuth } from '../contexts/AuthContext'
-import { useCurrency } from '../hooks/useCurrency'
 import { useConfirm } from '../hooks/useConfirm'
 import { useToast } from '../hooks/useToast'
 import { apiErrorMessage } from '../utils/apiError'
@@ -27,8 +32,6 @@ import type { StatusTone } from './StatusText'
 
 /** A row's icon action: 2px padding and the Button's 1px border around the 20px icon (26px), held at 28px square as before. */
 const ICON_ACTION = 'p-0.5 min-h-7 min-w-7'
-
-const PRIORITIES: WishlistItemPriority[] = ['critical', 'high', 'medium', 'low']
 
 // Priority reads as a dot plus a label, never a tinted pill — the status colour
 // belongs to the text, so it cannot collide with the fill behind it.
@@ -81,6 +84,24 @@ const PAYMENT_OPTIONS = [
   { value: 'installment' as const, label: 'Installments' },
 ]
 
+/** A want's level; Critical is the other choice, an urgent need (STU-791). */
+const WANT_OPTIONS = [
+  { value: 'high' as const, label: 'High' },
+  { value: 'medium' as const, label: 'Medium' },
+  { value: 'low' as const, label: 'Low' },
+]
+
+// What a currency row says when it has no figures, as the API words it (`free_flow.py`, `wishlist_projection.py`).
+const NOT_ESTIMATED_TEXT = 'Needs one full month of history'
+const INCOMPLETE_TEXT = 'Money in more than one currency is involved, so this cannot be estimated yet'
+const noProjectionText = (currency: string) => `No projected income or expenses in ${currency}, so this can't be judged yet.`
+
+const PURCHASE_NOTE = 'Marking an item purchased does not record the payment. Its estimate moves only once you record the transaction.'
+
+/** The months of history a figure rests on, when it is a short sample: "based on your last 4 full months". */
+const sampleNote = (months: number): string | null =>
+  months >= 1 && months < 12 ? `Based on your last ${months} full month${months === 1 ? '' : 's'}` : null
+
 /**
  * An installment item's monthly payment worked out here, for an item whose outlook is not requested (a purchased one):
  * the price over the months, rounded half-up to the centavo, as the API splits it. Null when the price is too small to split.
@@ -121,7 +142,6 @@ export interface WishlistPanelProps {
 
 export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps) {
   const { user, isAuthenticated } = useAuth()
-  const { format } = useCurrency()
   const defaultCurrency = (user?.default_currency as CurrencyCode) || 'PHP'
   const currencyOptions = useMemo(() => Object.keys(CURRENCY_CONFIGS) as CurrencyCode[], [])
 
@@ -138,6 +158,10 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
   const items = wishlistQuery.data
   const wishlistPhase = queryPhase(items, wishlistQuery, !isAuthenticated)
   const { data: plan } = useGetWishlistPlanQuery(undefined, { skip: !isAuthenticated })
+  const flowRows = plan?.net_flow ?? []
+  // A critical item is an urgent need; anything else (or an answer with no priority) is a want, queued in the API's order.
+  const urgentItems = useMemo(() => (plan?.items ?? []).filter((p) => p.priority === 'critical'), [plan])
+  const wantItems = useMemo(() => (plan?.items ?? []).filter((p) => p.priority !== 'critical'), [plan])
   const { data: accountsPage } = useGetAccountsQuery({ is_active: true, limit: 100 }, { skip: !isAuthenticated })
   // The API takes any account the caller can add records to (owner, admin or editor; `can_add_transactions`, as the
   // recurring form's writable accounts), never a loan; an installment is paid from a card.
@@ -265,8 +289,9 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
         <div>
           <h2 className="text-lg font-semibold text-ink">Wishlist</h2>
           <p className="text-sm text-muted mt-1">
-            Prioritised things you're saving up for. Turn any of them into a budget envelope or savings target.
+            Urgent needs come first. Everything else is saved for after your savings. Turn any of them into a budget envelope or savings target.
           </p>
+          <p className="text-sm text-muted mt-1" data-testid="purchase-note">{PURCHASE_NOTE}</p>
         </div>
         <Button variant="primary" onClick={openCreate} className="w-full sm:w-auto justify-center">Add item</Button>
       </div>
@@ -274,31 +299,44 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
       {/* Purchase plan */}
       {plan && (plan.items.length > 0 || plan.installments.length > 0) && (
         <div className="bg-surface border border-line" data-testid="purchase-plan">
-          <div className="p-4 sm:p-6 border-b border-line">
-            <h3 className="text-base font-semibold text-ink">Purchase plan</h3>
-            {plan.items.length > 0 && (
-              <p className="text-sm text-muted">
-                Assuming {format(plan.savings_rate)}/mo toward the wishlist ({format(plan.monthly_disposable)} disposable). Items are saved for in priority order.
-              </p>
-            )}
+          <div className="p-4 sm:p-6 border-b border-line space-y-3">
+            <div className="flex items-baseline justify-between gap-4">
+              <h3 className="text-base font-semibold text-ink">Purchase plan</h3>
+              {flowRows.length > 0 && <span className="text-sm text-muted">Per month</span>}
+            </div>
+            {flowRows.map((row) => <FlowSummary key={row.currency} row={row} showCurrency={flowRows.length > 1} />)}
           </div>
-          {plan.items.length > 0 && (
-            <ol className="divide-y divide-line/50" data-testid="plan-queue">
-              {plan.items.map((p, i) => (
-                <li key={p.item_id} className="p-4 sm:px-6 flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-ink text-xs font-semibold">{i + 1}</span>
-                    <span className="font-medium text-ink truncate">{p.name}</span>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className="text-sm font-semibold text-ink">{format(p.estimated_cost)}</p>
-                    {p.estimated_purchase_date
-                      ? <p className="text-xs text-muted">~{longDate(p.estimated_purchase_date)} · {p.cumulative_months} mo</p>
-                      : <p className="text-xs text-warn">{p.note ?? 'No date yet'}</p>}
-                  </div>
-                </li>
-              ))}
-            </ol>
+          {urgentItems.length > 0 && (
+            <section className="p-4 sm:p-6 border-b border-line space-y-3" aria-labelledby="plan-urgent-heading" data-testid="plan-urgent">
+              <div>
+                <h4 id="plan-urgent-heading" className="text-sm font-semibold text-ink">Urgent needs</h4>
+                <p className="text-sm text-muted">Bought when you need them, ahead of your savings.</p>
+              </div>
+              <ul className="space-y-3">
+                {urgentItems.map((p) => (
+                  <UrgentRow key={p.item_id} item={p} defaultCurrency={defaultCurrency} row={flowRows.find((r) => r.currency === (p.currency ?? defaultCurrency))} />
+                ))}
+              </ul>
+            </section>
+          )}
+          {wantItems.length > 0 && (
+            <section aria-labelledby="plan-wants-heading" data-testid="plan-wants">
+              <div className="px-4 pt-4 sm:px-6">
+                <h4 id="plan-wants-heading" className="text-sm font-semibold text-ink">Wants</h4>
+                <p className="text-sm text-muted">Saved for from what is left after your savings, in priority order.</p>
+              </div>
+              <ol className="divide-y divide-line/50 mt-2" data-testid="plan-queue">
+                {wantItems.map((p) => (
+                  <li key={p.item_id} className="p-4 sm:px-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4" data-testid={`plan-item-${p.item_id}`}>
+                    <div className="min-w-0">
+                      <span className="font-medium text-ink truncate block">{p.name}</span>
+                      {p.priority && <span className="text-xs text-muted capitalize">{p.priority}</span>}
+                    </div>
+                    <PlanWhen item={p} defaultCurrency={defaultCurrency} />
+                  </li>
+                ))}
+              </ol>
+            </section>
           )}
           {plan.installments.length > 0 && (
             <section className={plan.items.length > 0 ? 'border-t border-line' : ''} aria-labelledby="plan-installments-heading" data-testid="plan-installments">
@@ -392,17 +430,42 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
                     </select>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="label">Priority</label>
-                    <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value as WishlistItemPriority })} className="select-field focus-ring capitalize">
-                      {PRIORITIES.map((p) => <option key={p} value={p} className="capitalize">{p}</option>)}
-                    </select>
+                <fieldset className="space-y-2" data-testid="wishlist-priority">
+                  <legend className="label">Priority</legend>
+                  <label className={`flex items-start gap-3 border p-3 ${form.priority === 'critical' ? 'border-danger' : 'border-line'}`}>
+                    <input type="radio" name="wishlist-priority" checked={form.priority === 'critical'} onChange={() => setForm({ ...form, priority: 'critical' })} className="mt-1" />
+                    <span className="flex flex-col gap-0.5">
+                      <span className="text-sm font-semibold text-ink">Critical</span>
+                      <span className="text-sm text-muted">An urgent need. It comes before your savings.</span>
+                    </span>
+                  </label>
+                  <div className={`border p-3 space-y-2 ${form.priority !== 'critical' ? 'border-ink' : 'border-line'}`}>
+                    <label className="flex items-start gap-3">
+                      <input
+                        type="radio"
+                        name="wishlist-priority"
+                        checked={form.priority !== 'critical'}
+                        onChange={() => setForm({ ...form, priority: form.priority === 'critical' ? 'medium' : form.priority })}
+                        className="mt-1"
+                      />
+                      <span className="flex flex-col gap-0.5">
+                        <span className="text-sm font-semibold text-ink">A want</span>
+                        <span className="text-sm text-muted">Saved for after your savings, in this order.</span>
+                      </span>
+                    </label>
+                    <SegmentedControl
+                      className="flex flex-wrap gap-2 pl-7"
+                      aria-label="How much you want it"
+                      options={WANT_OPTIONS}
+                      value={form.priority}
+                      onChange={(priority) => setForm({ ...form, priority })}
+                      segmentClassName="px-3 py-1 text-sm"
+                    />
                   </div>
-                  <div>
-                    <label className="label">Target date (optional)</label>
-                    <input type="date" value={form.target_date} onChange={(e) => setForm({ ...form, target_date: e.target.value })} className="input-field focus-ring" />
-                  </div>
+                </fieldset>
+                <div>
+                  <label className="label">Target date (optional)</label>
+                  <input type="date" value={form.target_date} onChange={(e) => setForm({ ...form, target_date: e.target.value })} className="input-field focus-ring" />
                 </div>
                 <fieldset className="space-y-3" disabled={paymentLocked} data-testid="wishlist-payment">
                   <div>
@@ -560,7 +623,7 @@ function WishlistCard({ item, accountName, error, onCreateAllocationFromItem, on
               >
                 {showOutlook ? 'Hide outlook' : 'Show outlook'}
               </Button>
-              {showOutlook && (outlook ? <InstallmentOutlook id={outlookId} outlook={outlook} alreadyCounted={item.installment_entry_id != null} /> : <p className="text-xs text-muted mt-2">Loading the outlook…</p>)}
+              {showOutlook && (outlook ? <InstallmentOutlook id={outlookId} outlook={outlook} /> : <p className="text-xs text-muted mt-2">Loading the outlook…</p>)}
             </div>
           )}
           {onCreateAllocationFromItem && !item.is_purchased && (
@@ -605,16 +668,17 @@ function WishlistCard({ item, accountName, error, onCreateAllocationFromItem, on
 
 /**
  * Month by month, in the item's currency: the card installments already running, this item's payment, and what is
- * left of the monthly disposable income after this item. That income already counts the existing installments, so
- * only this item comes off it, unless its own entry already exists (`alreadyCounted`, the API's rule for its
- * "already counts in your plan" outlook): then that income already counts this item too, and nothing more comes off.
+ * left of the item's rate (the outlook's `available`: net flow for an urgent need, free flow for a want) after this
+ * item. The leftover cell is empty when the item has no rate (`available` is null), and a dash when its payment that
+ * month is unknown.
  */
-function InstallmentOutlook({ id, outlook, alreadyCounted }: { id: string; outlook: WishlistOutlook; alreadyCounted: boolean }) {
+function InstallmentOutlook({ id, outlook }: { id: string; outlook: WishlistOutlook }) {
   const currency = outlook.currency as CurrencyCode
-  const disposable = outlook.disposable_check.monthly_disposable
+  const available = outlook.disposable_check.available
   const money = (n: number | null | undefined) => (n == null ? '—' : formatCurrency(n, currency))
-  // Nothing is left to name without the disposable income or this item's payment that month.
-  const left = (thisItem: number | null) => (disposable == null || thisItem == null ? null : alreadyCounted ? disposable : disposable - thisItem)
+  const left = (thisItem: number | null) => (available == null || thisItem == null ? null : available - thisItem)
+  // With no rate to take the payment from the leftover is empty; with a rate but no payment that month it is a dash.
+  const leftover = (thisItem: number | null) => (available == null ? null : money(left(thisItem)))
   return (
     <section id={id} className="mt-3" aria-labelledby={`${id}-heading`} data-testid="installment-outlook">
       <h4 id={`${id}-heading`} className="text-sm font-semibold text-ink">Installment outlook</h4>
@@ -634,7 +698,7 @@ function InstallmentOutlook({ id, outlook, alreadyCounted }: { id: string; outlo
                 <th scope="row" className="py-1 pr-3 font-normal text-body whitespace-nowrap">{monthLabel(m.month)}</th>
                 <td className="py-1 pr-3 text-right text-body">{money(m.existing_installments)}</td>
                 <td className="py-1 pr-3 text-right text-body">{money(m.this_item)}</td>
-                <td className={`py-1 text-right ${left(m.this_item) != null && (left(m.this_item) ?? 0) < 0 ? 'text-danger' : 'text-ink'}`}>{money(left(m.this_item))}</td>
+                <td className={`py-1 text-right ${left(m.this_item) != null && (left(m.this_item) ?? 0) < 0 ? 'text-danger' : 'text-ink'}`}>{leftover(m.this_item)}</td>
               </tr>
             ))}
           </tbody>
@@ -644,5 +708,95 @@ function InstallmentOutlook({ id, outlook, alreadyCounted }: { id: string; outlo
         <p className="text-xs text-muted mt-2">{[outlook.note, outlook.disposable_check.reason].filter(Boolean).join(' ')}</p>
       )}
     </section>
+  )
+}
+
+/** One currency's three monthly figures, or why there are none, and what the figures rest on. */
+function FlowSummary({ row, showCurrency }: { row: WishlistFreeFlowRow; showCurrency: boolean }) {
+  const currency = row.currency as CurrencyCode
+  const money = (n: number | null) => (n == null ? '—' : formatCurrency(n, currency))
+  const sample = sampleNote(row.sample_months)
+  const status =
+    row.status === 'not_estimated' ? NOT_ESTIMATED_TEXT
+    : row.status === 'incomplete' ? INCOMPLETE_TEXT
+    : row.status === 'no_projection' ? noProjectionText(row.currency)
+    : null
+  const shortfall = row.status === 'ok' && row.shortfall != null && row.shortfall > 0 ? row.shortfall : null
+  return (
+    <div className="space-y-2" data-testid={`flow-${row.currency}`}>
+      {showCurrency && <p className="text-xs font-semibold text-muted">{row.currency}</p>}
+      {row.status === 'ok' ? (
+        <dl className="grid grid-cols-1 sm:grid-cols-3 border border-line divide-y sm:divide-y-0 sm:divide-x divide-line">
+          <div className="px-4 py-3" data-testid="flow-net">
+            <dt className="text-sm text-muted">Net flow</dt>
+            <dd className="text-xl font-semibold text-ink">{money(row.net_flow)}</dd>
+            <p className="text-xs text-muted">Income less spending</p>
+          </div>
+          <div className="px-4 py-3" data-testid="flow-kept">
+            <dt className="text-sm text-muted">Kept for saving</dt>
+            <dd className="text-xl font-semibold text-ink">{money(row.reserved)}</dd>
+            <p className="text-xs text-muted">Saved and needed by your goals</p>
+          </div>
+          <div className="px-4 py-3" data-testid="flow-free">
+            <dt className="text-sm text-muted">Free for the wishlist</dt>
+            <dd className="text-xl font-semibold text-ink">{money(row.free_flow)}</dd>
+            <p className="text-xs text-muted">What is left over</p>
+          </div>
+        </dl>
+      ) : (
+        status && <p className="text-sm text-warn" data-testid="flow-status">{status}</p>
+      )}
+      {shortfall != null && (
+        <p className="text-sm text-warn" data-testid="flow-shortfall">
+          Net flow is {formatCurrency(shortfall, currency)} a month short of what you keep for saving, so nothing is free for the wishlist.
+        </p>
+      )}
+      {sample && <p className="text-sm text-muted" data-testid="flow-sample">{sample}</p>}
+    </div>
+  )
+}
+
+/** A queued item's date, or the note that stands in for it: its own, else the queue's. */
+function PlanWhen({ item, defaultCurrency }: { item: WishlistPlanItem; defaultCurrency: CurrencyCode }) {
+  const currency = (item.currency ?? defaultCurrency) as CurrencyCode
+  // Only a `dated` item has a date; a status the API did not send is read as the older answer, which dated by the field alone.
+  const date = !item.projection_status || item.projection_status === 'dated' ? item.estimated_purchase_date : null
+  const note = item.note ?? item.projection_note ?? item.queue_note
+  return (
+    <div className="min-w-0 sm:max-w-[60%] sm:text-right">
+      <p className="text-sm font-semibold text-ink" data-testid="plan-cost">{formatCurrency(item.estimated_cost, currency)}</p>
+      {date
+        ? <p className="text-xs text-muted" data-testid="plan-date">~{longDate(date)} · {item.cumulative_months} mo</p>
+        : <p className={`text-xs break-words ${item.projection_status === 'paid_from_savings' ? 'text-muted' : 'text-warn'}`} data-testid="plan-note">{note ?? 'No date yet'}</p>}
+    </div>
+  )
+}
+
+/** An urgent need: its date or note, and what buying it does to this month's net flow and to saving. */
+function UrgentRow({ item, row, defaultCurrency }: { item: WishlistPlanItem; row: WishlistFreeFlowRow | undefined; defaultCurrency: CurrencyCode }) {
+  const currency = (item.currency ?? defaultCurrency) as CurrencyCode
+  const before = row?.status === 'ok' ? row.net_flow : null
+  return (
+    <li className="border border-line p-4 space-y-3" data-testid={`plan-item-${item.item_id}`}>
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <span className="font-medium text-ink">{item.name}</span>
+        <PlanWhen item={item} defaultCurrency={defaultCurrency} />
+      </div>
+      {(item.net_flow_after != null || item.from_saving != null) && (
+        <div className="border-t border-line pt-3 space-y-1 text-sm text-body">
+          {item.net_flow_after != null && (
+            <p data-testid="plan-net-flow-after">
+              Net flow if you bought it this month: <span className={item.net_flow_after < 0 ? 'amount-negative' : undefined} data-testid="plan-net-flow-after-amount">{formatCurrency(item.net_flow_after, currency)}</span>
+              {before != null && ` instead of ${formatCurrency(before, currency)}`}
+            </p>
+          )}
+          {item.from_saving != null && (
+            <p className={item.from_saving > 0 ? 'text-warn' : 'text-muted'} data-testid="plan-from-saving">
+              {item.from_saving > 0 ? `About ${formatCurrency(item.from_saving, currency)} of it comes out of saving` : 'None of it comes out of saving'}
+            </p>
+          )}
+        </div>
+      )}
+    </li>
   )
 }

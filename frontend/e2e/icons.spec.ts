@@ -32,6 +32,7 @@ import {
   withShortfalls,
 } from './support/fixtures/household'
 import type { HouseholdData } from './support/fixtures/household'
+import { WISHLIST_WORDING } from './support/fixtures/wishlistPlan'
 
 // This spec lives in <repo>/frontend/e2e.
 const FRONTEND = fileURLToPath(new URL('..', import.meta.url))
@@ -387,13 +388,14 @@ const iconOnlyControls = (page: Page): Promise<{ where: string; label: string | 
  * What STU-780 added to the wishlist, which the baseline (recorded before it) lacks. A baseline entry is compared with
  * the page minus exactly these, each matched whole: each item's budget badge text, the add dialog's new text ("Pay from",
  * "No account", every account option, "Payment", "Full", "Installments", as the page reads it, one space between), and
- * the dialog's two segment buttons by name.
+ * the dialog's two segment buttons by name. STU-791 changed the header line and the priority choice and added a purchase
+ * note and the three want-level buttons (`WISHLIST_WORDING`): the new text is put back to the recorded text, or dropped.
  */
 const WISHLIST_BADGE = 'Fits your monthly budget'
 const WISHLIST_PAYMENT_TEXT = ['Pay from', 'No account', ...WISHLIST_PAY_FROM_OPTIONS, 'Payment', 'Full', 'Installments'].join(' ')
-const WISHLIST_ADDED_CONTROLS = new Set(['Full', 'Installments'])
+const WISHLIST_ADDED_CONTROLS = new Set(['Full', 'Installments', ...WISHLIST_WORDING.levelButtons])
 const normalise = (text: string): string =>
-  text.replace(REMOVED, '').replaceAll(WISHLIST_BADGE, '').replace(/\s+/g, ' ').replace(WISHLIST_PAYMENT_TEXT, '').replace(/\s+/g, ' ').trim()
+  text.replace(REMOVED, '').replaceAll(WISHLIST_BADGE, '').replace(/\s+/g, ' ').replace(WISHLIST_PAYMENT_TEXT, '').replace(WISHLIST_WORDING.header.now, WISHLIST_WORDING.header.old).replace(WISHLIST_WORDING.purchaseNote, '').replace(WISHLIST_WORDING.priority.now, WISHLIST_WORDING.priority.old).replace(/\s+/g, ' ').trim()
 
 interface SurfaceBaseline {
   text: string
