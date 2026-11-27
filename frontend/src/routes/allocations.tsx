@@ -323,9 +323,9 @@ const ADD_LABEL: Record<AllocationsTab, string> = {
 
 /** What each tab's `SectionIntro` says under its heading (Wishlist's lives in `WishlistPanel`). */
 const INTRO = {
-  subscriptions: 'Regular income, bills and subscriptions that post on a schedule.',
-  budgets: 'Monthly spending buckets that align with your categories and keep cash flow on track.',
-  savings: 'Longer-term goals and rainy-day funds that should steadily grow over time.',
+  subscriptions: 'Regular income, bills and subscriptions.',
+  budgets: 'Monthly spending limits by category.',
+  savings: 'Long-term goals and rainy-day funds.',
 }
 
 export const Route = createFileRoute('/allocations')({
@@ -373,6 +373,10 @@ export function AllocationsPage() {
   const [recurringSearch, setRecurringSearch] = useState('')
   // The Wishlist create form: the page owns it so the header button and the panel's empty state open the same form.
   const [wishlistCreateOpen, setWishlistCreateOpen] = useState(false)
+  // The panel unmounts off the Wishlist tab and its draft goes with it, so the flag must not outlive the tab.
+  useEffect(() => {
+    if (activeTab !== 'wishlist') setWishlistCreateOpen(false)
+  }, [activeTab])
 
   const createAllocationDefaults = useCallback(
     (type: 'budget' | 'savings'): AllocationFormState => {

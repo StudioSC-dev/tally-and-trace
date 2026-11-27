@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { accountPickerGroups, centavosToAmount, queryPhase, trySplitInstallment } from '@tally-trace/shared'
 import type {
   WishlistCheckStatus,
@@ -197,8 +197,14 @@ export function WishlistPanel({ createOpen, onCreateOpen, onCreateClose, onCreat
     }
   }
   const isModalOpen = createOpen || editing !== null
+  // Each time the form opens or closes starts a new session; a save that finishes after its session ended changes nothing.
+  const sessionRef = useRef(0)
+  useEffect(() => {
+    sessionRef.current += 1
+  }, [createOpen])
 
   const closeModal = () => {
+    sessionRef.current += 1
     setSaveError(null)
     setEditing(null)
     setForm({ ...emptyForm, currency: defaultCurrency })
@@ -206,6 +212,7 @@ export function WishlistPanel({ createOpen, onCreateOpen, onCreateClose, onCreat
   }
 
   const openEdit = (item: WishlistItem) => {
+    sessionRef.current += 1
     setEditing(item)
     setForm({
       name: item.name,
@@ -236,14 +243,16 @@ export function WishlistPanel({ createOpen, onCreateOpen, onCreateClose, onCreat
       installment_months: form.payment_plan === 'installment' ? parseInt(form.installment_months, 10) : null,
     }
     setSaveError(null)
+    const session = sessionRef.current
     try {
       if (editing) {
         const saved = await updateItem({ id: editing.id, data: payload }).unwrap()
         // Switching a purchased item to Installments creates its card installment in this request; the notice says so.
         if (saved.notice) showToast(saved.notice)
       } else await createItem(payload).unwrap()
-      closeModal()
+      if (session === sessionRef.current) closeModal()
     } catch (err) {
+      if (session !== sessionRef.current) return
       // A refusal (a locked field once the installment exists, a card that cannot take it) shows in the form, with the API's reason.
       setSaveError(apiErrorMessage(err) || 'Could not save the wishlist item.')
     }
@@ -300,7 +309,7 @@ export function WishlistPanel({ createOpen, onCreateOpen, onCreateClose, onCreat
       <div className="space-y-1">
         <SectionIntro
           title="Wishlist"
-          description="Urgent needs come first. Everything else is saved for after your savings. Turn any of them into a budget envelope or savings target."
+          description="Urgent needs first, then everything else."
         />
         <p className="text-sm text-muted" data-testid="purchase-note">{PURCHASE_NOTE}</p>
       </div>

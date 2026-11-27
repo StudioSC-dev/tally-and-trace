@@ -151,7 +151,8 @@ Every route renders into one container, `.page` (`frontend/src/assets/index.css`
   second row on a phone. A page's lead sentence is its own section under the header, not part of it.
 - **Tabbed pages:** a page's main action sits in `PageHeader` on every tab, and a tab never adds its own header
   row. Each tab opens with one `SectionIntro` (`frontend/src/components/`): a `text-xl` heading and a one-line
-  description, directly under the tab nav, with the tab's search or filter toolbar right below it.
+  description, directly under the tab nav, then the tab's search or filter toolbar. A tab's own note, such as
+  Wishlist's purchase note, sits between the intro and the toolbar.
 
 ## Radius
 

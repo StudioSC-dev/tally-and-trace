@@ -733,7 +733,7 @@ const INVENTORY: Group[] = [
   },
   {
     key: 'allocations-cadence',
-    route: '/allocations (Budgets, Add allocation)',
+    route: '/allocations (Budgets, Add budget)',
     what: 'Create budget envelope: Budget cadence (Segment)',
     kind: 'pressed',
     dialog: true,
@@ -752,7 +752,7 @@ const INVENTORY: Group[] = [
   },
   {
     key: 'allocations-tracked-categories',
-    route: '/allocations (Budgets, Add allocation)',
+    route: '/allocations (Budgets, Add budget)',
     what: 'Create budget envelope: Tracked Categories (CategoryPicker chips, Segment, multi-select)',
     kind: 'pressed',
     multi: 'toggle',
@@ -779,7 +779,7 @@ const INVENTORY: Group[] = [
   },
   {
     key: 'allocations-savings-accounts',
-    route: '/allocations (Savings, Add allocation)',
+    route: '/allocations (Savings, Add savings goal)',
     what: 'Savings tracker: Accounts to aggregate (AccountPicker chips, Segment, multi-select)',
     kind: 'pressed',
     multi: 'toggle',

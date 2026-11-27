@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 interface SectionIntroProps {
   /** The tab's heading, set as an `h2` in `text-xl`. */
   title: ReactNode
-  /** One line saying what the tab holds. */
+  /** One line saying what the tab holds: short enough to fit one line on a 390px phone. */
   description: ReactNode
 }
 
