@@ -530,15 +530,13 @@ test.describe('Columnar pad design tokens (STU-675)', () => {
           }
         }
         if (p.name === 'allocations') {
-          // Allocations asks once per entry type: each list holds that type only, and the two never share an entry.
+          // Recurring (the default tab) pages through every entry in one cursor series: ascending by id, no entry type.
           const idsOf = (list?: PaginatedResponse<BudgetEntry>): number[] => (list?.items ?? []).map((e) => e.id)
-          const income = answer<PaginatedResponse<BudgetEntry>>('/budget-entries/', 'entry_type', 'income')
-          const expense = answer<PaginatedResponse<BudgetEntry>>('/budget-entries/', 'entry_type', 'expense')
-          const wanted = (kind: string): number[] => data.entries.filter((e) => e.entry_type === kind).map((e) => e.id)
-          expect.soft(idsOf(income), 'the income list').toEqual(wanted('income'))
-          expect.soft(idsOf(expense), 'the expense list').toEqual(wanted('expense'))
-          expect.soft(idsOf(income).filter((id) => idsOf(expense).includes(id)), 'the lists are disjoint').toEqual([])
-          expect.soft(api.count('GET', '/budget-entries/'), 'both lists went through the counted mock').toBe(2)
+          const first = answer<PaginatedResponse<BudgetEntry>>('/budget-entries/', 'after_id', '0')
+          const wanted = data.entries.map((e) => e.id).sort((x, y) => x - y)
+          expect.soft(idsOf(first), 'the cursor list holds every entry in id order').toEqual(wanted)
+          expect.soft(first?.has_more, 'one page was enough').toBe(false)
+          expect.soft(api.count('GET', '/budget-entries/'), 'the list went through the counted mock once').toBe(1)
         }
         expect(api.requests().length, 'the page called the faked API').toBeGreaterThan(0)
         // mockApi soft-fails any unmocked call; this names the calls in the report as well.

@@ -481,6 +481,8 @@ export const accountingApi = createApi({
       after?: string
       limit?: number
       offset?: number
+      /** Cursor: entries with a higher id, in id order (the page's last id). Sent without `offset`. */
+      after_id?: number
     }>({
       query: (params) => ({ url: 'budget-entries/', params }),
       providesTags: ['BudgetEntry'],

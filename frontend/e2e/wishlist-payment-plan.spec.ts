@@ -121,7 +121,7 @@ const formOf = (page: Page): Locator => page.locator('form').filter({ has: page.
 const toastText = (page: Page): Locator => page.getByTestId('toast-message')
 
 async function openForm(page: Page): Promise<Locator> {
-  await page.getByRole('button', { name: 'Add item', exact: true }).click()
+  await page.getByRole('button', { name: 'Add wishlist item', exact: true }).click()
   const form = formOf(page)
   await expect(form).toBeVisible()
   return form

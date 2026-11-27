@@ -140,8 +140,8 @@ async function openAllocations(page: Page, tab: 'Savings' | 'Budgets', categorie
   return api
 }
 
-const addForm = async (page: Page, title: RegExp): Promise<Locator> => {
-  await page.getByRole('button', { name: 'Add allocation' }).click()
+const addForm = async (page: Page, title: RegExp, label = 'Add savings goal'): Promise<Locator> => {
+  await page.getByRole('button', { name: label }).click()
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
   return page.locator('form').filter({ has: page.getByRole('button', { name: /^Create / }) })
 }
@@ -418,7 +418,7 @@ test.describe('savings form tracking mode (STU-778)', () => {
 
   test('the budget form is unchanged', async ({ page }) => {
     const api = await openAllocations(page, 'Budgets')
-    const form = await addForm(page, /^Create budget envelope/)
+    const form = await addForm(page, /^Create budget envelope/, 'Add budget')
     expect(await labelsOf(form)).toEqual(['Account', 'Name', 'Description', 'Tracked categories', 'Budget cadence', 'Period start', 'Period end (optional)', 'Amount already spent', 'Spending limit'])
     await expect(field(form, 'account_id')).toHaveCount(1)
     await expect(field(form, 'current_amount')).toHaveCount(1)

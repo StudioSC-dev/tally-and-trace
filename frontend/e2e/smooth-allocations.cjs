@@ -111,9 +111,9 @@ async function openBudgets(page) {
   await h.waitQuiet(page)
 }
 
-/** Opens Add allocation on the Budgets tab and fills a monthly envelope; returns the submit button. */
+/** Opens Add budget on the Budgets tab and fills a monthly envelope; returns the submit button. */
 async function fillEnvelope(page, u, name) {
-  await page.getByRole('button', { name: 'Add allocation' }).click()
+  await page.getByRole('button', { name: 'Add budget' }).click()
   const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Create budget envelope' }) })
   await form.waitFor()
   await h.waitQuiet(page)

@@ -29,6 +29,16 @@ import {
   entryCreditWarning,
   isLimited,
   groupByKind,
+  KIND_LABELS,
+  KIND_ORDER,
+  DEFAULT_RECURRING_VIEW,
+  RECURRING_PAGE_SIZE,
+  clampRecurringPage,
+  dueIndicator,
+  hasRecurringFilter,
+  recurringAccountOptions,
+  recurringPageSlice,
+  viewRecurringEntries,
   isOwnerFull,
   isSharedFull,
   RECURRING_ACTION_LABELS,
@@ -38,7 +48,7 @@ import {
   hasCreditLimit,
   withoutError,
 } from '@tally-trace/shared'
-import type { CardCredit, FieldErrors, KindGroup, RecurringAction } from '@tally-trace/shared'
+import type { CardCredit, FieldErrors, KindGroup, KindGroupKey, RecurringAction, RecurringSectionView, RecurringSortKey, RecurringStatusFilter } from '@tally-trace/shared'
 import { accountPickerGroups, matchesRecurringSearch, parseAllocationsTab } from '@tally-trace/shared'
 import type { AllocationsTab } from '@tally-trace/shared'
 import { PickerOptGroups } from '../components/PickerOptGroups'
@@ -64,6 +74,7 @@ import { EntryCreditWarningRow, KindCreditLines } from '../components/Allocation
 import type { KindCreditState } from '../components/AllocationsCredit'
 import { ListSheet } from '../components/ListSheet'
 import { PageHeader } from '../components/PageHeader'
+import { SectionIntro } from '../components/SectionIntro'
 import { EmptyState } from '../components/EmptyState'
 import { Row } from '../components/Row'
 import { TagFilter } from '../components/TagFilter'
@@ -73,7 +84,8 @@ import { useToast } from '../hooks/useToast'
 import { RankedGoals } from '../components/RankedGoals'
 import { apiErrorMessage } from '../utils/apiError'
 import { SkeletonRows } from '../components/Loading'
-import { Segment } from '../components/SegmentedControl'
+import { Segment, SegmentedControl } from '../components/SegmentedControl'
+import { Pager } from '../components/Pager'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { StatusText } from '../components/StatusText'
@@ -312,6 +324,45 @@ type AllocationFormState = {
 
 const CURRENCY_OPTIONS = Object.keys(CURRENCY_CONFIGS) as CurrencyCode[]
 
+/** Each tab's create button, shown in the page header. */
+/** The most entries one `GET budget-entries/` returns: the API's own cap, so the fewest requests load the tab. */
+const RECURRING_FETCH_LIMIT = 200
+
+/** A Recurring section's sort and filter, and the page it is on. */
+interface SectionState extends RecurringSectionView {
+  page: number
+}
+const DEFAULT_SECTION_STATE: SectionState = { ...DEFAULT_RECURRING_VIEW, page: 1 }
+
+const SORT_OPTIONS: ReadonlyArray<{ value: RecurringSortKey; label: string }> = [
+  { value: 'due', label: 'Next due' },
+  { value: 'amount', label: 'Amount' },
+  { value: 'name', label: 'Name' },
+]
+const STATUS_OPTIONS = [
+  { value: 'all' as const, label: 'All' },
+  { value: 'active' as const, label: 'Active' },
+  { value: 'paused' as const, label: 'Paused' },
+]
+const DIRECTION_OPTIONS = [
+  { value: 'asc' as const, label: 'Ascending' },
+  { value: 'desc' as const, label: 'Descending' },
+]
+
+const ADD_LABEL: Record<AllocationsTab, string> = {
+  subscriptions: 'Add recurring entry',
+  budgets: 'Add budget',
+  savings: 'Add savings goal',
+  wishlist: 'Add wishlist item',
+}
+
+/** What each tab's `SectionIntro` says under its heading (Wishlist's lives in `WishlistPanel`). */
+const INTRO = {
+  subscriptions: 'Regular income, bills and subscriptions.',
+  budgets: 'Monthly spending limits by category.',
+  savings: 'Long-term goals and rainy-day funds.',
+}
+
 export const Route = createFileRoute('/allocations')({
   validateSearch: (search: Record<string, unknown>): { tab?: AllocationsTab | 'recurring' } => ({
     // `recurring` stays as written in the URL; the page maps it to the internal `subscriptions` tab.
@@ -355,6 +406,12 @@ export function AllocationsPage() {
     if (tabFromUrl) setActiveTab(tabFromUrl)
   }, [tabFromUrl])
   const [recurringSearch, setRecurringSearch] = useState('')
+  // The Wishlist create form: the page owns it so the header button and the panel's empty state open the same form.
+  const [wishlistCreateOpen, setWishlistCreateOpen] = useState(false)
+  // The panel unmounts off the Wishlist tab and its draft goes with it, so the flag must not outlive the tab.
+  useEffect(() => {
+    if (activeTab !== 'wishlist') setWishlistCreateOpen(false)
+  }, [activeTab])
 
   const createAllocationDefaults = useCallback(
     (type: 'budget' | 'savings'): AllocationFormState => {
@@ -554,9 +611,43 @@ export function AllocationsPage() {
   // The first recurring load has settled; later reloads keep the sections on screen.
   const [recurringLoaded, setRecurringLoaded] = useState(false)
   const [recurringError, setRecurringError] = useState(false)
-  const [recurringIncome, setRecurringIncome] = useState<BudgetEntry[]>([])
-  const [recurringExpenses, setRecurringExpenses] = useState<BudgetEntry[]>([])
+  // Every recurring entry the last complete load returned; a load that fails part way leaves it as it was.
+  const [recurringEntries, setRecurringEntries] = useState<BudgetEntry[]>([])
   const [selectedTag, setSelectedTag] = useState<number | undefined>(undefined)
+  // Each section's sort, filter and page, by kind; a section not here has the defaults.
+  const [sectionStates, setSectionStates] = useState<Partial<Record<KindGroupKey, SectionState>>>({})
+  // Sections left standing, with their header, after Clear filters; a search or tag change lets them go.
+  const [knownSections, setKnownSections] = useState<ReadonlySet<KindGroupKey>>(() => new Set())
+  const [heldSections, setHeldSections] = useState<ReadonlySet<KindGroupKey>>(() => new Set())
+  const patchSection = useCallback((key: KindGroupKey, patch: Partial<SectionState>) => {
+    setSectionStates((prev) => ({ ...prev, [key]: { ...(prev[key] ?? DEFAULT_SECTION_STATE), ...patch } }))
+  }, [])
+  // A new search or tag is a new list: every section starts again at its first page.
+  const resetSectionPages = useCallback(() => {
+    setSectionStates((prev) => {
+      const next: Partial<Record<KindGroupKey, SectionState>> = {}
+      for (const key of KIND_ORDER) {
+        const state = prev[key]
+        if (state) next[key] = { ...state, page: 1 }
+      }
+      return next
+    })
+    setHeldSections(new Set())
+  }, [])
+  const changeRecurringSearch = useCallback(
+    (value: string) => {
+      setRecurringSearch(value)
+      resetSectionPages()
+    },
+    [resetSectionPages]
+  )
+  const changeSelectedTag = useCallback(
+    (tag: number | undefined) => {
+      setSelectedTag(tag)
+      resetSectionPages()
+    },
+    [resetSectionPages]
+  )
 
   const loadAllocations = useCallback(
     async (reset = false) => {
@@ -625,20 +716,47 @@ export function AllocationsPage() {
     loadAllocations(true)
   }, [authLoading, isAuthenticated, loadAllocations])
 
+  // The loader runs only while Recurring is the open tab; the ref lets a refresh a dialog asks for later see that.
+  const recurringOpenRef = useRef(activeTab === 'subscriptions')
+  // The lazy query stays subscribed to its last page (and refetches it when an entry changes elsewhere), so the
+  // loader keeps that request to end the subscription when Recurring closes.
+  const budgetEntriesRequestRef = useRef<{ unsubscribe: () => void } | null>(null)
+  const endBudgetEntriesSubscription = useCallback(() => {
+    budgetEntriesRequestRef.current?.unsubscribe()
+    budgetEntriesRequestRef.current = null
+  }, [])
+  useEffect(() => {
+    recurringOpenRef.current = activeTab === 'subscriptions'
+  }, [activeTab])
+
+  // Pages through `GET budget-entries/` by `after_id`, from the first request, so an entry that is deleted or moves
+  // between two requests cannot make the next one skip another. The list is replaced only once every page has come.
   const loadBudgetEntries = useCallback(async () => {
-    if (!isAuthenticated) {
+    if (!isAuthenticated || !recurringOpenRef.current) {
       return
     }
     const isCurrent = beginBudgetEntriesRequest(true)
     try {
       const tagParam = selectedTag !== undefined ? { tag: selectedTag } : {}
-      const [incomeResult, expenseResult] = await Promise.all([
-        triggerBudgetEntries({ entry_type: 'income', limit: 100, ...tagParam }).unwrap(),
-        triggerBudgetEntries({ entry_type: 'expense', limit: 100, ...tagParam }).unwrap(),
-      ])
-      if (!isCurrent()) return
-      setRecurringIncome(incomeResult.items)
-      setRecurringExpenses(expenseResult.items)
+      const loaded: BudgetEntry[] = []
+      let afterId = 0
+      for (;;) {
+        const request = triggerBudgetEntries({ limit: RECURRING_FETCH_LIMIT, after_id: afterId, ...tagParam })
+        budgetEntriesRequestRef.current = request
+        const page = await request.unwrap()
+        if (!isCurrent()) return
+        // An API that ignores the cursor would send the same page again for ever: ids must rise past it.
+        const rising = page.items.every((item, i) => item.id > (i === 0 ? afterId : page.items[i - 1].id))
+        if (!rising) throw new Error('budget-entries page did not advance past its cursor')
+        loaded.push(...page.items)
+        const last = page.items[page.items.length - 1]
+        if (!page.has_more || !last) break
+        afterId = last.id
+      }
+      setRecurringEntries(loaded)
+      // A tag narrows the list, so the sections seen before it stay known (their filters and Clear filters stay).
+      const keys = groupByKind(loaded).map((group) => group.key)
+      setKnownSections((prev) => (selectedTag === undefined ? new Set(keys) : new Set([...prev, ...keys])))
       setRecurringError(false)
     } catch (error) {
       if (!isCurrent()) return
@@ -656,8 +774,24 @@ export function AllocationsPage() {
     if (authLoading || !isAuthenticated) {
       return
     }
+    if (activeTab !== 'subscriptions') {
+      // Leaving Recurring ends a load in flight: it asks for no further page and sets nothing.
+      beginBudgetEntriesRequest(true)
+      endBudgetEntriesSubscription()
+      return
+    }
+    recurringOpenRef.current = true
     loadBudgetEntries()
-  }, [authLoading, isAuthenticated, loadBudgetEntries])
+  }, [authLoading, isAuthenticated, loadBudgetEntries, activeTab, beginBudgetEntriesRequest, endBudgetEntriesSubscription])
+
+  // Leaving the Allocations route ends the load too, and the subscription with it.
+  useEffect(
+    () => () => {
+      beginBudgetEntriesRequest(true)
+      endBudgetEntriesSubscription()
+    },
+    [beginBudgetEntriesRequest, endBudgetEntriesSubscription]
+  )
 
   useEffect(() => {
     return () => {
@@ -1483,6 +1617,23 @@ export function AllocationsPage() {
     )
   }
 
+  // Only a full, active entry that still has payments to come says how near its next date is.
+  const renderDueIndicator = (entry: BudgetEntry) => {
+    const due = dueIndicator(entry)
+    if (!due) return undefined
+    if (due.kind === 'overdue') {
+      return <StatusText tone="danger" data-testid="due-indicator" data-due="overdue">Overdue</StatusText>
+    }
+    if (due.kind === 'today') {
+      return <StatusText tone="warn" data-testid="due-indicator" data-due="today">Due today</StatusText>
+    }
+    return (
+      <StatusText tone="muted" data-testid="due-indicator" data-due="soon">
+        Due in {due.days} {due.days === 1 ? 'day' : 'days'}
+      </StatusText>
+    )
+  }
+
   const renderBudgetEntryCard = (entry: BudgetEntry) => {
     if (isLimited(entry)) {
       return renderLimitedEntryCard(entry)
@@ -1549,7 +1700,7 @@ export function AllocationsPage() {
     const metaItems = foldFacts([
       typeLabel && <span key="type">{typeLabel}</span>,
       // The cadence once, with how it settles (and that it is paused) in the same item, then when it falls next, then where.
-      <span key="schedule">{[cadenceLabel, settlementLabel(entry.settlement), !entry.is_active && 'Paused'].filter(Boolean).join(' · ')}</span>,
+      <span key="schedule">{[cadenceLabel, settlementLabel(entry.settlement)].join(' · ')}</span>,
       <span key="next" className="text-ink">Next {formatFullDate(entry.next_occurrence)} · {formatRelativeDate(entry.next_occurrence)}</span>,
       account && (
         <span key="account">
@@ -1580,10 +1731,18 @@ export function AllocationsPage() {
       <Row
         key={entry.id}
         className={`${canEdit ? 'hover:bg-sunken cursor-pointer' : ''} ${ entry.is_active ? '' : 'opacity-60' }`}
+        data-paused={entry.is_active ? undefined : 'true'}
         onOpen={canEdit ? () => openRecurringModal(entry) : undefined}
         title={entry.name}
+        badges={entry.is_active ? undefined : <StatusText tone="muted" data-testid="paused-badge">Paused</StatusText>}
         tags={entry.tags}
-        status={remaining === 0 ? <StatusText tone="ok" data-testid="installment-paid">Fully paid</StatusText> : undefined}
+        status={
+          remaining === 0 ? (
+            <StatusText tone="ok" data-testid="installment-paid">Fully paid</StatusText>
+          ) : (
+            renderDueIndicator(entry)
+          )
+        }
         meta={<>{metaItems}</>}
         details={[
           entry.description && <p>{entry.description}</p>,
@@ -1668,17 +1827,11 @@ export function AllocationsPage() {
   }
 
   const renderAllocationSection = (
-    title: string,
-    subtitle: string,
     allocations: Allocation[],
     emptyMessage: string,
     emptyAction: string
   ) => (
     <section className="space-y-3">
-      <header className="space-y-1">
-        <h2 className="text-xl font-semibold text-ink">{title}</h2>
-        <p className="text-sm text-muted">{subtitle}</p>
-      </header>
       {loadError && (
         <div className="card p-4 space-y-3" role="alert" data-testid="allocations-load-error">
           <p className="text-sm text-danger">Could not load allocations.</p>
@@ -1739,18 +1892,10 @@ export function AllocationsPage() {
     )
   }
 
-  // Recurring entries by kind: subscriptions, card installments, cash expenses,
-  // card-billed bills, then income and transfers, then what is shared with you.
-  const renderRecurringKindSections = () => {
-    if (!recurringLoaded) {
-      return (
-        <div className="card p-6" aria-busy="true" data-testid="recurring-pending">
-          <span role="status" className="sr-only">Loading recurring entries</span>
-          <SkeletonRows rows={3} />
-        </div>
-      )
-    }
-    const matching = [...recurringExpenses, ...recurringIncome].filter((entry) => {
+  // The sections Recurring shows, each with its filtered and sorted entries and the page it is on. `group` is the
+  // section after the page search and the tag filter only: the credit summary and the count read it.
+  const recurringSections = useMemo(() => {
+    const matching = recurringEntries.filter((entry) => {
       if (isLimited(entry)) {
         return (
           matchesRecurringSearch(entry, recurringSearch, { accountName: entry.account?.name, categoryName: entry.category_name }) ||
@@ -1773,7 +1918,113 @@ export function AllocationsPage() {
         })
       )
     })
-    const groups = groupByKind(matching)
+    const groups = new Map(groupByKind(matching).map((group) => [group.key, group]))
+    const accountNames = new Map([...accountsById].map(([id, account]) => [id, account.name]))
+    return KIND_ORDER.flatMap((key) => {
+      const state = sectionStates[key] ?? DEFAULT_SECTION_STATE
+      const group: KindGroup = groups.get(key) ?? { key, label: KIND_LABELS[key], entries: [] }
+      // A section with a filter on, or one Clear filters left, stays with its header though the search leaves it nothing.
+      const stays = knownSections.has(key) && (hasRecurringFilter(state) || heldSections.has(key))
+      if (group.entries.length === 0 && !stays) return []
+      const visible = viewRecurringEntries(group.entries, state)
+      const options = recurringAccountOptions(group.entries, accountNames)
+      if (state.accountId !== null && !options.some((option) => option.id === state.accountId)) {
+        options.push({ id: state.accountId, name: accountNames.get(state.accountId) ?? `Account ${state.accountId}` })
+      }
+      return [{ group, state, visible, page: clampRecurringPage(state.page, visible.length), options }]
+    })
+  }, [recurringEntries, recurringSearch, sectionStates, heldSections, knownSections, accountsById, categoriesById])
+
+  // After a reload that leaves fewer pages (a delete, a pause), the page held moves to the last one that exists.
+  useEffect(() => {
+    setSectionStates((prev) => {
+      let next = prev
+      for (const section of recurringSections) {
+        const held = prev[section.group.key]
+        if (held && held.page !== section.page) next = { ...next, [section.group.key]: { ...held, page: section.page } }
+      }
+      return next
+    })
+  }, [recurringSections])
+
+  const renderSectionControls = (section: (typeof recurringSections)[number]) => {
+    const { group, state, options } = section
+    const key = group.key
+    const label = group.label
+    return (
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2" data-testid={`${key}-controls`}>
+        <label className="inline-flex items-center gap-2 text-sm text-body">
+          <span>Sort</span>
+          <select
+            aria-label={`Sort ${label}`}
+            data-testid={`${key}-sort`}
+            value={state.sort}
+            onChange={(event) => patchSection(key, { sort: event.target.value as RecurringSortKey })}
+            className="select-field focus-ring"
+          >
+            {SORT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <SegmentedControl
+          className="flex bg-sunken p-1"
+          aria-label={`Sort order for ${label}`}
+          data-testid={`${key}-direction`}
+          options={DIRECTION_OPTIONS}
+          value={state.direction}
+          onChange={(direction) => patchSection(key, { direction })}
+          segmentClassName="px-3 py-1.5 text-sm"
+        />
+        {key !== 'shared' && (
+          <SegmentedControl
+            className="flex bg-sunken p-1"
+            aria-label={`Status of ${label}`}
+            data-testid={`${key}-status`}
+            options={STATUS_OPTIONS}
+            value={state.status}
+            onChange={(status: RecurringStatusFilter) => patchSection(key, { status, page: 1 })}
+            segmentClassName="px-3 py-1.5 text-sm"
+          />
+        )}
+        {options.length > 0 && (
+          <label className="inline-flex items-center gap-2 text-sm text-body">
+            <span>Account</span>
+            <select
+              aria-label={`Account for ${label}`}
+              data-testid={`${key}-account`}
+              value={state.accountId === null ? '' : String(state.accountId)}
+              onChange={(event) =>
+                patchSection(key, { accountId: event.target.value === '' ? null : Number(event.target.value), page: 1 })
+              }
+              className="select-field focus-ring"
+            >
+              <option value="">All accounts</option>
+              {options.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
+    )
+  }
+
+  // Recurring entries by kind: subscriptions, card installments, cash expenses,
+  // card-billed bills, then income and transfers, then what is shared with you.
+  const renderRecurringKindSections = () => {
+    if (!recurringLoaded) {
+      return (
+        <div className="card p-6" aria-busy="true" data-testid="recurring-pending">
+          <span role="status" className="sr-only">Loading recurring entries</span>
+          <SkeletonRows rows={3} />
+        </div>
+      )
+    }
     const errorAlert = recurringError && (
       <div className="card p-4 space-y-3" role="alert" data-testid="recurring-load-error">
         <p className="text-sm text-danger">Could not load recurring entries.</p>
@@ -1786,7 +2037,7 @@ export function AllocationsPage() {
         </Button>
       </div>
     )
-    if (groups.length === 0 && recurringSearch.trim() !== '') {
+    if (recurringSections.length === 0 && recurringSearch.trim() !== '') {
       return (
         <>
           {errorAlert}
@@ -1796,7 +2047,7 @@ export function AllocationsPage() {
         </>
       )
     }
-    if (groups.length === 0) {
+    if (recurringSections.length === 0) {
       return (
         errorAlert || (!accountsSettled ? null : (
           <EmptyState
@@ -1809,16 +2060,53 @@ export function AllocationsPage() {
     return (
       <>
         {errorAlert}
-        {groups.map((group) => (
-          <section key={group.key} className="space-y-3" data-testid={`kind-section-${group.key}`}>
-            <header className="flex items-baseline gap-2 border-b border-line pb-1">
-              <h2 className="text-xl font-semibold text-ink">{group.label}</h2>
-              <span className="text-sm text-muted">{group.entries.length}</span>
-            </header>
-            {renderKindCredit(group)}
-            <ListSheet>{group.entries.map(renderBudgetEntryCard)}</ListSheet>
-          </section>
-        ))}
+        {recurringSections.map((section) => {
+          const { group, state, visible, page } = section
+          const key = group.key
+          return (
+            <section key={key} className="space-y-3" data-testid={`kind-section-${key}`}>
+              <header className="flex items-baseline gap-2 border-b border-line pb-1">
+                <h2 className="text-xl font-semibold text-ink">{group.label}</h2>
+                <span className="text-sm text-muted">{group.entries.length}</span>
+              </header>
+              {renderSectionControls(section)}
+              {renderKindCredit(group)}
+              {visible.length === 0 ? (
+                <div className="space-y-3" data-testid={`${key}-empty`}>
+                  <p className="text-base text-body">
+                    No matching entries in this section.
+                  </p>
+                  {hasRecurringFilter(state) && (
+                    <Button
+                      variant="secondary"
+                      data-testid={`${key}-clear-filters`}
+                      onClick={() => {
+                        patchSection(key, { status: 'all', accountId: null, page: 1 })
+                        setHeldSections((prev) => new Set(prev).add(key))
+                      }}
+                    >
+                      Clear filters
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <ListSheet>{recurringPageSlice(visible, page).map(renderBudgetEntryCard)}</ListSheet>
+                  {visible.length > RECURRING_PAGE_SIZE && (
+                    <Pager
+                      total={visible.length}
+                      page={page}
+                      pageSize={RECURRING_PAGE_SIZE}
+                      onPage={(next) => patchSection(key, { page: next })}
+                      label={`${group.label} pages`}
+                      testId={`${key}-pager`}
+                    />
+                  )}
+                </>
+              )}
+            </section>
+          )
+        })}
       </>
     )
   }
@@ -1847,15 +2135,14 @@ export function AllocationsPage() {
   return (
     <div className="page">
       <PageHeader title="Allocations">
-        {activeTab !== 'wishlist' && (
-          <Button
-              variant="primary"
-              onClick={openCreateModal}
-            className="w-full sm:w-auto justify-center"
-          >
-              {activeTab === 'subscriptions' ? 'Add recurring entry' : 'Add allocation'}
-          </Button>
-        )}
+        <Button
+          variant="primary"
+          onClick={activeTab === 'wishlist' ? () => setWishlistCreateOpen(true) : openCreateModal}
+          // The longest label's width on a phone, so the button reads the same on every tab.
+          className="w-40 sm:w-auto justify-center"
+        >
+          {ADD_LABEL[activeTab]}
+        </Button>
       </PageHeader>
           <nav className="grid grid-cols-4 gap-1 sm:flex">
             {[
@@ -1877,6 +2164,10 @@ export function AllocationsPage() {
             })}
           </nav>
 
+      {activeTab === 'subscriptions' && <SectionIntro title="Recurring entries" description={INTRO.subscriptions} />}
+      {activeTab === 'budgets' && <SectionIntro title="Budget envelopes" description={INTRO.budgets} />}
+      {activeTab === 'savings' && <SectionIntro title="Savings & investment targets" description={INTRO.savings} />}
+
       {activeTab === 'subscriptions' && (
         <div>
           <label htmlFor="recurring-search" className="sr-only">Search recurring entries</label>
@@ -1884,7 +2175,7 @@ export function AllocationsPage() {
             id="recurring-search"
             type="search"
             value={recurringSearch}
-            onChange={(event) => setRecurringSearch(event.target.value)}
+            onChange={(event) => changeRecurringSearch(event.target.value)}
             placeholder="Search by name, account, category or amount"
             autoComplete="off"
             className="input-field focus-ring !h-11"
@@ -1893,14 +2184,12 @@ export function AllocationsPage() {
         </div>
       )}
 
-      {activeTab === 'subscriptions' && <TagFilter value={selectedTag} onChange={setSelectedTag} />}
+      {activeTab === 'subscriptions' && <TagFilter value={selectedTag} onChange={changeSelectedTag} />}
 
       {activeTab === 'subscriptions' && renderRecurringKindSections()}
 
       {activeTab === 'budgets' &&
         renderAllocationSection(
-          'Budget envelopes',
-          'Monthly spending buckets that align with your categories and keep cash flow on track.',
           budgetEnvelopes,
           'No budget envelopes yet. Create one to keep monthly spending in check.',
           'Create a budget envelope'
@@ -1910,8 +2199,6 @@ export function AllocationsPage() {
 
       {activeTab === 'savings' &&
         renderAllocationSection(
-          'Savings & investment targets',
-          'Longer-term goals and rainy-day funds that should steadily grow over time.',
           savingsAndGoals,
           hasRankedGoals
             ? 'No paused or other savings goals. Your active goals are in the ranked list above.'
@@ -1920,7 +2207,12 @@ export function AllocationsPage() {
         )}
 
       {activeTab === 'wishlist' && (
-        <WishlistPanel onCreateAllocationFromItem={openAllocationFromWishlist} />
+        <WishlistPanel
+          createOpen={wishlistCreateOpen}
+          onCreateOpen={() => setWishlistCreateOpen(true)}
+          onCreateClose={() => setWishlistCreateOpen(false)}
+          onCreateAllocationFromItem={openAllocationFromWishlist}
+        />
       )}
 
       {activeTab !== 'subscriptions' && activeTab !== 'wishlist' && (

@@ -132,7 +132,7 @@ async function openTab(page, tab) {
 }
 
 async function createBudget(page, bank, name, { start, end, amount = '1000', description } = {}) {
-  await page.getByRole('button', { name: 'Add allocation' }).click()
+  await page.getByRole('button', { name: 'Add budget' }).click()
   const form = budgetForm(page)
   await form.waitFor()
   await field(form, 'account_id').selectOption(String(bank.id))
@@ -150,7 +150,7 @@ async function createBudget(page, bank, name, { start, end, amount = '1000', des
 }
 
 async function createSavings(page, bank, name, { target, amount = '5000' } = {}) {
-  await page.getByRole('button', { name: 'Add allocation' }).click()
+  await page.getByRole('button', { name: 'Add savings goal' }).click()
   const form = savingsForm(page)
   await form.waitFor()
   await field(form, 'account_id').selectOption(String(bank.id))

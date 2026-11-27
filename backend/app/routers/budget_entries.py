@@ -513,6 +513,12 @@ def list_budget_entries(
     tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    after_id: Optional[int] = Query(
+        None, ge=0,
+        description=("Cursor: only entries with an id above this, in ascending id order "
+                     "(send the last id of the previous page). Without it the list is "
+                     "ordered by next occurrence and paged by offset."),
+    ),
 ):
     viewable = viewable_account_ids(db, current_user)
     query = db.query(BudgetEntry).filter(readable_criterion(
@@ -535,9 +541,15 @@ def list_budget_entries(
     if tag_id is not None:
         query = query.filter(effective_tag_criterion(BudgetEntry, tag_id))
 
+    if after_id is not None:
+        query = query.filter(BudgetEntry.id > after_id)
+        order = (BudgetEntry.id.asc(),)
+    else:
+        order = (BudgetEntry.next_occurrence.asc(), BudgetEntry.id.asc())
+
     total = query.count()
     entries = (
-        query.order_by(BudgetEntry.next_occurrence.asc(), BudgetEntry.id.asc())
+        query.order_by(*order)
         .offset(offset)
         .limit(limit)
         .all()

@@ -1252,15 +1252,23 @@ export function scheduledFor(data: HouseholdData, query: URLSearchParams): Sched
   }
 }
 
-/** `GET /budget-entries/` as the pages ask it: `entry_type`, `is_active`, `limit` and `offset`. */
+/**
+ * `GET /budget-entries/` as the pages ask it: `entry_type`, `is_active`, `limit`, `offset` and `after_id`. With
+ * `after_id` the matches are the entries whose id is higher, in ascending id order, as the API answers a cursor
+ * request; without it they keep the fixture's order.
+ */
 export function budgetEntriesFor(data: HouseholdData, query: URLSearchParams): PaginatedResponse<BudgetEntry> {
-  only(query, ['entry_type', 'is_active', 'limit', 'offset'])
+  only(query, ['entry_type', 'is_active', 'limit', 'offset', 'after_id'])
   const kind = query.get('entry_type')
   const active = query.get('is_active')
+  const after = query.get('after_id')
   const matches = data.entries.filter(
-    (e) => (!kind || e.entry_type === kind) && (active === null || (e.view === 'limited' ? true : String(e.is_active) === active)),
+    (e) =>
+      (!kind || e.entry_type === kind) &&
+      (active === null || (e.view === 'limited' ? true : String(e.is_active) === active)) &&
+      (after === null || e.id > Number(after)),
   )
-  return pageFor(matches, query)
+  return pageFor(after === null ? matches : [...matches].sort((a, b) => a.id - b.id), query)
 }
 
 /** The one bank preset the account form's minimum due rule offers (a card is being added or edited). */
