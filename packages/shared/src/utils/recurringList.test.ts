@@ -120,6 +120,26 @@ describe('sorts and filters recurring entries through recurringList', () => {
     expect(recurringPageSlice(twelve, 3)).toEqual([11, 12])
     expect(recurringPageSlice(twelve, 9)).toEqual([11, 12])
   })
+
+  it('offers and matches an account used only as an overflow source', () => {
+    const topUp = full(6, { name: 'Top-up', account_id: 10, overflow_account_id: 13 })
+    expect(entryAccountIds(topUp)).toEqual([10, 13])
+    expect(recurringAccountOptions([topUp], new Map([[10, 'Main'], [13, 'Reserve']]))).toEqual([
+      { id: 10, name: 'Main' },
+      { id: 13, name: 'Reserve' },
+    ])
+    expect(ids(filterRecurringEntries([rent, topUp], { status: 'all', accountId: 13 }))).toEqual([6])
+    expect(ids(filterRecurringEntries([rent, topUp], { status: 'all', accountId: 10 }))).toEqual([1, 6])
+  })
+
+  it('orders stored wall times by their own parts, whatever the browser zone', () => {
+    // 02:30 and 03:00 on the spring-forward day in Los Angeles (02:30 does not exist there locally).
+    const early = full(7, { next_occurrence: '2026-03-08T02:30:00Z' })
+    const late = full(8, { next_occurrence: '2026-03-08T03:00:00Z' })
+    const naive = full(9, { next_occurrence: '2026-03-08T02:45:00' })
+    expect(ids(sortRecurringEntries([late, naive, early], 'due', 'asc'))).toEqual([7, 9, 8])
+    expect(ids(sortRecurringEntries([early, late], 'due', 'desc'))).toEqual([8, 7])
+  })
 })
 
 describe('dueIndicator', () => {
@@ -134,6 +154,12 @@ describe('dueIndicator', () => {
     expect(due(21)).toEqual({ kind: 'soon', days: 1 })
     expect(due(27)).toEqual({ kind: 'soon', days: 7 })
     expect(due(28)).toBeNull()
+  })
+
+  it('reads a UTC-suffixed stored date by its own calendar day, in any browser zone', () => {
+    expect(dueIndicator(full(1, { next_occurrence: '2026-10-20T00:00:00Z' }), today)).toEqual({ kind: 'today' })
+    expect(dueIndicator(full(1, { next_occurrence: '2026-10-19T23:30:00Z' }), today)).toEqual({ kind: 'overdue', days: 1 })
+    expect(dueIndicator(full(1, { next_occurrence: '2026-10-21T00:00:00Z' }), today)).toEqual({ kind: 'soon', days: 1 })
   })
 
   it('is for active full entries only, and not a fully paid one', () => {

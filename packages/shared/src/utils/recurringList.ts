@@ -1,4 +1,5 @@
 import type { BudgetEntry } from '../types/api'
+import { entryCalendarDate, parseEntryDate } from './entryDate'
 
 /** How a Recurring section is ordered: by next due date, amount or name. */
 export type RecurringSortKey = 'due' | 'amount' | 'name'
@@ -33,14 +34,15 @@ export function hasRecurringFilter(view: Pick<RecurringSectionView, 'status' | '
 }
 
 /**
- * The account ids an entry exposes: its own account and a transfer's other end. A limited
- * entry exposes the two account refs the API gives it, and only those with an id.
+ * The account ids an entry exposes: its own account, a transfer's other end and its overflow
+ * (secondary funding) account. A limited entry exposes the two account refs the API gives it,
+ * and only those with an id.
  */
 export function entryAccountIds(entry: BudgetEntry): number[] {
   const ids =
     entry.view === 'limited'
       ? [entry.account?.id, entry.counterpart?.id]
-      : [entry.account_id, entry.transfer_to_account_id]
+      : [entry.account_id, entry.transfer_to_account_id, entry.overflow_account_id]
   return [...new Set(ids.filter((id): id is number => typeof id === 'number'))]
 }
 
@@ -93,7 +95,8 @@ function entryName(entry: BudgetEntry): string {
 }
 
 function dueTime(entry: BudgetEntry): number {
-  const time = new Date(entry.next_occurrence).getTime()
+  // Wall time stored as UTC parts: read it so, never through the browser's zone (a DST gap would reorder it).
+  const time = parseEntryDate(entry.next_occurrence).getTime()
   return Number.isNaN(time) ? Number.POSITIVE_INFINITY : time
 }
 
@@ -149,8 +152,8 @@ function localDay(date: Date): number {
 export function dueIndicator(entry: BudgetEntry, today: Date = new Date()): DueIndicator | null {
   if (entry.view === 'limited' || !entry.is_active) return null
   if (entry.end_mode === 'after_occurrences' && (entry.max_occurrences ?? 0) === 0) return null
-  const due = new Date(entry.next_occurrence)
-  if (Number.isNaN(due.getTime())) return null
+  if (Number.isNaN(parseEntryDate(entry.next_occurrence).getTime())) return null
+  const due = entryCalendarDate(entry.next_occurrence)
   const days = Math.round((localDay(due) - localDay(today)) / 86_400_000)
   if (days < 0) return { kind: 'overdue', days: -days }
   if (days === 0) return { kind: 'today' }
