@@ -617,6 +617,7 @@ export function AllocationsPage() {
   // Each section's sort, filter and page, by kind; a section not here has the defaults.
   const [sectionStates, setSectionStates] = useState<Partial<Record<KindGroupKey, SectionState>>>({})
   // Sections left standing, with their header, after Clear filters; a search or tag change lets them go.
+  const [knownSections, setKnownSections] = useState<ReadonlySet<KindGroupKey>>(() => new Set())
   const [heldSections, setHeldSections] = useState<ReadonlySet<KindGroupKey>>(() => new Set())
   const patchSection = useCallback((key: KindGroupKey, patch: Partial<SectionState>) => {
     setSectionStates((prev) => ({ ...prev, [key]: { ...(prev[key] ?? DEFAULT_SECTION_STATE), ...patch } }))
@@ -717,6 +718,13 @@ export function AllocationsPage() {
 
   // The loader runs only while Recurring is the open tab; the ref lets a refresh a dialog asks for later see that.
   const recurringOpenRef = useRef(activeTab === 'subscriptions')
+  // The lazy query stays subscribed to its last page (and refetches it when an entry changes elsewhere), so the
+  // loader keeps that request to end the subscription when Recurring closes.
+  const budgetEntriesRequestRef = useRef<{ unsubscribe: () => void } | null>(null)
+  const endBudgetEntriesSubscription = useCallback(() => {
+    budgetEntriesRequestRef.current?.unsubscribe()
+    budgetEntriesRequestRef.current = null
+  }, [])
   useEffect(() => {
     recurringOpenRef.current = activeTab === 'subscriptions'
   }, [activeTab])
@@ -733,14 +741,22 @@ export function AllocationsPage() {
       const loaded: BudgetEntry[] = []
       let afterId = 0
       for (;;) {
-        const page = await triggerBudgetEntries({ limit: RECURRING_FETCH_LIMIT, after_id: afterId, ...tagParam }).unwrap()
+        const request = triggerBudgetEntries({ limit: RECURRING_FETCH_LIMIT, after_id: afterId, ...tagParam })
+        budgetEntriesRequestRef.current = request
+        const page = await request.unwrap()
         if (!isCurrent()) return
+        // An API that ignores the cursor would send the same page again for ever: ids must rise past it.
+        const rising = page.items.every((item, i) => item.id > (i === 0 ? afterId : page.items[i - 1].id))
+        if (!rising) throw new Error('budget-entries page did not advance past its cursor')
         loaded.push(...page.items)
         const last = page.items[page.items.length - 1]
         if (!page.has_more || !last) break
         afterId = last.id
       }
       setRecurringEntries(loaded)
+      // A tag narrows the list, so the sections seen before it stay known (their filters and Clear filters stay).
+      const keys = groupByKind(loaded).map((group) => group.key)
+      setKnownSections((prev) => (selectedTag === undefined ? new Set(keys) : new Set([...prev, ...keys])))
       setRecurringError(false)
     } catch (error) {
       if (!isCurrent()) return
@@ -761,11 +777,21 @@ export function AllocationsPage() {
     if (activeTab !== 'subscriptions') {
       // Leaving Recurring ends a load in flight: it asks for no further page and sets nothing.
       beginBudgetEntriesRequest(true)
+      endBudgetEntriesSubscription()
       return
     }
     recurringOpenRef.current = true
     loadBudgetEntries()
-  }, [authLoading, isAuthenticated, loadBudgetEntries, activeTab, beginBudgetEntriesRequest])
+  }, [authLoading, isAuthenticated, loadBudgetEntries, activeTab, beginBudgetEntriesRequest, endBudgetEntriesSubscription])
+
+  // Leaving the Allocations route ends the load too, and the subscription with it.
+  useEffect(
+    () => () => {
+      beginBudgetEntriesRequest(true)
+      endBudgetEntriesSubscription()
+    },
+    [beginBudgetEntriesRequest, endBudgetEntriesSubscription]
+  )
 
   useEffect(() => {
     return () => {
@@ -1596,7 +1622,7 @@ export function AllocationsPage() {
     const due = dueIndicator(entry)
     if (!due) return undefined
     if (due.kind === 'overdue') {
-      return <StatusText tone="warn" data-testid="due-indicator" data-due="overdue">Overdue</StatusText>
+      return <StatusText tone="danger" data-testid="due-indicator" data-due="overdue">Overdue</StatusText>
     }
     if (due.kind === 'today') {
       return <StatusText tone="warn" data-testid="due-indicator" data-due="today">Due today</StatusText>
@@ -1893,13 +1919,12 @@ export function AllocationsPage() {
       )
     })
     const groups = new Map(groupByKind(matching).map((group) => [group.key, group]))
-    const loadedKeys = new Set(groupByKind(recurringEntries).map((group) => group.key))
     const accountNames = new Map([...accountsById].map(([id, account]) => [id, account.name]))
     return KIND_ORDER.flatMap((key) => {
       const state = sectionStates[key] ?? DEFAULT_SECTION_STATE
       const group: KindGroup = groups.get(key) ?? { key, label: KIND_LABELS[key], entries: [] }
       // A section with a filter on, or one Clear filters left, stays with its header though the search leaves it nothing.
-      const stays = loadedKeys.has(key) && (hasRecurringFilter(state) || heldSections.has(key))
+      const stays = knownSections.has(key) && (hasRecurringFilter(state) || heldSections.has(key))
       if (group.entries.length === 0 && !stays) return []
       const visible = viewRecurringEntries(group.entries, state)
       const options = recurringAccountOptions(group.entries, accountNames)
@@ -1908,7 +1933,7 @@ export function AllocationsPage() {
       }
       return [{ group, state, visible, page: clampRecurringPage(state.page, visible.length), options }]
     })
-  }, [recurringEntries, recurringSearch, sectionStates, heldSections, accountsById, categoriesById])
+  }, [recurringEntries, recurringSearch, sectionStates, heldSections, knownSections, accountsById, categoriesById])
 
   // After a reload that leaves fewer pages (a delete, a pause), the page held moves to the last one that exists.
   useEffect(() => {

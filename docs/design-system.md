@@ -294,7 +294,7 @@ Fields have no box. They are written on a ruled line (an underline in `line-stro
     select. A section the controls leave empty keeps its header, says so, and offers
     "Clear filters". A paused entry's row is muted with a "Paused" mark on its title line;
     a full, active entry due today or within seven days says so in the row's status slot
-    (`StatusText`), and an overdue one reads "Overdue" in the `warn` tone.
+    (`StatusText`), and an overdue one reads "Overdue" (`danger`, as in the states below).
   - The dashboard's quick balances are account lines on their panel, ruled with
     `line`, figures right-aligned, with no tile fill; their editor's controls are
     outlined, and its Add account list sits under a rule, not on a fill.

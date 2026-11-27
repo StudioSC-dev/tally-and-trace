@@ -233,6 +233,29 @@ test.describe('Recurring sections', () => {
     expect(fake.gets.length).toBe(5)
   })
 
+  test('stops requesting pages when the Allocations route closes with a page held', async ({ page }) => {
+    const held = gate()
+    const fake = await open(page, cashEntries(430), { hook: async (n) => (n === 2 ? held.wait.then(() => undefined) : undefined) })
+    await expect.poll(() => fake.gets.length, { message: 'the second page is asked for and held' }).toBe(2)
+    await page.getByRole('link', { name: 'Dashboard', exact: true }).first().click()
+    await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible()
+    held.open()
+    await settle(page)
+    expect(fake.gets, 'no third page once the route is left').toHaveLength(2)
+  })
+
+  test('does not refetch Recurring when a Wishlist purchase invalidates entries after Recurring was visited', async ({ page }) => {
+    const fake = await open(page, cashEntries(3))
+    await expect(count(page, 'cash')).toHaveText('3')
+    expect(fake.gets).toHaveLength(1)
+    await tab(page, 'Wishlist').click()
+    await expect(page.getByRole('button', { name: 'Mark as purchased' }).first()).toBeVisible()
+    await settle(page)
+    await page.getByRole('button', { name: 'Mark as purchased' }).first().click()
+    await settle(page)
+    expect(fake.gets, 'a purchase invalidates budget entries but Recurring is closed').toHaveLength(1)
+  })
+
   test('does not ask for recurring entries while another tab is open', async ({ page }) => {
     const fake = await open(page, cashEntries(3), { query: '?tab=savings' })
     await expect(page.locator('main').getByText('Emergency fund', { exact: true })).toBeVisible()
@@ -308,6 +331,30 @@ test.describe('Recurring sections', () => {
     await expect(page.getByTestId('recurring-load-error')).toHaveCount(0)
     await expect(count(page, 'cash')).toHaveText('429')
     expect(fake.gets).toHaveLength(8)
+  })
+
+  test('treats a page that does not advance the cursor as a failed load and keeps the last complete list', async ({ page }) => {
+    const many = cashEntries(430)
+    const fake = await open(page, many)
+    await expect(count(page, 'cash')).toHaveText('430')
+    expect(fake.gets).toHaveLength(3)
+    // The API now repeats the first page whatever the cursor, and says there is more.
+    await page.unroute((url) => url.pathname === '/api/v1/budget-entries/')
+    const repeats: number[] = []
+    await page.route(
+      (url) => url.pathname === '/api/v1/budget-entries/',
+      (route) => {
+        if (route.request().method() !== 'GET') return route.fallback()
+        repeats.push(1)
+        return route.fulfill(json({ items: many.slice(0, 200), total: 430, has_more: true }))
+      },
+    )
+    await tab(page, 'Budgets').click()
+    await tab(page, 'Recurring').click()
+    await expect(page.getByTestId('recurring-load-error')).toBeVisible()
+    await settle(page)
+    expect(repeats.length, 'it stops after the repeated page instead of looping').toBeLessThanOrEqual(3)
+    await expect(count(page, 'cash'), 'the last complete list stays').toHaveText('430')
   })
 
   test('pages each section independently and clamps after deleting or pausing an entry', async ({ page }) => {
@@ -462,6 +509,26 @@ test.describe('Recurring sections', () => {
     await expect(section(page, 'subscription').getByTestId('kind-credit-lines')).toHaveCount(0)
   })
 
+  test('computes the credit summary from every loaded entry, not the visible page', async ({ page }) => {
+    // The only credit-bearing entry sits on page two; page one has none.
+    const rows = [
+      ...subscriptions(6, 'Joint sub', { account_id: JOINT, tags: [HOUSEHOLD_TAG] }),
+      entry('Card sub', { kind: 'subscription', account_id: CARD, next_occurrence: day(60) }),
+    ]
+    await open(page, rows, { credit: true })
+    const lines = section(page, 'subscription').getByTestId('kind-credit-lines')
+    await expect(pager(page, 'subscription')).toContainText('1–5 of 7')
+    expect(await titles(page, 'subscription'), 'page one holds no card entry').not.toContain('Card sub')
+    await expect(lines, 'the summary shows on a page without the card entry').toContainText('Available credit on HSBC Red Mastercard')
+    await goToPage(page, 'subscription', 2)
+    expect(await titles(page, 'subscription')).toContain('Card sub')
+    await expect(lines).toContainText('Available credit on HSBC Red Mastercard')
+    // A tag that excludes the card entry removes the summary on every page.
+    await page.getByTestId('tag-filter').selectOption('41')
+    await expect(pager(page, 'subscription')).toContainText('1–5 of 6')
+    await expect(section(page, 'subscription').getByTestId('kind-credit-lines')).toHaveCount(0)
+  })
+
   test('mutes paused entries and shows the Paused badge', async ({ page }) => {
     await open(page, [entry('Running', { next_occurrence: day(30) }), entry('On hold', { next_occurrence: day(31), is_active: false })])
     const held = rowOf(page, 'On hold')
@@ -489,7 +556,8 @@ test.describe('Recurring sections', () => {
     await open(page, [...rows, late])
     const indicator = (name: string): Locator => rowOf(page, name).getByTestId('due-indicator')
     await expect(indicator('Late')).toHaveText('Overdue')
-    await expect(indicator('Late')).toHaveAttribute('data-status', 'warn')
+    await expect(indicator('Late')).toHaveAttribute('data-status', 'danger')
+    await expect(indicator('Today')).toHaveAttribute('data-status', 'warn')
     await expect(indicator('Today')).toHaveText('Due today')
     await expect(indicator('Tomorrow')).toHaveText('Due in 1 day')
     await expect(indicator('Seventh day')).toHaveText('Due in 7 days')
@@ -541,6 +609,26 @@ test.describe('Recurring sections', () => {
     await expect(section(page, 'cash')).toBeVisible()
     await searchBox(page).fill('Netflix')
     await expect(section(page, 'cash')).toHaveCount(0)
+  })
+
+  test('keeps a section with a filter, its message and Clear filters when a tag excludes all its entries', async ({ page }) => {
+    const rows = [entry('Plain rent', { next_occurrence: day(10) }), entry('Old gym', { next_occurrence: day(11), is_active: false }), ...subscriptions(2, 'Netflix', { tags: [TRIP_TAG] })]
+    await open(page, rows)
+    await pickStatus(page, 'cash', 'Paused')
+    await page.getByTestId('tag-filter').selectOption('42')
+    await expect(page.getByTestId('tag-filter')).toHaveValue('42')
+    expect(await titles(page, 'subscription')).toEqual(['Netflix 01', 'Netflix 02'])
+    const cash = section(page, 'cash')
+    await expect(cash.getByRole('heading', { name: 'Cash expenses' })).toBeVisible()
+    await expect(page.getByTestId('cash-empty')).toContainText('No matching entries in this section')
+    await expect(page.getByTestId('cash-clear-filters')).toBeVisible()
+    await page.getByTestId('cash-clear-filters').click()
+    await expect(cash.getByRole('heading', { name: 'Cash expenses' })).toBeVisible()
+    await expect(page.getByTestId('cash-empty')).toBeVisible()
+    // With no filter left the tag alone lets the section go.
+    await page.getByTestId('tag-filter').selectOption('')
+    await expect(page.getByTestId('cash-empty')).toHaveCount(0)
+    expect(await titles(page, 'cash')).toEqual(['Plain rent', 'Old gym'])
   })
 
   test('preserves existing Recurring entry actions and behavior in the other Allocations tabs', async ({ page }) => {
