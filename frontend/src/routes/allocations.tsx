@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import {
   useLazyGetAllocationsQuery,
+  useLazyGetAllocationQuery,
   useLazyGetBudgetEntriesQuery,
   useGetAccountsQuery,
   useGetCardCreditsQuery,
@@ -61,8 +62,10 @@ import { useRecentPicks } from '../hooks/useRecentPicks'
 import { useDeleteRecurringEntry } from '../hooks/useDeleteRecurringEntry'
 import { useManilaDay } from '../hooks/useManilaDay'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
-import { BudgetUsageBar } from '../components/BudgetUsageBar'
+import { BudgetFigures } from '../components/BudgetFigures'
+import { BudgetEnvelopeDetail } from '../components/BudgetEnvelopeDetail'
 import { amountClass, formatAmount, formatSigned } from '../utils/amount'
+import { withSelection } from '../utils/selection'
 import { CURRENCY_CONFIGS, getCurrencySymbol } from '../utils/currency'
 import type { CurrencyCode } from '../utils/currency'
 import type { AmountKind } from '../utils/amount'
@@ -143,7 +146,7 @@ type AllocationFieldKey =
   | 'period_frequency'
   | 'period_start'
   | 'period_end'
-  | 'current_amount'
+  | 'budget_account_ids'
   | 'target_amount'
   | 'monthly_target'
   | 'target_date'
@@ -152,7 +155,7 @@ const isAllocationFieldKey = (key: string | undefined): key is AllocationFieldKe
   key !== undefined &&
   [
     'account_id', 'name', 'category_ids', 'savings_account_ids', 'period_frequency', 'period_start',
-    'period_end', 'current_amount', 'target_amount', 'monthly_target', 'target_date', 'currency',
+    'period_end', 'budget_account_ids', 'target_amount', 'monthly_target', 'target_date', 'currency',
   ].includes(key)
 
 /** The app's own wording for a required field left empty; a bound such as `min` uses the browser's text. */
@@ -310,7 +313,6 @@ type AllocationFormState = {
   allocation_type: Allocation['allocation_type']
   description: string
   target_amount?: number
-  current_amount: number
   monthly_target?: number
   target_date?: string
   is_active: boolean
@@ -318,6 +320,8 @@ type AllocationFormState = {
   period_frequency?: 'daily' | 'weekly' | 'monthly' | 'quarterly'
   period_start?: string
   period_end?: string
+  /** Budgets only: the "Carry over to next period" switch. It counts only while a limit is set. */
+  carry_over: boolean
   /** A savings currency the user picked (or the stored one when editing); unset follows the mode's default. */
   currency?: CurrencyCode
 }
@@ -376,7 +380,7 @@ export function AllocationsPage() {
   const recentAccounts = useRecentPicks('account')
   const recentCategories = useRecentPicks('category')
   const navigate = useNavigate()
-  const { format, currencyCode: userCurrency } = useCurrency()
+  const { currencyCode: userCurrency } = useCurrency()
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -422,7 +426,6 @@ export function AllocationsPage() {
         allocation_type: type === 'budget' ? 'budget' : 'savings',
     description: '',
         target_amount: undefined,
-    current_amount: 0,
         monthly_target: undefined,
         target_date: undefined,
         is_active: true,
@@ -430,6 +433,7 @@ export function AllocationsPage() {
         period_frequency: 'monthly',
         period_start: defaultPeriod.start,
         period_end: defaultPeriod.end,
+        carry_over: false,
       }
 
       if (type === 'budget') {
@@ -456,6 +460,8 @@ export function AllocationsPage() {
   )
 
   const [selectedBudgetCategoryIds, setSelectedBudgetCategoryIds] = useState<number[]>([])
+  // Budgets: the accounts an envelope counts; none means every account.
+  const [selectedBudgetAccountIds, setSelectedBudgetAccountIds] = useState<number[]>([])
   const [selectedSavingsAccountIds, setSelectedSavingsAccountIds] = useState<number[]>([])
   const [fieldErrors, setFieldErrors] = useState<FieldErrors<AllocationFieldKey>>({})
   // A refusal with no single field to fix, or a control the form does not wire.
@@ -542,6 +548,13 @@ export function AllocationsPage() {
     categories.forEach((category) => map.set(category.id, category))
     return map
   }, [categories])
+  // Which accounts a budget counts: its `configuration.account_ids`, or every account when there are none.
+  const budgetAccountLabel = (allocation: Allocation): string => {
+    const raw = (allocation.configuration ?? {})['account_ids']
+    const ids = Array.isArray(raw) ? raw.map((id) => Number(id)).filter((id) => Number.isFinite(id)) : []
+    if (ids.length === 0) return 'All accounts'
+    return ids.map((id) => accountsById.get(id)?.name ?? `Account ${id}`).join(', ')
+  }
   const actionAllocationConfig = (actionAllocation?.configuration ?? {}) as Record<string, unknown>
   const actionAllocationIsBudget = actionAllocation?.allocation_type === 'budget'
   const actionBudgetCadenceLabel =
@@ -556,25 +569,6 @@ export function AllocationsPage() {
     actionAllocationIsBudget && actionAllocation?.period_end
       ? formatBudgetPeriodEndLabel(actionAllocation.period_end)
       : undefined
-  const actionAllocationLimit =
-    actionAllocationIsBudget && actionAllocation
-      ? typeof actionAllocation.target_amount === 'number'
-        ? actionAllocation.target_amount
-        : typeof actionAllocation.monthly_target === 'number'
-        ? actionAllocation.monthly_target
-        : null
-      : actionAllocation?.target_amount ?? null
-  const actionAllocationRemaining =
-    actionAllocation && typeof actionAllocationLimit === 'number'
-      ? actionAllocationLimit - actionAllocation.current_amount
-      : null
-  const actionAllocationUsagePct =
-    actionAllocation &&
-    actionAllocationIsBudget &&
-    typeof actionAllocationLimit === 'number' &&
-    actionAllocationLimit !== 0
-      ? Math.min((actionAllocation.current_amount / actionAllocationLimit) * 100, 999)
-      : null
   const actionAllocationTypeLabel = actionAllocationIsBudget
     ? 'Budget Envelope'
     : actionAllocation?.allocation_type === 'savings'
@@ -852,6 +846,7 @@ export function AllocationsPage() {
     const presetType = activeTab === 'budgets' ? 'budget' : 'savings'
     setAllocationForm(createAllocationDefaults(presetType))
     setSelectedBudgetCategoryIds([])
+    setSelectedBudgetAccountIds([])
     setSelectedSavingsAccountIds([])
     setEditingAllocation(null)
     setIsCreateModalOpen(true)
@@ -861,6 +856,7 @@ export function AllocationsPage() {
     (item: WishlistItem, kind: 'budget' | 'savings') => {
       setEditingAllocation(null)
       setSelectedBudgetCategoryIds([])
+      setSelectedBudgetAccountIds([])
       setSelectedSavingsAccountIds([])
       setAllocationForm({
         ...createAllocationDefaults(kind),
@@ -895,6 +891,7 @@ export function AllocationsPage() {
     const type = activeTab === 'budgets' ? 'budget' : 'savings'
     setAllocationForm(createAllocationDefaults(type))
     setSelectedBudgetCategoryIds([])
+    setSelectedBudgetAccountIds([])
     setSelectedSavingsAccountIds([])
   }, [activeTab, createAllocationDefaults])
 
@@ -1052,9 +1049,10 @@ export function AllocationsPage() {
     await loadBudgetEntriesRef.current()
   }, [loadBudgetEntriesRef])
 
-  // Budgets and target-balance savings pick one account; the other savings modes do not.
+  // Target-balance savings pick one account; the other savings modes and budgets do not (a budget counts the
+  // accounts picked in its own multi-picker, or every account).
   const needsSingleAccount =
-    allocationForm.allocation_type === 'budget' || allocationForm.goal_mode === 'target_balance'
+    allocationForm.allocation_type !== 'budget' && allocationForm.goal_mode === 'target_balance'
 
   // A savings tracker's currency: the user's pick, else the chosen account's (target balance), the first
   // aggregated account's (combined total), else the signed-in user's default currency (which useCurrency
@@ -1070,6 +1068,9 @@ export function AllocationsPage() {
     return (linked?.currency as CurrencyCode | undefined) ?? userCurrency
   }, [allocationForm.goal_mode, allocationForm.account_id, selectedSavingsAccountIds, ownAccounts, userCurrency])
   const savingsCurrency: CurrencyCode = allocationForm.currency ?? defaultSavingsCurrency
+  // The carry switch reads off, and cannot be turned on, while the envelope has no limit.
+  const budgetHasLimit = allocationForm.target_amount !== undefined
+  const carrySwitchOn = budgetHasLimit && allocationForm.carry_over
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1130,8 +1131,10 @@ export function AllocationsPage() {
 
       let configuration: Record<string, unknown> | undefined
       if (allocationForm.allocation_type === 'budget') {
+        // An empty `account_ids` clears an earlier selection: the envelope counts every account.
         configuration = {
           category_ids: selectedBudgetCategoryIds,
+          account_ids: selectedBudgetAccountIds,
         }
       } else {
         configuration = {
@@ -1157,14 +1160,24 @@ export function AllocationsPage() {
           ? undefined
           : dateInputToWire(allocationForm.target_date)
 
-      // Budgets and a target-balance tracker use the chosen account; a combined total stores
-      // the first aggregated one; a transactions total has none.
-      const payloadAccountId: number | null =
-        allocationForm.allocation_type === 'budget' || allocationForm.goal_mode === 'target_balance'
+      // A target-balance tracker uses the chosen account; a combined total stores the first aggregated one; a
+      // transactions total has none. A budget sends none: its accounts are `configuration.account_ids`.
+      const payloadAccountId: number | null | undefined =
+        allocationForm.allocation_type === 'budget'
+          ? undefined
+          : allocationForm.goal_mode === 'target_balance'
           ? allocationForm.account_id
           : allocationForm.goal_mode === 'multi_account'
           ? selectedSavingsAccountIds[0] ?? null
           : null
+
+      // Carry-over needs a limit: with none the switch counts as off. A carry that was on when the form opened and is
+      // still on keeps its saved start, even if a new period has begun; a new carry starts this period.
+      const isBudgetForm = allocationForm.allocation_type === 'budget'
+      const carryOn = isBudgetForm && allocationForm.target_amount !== undefined && allocationForm.carry_over
+      const savedCarryFrom = editingAllocation?.carry_over_from ?? null
+      const periodStartWire = allocationForm.period_start ? dateInputToWire(allocationForm.period_start) : undefined
+      const carryFrom = !carryOn ? null : savedCarryFrom ?? periodStartWire ?? null
 
       const allocationPayload = {
         account_id: payloadAccountId,
@@ -1172,9 +1185,6 @@ export function AllocationsPage() {
         allocation_type: resolvedAllocationType,
         description: allocationForm.description?.trim() || undefined,
         target_amount: allocationForm.target_amount,
-        // A savings figure is calculated by the API; only a budget's spent amount is sent.
-        current_amount:
-          allocationForm.allocation_type === 'budget' ? allocationForm.current_amount : undefined,
         monthly_target: allocationForm.monthly_target,
         target_date: targetDateIso,
         period_frequency:
@@ -1190,6 +1200,8 @@ export function AllocationsPage() {
         currency: allocationForm.allocation_type === 'budget' ? undefined : savingsCurrency,
         is_active: allocationForm.is_active,
         configuration,
+        carry_over: isBudgetForm ? carryOn : undefined,
+        carry_over_from: isBudgetForm ? carryFrom : undefined,
       }
       
       if (editingAllocation) {
@@ -1213,7 +1225,9 @@ export function AllocationsPage() {
           period_start: editedDate(isBudget, allocationForm.period_start, baseline.period_start),
           period_end: editedDate(isBudget, allocationForm.period_end, baseline.period_end),
         }
-        await updateAllocation({ id: editingAllocation.id, data: { ...fields, ...dateChanges } }).unwrap()
+        // An edit that clears a budget's limit sends null, which the API reads as no limit (undefined is left as it is).
+        const limitChange = isBudget && allocationForm.target_amount === undefined ? { target_amount: null } : {}
+        await updateAllocation({ id: editingAllocation.id, data: { ...fields, ...dateChanges, ...limitChange } }).unwrap()
         setEditingAllocation(null)
       } else {
         await createAllocation(allocationPayload).unwrap()
@@ -1221,11 +1235,14 @@ export function AllocationsPage() {
 
       setAllocationForm(createAllocationDefaults(resolvedAllocationType === 'budget' ? 'budget' : 'savings'))
       setSelectedBudgetCategoryIds([])
+      setSelectedBudgetAccountIds([])
       setSelectedSavingsAccountIds([])
       setIsCreateModalOpen(false)
       await loadAllocations(true)
     } catch (error) {
       console.error('Error saving allocation data:', error)
+      // The form stays open with what was typed; the list changes only after a save the API accepted.
+      setFormError(apiErrorMessage(error) || 'Could not save this allocation. Please try again.')
     }
   }
 
@@ -1259,7 +1276,6 @@ export function AllocationsPage() {
       allocation_type: normalizedType,
       description: allocation.description || '',
       target_amount: allocation.target_amount,
-      current_amount: allocation.current_amount,
       monthly_target: normalizedType === 'savings' ? allocation.monthly_target : undefined,
       target_date: normalizedType === 'savings' ? isoToDateInput(allocation.target_date ?? undefined) : undefined,
       currency: normalizedType === 'savings' ? (allocation.currency as CurrencyCode) : undefined,
@@ -1269,6 +1285,7 @@ export function AllocationsPage() {
       period_start: periodStartInput ?? defaultPeriod.start,
       // A stored empty end stays empty: it is not refilled with the cadence's default.
       period_end: periodEndInput,
+      carry_over: normalizedType === 'budget' && allocation.carry_over_from != null,
     })
     if (normalizedType === 'budget') {
       const categoryIds = Array.isArray(config['category_ids'])
@@ -1280,6 +1297,13 @@ export function AllocationsPage() {
             .filter((id): id is number => typeof id === 'number')
         : []
       setSelectedBudgetCategoryIds(categoryIds)
+      setSelectedBudgetAccountIds(
+        Array.isArray(config['account_ids'])
+          ? (config['account_ids'] as Array<number | string>)
+              .map((id) => Number(id))
+              .filter((id) => Number.isFinite(id))
+          : []
+      )
       setActiveTab('budgets')
     } else {
       const accountIds = Array.isArray(config['account_ids'])
@@ -1311,6 +1335,47 @@ export function AllocationsPage() {
     }
     await loadAllocations(true)
   }
+
+  // Opening a budget's snapshot dialog or history refetches the envelope: the fresh copy replaces the list's and the
+  // open dialog's, so a window that rolled over since the list loaded shows the same figures everywhere (STU-798).
+  const [triggerAllocation] = useLazyGetAllocationQuery()
+  const refreshSeq = useRef(0)
+  const appliedRefresh = useRef(0)
+  const refreshEnvelope = useCallback(
+    async (id: number): Promise<Allocation> => {
+      const seq = ++refreshSeq.current
+      const fresh = await triggerAllocation(id).unwrap()
+      // A slower, older read never overwrites a newer one.
+      if (seq > appliedRefresh.current) {
+        appliedRefresh.current = seq
+        setAllocationItems((prev) => prev.map((item) => (item.id === id ? fresh : item)))
+        setActionAllocation((prev) => (prev && prev.id === id ? fresh : prev))
+      }
+      return fresh
+    },
+    [triggerAllocation]
+  )
+  const [snapshotRead, setSnapshotRead] = useState<'loading' | 'ok' | 'error'>('loading')
+  const [snapshotAttempt, setSnapshotAttempt] = useState(0)
+  // The budget whose snapshot dialog is open.
+  const snapshotBudgetId = isActionModalOpen && actionAllocation?.allocation_type === 'budget' ? actionAllocation.id : null
+  useEffect(() => {
+    if (snapshotBudgetId === null) return
+    let current = true
+    setSnapshotRead('loading')
+    refreshEnvelope(snapshotBudgetId)
+      .then(() => {
+        if (current) setSnapshotRead('ok')
+      })
+      .catch(() => {
+        if (current) setSnapshotRead('error')
+      })
+    return () => {
+      current = false
+    }
+  }, [snapshotBudgetId, snapshotAttempt, refreshEnvelope])
+  // The budget whose history dialog is open.
+  const [historyFor, setHistoryFor] = useState<Allocation | null>(null)
 
   const openActionModal = (allocation: Allocation) => {
     setActionAllocation(allocation)
@@ -1350,19 +1415,7 @@ export function AllocationsPage() {
     const budgetCadenceLabel = formatBudgetCadenceLabel(allocation.period_frequency)
     const budgetPeriodStartLabel = allocation.period_start ? formatDateLabel(allocation.period_start) : undefined
     const budgetPeriodEndLabel = allocation.period_end ? formatBudgetPeriodEndLabel(allocation.period_end) : undefined
-    const limitAmount =
-      typeof allocation.target_amount === 'number'
-        ? allocation.target_amount
-        : isBudget && typeof allocation.monthly_target === 'number'
-        ? allocation.monthly_target
-        : null
-    const usedAmount = typeof allocation.current_amount === 'number' ? allocation.current_amount : 0
-    const remainingAmount =
-      typeof limitAmount === 'number' ? limitAmount - usedAmount : null
-    const usagePercentage =
-      isBudget && typeof limitAmount === 'number' && limitAmount !== 0
-        ? Math.min((usedAmount / limitAmount) * 100, 999)
-        : 0
+    const budgetScope = isBudget ? budgetAccountLabel(allocation) : null
     const savingsProgressPercentage =
       !isBudget && allocation.target_amount
         ? Math.min((allocation.current_amount / allocation.target_amount) * 100, 999)
@@ -1413,7 +1466,7 @@ export function AllocationsPage() {
                 <p className="text-sm text-muted capitalize">
                   {allocation.allocation_type === 'budget' ? 'Budget Envelope' : allocation.allocation_type}
                 </p>
-                {account && <p className="text-sm text-body">{account.name}</p>}
+                {!isBudget && account && <p className="text-sm text-body">{account.name}</p>}
                   {allocation.description && (
                     <p className="text-sm text-body mt-1">{allocation.description}</p>
                   )}
@@ -1444,6 +1497,14 @@ export function AllocationsPage() {
                     {budgetPeriodEndLabel && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
                         Ends {budgetPeriodEndLabel}
+                      </span>
+                    )}
+                    <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1" data-testid="card-accounts">
+                      Accounts: {budgetScope}
+                    </span>
+                    {allocation.carry_over_from != null && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1" data-testid="card-carry-chip">
+                        Carry over on
                       </span>
                     )}
                   </div>
@@ -1493,36 +1554,7 @@ export function AllocationsPage() {
                 
           <div className="space-y-2">
             {isBudget ? (
-              <>
-                {limitAmount !== null && limitAmount > 0 && (
-                  <div className="flex items-center justify-between text-sm text-body">
-                    <span>Spending limit</span>
-                    <span className="font-medium text-ink">{format(limitAmount)}</span>
-                  </div>
-                )}
-                <div className="flex items-center justify-between text-sm text-body">
-                  <span>Spent this period</span>
-                  <span className={`font-semibold ${amountClass('out')}`}>{format(usedAmount)}</span>
-                </div>
-                {limitAmount !== null && limitAmount > 0 && (
-                  <>
-                    <BudgetUsageBar spent={usedAmount} limit={limitAmount} />
-                    <p className="text-right text-xs font-medium text-muted">
-                      {Math.min(Math.max(usagePercentage, 0), 100).toFixed(1)}% of limit used
-                    </p>
-                  </>
-                )}
-                {limitAmount !== null && (
-                  <div className="flex items-center justify-between text-sm text-body">
-                    <span>Remaining</span>
-                    <span
-                      className={`font-semibold ${ remainingAmount !== null && remainingAmount < 0 ? 'text-danger' : 'text-ink' }`}
-                    >
-                      {format(remainingAmount ?? 0)}
-                    </span>
-                  </div>
-                )}
-              </>
+              <BudgetFigures allocation={allocation} prefix="card" spentLabel="Spent this period" />
             ) : (
               <>
                 <div className="flex items-center justify-between text-sm text-body">
@@ -2260,7 +2292,7 @@ export function AllocationsPage() {
                 <div>
                 <h2 className="text-xl font-semibold text-ink">{actionAllocation.name}</h2>
                 <p className="text-sm text-muted">{actionAllocationTypeLabel}</p>
-                {actionAllocationAccount && (
+                {!actionAllocationIsBudget && actionAllocationAccount && (
                   <p className="text-sm text-muted">{actionAllocationAccount.name}</p>
                 )}
                 {actionAllocationIsBudget && actionAllocationCategories.length > 0 && (
@@ -2292,6 +2324,14 @@ export function AllocationsPage() {
                         Ends {actionBudgetPeriodEndLabel}
                       </span>
                     )}
+                    <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1" data-testid="snapshot-accounts">
+                      Accounts: {budgetAccountLabel(actionAllocation)}
+                    </span>
+                    {actionAllocation.carry_over_from != null && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1" data-testid="snapshot-carry-chip">
+                        Carry over on
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
@@ -2310,34 +2350,16 @@ export function AllocationsPage() {
                   {actionAllocationIsBudget ? 'Budget snapshot' : 'Current progress'}
                 </h3>
                 {actionAllocationIsBudget ? (
-                  <>
-                    {actionAllocationLimit !== null && (
-                      <p className="mt-2 text-sm text-muted">
-                        Limit <span className="font-semibold text-ink">{format(actionAllocationLimit)}</span>
-                      </p>
-                    )}
-                    <p className="mt-2 text-sm text-muted">
-                      Spent <span className={`font-semibold ${amountClass('out')}`}>{format(actionAllocation.current_amount)}</span>
-                    </p>
-                    {actionAllocationUsagePct !== null && actionAllocationLimit !== null && actionAllocationLimit > 0 && (
-                      <>
-                        <BudgetUsageBar spent={actionAllocation.current_amount} limit={actionAllocationLimit} />
-                        <p className="text-right text-xs font-medium text-muted">
-                          {Math.min(Math.max(actionAllocationUsagePct, 0), 100).toFixed(1)}% of limit used
-                        </p>
-                      </>
-                    )}
-                    {actionAllocationRemaining !== null && (
-                      <p
-                        className={`mt-2 text-sm ${ actionAllocationRemaining < 0 ? 'text-danger' : 'text-body' }`}
-                      >
-                        Remaining{' '}
-                        <span className="font-semibold">
-                          {format(actionAllocationRemaining)}
-                        </span>
-                      </p>
-                    )}
-                  </>
+                  snapshotRead === 'error' ? (
+                    <div className="mt-2 space-y-3" role="alert" data-testid="snapshot-error">
+                      <p className="text-sm text-danger">Could not refresh this envelope. Its figures are hidden until it loads.</p>
+                      <Button variant="secondary" onClick={() => setSnapshotAttempt((n) => n + 1)}>Retry</Button>
+                    </div>
+                  ) : (
+                    <div className="mt-2">
+                      <BudgetFigures allocation={actionAllocation} prefix="snapshot" spentLabel="Spent" />
+                    </div>
+                  )
                 ) : (
                   <>
                     <p className="mt-2 text-lg font-bold text-ink">{formatSigned(actionAllocation.current_amount, actionAllocation.currency)}</p>
@@ -2384,6 +2406,20 @@ export function AllocationsPage() {
             </div>
 
             <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {actionAllocationIsBudget && (
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setHistoryFor(actionAllocation)
+                    closeActionModal()
+                  }}
+                  className="flex min-h-11 py-2.5 sm:col-span-2"
+                  data-testid="open-budget-history"
+                >
+                  <Icon name="forecast" />
+                  View period history
+                </Button>
+              )}
                   <Button
                 variant="secondary"
                 onClick={() => handleToggleAllocationActive(actionAllocation)}
@@ -2606,6 +2642,38 @@ export function AllocationsPage() {
                     <p className="mt-2 text-xs text-muted">
                       Transactions in these categories will roll into this envelope when they post.
                     </p>
+                    <div className="mt-4">
+                      <label className="block text-sm font-medium text-body" id="allocation-budget-accounts-label">Accounts</label>
+                      <div ref={bindField('budget_account_ids')}>
+                        <AccountPicker
+                          mode="multi"
+                          accounts={ownAccounts}
+                          value={selectedBudgetAccountIds}
+                          onChange={(ids) => {
+                            clearFieldErrors('budget_account_ids')
+                            setSelectedBudgetAccountIds(ids.filter((id): id is number => typeof id === 'number'))
+                          }}
+                          recentIds={recentAccounts.recentIds}
+                          pinnedId={user?.main_account_id ?? undefined}
+                          dataField="budget_account_ids"
+                          labelledBy="allocation-budget-accounts-label"
+                          describedBy={fieldProps('budget_account_ids')['aria-describedby']}
+                          leading={[
+                            {
+                              key: 'all',
+                              label: 'All accounts',
+                              selected: selectedBudgetAccountIds.length === 0,
+                              onClick: () => setSelectedBudgetAccountIds([]),
+                              disabled: selectedBudgetAccountIds.length === 0,
+                            },
+                          ]}
+                        />
+                      </div>
+                      {renderFieldError('budget_account_ids')}
+                    </div>
+                    <p className="mt-2 text-xs text-muted" data-testid="budget-history-note">
+                      Period history uses this envelope's current categories and accounts.
+                    </p>
                     <div className="mt-4 space-y-2">
                       <label className="block text-sm font-medium text-body" id="allocation-cadence-label">Budget cadence</label>
                       <div className="flex flex-wrap gap-2" aria-labelledby="allocation-cadence-label" {...groupProps('period_frequency')}>
@@ -2702,38 +2770,10 @@ export function AllocationsPage() {
                   )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {allocationForm.allocation_type === 'budget' && (
-                    <div>
-                      <label className="block text-sm font-medium text-body">
-                        Amount already spent
-                      </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                        value={allocationForm.current_amount}
-                        onChange={(e) =>
-                          setAllocationForm((prev) => ({
-                            ...prev,
-                            current_amount: parseFloat(e.target.value) || 0,
-                          }))
-                        }
-                  className="mt-1 block w-full border border-line px-3 py-2"
-                  required
-                  ref={bindField('current_amount')}
-                  data-field="current_amount"
-                  {...fieldProps('current_amount')}
-                />
-                {renderFieldError('current_amount')}
-                      <p className="mt-1 text-xs text-muted">
-                        Track how much of the envelope has already been used this period.
-                      </p>
-              </div>
-                    )}
               <div>
                       <label className="block text-sm font-medium text-body">
                         {allocationForm.allocation_type === 'budget'
-                          ? 'Spending limit'
+                          ? 'Spending limit (optional)'
                           : 'Target amount (optional)'}
                       </label>
                 <div className="relative">
@@ -2754,7 +2794,6 @@ export function AllocationsPage() {
                           }))
                         }
                   className={`mt-1 block w-full border border-line px-3 py-2${allocationForm.allocation_type === 'savings' ? ' pl-9' : ''}`}
-                        required={allocationForm.allocation_type === 'budget'}
                         ref={bindField('target_amount')}
                         data-field="target_amount"
                         {...fieldProps('target_amount')}
@@ -2763,7 +2802,7 @@ export function AllocationsPage() {
                       {renderFieldError('target_amount')}
                       {allocationForm.allocation_type === 'budget' ? (
                         <p className="mt-1 text-xs text-muted">
-                          The maximum amount available for this envelope before it resets.
+                          The maximum amount available for this envelope before it resets. Leave it empty for no limit.
                         </p>
                       ) : (
                         <p className="mt-1 text-xs text-muted">
@@ -2772,6 +2811,32 @@ export function AllocationsPage() {
                       )}
                     </div>
               </div>
+
+                  {allocationForm.allocation_type === 'budget' && (
+                    <div className="flex items-center justify-between gap-4 border border-line px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-body" id="allocation-carry-label">Carry over to next period</p>
+                        <p className="text-xs text-muted" id="allocation-carry-help" data-testid="carry-help">
+                          Leftover adds to next period; overspending is taken from it. Starts this period.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={carrySwitchOn}
+                        aria-label="Carry over to next period"
+                        aria-describedby="allocation-carry-help"
+                        disabled={!budgetHasLimit}
+                        onClick={() => setAllocationForm((prev) => ({ ...prev, carry_over: !prev.carry_over }))}
+                        className={withSelection(carrySwitchOn, 'relative inline-flex h-6 w-11 shrink-0 items-center border border-line-strong disabled:opacity-50')}
+                        data-testid="carry-over-switch"
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 transform transition-transform duration-fast ${ carrySwitchOn ? 'translate-x-5 bg-accent' : 'translate-x-1 bg-line-strong' }`}
+                        />
+                      </button>
+                    </div>
+                  )}
               
                   {allocationForm.allocation_type !== 'budget' && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2877,6 +2942,15 @@ export function AllocationsPage() {
           </div>
           </div>
         </div>
+      )}
+
+      {historyFor && (
+        <BudgetEnvelopeDetail
+          key={historyFor.id}
+          allocation={historyFor}
+          refresh={refreshEnvelope}
+          onClose={() => setHistoryFor(null)}
+        />
       )}
 
       {reviewFor && (
