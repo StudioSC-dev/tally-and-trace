@@ -382,7 +382,68 @@ export interface Allocation {
   rank?: number | null
   created_at: string
   updated_at?: string
+  /**
+   * Budgets: `category_ids` and `account_ids` (the owner's own accounts; empty or absent
+   * counts every account). Savings: `goal_mode` and its fields.
+   */
   configuration?: Record<string, unknown>
+  /**
+   * Budgets only: the start of the window carry-over runs from (naive UTC, like
+   * `period_start`); null when carry is off, and on every other type. Server-managed:
+   * send `carry_over` instead.
+   */
+  carry_over_from?: string | null
+  /** Budgets only, the current window: what carries in from the windows before it (0 when carry is off). */
+  carry_in?: number | null
+  /** Budgets only, the current window: limit plus carry-in; null without a limit. */
+  available?: number | null
+  /** Budgets only, the current window: false when a row's currency had no exchange rate. */
+  complete?: boolean | null
+  /** Budgets only, the current window: the currencies left out of `current_amount`. */
+  missing?: string[] | null
+  /** Budgets only, the current window: true when an earlier window of its carry chain was not complete. */
+  provisional?: boolean | null
+  /** Budgets only, the current window: the currencies missing upstream in its carry chain. */
+  inherited_missing?: string[] | null
+}
+
+/**
+ * `carry_over` on POST /allocations/ and PUT /allocations/{id}, budgets only: true switches
+ * carry-over on from the current window (it needs `target_amount` or `monthly_target`),
+ * false switches it off. Left out: off on create, unchanged on update.
+ */
+export interface AllocationCarryOverInput {
+  carry_over?: boolean
+}
+
+/**
+ * One window of a budget, GET /allocations/{id}/periods (newest, the current one, first;
+ * up to 12). `start` and `end` are ISO timestamps with an explicit UTC offset; pass `start`
+ * as `period_start` to GET /allocations/{id}/transactions. With no limit, `limit`,
+ * `available` and `remaining` are null and `carry_in` is 0.
+ */
+export interface BudgetPeriod {
+  start: string
+  end: string
+  limit: number | null
+  carry_in: number
+  /** `limit + carry_in`; may be negative. */
+  available: number | null
+  /** Debits less credits counted in the window, converted to the budget's currency, never below 0. */
+  spent: number
+  /** `available - spent`; may be negative. */
+  remaining: number | null
+  /** False when a row's currency had no exchange rate (named in `missing`). */
+  complete: boolean
+  missing: string[]
+  /** True when an earlier window of the same carry chain was not complete. */
+  provisional: boolean
+  inherited_missing: string[]
+  /** Generated back by the current cadence, not a stored window: it never carries. */
+  estimated: boolean
+  /** The window ended at or before the budget was created. */
+  before_created: boolean
+  is_current: boolean
 }
 
 // ─── Budget Entry ────────────────────────────────────────────────────────────
@@ -655,6 +716,14 @@ export interface LimitedTransaction {
 
 /** A transaction as the API returns it; narrow on `view` before reading a field Limited lacks. */
 export type Transaction = FullTransaction | SharedFullTransaction | LimitedTransaction
+
+/** A full row in a budget window's drill-down: `missing_rate` is true when its currency has no rate. */
+export interface FullBudgetTransaction extends FullTransaction {
+  missing_rate: boolean
+}
+
+/** A row of GET /allocations/{id}/transactions, redacted as GET /transactions redacts it. */
+export type BudgetTransaction = FullBudgetTransaction | SharedFullTransaction | LimitedTransaction
 
 /**
  * POST /transactions/ and PUT /transactions/{id}. A non-creator editing a
@@ -1047,6 +1116,16 @@ export interface PaginatedResponse<T> {
   items: T[]
   total: number
   has_more: boolean
+}
+
+/**
+ * GET /allocations/{id}/transactions: the rows one budget window counts, newest first
+ * (date, then id), paged like GET /transactions. `currency_subtotals` is each currency's
+ * signed net before conversion; `converted_total` equals the window's `spent` on every page.
+ */
+export interface BudgetTransactionPage extends PaginatedResponse<BudgetTransaction> {
+  currency_subtotals: Record<string, number>
+  converted_total: number
 }
 
 /** A balance-history row the caller sees in full (`full` or `shared_full`). */
