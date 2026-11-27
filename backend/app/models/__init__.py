@@ -5,6 +5,7 @@ from app.models.account import Account as Account, AccountType as AccountType
 from app.models.transaction import Transaction as Transaction, TransactionType as TransactionType
 from app.models.category import Category as Category
 from app.models.allocation import Allocation as Allocation, AllocationType as AllocationType
+from app.models.budget_period import BudgetPeriod as BudgetPeriod
 from app.models.budget_entry import BudgetEntry as BudgetEntry, BudgetEntryType as BudgetEntryType
 from app.models.email_token import EmailToken as EmailToken, EmailTokenType as EmailTokenType
 from app.models.refresh_token import RefreshToken as RefreshToken

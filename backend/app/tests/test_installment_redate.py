@@ -496,6 +496,51 @@ def test_redate_row_recomputes_allocations_at_old_and_new_dates(world):
     assert moved.updated_at is not None and moved.updated_at != stamp
 
 
+def test_redated_instalments_count_in_the_budgets_they_match(world):
+    """STU-795: posted instalments in a budget's category, converted by the run, move
+    into its current window; a budget limited to the card counts them, one limited
+    to another account does not."""
+    from app.models.allocation import Allocation
+    from app.models.transaction import Transaction, TransactionType
+
+    client, db, me, card = world["client"], world["db"], world["me"], world["card_c"]
+    bank = _account(client, me, "Bank", balance=10_000)
+    gadgets = sw_post(client, me, "/categories/", {"name": "Gadgets", "kind": "expense"})["id"]
+
+    def budget(account):
+        return sw_post(client, me, "/allocations/", {
+            "name": "Gadgets", "allocation_type": "budget", "target_amount": 5_000,
+            "period_frequency": "monthly", "period_start": "2026-11-01T00:00:00",
+            "configuration": {"category_ids": [gadgets], "account_ids": [account]}})["id"]
+
+    on_card, on_bank = budget(card), budget(bank)
+    entry = _entry(db, me, card, date(2026, 11, 27), payments=4)
+    rows = []
+    for day in (date(2026, 9, 27), date(2026, 10, 27)):
+        when = datetime.combine(day, datetime.min.time())
+        row = Transaction(user_id=me["id"], account_id=card, category_id=gadgets,
+                          transaction_type=TransactionType.DEBIT, amount=AMOUNT,
+                          description="Charge", transaction_date=when, is_posted=True,
+                          budget_entry_id=entry, is_recurring=True, occurrence_date=when)
+        db.add(row)
+        db.commit()
+        rows.append(row.id)
+
+    def totals():
+        db.expire_all()
+        return [Decimal(db.get(Allocation, b).current_amount) for b in (on_card, on_bank)]
+
+    assert totals() == [0, 0]
+    assert _run(True, {entry})[entry].status == "converted"
+    assert [r[1] for r in _state(db, entry)[1]] == [date(2026, 10, 2), date(2026, 11, 2)]
+    # October 27 moved to November 2: in the card budget's current window only.
+    assert totals() == [Decimal(AMOUNT), 0]
+    current = client.get(f"{API}/allocations/{on_card}/transactions",
+                         headers=me["headers"]).json()
+    assert ([i["id"] for i in current["items"]], current["converted_total"]) == (
+        [rows[1]], float(AMOUNT))
+
+
 def test_script_reads_cycle_settings_under_card_lock(world):
     """The close day changes in another transaction holding the card: the run
     waits for it and maps onto the committed close day."""

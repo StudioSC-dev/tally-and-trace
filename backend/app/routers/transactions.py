@@ -49,6 +49,7 @@ from app.services import missed as missed_svc
 from app.services import posting
 from app.services import description_suggestions as suggestions_svc
 from app.services import repeat as repeat_svc
+from app.services import budget_periods
 from app.services.statements import resolve_cycle_fields
 from app.routers.accounts import _funding_account, _loan_or_404, _lock
 from app.models.category import Category
@@ -135,7 +136,42 @@ def _compute_period_end(start: datetime, frequency: BudgetPeriodFrequency) -> da
     return start
 
 
-def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime]) -> bool:
+def _is_month_end(value: datetime) -> bool:
+    return value.day == monthrange(value.year, value.month)[1]
+
+
+def _cadence_anchor(start: datetime, end: datetime) -> int:
+    """The day of the month a monthly or quarterly window ``[start, end)`` ends on, as
+    intended (STU-795): its end's day, unless the end is a month's last day clamped
+    below the start's day (Jan 31 to Feb 28, or Jan 30 to Feb 28), when it is the
+    start's day. A fixed 30th (Jun 30 to Sep 30) stays the 30th."""
+    if _is_month_end(end) and start.day > end.day:
+        return start.day
+    return end.day
+
+
+def _next_period_end(end: datetime, frequency: BudgetPeriodFrequency,
+                     anchor: Optional[int] = None) -> datetime:
+    """The end of the window that starts at ``end``: one cadence step from it.
+
+    A monthly or quarterly step ends on the ``anchor`` day (the budget's
+    ``period_anchor_day``, STU-795), clamped to short months, so the cadence's day
+    survives them: anchored on the 31st, Jan 31 gives Feb 28, then Mar 31; on the
+    30th, Jun 30 gives Sep 30, then Dec 30. Without an anchor, ``end``'s day.
+    """
+    freq = frequency or BudgetPeriodFrequency.MONTHLY
+    if freq not in (BudgetPeriodFrequency.MONTHLY, BudgetPeriodFrequency.QUARTERLY):
+        return _compute_period_end(end, freq)
+    day = anchor or end.day
+    months = 1 if freq == BudgetPeriodFrequency.MONTHLY else 3
+    month_index = end.month - 1 + months
+    year = end.year + month_index // 12
+    month = month_index % 12 + 1
+    return end.replace(year=year, month=month, day=min(day, monthrange(year, month)[1]))
+
+
+def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime],
+                          closed: Optional[List[tuple]] = None) -> bool:
     """Keep the allocation on the period containing now; report whether ``reference`` is in it.
 
     The active period is always the one containing the current date, never the one
@@ -156,6 +192,12 @@ def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime])
     counts only if it falls inside the resulting period and that period has started;
     earlier (historical) rows and rows beyond the horizon in a later period (future) are
     excluded.
+
+    Each window a roll passes, the one left and every one skipped, is appended to
+    ``closed`` as ``(start, end)`` when it is given (STU-795), including one an
+    early roll leaves before it has ended. A roll steps by ``_next_period_end`` on
+    the allocation's ``period_anchor_day``; a monthly or quarterly budget without one
+    takes it from the window it first rolls past (``_cadence_anchor``) and keeps it.
     """
     frequency = allocation.period_frequency or BudgetPeriodFrequency.MONTHLY
     normalized_reference = _normalize_reference(reference)
@@ -178,20 +220,31 @@ def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime])
     elif period_end is None:
         period_end = _compute_period_end(period_start, frequency)
 
+    cadenced = frequency in (BudgetPeriodFrequency.MONTHLY, BudgetPeriodFrequency.QUARTERLY)
+    anchor = allocation.period_anchor_day if cadenced else None
+
+    def advance(start: datetime, end: datetime) -> tuple:
+        nonlocal anchor
+        if closed is not None:
+            closed.append((start, end))
+        if cadenced and anchor is None:
+            anchor = _cadence_anchor(start, end)
+        return end, _next_period_end(end, frequency, anchor)
+
     while now >= period_end:
-        period_start = period_end
-        period_end = _compute_period_end(period_start, frequency)
+        period_start, period_end = advance(period_start, period_end)
         period_changed = True
 
     while period_end <= normalized_reference <= horizon:
-        period_start = period_end
-        period_end = _compute_period_end(period_start, frequency)
+        period_start, period_end = advance(period_start, period_end)
         period_changed = True
 
     if period_changed:
         allocation.current_amount = Decimal("0")
         allocation.period_start = period_start
         allocation.period_end = period_end
+        if anchor is not None and allocation.period_anchor_day != anchor:
+            allocation.period_anchor_day = anchor
 
     if normalized_reference < period_start or normalized_reference >= period_end or period_start > horizon:
         return False
@@ -748,24 +801,9 @@ def _owner_exemption_allows(db: Session, txn: Transaction, requested: dict) -> b
     return figure is not None and keys == {"is_posted", figure}
 
 
-def _budget_delta_for_transaction(transaction_type: TransactionType, amount: float) -> float:
-    if transaction_type == TransactionType.DEBIT:
-        return amount
-    if transaction_type == TransactionType.CREDIT:
-        return -amount
-    return 0.0
-
-
 def _configured_category_ids(allocation: Allocation) -> Set[int]:
     """The category ids a budget's configuration names, ignoring any that aren't ids."""
-    config = allocation.configuration or {}
-    ids: Set[int] = set()
-    for value in config.get("category_ids") or []:
-        try:
-            ids.add(int(value))
-        except (TypeError, ValueError):
-            continue
-    return ids
+    return budget_periods.category_ids(allocation)
 
 
 def _get_budget_allocations_for_transaction(
@@ -774,8 +812,13 @@ def _get_budget_allocations_for_transaction(
     user_id: int,
     allocation_id: Optional[int],
     category_id: Optional[int],
+    account_id: Optional[int] = None,
 ) -> List[Allocation]:
     """The owner's budgets a row with these references counts toward.
+
+    A budget counts the row it is linked to (``allocation_id``) whatever its category
+    or account, and a row in one of its categories when it names no accounts or the
+    row is on one of them (``budget_periods.counts``, STU-795).
 
     Read with ``populate_existing``, so a configuration another write changed is
     never served from the session. That overwrites unflushed changes on any
@@ -812,7 +855,8 @@ def _get_budget_allocations_for_transaction(
         for allocation in candidate_budgets:
             if allocation.id in seen:
                 continue
-            if category_id in _configured_category_ids(allocation):
+            if budget_periods.counts(allocation, allocation_id=None, category_id=category_id,
+                                     account_id=account_id):
                 allocations.append(allocation)
                 seen.add(allocation.id)
 
@@ -821,12 +865,15 @@ def _get_budget_allocations_for_transaction(
 
 def _counted_allocations(db: Session, *, user_id: int, transaction_type, amount, is_posted,
                          allocation_id: Optional[int],
-                         category_id: Optional[int]) -> List[Allocation]:
-    """The budgets a row counts toward: none unless it is a posted debit or credit."""
-    if not is_posted or not _budget_delta_for_transaction(transaction_type, amount):
+                         category_id: Optional[int],
+                         account_id: Optional[int] = None) -> List[Allocation]:
+    """The budgets a row counts toward: none unless it is a posted debit or credit,
+    whatever its amount (a zero one included, as reads count it, STU-795)."""
+    if not is_posted or transaction_type not in budget_periods.COUNTED_TYPES:
         return []
     return _get_budget_allocations_for_transaction(
-        db, user_id=user_id, allocation_id=allocation_id, category_id=category_id)
+        db, user_id=user_id, allocation_id=allocation_id, category_id=category_id,
+        account_id=account_id)
 
 
 def _lock_allocations(db: Session, allocations: List[Allocation]) -> List[Allocation]:
@@ -844,19 +891,20 @@ def _recompute_budget_total(db: Session, allocation: Allocation,
                             references: List[Optional[datetime]]) -> None:
     """Set a budget's total to the sum of the rows in its active period (STU-222).
 
-    The period is kept current by ``_ensure_budget_period`` for each reference
-    (a write's old and new row dates, or None for now); rolls only move forward,
-    so several references are safe. The total is then the owner's posted debits
-    less credits dated in ``[period_start, period_end)`` that name the budget or
-    one of its categories, each row once, never below 0. A period that has not
-    started (it starts beyond the horizon) totals 0. A row outside the period
-    does not stop the recompute: the period is re-summed whatever triggered it,
-    so a drifted total is corrected. Flushed before and after, so the sum sees
-    the write and nothing later can discard the total.
+    The period is kept current for each reference (a write's old and new row
+    dates, or None for now) by ``budget_periods.roll``, which also stores every
+    window it closes (STU-795); rolls only move forward, so several references
+    are safe. The total is then the owner's posted debits less credits dated in
+    ``[period_start, period_end)`` that the budget counts (its own rows, and
+    rows in one of its categories on one of its accounts when it names any),
+    each row once, never below 0. A period that has not started (it starts
+    beyond the horizon) totals 0. A row outside the period does not stop the
+    recompute: the period is re-summed whatever triggered it, so a drifted total
+    is corrected. Flushed before and after, so the sum sees the write and
+    nothing later can discard the total.
     """
     db.flush()
-    for reference in references:
-        _ensure_budget_period(allocation, reference)
+    budget_periods.roll(db, allocation, references)
     frequency = allocation.period_frequency or BudgetPeriodFrequency.MONTHLY
     start = _normalize_reference(allocation.period_start)
     end = (_normalize_reference(allocation.period_end) if allocation.period_end
@@ -869,19 +917,14 @@ def _recompute_budget_total(db: Session, allocation: Allocation,
             (Transaction.transaction_type == TransactionType.CREDIT, -Transaction.amount),
             else_=0,
         )
-        matches = [Transaction.allocation_id == allocation.id]
-        category_ids = _configured_category_ids(allocation)
-        if category_ids:
-            matches.append(Transaction.category_id.in_(category_ids))
         summed = (
             db.query(func.coalesce(func.sum(signed), 0))
             .filter(
-                Transaction.user_id == allocation.user_id,
                 Transaction.is_posted.is_(True),
                 Transaction.transaction_type.in_([TransactionType.DEBIT, TransactionType.CREDIT]),
                 Transaction.transaction_date >= start,
                 Transaction.transaction_date < end,
-                or_(*matches),
+                budget_periods.membership_criterion(allocation),
             )
             .scalar()
         )
@@ -1234,7 +1277,8 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
     budget_allocations = _lock_allocations(db, _counted_allocations(
         db, user_id=owner.id, transaction_type=transaction.transaction_type,
         amount=transaction.amount, is_posted=transaction.is_posted,
-        allocation_id=transaction.allocation_id, category_id=transaction.category_id))
+        allocation_id=transaction.allocation_id, category_id=transaction.category_id,
+        account_id=db_transaction.account_id))
     db.flush()
     for allocation in budget_allocations:
         _recompute_budget_total(db, allocation, [transaction.transaction_date])
@@ -1605,13 +1649,15 @@ def apply_transaction_update(db: Session, current_user: User, txn: Transaction,
     counted_before = _counted_allocations(
         db, user_id=db_transaction.user_id, transaction_type=db_transaction.transaction_type,
         amount=db_transaction.amount, is_posted=db_transaction.is_posted,
-        allocation_id=db_transaction.allocation_id, category_id=db_transaction.category_id)
+        allocation_id=db_transaction.allocation_id, category_id=db_transaction.category_id,
+        account_id=db_transaction.account_id)
     counted_after = _counted_allocations(
         db, user_id=db_transaction.user_id, transaction_type=new_type,
         amount=requested.get("amount", db_transaction.amount),
         is_posted=requested.get("is_posted", db_transaction.is_posted),
         allocation_id=requested.get("allocation_id", db_transaction.allocation_id),
-        category_id=requested.get("category_id", db_transaction.category_id))
+        category_id=requested.get("category_id", db_transaction.category_id),
+        account_id=requested.get("account_id", db_transaction.account_id))
     before_ids = {a.id for a in counted_before}
     after_ids = {a.id for a in counted_after}
     budget_allocations = _lock_allocations(db, counted_before + counted_after)
@@ -1832,7 +1878,8 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db), curre
     counted = _counted_allocations(
         db, user_id=db_transaction.user_id, transaction_type=db_transaction.transaction_type,
         amount=db_transaction.amount, is_posted=db_transaction.is_posted,
-        allocation_id=db_transaction.allocation_id, category_id=db_transaction.category_id)
+        allocation_id=db_transaction.allocation_id, category_id=db_transaction.category_id,
+        account_id=db_transaction.account_id)
     old_transaction_date = db_transaction.transaction_date
     old_receipt = db_transaction.receipt_url
     db.delete(db_transaction)

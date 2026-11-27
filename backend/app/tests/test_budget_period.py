@@ -219,3 +219,44 @@ def test_a_period_advanced_early_accepts_its_rows_and_treats_the_utc_current_per
     assert _snapshot(allocation) == (end, next_end, SPENT)
     assert _ensure_budget_period(allocation, end - timedelta(hours=3)) is False
     assert _snapshot(allocation) == (end, next_end, SPENT)
+
+
+# --- the cadence anchor (STU-795) -----------------------------------------------------------------
+
+def test_a_quarterly_fixed_30th_stays_the_30th_across_rolls(now_is):
+    allocation = _allocation(datetime(2025, 6, 30), datetime(2025, 9, 30),
+                             BudgetPeriodFrequency.QUARTERLY)
+    now_is(datetime(2025, 10, 5))
+    _ensure_budget_period(allocation, None)
+    assert (allocation.period_start, allocation.period_end, allocation.period_anchor_day) == (
+        datetime(2025, 9, 30), datetime(2025, 12, 30), 30)
+    now_is(datetime(2026, 1, 5))
+    _ensure_budget_period(allocation, None)
+    assert (allocation.period_start, allocation.period_end) == (
+        datetime(2025, 12, 30), datetime(2026, 3, 30))
+
+
+def test_a_month_end_anchor_is_kept_through_a_30th(now_is):
+    # From Mar 31 the quarter clamps to Jun 30 and Sep 30, then returns to Dec 31: the same
+    # Jun 30 to Sep 30 window as the fixed 30th's above, stepped by the kept anchor.
+    allocation = _allocation(datetime(2025, 3, 31), datetime(2025, 6, 30),
+                             BudgetPeriodFrequency.QUARTERLY)
+    now_is(datetime(2025, 7, 5))
+    _ensure_budget_period(allocation, None)
+    assert (allocation.period_start, allocation.period_end, allocation.period_anchor_day) == (
+        datetime(2025, 6, 30), datetime(2025, 9, 30), 31)
+    now_is(datetime(2025, 10, 5))
+    _ensure_budget_period(allocation, None)
+    assert (allocation.period_start, allocation.period_end) == (
+        datetime(2025, 9, 30), datetime(2025, 12, 31))
+
+
+@pytest.mark.parametrize("value,expected", [
+    ([3, "4", "x", 3], {3, 4}), ("7", {7}), ({"7": True, "8": True}, {7, 8}), (7, set()),
+    (None, set())])
+def test_budget_category_ids_read_every_shape_the_validator_accepted(value, expected):
+    from app.services import budget_periods
+
+    allocation = Allocation(allocation_type=AllocationType.BUDGET,
+                            configuration={"category_ids": value})
+    assert budget_periods.category_ids(allocation) == expected
