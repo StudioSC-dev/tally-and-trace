@@ -120,6 +120,9 @@ import type {
   Category,
   DescriptionSuggestion,
   Allocation,
+  AllocationCarryOverInput,
+  BudgetPeriod,
+  BudgetTransactionPage,
   BudgetEntry,
   Transaction,
   PaginatedResponse,
@@ -231,10 +234,18 @@ export interface RankedAllocations {
 }
 
 /** An allocation edit: a date sent as null is cleared, one left out is kept. */
-export type AllocationUpdate = Omit<Partial<Allocation>, 'target_date' | 'period_start' | 'period_end'> & {
+export type AllocationUpdate = Omit<Partial<Allocation>, 'target_date' | 'period_start' | 'period_end'> & AllocationCarryOverInput & {
   target_date?: string | null
   period_start?: string | null
   period_end?: string | null
+}
+
+/** GET /allocations/{id}/transactions: one window's rows (`period_start` from `getBudgetPeriods`; the current window when left out). */
+export interface BudgetTransactionsArgs {
+  id: number
+  period_start?: string
+  limit?: number
+  offset?: number
 }
 
 export interface OutboxSendArgs {
@@ -451,7 +462,7 @@ export const accountingApi = createApi({
       query: (id) => `allocations/${id}`,
       providesTags: ['Allocation'],
     }),
-    createAllocation: builder.mutation<Allocation, Partial<Allocation>>({
+    createAllocation: builder.mutation<Allocation, Partial<Allocation> & AllocationCarryOverInput>({
       query: (allocation) => ({ url: 'allocations/', method: 'POST', body: allocation }),
       invalidatesTags: ['Allocation'],
     }),
@@ -466,6 +477,16 @@ export const accountingApi = createApi({
     getAllocationProgress: builder.query<AllocationProgress, number>({
       query: (id) => `allocations/${id}/progress`,
       providesTags: ['Allocation'],
+    }),
+    // A budget's last 12 windows, newest first (STU-795). A transaction save moves their figures.
+    getBudgetPeriods: builder.query<BudgetPeriod[], number>({
+      query: (id) => `allocations/${id}/periods`,
+      providesTags: ['Allocation', 'Transaction'],
+    }),
+    // The rows one budget window counts, paged like `getTransactions` (STU-795).
+    getBudgetTransactions: builder.query<BudgetTransactionPage, BudgetTransactionsArgs>({
+      query: ({ id, ...params }) => ({ url: `allocations/${id}/transactions`, params }),
+      providesTags: ['Allocation', 'Transaction'],
     }),
     getGoalsSummary: builder.query<GoalsSummary, void>({
       query: () => 'allocations/summary/goals',
@@ -1020,6 +1041,8 @@ export const {
   useUpdateAllocationMutation,
   useDeleteAllocationMutation,
   useGetAllocationProgressQuery,
+  useGetBudgetPeriodsQuery,
+  useGetBudgetTransactionsQuery,
   useGetGoalsSummaryQuery,
 
   // Budget entry hooks

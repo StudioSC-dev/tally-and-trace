@@ -20,12 +20,18 @@ def goal_mode(configuration) -> str:
 def account_rule_error(allocation_type, configuration, account_id) -> Optional[str]:
     """Why an allocation's account (or tracking mode) is invalid, or None (STU-777).
 
-    Budgets, goals and ``target_balance`` savings need an account.
-    ``multi_account`` savings need at least one id in ``configuration.account_ids``
-    (the first is stored as the account). ``transaction_total`` savings need none.
-    A savings ``goal_mode`` must be one of ``GOAL_MODES``; a missing one is
-    ``target_balance``.
+    Goals and ``target_balance`` savings need an account. Budgets need none: one
+    sent is stored but filters nothing; ``configuration.account_ids``, when sent,
+    must be a list (empty means every account, STU-795). ``multi_account`` savings
+    need at least one id in ``configuration.account_ids`` (the first is stored as
+    the account). ``transaction_total`` savings need none. A savings ``goal_mode``
+    must be one of ``GOAL_MODES``; a missing one is ``target_balance``.
     """
+    if allocation_type == AllocationType.BUDGET:
+        if isinstance(configuration, dict) and "account_ids" in configuration \
+                and not isinstance(configuration["account_ids"], list):
+            return "configuration.account_ids must be a list of account ids"
+        return None
     if allocation_type == AllocationType.SAVINGS:
         raw = configuration.get("goal_mode") if isinstance(configuration, dict) else None
         if raw is not None and raw not in GOAL_MODES:
@@ -67,6 +73,11 @@ class AllocationBase(BaseModel):
 
 
 class AllocationCreate(AllocationBase):
+    # Budgets only (STU-795): true switches carry-over on from the current window;
+    # omitted or false leaves it off. Needs a limit (``target_amount`` or
+    # ``monthly_target``). Ignored for other types.
+    carry_over: Optional[bool] = None
+
     @model_validator(mode="after")
     def _account_per_mode(self):
         problem = account_rule_error(self.allocation_type, self.configuration, self.account_id)
@@ -90,6 +101,9 @@ class AllocationUpdate(BaseModel):
     period_end: Optional[datetime] = None
     is_active: Optional[bool] = None
     configuration: Optional[Dict[str, Any]] = None
+    # Budgets only (STU-795): true switches carry-over on (kept when already on),
+    # false switches it off, omitted leaves it as it is.
+    carry_over: Optional[bool] = None
 
 
 class AllocationResponse(AllocationBase):
@@ -106,6 +120,16 @@ class AllocationResponse(AllocationBase):
     currency: CurrencyType = CurrencyType.PHP
     # Place among the owner's ranked goals, 1 at the top; None on any other row (STU-786).
     rank: Optional[int] = None
+    # Budgets (STU-795): the start of the window carry-over was switched on in, null
+    # when it is off; and the current window's figures (services/budget_periods.py),
+    # of which ``current_amount`` is the spent. None on every other type.
+    carry_over_from: Optional[datetime] = None
+    carry_in: Optional[float] = None
+    available: Optional[float] = None
+    complete: Optional[bool] = None
+    missing: Optional[List[str]] = None
+    provisional: Optional[bool] = None
+    inherited_missing: Optional[List[str]] = None
     id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -132,3 +156,25 @@ class AllocationListResponse(BaseModel):
     items: List[AllocationResponse]
     total: int
     has_more: bool
+
+
+class BudgetPeriodResponse(BaseModel):
+    """One window of a budget (``GET /allocations/{id}/periods``, STU-795).
+
+    ``start`` and ``end`` are UTC with an explicit offset. ``limit``,
+    ``available`` and ``remaining`` are null when the budget has no limit.
+    """
+    start: datetime
+    end: datetime
+    limit: Optional[float] = None
+    carry_in: float
+    available: Optional[float] = None
+    spent: float
+    remaining: Optional[float] = None
+    complete: bool
+    missing: List[str]
+    provisional: bool
+    inherited_missing: List[str]
+    estimated: bool
+    before_created: bool
+    is_current: bool

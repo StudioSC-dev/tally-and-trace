@@ -515,3 +515,259 @@ def test_the_snapshot_does_not_grow_with_history(realistic, sw_client):
     assert abs(four.statements - one.statements) <= HISTORY_SLACK, (one.statements,
                                                                     four.statements)
     assert four.statement_day <= 2_000, four.statement_day
+
+
+# --- STU-795: budget envelopes' spent statement and window rolls ------------------------------
+
+def _plan_nodes(node):
+    yield node
+    for child in node.get("Plans", []):
+        yield from _plan_nodes(child)
+
+
+def _capture(engine):
+    """``(statement, parameters)`` of every statement run while installed."""
+    from sqlalchemy import event
+
+    seen = []
+
+    def on_execute(conn, cursor, statement, parameters, context, executemany):
+        seen.append((statement, parameters))
+
+    event.listen(engine, "before_cursor_execute", on_execute)
+    return seen, lambda: event.remove(engine, "before_cursor_execute", on_execute)
+
+
+@needs_db
+def test_budget_list_scans_transactions_once(realistic, sw_client, sw_db, monkeypatch):
+    """AC28: the budget list reads every envelope's spent figures, across all their
+    windows, in one statement that scans ``transactions`` once. Ten envelopes on the
+    realistic owner (2,938 rows): five started two years ago (one of them daily, so 730
+    stored windows), the others weekly, quarterly, in USD, with no limit and a custom
+    window; some limited to accounts. They are created 40 days back, so the first list
+    call rolls eight of them: it adds one statement however many roll (their stored
+    totals refreshed together), not one per envelope."""
+    import json
+    import re
+    from datetime import timedelta
+
+    from sqlalchemy import text
+
+    from app.core.database import engine
+    from app.models.category import Category
+    from app.tests.fixtures.realistic import REF, pin_clock
+
+    owner = realistic.callers["owner"]
+    headers, acc = owner.headers, realistic.accounts
+    cats = [c for (c,) in sw_db.query(Category.id).filter(Category.user_id == owner.id)
+            .order_by(Category.id)]
+    sw_db.rollback()
+    two_years = "2024-11-01T00:00:00"
+    envelopes = [
+        {"period_frequency": "monthly", "period_start": two_years, "target_amount": 20_000},
+        {"period_frequency": "monthly", "period_start": two_years, "target_amount": 8_000,
+         "account_ids": [acc["bank0"], acc["card_a"]]},
+        {"period_frequency": "monthly", "period_start": two_years, "monthly_target": 5_000},
+        {"period_frequency": "weekly", "period_start": "2024-11-04T00:00:00",
+         "target_amount": 2_000},
+        {"period_frequency": "daily", "period_start": "2024-11-13T00:00:00",
+         "target_amount": 500, "account_ids": [acc["cash"], acc["wallet"]]},
+        {"period_frequency": "weekly", "target_amount": 3_000, "carry_over": True},
+        {"period_frequency": "quarterly", "period_start": "2025-01-01T00:00:00",
+         "target_amount": 60_000, "carry_over": True},
+        {"period_frequency": "monthly", "target_amount": 300, "currency": "USD"},
+        {"period_frequency": "monthly"},
+        {"period_frequency": "monthly", "period_start": "2026-09-01T00:00:00",
+         "period_end": "2026-12-01T00:00:00", "target_amount": 30_000},
+    ]
+    ids = []
+    pin_clock(monkeypatch, REF - timedelta(days=40))
+    try:
+        for n, fields in enumerate(envelopes):
+            accounts = fields.pop("account_ids", None)
+            configuration = {"category_ids": cats[n % len(cats):][:3] or cats[:3]}
+            if accounts:
+                configuration["account_ids"] = accounts
+            r = sw_client.post(f"{API}/allocations/", headers=headers, json={
+                "name": f"Envelope {n}", "allocation_type": "budget",
+                "configuration": configuration, **fields})
+            assert r.status_code == 200, r.text
+            ids.append(r.json()["id"])
+        pin_clock(monkeypatch, REF)
+
+        def spent_statements(seen):
+            reading = [(s, p) for s, p in seen if re.search(r"\btransactions\b", s)]
+            assert all("AS MATERIALIZED" in s for s, _ in reading), [s[:120] for s, _ in reading]
+            return reading
+
+        def elapsed():
+            rows = sw_db.execute(text(
+                "SELECT count(*) FROM allocations WHERE id = ANY(:ids) AND period_end <= :now"),
+                {"ids": ids, "now": REF}).scalar_one()
+            sw_db.rollback()
+            return rows
+
+        path = f"{API}/allocations/?allocation_type=budget&limit=100"
+        assert elapsed() == 8
+        seen, stop = _capture(engine)  # the first call: eight elapsed envelopes roll
+        try:
+            r = sw_client.get(path, headers=headers)
+        finally:
+            stop()
+        assert r.status_code == 200 and elapsed() == 0
+        cold = spent_statements(seen)
+        assert len(cold) == 2, [s[:120] for s, _ in cold]  # stored totals, then spent
+        stored = sw_db.execute(text(
+            "SELECT count(*) FROM budget_periods WHERE allocation_id = ANY(:ids)"),
+            {"ids": ids}).scalar_one()
+        sw_db.rollback()
+        assert stored >= 730 + 4 * 24
+
+        seen, stop = _capture(engine)  # warm: nothing rolls
+        try:
+            r = sw_client.get(path, headers=headers)
+        finally:
+            stop()
+        assert r.status_code == 200 and r.json()["total"] == len(ids)
+        reading = spent_statements(seen)
+        assert len(reading) == 1, [s[:120] for s, _ in reading]  # one spent statement
+        (statement, parameters), = reading
+        assert "budget_periods" not in statement
+
+        raw = engine.raw_connection()
+        try:
+            cursor = raw.cursor()
+            cursor.execute("EXPLAIN (ANALYZE, FORMAT JSON) " + statement, parameters)
+            (plan,) = cursor.fetchone()[0]
+            raw.rollback()
+        finally:
+            raw.close()
+        plan = plan if isinstance(plan, dict) else json.loads(plan)
+        scans = [n for n in _plan_nodes(plan["Plan"]) if n.get("Relation Name") == "transactions"]
+        assert len(scans) == 1, [n["Node Type"] for n in scans]
+        assert scans[0]["Actual Loops"] == 1, scans[0]
+        print(f"\nSTU-795 budget list: {len(seen)} statements, one transactions scan "
+              f"({scans[0]['Node Type']}, {scans[0]['Actual Rows']} rows) over "
+              f"{stored} stored windows; the first call, rolling 8, read it twice")
+    finally:
+        sw_db.rollback()
+        if ids:
+            sw_db.execute(text("DELETE FROM allocations WHERE id = ANY(:ids)"), {"ids": ids})
+            sw_db.commit()
+
+
+def _budget_world(client, people, name):
+    from app.tests.conftest import sw_post
+
+    who = people()
+    bank = sw_post(client, who, "/accounts/", {"name": f"{name} bank",
+                                              "account_type": "checking", "balance": 10_000})["id"]
+    food = sw_post(client, who, "/categories/", {"name": "Food", "kind": "expense"})["id"]
+    return who, bank, food
+
+
+def _spend(client, who, bank, food, day):
+    r = client.post(f"{API}/transactions/", headers=who["headers"], json={
+        "account_id": bank, "transaction_type": "debit", "amount": 25, "description": "Lunch",
+        "transaction_date": day, "is_posted": True, "category_id": food})
+    assert r.status_code == 200, r.text
+
+
+def _budget(client, who, food, frequency, start):
+    r = client.post(f"{API}/allocations/", headers=who["headers"], json={
+        "name": "Food", "allocation_type": "budget", "period_frequency": frequency,
+        "period_start": start, "target_amount": 1_000,
+        "configuration": {"category_ids": [food]}})
+    assert r.status_code == 200, r.text
+    return r.json()["id"]
+
+
+@needs_db
+def test_budget_roll_adds_only_one_insert_to_transaction_write(
+        realistic, sw_client, sw_people, monkeypatch):
+    """AC29: the same transaction write, once on a budget that is current and once on
+    one whose window has elapsed, differs by exactly one SQL statement: the insert of
+    the closed window."""
+    from datetime import timedelta
+
+    from app.core.database import engine
+    from app.tests.fixtures.realistic import REF, pin_clock
+
+    current = _budget_world(sw_client, sw_people, "Current")
+    rolling = _budget_world(sw_client, sw_people, "Rolling")
+    earlier = REF - timedelta(days=24)  # Oct 20
+    pin_clock(monkeypatch, earlier)
+    _budget(sw_client, rolling[0], rolling[2], "monthly", "2026-10-01T00:00:00")
+    _spend(sw_client, *rolling, "2026-10-15T00:00:00")  # warm, in October: no roll
+    pin_clock(monkeypatch, REF)
+    _budget(sw_client, current[0], current[2], "monthly", "2026-11-01T00:00:00")
+    _spend(sw_client, *current, "2026-11-02T00:00:00")  # warm
+
+    counted = {}
+    for key, world in (("current", current), ("rolling", rolling)):
+        seen, stop = _capture(engine)
+        try:
+            _spend(sw_client, *world, "2026-11-10T00:00:00")
+        finally:
+            stop()
+        counted[key] = [s for s, _ in seen]
+    extra = len(counted["rolling"]) - len(counted["current"])
+    periods = {k: [s for s in v if "budget_periods" in s] for k, v in counted.items()}
+    print(f"\nSTU-795 transaction write: {len(counted['current'])} statements, "
+          f"{len(counted['rolling'])} when it rolls")
+    assert extra == 1, (len(counted["current"]), len(counted["rolling"]))
+    assert periods["current"] == []
+    assert len(periods["rolling"]) == 1
+    assert periods["rolling"][0].lstrip().startswith("INSERT INTO budget_periods")
+
+
+# AC30: the median wall time (ms) of the first write after 400 daily windows elapsed,
+# measured on CI (GitHub Actions, Postgres 15, run 45956521869) on 2026-11-27. The
+# gate is the greater of 100 ms and 3x this.
+ROLL_400_BASELINE_MS = 23
+ROLL_400_FLOOR_MS = 100
+
+
+@needs_db
+def test_first_write_rolls_400_daily_windows_within_ceiling(
+        realistic, sw_client, sw_people, sw_db, monkeypatch, capsys):
+    """AC30: a daily budget left 400 days: the first write stores all 400 windows in one
+    statement. Five independently reset fixtures (a fresh user and budget each, set up
+    outside the timer); the median request time stays under the ceiling."""
+    import statistics
+    import time as clock
+    from datetime import timedelta
+
+    from sqlalchemy import text
+
+    from app.core.database import engine
+    from app.tests.fixtures.realistic import REF, pin_clock
+
+    timings = []
+    for run in range(5):
+        pin_clock(monkeypatch, REF - timedelta(days=400))
+        world = _budget_world(sw_client, sw_people, f"Daily {run}")
+        start = (REF - timedelta(days=400)).replace(hour=0).isoformat()
+        budget = _budget(sw_client, world[0], world[2], "daily", start)
+        pin_clock(monkeypatch, REF)
+        seen, stop = _capture(engine)
+        try:
+            began = clock.perf_counter()
+            _spend(sw_client, *world, REF.replace(hour=0).isoformat())
+            timings.append((clock.perf_counter() - began) * 1000)
+        finally:
+            stop()
+        inserts = [s for s, _ in seen if s.lstrip().startswith("INSERT INTO budget_periods")]
+        assert len(inserts) == 1
+        stored = sw_db.execute(text(
+            "SELECT count(*) FROM budget_periods WHERE allocation_id = :a"),
+            {"a": budget}).scalar_one()
+        sw_db.rollback()
+        assert stored == 400
+    median = statistics.median(timings)
+    limit = max(ROLL_400_FLOOR_MS, 3 * ROLL_400_BASELINE_MS)
+    report = (f"STU-795 first write rolling 400 daily windows: median {median:.1f} ms "
+              f"(runs {[round(t, 1) for t in timings]}, limit {limit} ms)")
+    with capsys.disabled():  # shown in every run's log (CI's), not only on failure
+        print(f"\n{report}")
+    assert median < limit, report
