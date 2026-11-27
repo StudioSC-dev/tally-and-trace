@@ -233,8 +233,9 @@ export interface RankedAllocations {
   items: Allocation[]
 }
 
-/** An allocation edit: a date sent as null is cleared, one left out is kept. */
-export type AllocationUpdate = Omit<Partial<Allocation>, 'target_date' | 'period_start' | 'period_end'> & AllocationCarryOverInput & {
+/** An allocation edit: a date sent as null is cleared, one left out is kept; a budget's `target_amount` sent as null clears its limit. */
+export type AllocationUpdate = Omit<Partial<Allocation>, 'target_date' | 'period_start' | 'period_end' | 'target_amount'> & AllocationCarryOverInput & {
+  target_amount?: number | null
   target_date?: string | null
   period_start?: string | null
   period_end?: string | null
@@ -1036,6 +1037,7 @@ export const {
   // Allocation hooks
   useGetAllocationsQuery,
   useLazyGetAllocationsQuery,
+  useLazyGetAllocationQuery,
   useGetRankedAllocationsQuery,
   useReorderRankedAllocationsMutation,
   useGetAllocationQuery,
