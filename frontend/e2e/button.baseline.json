@@ -240,31 +240,35 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Pause allocation",
             "height": 44,
             "icons": 1,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Edit allocation",
             "height": 44,
             "icons": 1,
-            "variant": null,
+            "variant": "primary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Delete allocation",
             "height": 44,
             "icons": 1,
-            "variant": null,
+            "variant": "danger",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           }
         ],
         "text": "Dining outBudget EnvelopeBPI PayrollCadence: MonthlyStarts Mar 1, 2026Ends Mar 30, 2026Budget snapshotLimit ₱5,000.00Spent ₱2,500.0050.0% of limit usedRemaining ₱2,500.00DetailsActivePause allocationEdit allocationDelete allocation"
@@ -277,7 +281,8 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Dining out",
@@ -285,7 +290,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Groceries",
@@ -293,7 +299,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Health",
@@ -301,7 +308,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Household help",
@@ -309,7 +317,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Rent",
@@ -317,7 +326,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "All 11 categories",
@@ -325,7 +335,8 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Daily",
@@ -333,7 +344,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Weekly",
@@ -341,7 +353,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Monthly",
@@ -349,7 +362,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(229, 231, 235) | 0px"
+            "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Quarterly",
@@ -357,7 +371,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Active",
@@ -365,23 +380,26 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Create budget envelope",
             "height": 40,
             "icons": 0,
-            "variant": null,
+            "variant": "primary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Cancel",
             "height": 40,
             "icons": 0,
-            "variant": null,
+            "variant": "quiet",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           }
         ],
         "text": "Create budget envelopeDefine how this envelope should behave and which categories it monitors.AccountSelect accountBPI PayrollMetrobank SavingsHSBC Red MastercardGCashCash on handNameDescriptionTracked categoriesDining outGroceriesHealthHousehold helpRentAll 11 categoriesTransactions in these categories will roll into this envelope when they post.Budget cadenceDailyWeeklyMonthlyQuarterlyChoose how often this envelope resets so we can bucket transactions correctly.Period startPeriod end (optional)Amount already spentTrack how much of the envelope has already been used this period.Spending limitThe maximum amount available for this envelope before it resets.Allocation statusPause allocations to hide them from planning without losing history.ActiveCreate budget envelopeCancel"
@@ -394,7 +412,8 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Dashboard",
@@ -402,7 +421,8 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Forecast",
@@ -410,7 +430,8 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Accounts",
@@ -418,7 +439,8 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Transactions",
@@ -426,7 +448,8 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Allocations",
@@ -434,7 +457,8 @@
             "icons": 1,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(228, 234, 226) | 400 | none | rgb(228, 234, 226) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(228, 234, 226) | 400 | none | rgb(228, 234, 226) | 0px",
+            "floored": false
           },
           {
             "name": "Toggle theme",
@@ -442,7 +466,8 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "MSMara Santos",
@@ -450,15 +475,17 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Add recurring entry",
             "height": 38,
             "icons": 0,
-            "variant": null,
+            "variant": "primary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Recurring",
@@ -466,7 +493,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(229, 231, 235) | 0px"
+            "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Budgets",
@@ -474,7 +502,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Savings",
@@ -482,7 +511,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Wishlist",
@@ -490,7 +520,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Netflix Standard",
@@ -498,23 +529,26 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Charged",
             "height": 24,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Posted",
             "height": 24,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Spotify Duo",
@@ -522,23 +556,26 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Charged",
             "height": 24,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Posted",
             "height": 24,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Disney+ Premium",
@@ -546,7 +583,8 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Rent",
@@ -554,15 +592,17 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Mark paid",
             "height": 24,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Meralco",
@@ -570,15 +610,17 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Mark paid",
             "height": 24,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "PLDT Fibr",
@@ -586,15 +628,17 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Mark paid",
             "height": 24,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Emergency fund top-up",
@@ -602,15 +646,17 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Mark paid",
             "height": 24,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "HMO dependent add-on",
@@ -618,15 +664,17 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Mark paid",
             "height": 24,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Globe Postpaid",
@@ -634,15 +682,17 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Mark paid",
             "height": 24,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Maynilad water",
@@ -650,15 +700,17 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Mark paid",
             "height": 24,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Palengke run",
@@ -666,15 +718,17 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Mark paid",
             "height": 24,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Yaya salary",
@@ -682,15 +736,17 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Mark paid",
             "height": 24,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Gym membership",
@@ -698,7 +754,8 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Payroll",
@@ -706,18 +763,20 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Mark received",
             "height": 24,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAllocationsAdd recurring entryRecurringBudgetsSavingsWishlistSearch recurring entriesTagAll tagsHouseholdJapan tripSubscriptions3Netflix StandardMonthly · day 9 · ScheduledNext Apr 9th, 2026 · In 28 daysAccount: HSBC Red MastercardChargedPosted₱549.00Spotify DuoMonthly · day 4 · ScheduledNext Apr 4th, 2026 · In 23 daysAccount: HSBC Red MastercardChargedPosted₱239.00Disney+ PremiumMonthly · day 2 · Scheduled · PausedNext Apr 2nd, 2026 · In 21 daysAccount: HSBC Red Mastercard₱369.00Cash expenses10RentHouseholdHousehold+1Monthly · day 1 · ManualNext Apr 1st, 2026 · In 20 daysAccount: BPI PayrollMark paid₱22,000.00MeralcoHouseholdHousehold+1Monthly · day 10 · ManualNext Apr 10th, 2026 · In 29 daysAccount: BPI PayrollMark paid₱4,600.00PLDT FibrMonthly · day 6 · Auto-payNext Apr 6th, 2026 · In 25 daysAccount: BPI PayrollMark paid₱1,899.00Emergency fund top-upMonthly · day 8 · ManualNext Apr 8th, 2026 · In 27 daysAccount: BPI PayrollMark paid₱10,000.00HMO dependent add-onMonthly · day 20 · ManualNext Mar 20th, 2026 · In 8 daysAccount: BPI PayrollMark paid₱1,450.00Globe PostpaidMonthly · day 18 · Auto-payNext Mar 18th, 2026 · In 6 daysAccount: BPI PayrollMark paid₱1,299.00Maynilad waterHouseholdHousehold+1Monthly · day 27 · ManualNext Mar 27th, 2026 · In 15 daysAccount: BPI PayrollMark paid₱720.00Palengke runHouseholdHousehold+1Weekly · Saturday · ManualNext Mar 14th, 2026 · In 2 daysAccount: BDO Joint household · by Mara S.Mark paid₱1,300.00Yaya salaryHouseholdHousehold+1Twice a month · ManualNext Mar 15th, 2026 · In 3 daysAccount: BDO Joint household · by Mara S.Mark paid₱4,500.00Gym membershipMonthly · day 5 · Manual · PausedNext Apr 5th, 2026 · In 24 daysAccount: BPI Payroll₱2,500.00Income & transfers1PayrollTwice a month · ScheduledNext Mar 15th, 2026 · In 3 daysAccount: BPI PayrollMark received+₱41,250.00DashboardAccountsTransactionsAllocations"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAllocationsAdd recurring entryRecurringBudgetsSavingsWishlistRecurring entriesRegular income, bills and subscriptions.Search recurring entriesTagAll tagsHouseholdJapan tripSubscriptions3Netflix StandardMonthly · day 9 · ScheduledNext Apr 9th, 2026 · In 28 daysAccount: HSBC Red MastercardChargedPosted₱549.00Spotify DuoMonthly · day 4 · ScheduledNext Apr 4th, 2026 · In 23 daysAccount: HSBC Red MastercardChargedPosted₱239.00Disney+ PremiumMonthly · day 2 · Scheduled · PausedNext Apr 2nd, 2026 · In 21 daysAccount: HSBC Red Mastercard₱369.00Cash expenses10RentHouseholdHousehold+1Monthly · day 1 · ManualNext Apr 1st, 2026 · In 20 daysAccount: BPI PayrollMark paid₱22,000.00MeralcoHouseholdHousehold+1Monthly · day 10 · ManualNext Apr 10th, 2026 · In 29 daysAccount: BPI PayrollMark paid₱4,600.00PLDT FibrMonthly · day 6 · Auto-payNext Apr 6th, 2026 · In 25 daysAccount: BPI PayrollMark paid₱1,899.00Emergency fund top-upMonthly · day 8 · ManualNext Apr 8th, 2026 · In 27 daysAccount: BPI PayrollMark paid₱10,000.00HMO dependent add-onMonthly · day 20 · ManualNext Mar 20th, 2026 · In 8 daysAccount: BPI PayrollMark paid₱1,450.00Globe PostpaidMonthly · day 18 · Auto-payNext Mar 18th, 2026 · In 6 daysAccount: BPI PayrollMark paid₱1,299.00Maynilad waterHouseholdHousehold+1Monthly · day 27 · ManualNext Mar 27th, 2026 · In 15 daysAccount: BPI PayrollMark paid₱720.00Palengke runHouseholdHousehold+1Weekly · Saturday · ManualNext Mar 14th, 2026 · In 2 daysAccount: BDO Joint household · by Mara S.Mark paid₱1,300.00Yaya salaryHouseholdHousehold+1Twice a month · ManualNext Mar 15th, 2026 · In 3 daysAccount: BDO Joint household · by Mara S.Mark paid₱4,500.00Gym membershipMonthly · day 5 · Manual · PausedNext Apr 5th, 2026 · In 24 daysAccount: BPI Payroll₱2,500.00Income & transfers1PayrollTwice a month · ScheduledNext Mar 15th, 2026 · In 3 daysAccount: BPI PayrollMark received+₱41,250.00DashboardAccountsTransactionsAllocations"
       },
       "allocations-wishlist": {
         "controls": [
@@ -727,7 +786,8 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Dashboard",
@@ -735,7 +795,8 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Forecast",
@@ -743,7 +804,8 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Accounts",
@@ -751,7 +813,8 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Transactions",
@@ -759,7 +822,8 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Allocations",
@@ -767,7 +831,8 @@
             "icons": 1,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(228, 234, 226) | 400 | none | rgb(228, 234, 226) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(228, 234, 226) | 400 | none | rgb(228, 234, 226) | 0px",
+            "floored": false
           },
           {
             "name": "Toggle theme",
@@ -775,7 +840,8 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "MSMara Santos",
@@ -783,7 +849,17 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
+          },
+          {
+            "name": "Add wishlist item",
+            "height": 38,
+            "icons": 0,
+            "variant": "primary",
+            "selection": false,
+            "look": "",
+            "floored": true
           },
           {
             "name": "Recurring",
@@ -791,7 +867,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Budgets",
@@ -799,7 +876,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Savings",
@@ -807,7 +885,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Wishlist",
@@ -815,98 +894,101 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(229, 231, 235) | 0px"
-          },
-          {
-            "name": "Add item",
-            "height": 38,
-            "icons": 0,
-            "variant": null,
-            "selection": false,
-            "look": ""
+            "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Savings target",
             "height": 26,
             "icons": 1,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Budget envelope",
             "height": 26,
             "icons": 1,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Mark as purchased",
             "height": 28,
             "icons": 1,
-            "variant": null,
+            "variant": "quiet",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Edit",
             "height": 28,
             "icons": 1,
-            "variant": null,
+            "variant": "quiet",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Delete",
             "height": 28,
             "icons": 1,
-            "variant": null,
+            "variant": "danger",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Savings target",
             "height": 26,
             "icons": 1,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Budget envelope",
             "height": 26,
             "icons": 1,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Mark as purchased",
             "height": 28,
             "icons": 1,
-            "variant": null,
+            "variant": "quiet",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Edit",
             "height": 28,
             "icons": 1,
-            "variant": null,
+            "variant": "quiet",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Delete",
             "height": 28,
             "icons": 1,
-            "variant": null,
+            "variant": "danger",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAllocationsRecurringBudgetsSavingsWishlistSwitch tabs to view recurring subscriptions, monthly budgets, savings envelopes, or your wishlist.WishlistPrioritised things you're saving up for. Turn any of them into a budget envelope or savings target.Add itemShow purchasedhighWork laptopFor freelance workTarget Jun 30, 2026Savings targetBudget envelope₱65,000.00mediumRice cookerSavings targetBudget envelope₱3,500.00DashboardAccountsTransactionsAllocations"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAllocationsAdd wishlist itemRecurringBudgetsSavingsWishlistWishlistUrgent needs first, then everything else.Show purchasedhighWork laptopFor freelance workTarget Jun 30, 2026Savings targetBudget envelope₱65,000.00mediumRice cookerSavings targetBudget envelope₱3,500.00DashboardAccountsTransactionsAllocations"
       },
       "dashboard": {
         "controls": [
@@ -1722,33 +1804,37 @@
             "name": "Close",
             "height": 38,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Charged",
             "height": 38,
             "icons": 0,
-            "variant": null,
+            "variant": "primary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Posted",
             "height": 38,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Cancel",
             "height": 38,
             "icons": 0,
-            "variant": null,
+            "variant": "quiet",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           }
         ],
         "text": "Record Netflix StandardCloseOccurrenceApr 9th, 2026Charged onChargedPostedCancel"
@@ -1761,7 +1847,8 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Expense",
@@ -1769,7 +1856,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(229, 231, 235) | 0px"
+            "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Income",
@@ -1777,7 +1865,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Keep running",
@@ -1785,7 +1874,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(229, 231, 235) | 0px"
+            "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "On date",
@@ -1793,7 +1883,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "After runs",
@@ -1801,7 +1892,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Household",
@@ -1809,7 +1901,8 @@
             "icons": 1,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Japan trip",
@@ -1817,7 +1910,8 @@
             "icons": 1,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Active",
@@ -1825,23 +1919,26 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Save recurring entry",
             "height": 40,
             "icons": 0,
-            "variant": null,
+            "variant": "primary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Cancel",
             "height": 40,
             "icons": 0,
-            "variant": null,
+            "variant": "quiet",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           }
         ],
         "text": "Add recurring entryProject upcoming income or expenses so they feed into your budgets automatically.NameEntry typeExpenseIncomeAccountSelect accountBPI PayrollMetrobank SavingsHSBC Red MastercardGCashCash on handBDO Joint householdCategoryUncategorizedDining outGroceriesHealthHousehold helpRentSubscriptionsTransportUtilitiesFreelanceSalarySavings transferOverflow account (optional)NoneBPI PayrollMetrobank SavingsHSBC Red MastercardBDO Joint householdIf the primary account can't cover a payment, the shortfall is drawn from here.Transfer to (optional)None (a payment)BPI PayrollMetrobank SavingsGCashCash on handBDO Joint householdMakes this a recurring transfer from the account above, e.g. moving money to the account a loan is paid from. Not available from or to a credit card. A loan is listed only when the account above is in its currency.CurrencyPHPUSDEURGBPJPYAUDCADCHFCNYSGDAmount (PHP)CadenceWeeklyEvery 2 weeksMonthlyQuarterlySemi-AnnualAnnualNext occurrenceDaySame as dateDay of month (1–31)Last weekday of monthMonthly · day 12Next: Mar 12th, 2026, Apr 12th, 2026, May 12th, 2026Lead time (days)Link to budget (optional)No linked envelopeDining outGroceriesShoppingTransportUtilitiesEndsKeep runningOn dateAfter runsTags (optional)HouseholdJapan tripEntry statusPause recurring entries without deleting them.ActiveNotesSave recurring entryCancel"
@@ -3354,23 +3451,26 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Add",
             "height": 50,
             "icons": 0,
-            "variant": null,
+            "variant": "primary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Cancel",
             "height": 50,
             "icons": 0,
-            "variant": null,
+            "variant": "quiet",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           }
         ],
         "text": "Add itemNameEstimated cost₱CurrencyPHP (₱)USD ($)EUR (€)GBP (£)JPY (¥)AUD (A$)CAD (C$)CHF (CHF)CNY (¥)SGD (S$)PrioritycriticalhighmediumlowTarget date (optional)Link (optional)Notes (optional)AddCancel"
@@ -3743,7 +3843,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add allocation",
+          "Add budget",
           "Recurring",
           "Budgets",
           "Savings",
@@ -3784,7 +3884,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add allocation",
+          "Add budget",
           "Recurring",
           "Budgets",
           "Savings",
@@ -3827,7 +3927,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add allocation",
+          "Add budget",
           "Recurring",
           "Budgets",
           "Savings",
@@ -3860,7 +3960,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add allocation",
+          "Add budget",
           "Recurring",
           "Budgets",
           "Savings",
@@ -3888,7 +3988,7 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
-          "Add allocation",
+          "Add budget",
           "Recurring",
           "Budgets",
           "Savings",
@@ -3920,6 +4020,7 @@
         "dialogs": 1,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -3991,6 +4092,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -4058,6 +4160,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -4125,6 +4228,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -4191,6 +4295,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -4257,6 +4362,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -4323,6 +4429,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -4389,6 +4496,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -4455,6 +4563,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -4521,6 +4630,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -4587,6 +4697,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -4653,6 +4764,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -4720,6 +4832,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -4786,6 +4899,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -4853,6 +4967,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -4910,12 +5025,11 @@
           "GET /budget-entries/706/occurrences?include=2026-04-04"
         ]
       },
-      "allocations-wishlist | Add item | 1": {
+      "allocations-wishlist | Add wishlist item | 1": {
         "fields": [
           "text:",
           "number:0",
           "select-one:PHP",
-          "select-one:medium",
           "date:",
           "url:",
           "textarea:"
@@ -4937,11 +5051,11 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -4985,11 +5099,11 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -5044,11 +5158,11 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -5095,11 +5209,11 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -5134,11 +5248,11 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -5159,7 +5273,6 @@
           "text:Work laptop",
           "number:65000",
           "select-one:PHP",
-          "select-one:high",
           "date:2026-06-30",
           "url:",
           "textarea:For freelance work"
@@ -5181,11 +5294,11 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -5207,7 +5320,6 @@
           "text:Rice cooker",
           "number:3500",
           "select-one:PHP",
-          "select-one:medium",
           "date:",
           "url:",
           "textarea:"
@@ -5229,11 +5341,11 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -5268,11 +5380,11 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -5308,11 +5420,11 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -5357,11 +5469,11 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -5409,11 +5521,11 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -7185,6 +7297,7 @@
         "dialogs": 0,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers"
@@ -7241,6 +7354,7 @@
         "dialogs": 0,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers"
@@ -7306,6 +7420,7 @@
         "dialogs": 0,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers"
@@ -7362,6 +7477,7 @@
         "dialogs": 0,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers"
@@ -7427,6 +7543,7 @@
         "dialogs": 0,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers"
@@ -7485,6 +7602,7 @@
         "dialogs": 0,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers"
@@ -11693,11 +11811,11 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -11738,11 +11856,11 @@
           "Allocations",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -11991,31 +12109,35 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Pause allocation",
             "height": 44,
             "icons": 1,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Edit allocation",
             "height": 44,
             "icons": 1,
-            "variant": null,
+            "variant": "primary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Delete allocation",
             "height": 44,
             "icons": 1,
-            "variant": null,
+            "variant": "danger",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           }
         ],
         "text": "Dining outBudget EnvelopeBPI PayrollCadence: MonthlyStarts Mar 1, 2026Ends Mar 30, 2026Budget snapshotLimit ₱5,000.00Spent ₱2,500.0050.0% of limit usedRemaining ₱2,500.00DetailsActivePause allocationEdit allocationDelete allocation"
@@ -12028,7 +12150,8 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Dining out",
@@ -12036,7 +12159,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Groceries",
@@ -12044,7 +12168,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Health",
@@ -12052,7 +12177,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Household help",
@@ -12060,7 +12186,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Rent",
@@ -12068,7 +12195,8 @@
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "All 11 categories",
@@ -12076,39 +12204,44 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Daily",
-            "height": 28,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Weekly",
-            "height": 28,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Monthly",
-            "height": 28,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(229, 231, 235) | 0px"
+            "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Quarterly",
-            "height": 28,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Active",
@@ -12116,23 +12249,26 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Create budget envelope",
-            "height": 40,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "primary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Cancel",
-            "height": 40,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "quiet",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           }
         ],
         "text": "Create budget envelopeDefine how this envelope should behave and which categories it monitors.AccountSelect accountBPI PayrollMetrobank SavingsHSBC Red MastercardGCashCash on handNameDescriptionTracked categoriesDining outGroceriesHealthHousehold helpRentAll 11 categoriesTransactions in these categories will roll into this envelope when they post.Budget cadenceDailyWeeklyMonthlyQuarterlyChoose how often this envelope resets so we can bucket transactions correctly.Period startPeriod end (optional)Amount already spentTrack how much of the envelope has already been used this period.Spending limitThe maximum amount available for this envelope before it resets.Allocation statusPause allocations to hide them from planning without losing history.ActiveCreate budget envelopeCancel"
@@ -12141,19 +12277,21 @@
         "controls": [
           {
             "name": "₱Tally & Trace",
-            "height": 28,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Toggle theme",
-            "height": 36,
+            "height": 44,
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "MSMara Santos",
@@ -12161,47 +12299,53 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Add recurring entry",
-            "height": 38,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "primary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Recurring",
-            "height": 36,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(229, 231, 235) | 0px"
+            "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Budgets",
-            "height": 36,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Savings",
-            "height": 36,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Wishlist",
-            "height": 36,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Netflix Standard",
@@ -12209,23 +12353,26 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Charged",
-            "height": 24,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Posted",
-            "height": 24,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Spotify Duo",
@@ -12233,23 +12380,26 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Charged",
-            "height": 24,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Posted",
-            "height": 24,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Disney+ Premium",
@@ -12257,7 +12407,8 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Rent",
@@ -12265,15 +12416,17 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Mark paid",
-            "height": 24,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Meralco",
@@ -12281,23 +12434,26 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Show 1 more tag: Household",
-            "height": 22,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Mark paid",
-            "height": 24,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "PLDT Fibr",
@@ -12305,15 +12461,17 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Mark paid",
-            "height": 24,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Emergency fund top-up",
@@ -12321,15 +12479,17 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Mark paid",
-            "height": 24,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "HMO dependent add-on",
@@ -12337,15 +12497,17 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Mark paid",
-            "height": 24,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Globe Postpaid",
@@ -12353,15 +12515,17 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Mark paid",
-            "height": 24,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Maynilad water",
@@ -12369,23 +12533,26 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Show 1 more tag: Household",
-            "height": 22,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Mark paid",
-            "height": 24,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Palengke run",
@@ -12393,23 +12560,26 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Show 1 more tag: Household",
-            "height": 22,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Mark paid",
-            "height": 24,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Yaya salary",
@@ -12417,23 +12587,26 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Show 1 more tag: Household",
-            "height": 22,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Mark paid",
-            "height": 24,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Gym membership",
@@ -12441,7 +12614,8 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Payroll",
@@ -12449,15 +12623,17 @@
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Mark received",
-            "height": 24,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Dashboard",
@@ -12465,7 +12641,8 @@
             "icons": 2,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Accounts",
@@ -12473,7 +12650,8 @@
             "icons": 2,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Transactions",
@@ -12481,7 +12659,8 @@
             "icons": 2,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Allocations",
@@ -12489,28 +12668,31 @@
             "icons": 2,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(229, 231, 235) | 0px",
+            "floored": false
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAllocationsAdd recurring entryRecurringBudgetsSavingsWishlistSearch recurring entriesTagAll tagsHouseholdJapan tripSubscriptions3Netflix StandardMonthly · day 9 · ScheduledNext Apr 9th, 2026 · In 28 daysAccount: HSBC Red MastercardChargedPosted₱549.00Spotify DuoMonthly · day 4 · ScheduledNext Apr 4th, 2026 · In 23 daysAccount: HSBC Red MastercardChargedPosted₱239.00Disney+ PremiumMonthly · day 2 · Scheduled · PausedNext Apr 2nd, 2026 · In 21 daysAccount: HSBC Red Mastercard₱369.00Cash expenses10RentHouseholdHousehold+1Monthly · day 1 · ManualNext Apr 1st, 2026 · In 20 daysAccount: BPI PayrollMark paid₱22,000.00Meralco+1Household+1Monthly · day 10 · ManualNext Apr 10th, 2026 · In 29 daysAccount: BPI PayrollMark paid₱4,600.00PLDT FibrMonthly · day 6 · Auto-payNext Apr 6th, 2026 · In 25 daysAccount: BPI PayrollMark paid₱1,899.00Emergency fund top-upMonthly · day 8 · ManualNext Apr 8th, 2026 · In 27 daysAccount: BPI PayrollMark paid₱10,000.00HMO dependent add-onMonthly · day 20 · ManualNext Mar 20th, 2026 · In 8 daysAccount: BPI PayrollMark paid₱1,450.00Globe PostpaidMonthly · day 18 · Auto-payNext Mar 18th, 2026 · In 6 daysAccount: BPI PayrollMark paid₱1,299.00Maynilad water+1Household+1Monthly · day 27 · ManualNext Mar 27th, 2026 · In 15 daysAccount: BPI PayrollMark paid₱720.00Palengke run+1Household+1Weekly · Saturday · ManualNext Mar 14th, 2026 · In 2 daysAccount: BDO Joint household · by Mara S.Mark paid₱1,300.00Yaya salary+1Household+1Twice a month · ManualNext Mar 15th, 2026 · In 3 daysAccount: BDO Joint household · by Mara S.Mark paid₱4,500.00Gym membershipMonthly · day 5 · Manual · PausedNext Apr 5th, 2026 · In 24 daysAccount: BPI Payroll₱2,500.00Income & transfers1PayrollTwice a month · ScheduledNext Mar 15th, 2026 · In 3 daysAccount: BPI PayrollMark received+₱41,250.00DashboardAccountsTransactionsAllocations"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAllocationsAdd recurring entryRecurringBudgetsSavingsWishlistRecurring entriesRegular income, bills and subscriptions.Search recurring entriesTagAll tagsHouseholdJapan tripSubscriptions3Netflix StandardMonthly · day 9 · ScheduledNext Apr 9th, 2026 · In 28 daysAccount: HSBC Red MastercardChargedPosted₱549.00Spotify DuoMonthly · day 4 · ScheduledNext Apr 4th, 2026 · In 23 daysAccount: HSBC Red MastercardChargedPosted₱239.00Disney+ PremiumMonthly · day 2 · Scheduled · PausedNext Apr 2nd, 2026 · In 21 daysAccount: HSBC Red Mastercard₱369.00Cash expenses10RentHouseholdHousehold+1Monthly · day 1 · ManualNext Apr 1st, 2026 · In 20 daysAccount: BPI PayrollMark paid₱22,000.00Meralco+1Household+1Monthly · day 10 · ManualNext Apr 10th, 2026 · In 29 daysAccount: BPI PayrollMark paid₱4,600.00PLDT FibrMonthly · day 6 · Auto-payNext Apr 6th, 2026 · In 25 daysAccount: BPI PayrollMark paid₱1,899.00Emergency fund top-upMonthly · day 8 · ManualNext Apr 8th, 2026 · In 27 daysAccount: BPI PayrollMark paid₱10,000.00HMO dependent add-onMonthly · day 20 · ManualNext Mar 20th, 2026 · In 8 daysAccount: BPI PayrollMark paid₱1,450.00Globe PostpaidMonthly · day 18 · Auto-payNext Mar 18th, 2026 · In 6 daysAccount: BPI PayrollMark paid₱1,299.00Maynilad water+1Household+1Monthly · day 27 · ManualNext Mar 27th, 2026 · In 15 daysAccount: BPI PayrollMark paid₱720.00Palengke run+1Household+1Weekly · Saturday · ManualNext Mar 14th, 2026 · In 2 daysAccount: BDO Joint household · by Mara S.Mark paid₱1,300.00Yaya salary+1Household+1Twice a month · ManualNext Mar 15th, 2026 · In 3 daysAccount: BDO Joint household · by Mara S.Mark paid₱4,500.00Gym membershipMonthly · day 5 · Manual · PausedNext Apr 5th, 2026 · In 24 daysAccount: BPI Payroll₱2,500.00Income & transfers1PayrollTwice a month · ScheduledNext Mar 15th, 2026 · In 3 daysAccount: BPI PayrollMark received+₱41,250.00DashboardAccountsTransactionsAllocations"
       },
       "allocations-wishlist": {
         "controls": [
           {
             "name": "₱Tally & Trace",
-            "height": 28,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Toggle theme",
-            "height": 36,
+            "height": 44,
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "MSMara Santos",
@@ -12518,127 +12700,143 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
+          },
+          {
+            "name": "Add wishlist item",
+            "height": 44,
+            "icons": 0,
+            "variant": "primary",
+            "selection": false,
+            "look": "",
+            "floored": true
           },
           {
             "name": "Recurring",
-            "height": 36,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Budgets",
-            "height": 36,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Savings",
-            "height": 36,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Wishlist",
-            "height": 36,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(229, 231, 235) | 0px"
-          },
-          {
-            "name": "Add item",
-            "height": 38,
-            "icons": 0,
-            "variant": null,
-            "selection": false,
-            "look": ""
+            "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Savings target",
-            "height": 26,
+            "height": 44,
             "icons": 1,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Budget envelope",
-            "height": 26,
+            "height": 44,
             "icons": 1,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Mark as purchased",
-            "height": 28,
+            "height": 44,
             "icons": 1,
-            "variant": null,
+            "variant": "quiet",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Edit",
-            "height": 28,
+            "height": 44,
             "icons": 1,
-            "variant": null,
+            "variant": "quiet",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Delete",
-            "height": 28,
+            "height": 44,
             "icons": 1,
-            "variant": null,
+            "variant": "danger",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Savings target",
-            "height": 26,
+            "height": 44,
             "icons": 1,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Budget envelope",
-            "height": 26,
+            "height": 44,
             "icons": 1,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Mark as purchased",
-            "height": 28,
+            "height": 44,
             "icons": 1,
-            "variant": null,
+            "variant": "quiet",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Edit",
-            "height": 28,
+            "height": 44,
             "icons": 1,
-            "variant": null,
+            "variant": "quiet",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Delete",
-            "height": 28,
+            "height": 44,
             "icons": 1,
-            "variant": null,
+            "variant": "danger",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Dashboard",
@@ -12646,7 +12844,8 @@
             "icons": 2,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Accounts",
@@ -12654,7 +12853,8 @@
             "icons": 2,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Transactions",
@@ -12662,7 +12862,8 @@
             "icons": 2,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Allocations",
@@ -12670,10 +12871,11 @@
             "icons": 2,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(22, 36, 28) | 400 | none | rgb(229, 231, 235) | 0px",
+            "floored": false
           }
         ],
-        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAllocationsRecurringBudgetsSavingsWishlistSwitch tabs to view recurring subscriptions, monthly budgets, savings envelopes, or your wishlist.WishlistPrioritised things you're saving up for. Turn any of them into a budget envelope or savings target.Add itemShow purchasedhighWork laptopFor freelance workTarget Jun 30, 2026Savings targetBudget envelope₱65,000.00mediumRice cookerSavings targetBudget envelope₱3,500.00DashboardAccountsTransactionsAllocations"
+        "text": "₱Tally & TraceDashboardForecastAccountsTransactionsAllocationsMSMara SantosAllocationsAdd wishlist itemRecurringBudgetsSavingsWishlistWishlistUrgent needs first, then everything else.Show purchasedhighWork laptopFor freelance workTarget Jun 30, 2026Savings targetBudget envelope₱65,000.00mediumRice cookerSavings targetBudget envelope₱3,500.00DashboardAccountsTransactionsAllocations"
       },
       "dashboard": {
         "controls": [
@@ -13463,35 +13665,39 @@
         "controls": [
           {
             "name": "Close",
-            "height": 38,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Charged",
-            "height": 38,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "primary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Posted",
-            "height": 38,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "secondary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Cancel",
-            "height": 38,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "quiet",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           }
         ],
         "text": "Record Netflix StandardCloseOccurrenceApr 9th, 2026Charged onChargedPostedCancel"
@@ -13504,63 +13710,71 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Expense",
-            "height": 28,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(229, 231, 235) | 0px"
+            "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Income",
-            "height": 28,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Keep running",
-            "height": 28,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(229, 231, 235) | 0px"
+            "look": "rgb(242, 245, 240) | rgb(22, 36, 28) | 600 | rgb(34, 72, 58) 0px -2px 0px 0px inset | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "On date",
-            "height": 28,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "After runs",
-            "height": 28,
+            "height": 44,
             "icons": 0,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Household",
-            "height": 32,
+            "height": 44,
             "icons": 1,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Japan trip",
-            "height": 32,
+            "height": 44,
             "icons": 1,
             "variant": null,
             "selection": true,
-            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px"
+            "look": "rgba(0, 0, 0, 0) | rgb(45, 59, 51) | 500 | none | rgb(229, 231, 235) | 0px",
+            "floored": true
           },
           {
             "name": "Active",
@@ -13568,23 +13782,26 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Save recurring entry",
-            "height": 40,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "primary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Cancel",
-            "height": 40,
+            "height": 44,
             "icons": 0,
-            "variant": null,
+            "variant": "quiet",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           }
         ],
         "text": "Add recurring entryProject upcoming income or expenses so they feed into your budgets automatically.NameEntry typeExpenseIncomeAccountSelect accountBPI PayrollMetrobank SavingsHSBC Red MastercardGCashCash on handBDO Joint householdCategoryUncategorizedDining outGroceriesHealthHousehold helpRentSubscriptionsTransportUtilitiesFreelanceSalarySavings transferOverflow account (optional)NoneBPI PayrollMetrobank SavingsHSBC Red MastercardBDO Joint householdIf the primary account can't cover a payment, the shortfall is drawn from here.Transfer to (optional)None (a payment)BPI PayrollMetrobank SavingsGCashCash on handBDO Joint householdMakes this a recurring transfer from the account above, e.g. moving money to the account a loan is paid from. Not available from or to a credit card. A loan is listed only when the account above is in its currency.CurrencyPHPUSDEURGBPJPYAUDCADCHFCNYSGDAmount (PHP)CadenceWeeklyEvery 2 weeksMonthlyQuarterlySemi-AnnualAnnualNext occurrenceDaySame as dateDay of month (1–31)Last weekday of monthMonthly · day 12Next: Mar 12th, 2026, Apr 12th, 2026, May 12th, 2026Lead time (days)Link to budget (optional)No linked envelopeDining outGroceriesShoppingTransportUtilitiesEndsKeep runningOn dateAfter runsTags (optional)HouseholdJapan tripEntry statusPause recurring entries without deleting them.ActiveNotesSave recurring entryCancel"
@@ -15080,23 +15297,26 @@
             "icons": 1,
             "variant": null,
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": false
           },
           {
             "name": "Add",
             "height": 50,
             "icons": 0,
-            "variant": null,
+            "variant": "primary",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           },
           {
             "name": "Cancel",
             "height": 50,
             "icons": 0,
-            "variant": null,
+            "variant": "quiet",
             "selection": false,
-            "look": ""
+            "look": "",
+            "floored": true
           }
         ],
         "text": "Add itemNameEstimated cost₱CurrencyPHP (₱)USD ($)EUR (€)GBP (£)JPY (¥)AUD (A$)CAD (C$)CHF (CHF)CNY (¥)SGD (S$)PrioritycriticalhighmediumlowTarget date (optional)Link (optional)Notes (optional)AddCancel"
@@ -15456,7 +15676,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add allocation",
+          "Add budget",
           "Recurring",
           "Budgets",
           "Savings",
@@ -15496,7 +15716,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add allocation",
+          "Add budget",
           "Recurring",
           "Budgets",
           "Savings",
@@ -15538,7 +15758,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add allocation",
+          "Add budget",
           "Recurring",
           "Budgets",
           "Savings",
@@ -15570,7 +15790,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add allocation",
+          "Add budget",
           "Recurring",
           "Budgets",
           "Savings",
@@ -15597,7 +15817,7 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
-          "Add allocation",
+          "Add budget",
           "Recurring",
           "Budgets",
           "Savings",
@@ -15633,6 +15853,7 @@
         "dialogs": 1,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -15707,6 +15928,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -15777,6 +15999,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -15847,6 +16070,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -15916,6 +16140,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -15985,6 +16210,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -16054,6 +16280,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -16123,6 +16350,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -16192,6 +16420,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -16261,6 +16490,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -16330,6 +16560,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -16399,6 +16630,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -16469,6 +16701,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -16538,6 +16771,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -16608,6 +16842,7 @@
         "dialogs": 2,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers",
@@ -16668,12 +16903,11 @@
           "GET /budget-entries/706/occurrences?include=2026-04-04"
         ]
       },
-      "allocations-wishlist | Add item | 1": {
+      "allocations-wishlist | Add wishlist item | 1": {
         "fields": [
           "text:",
           "number:0",
           "select-one:PHP",
-          "select-one:medium",
           "date:",
           "url:",
           "textarea:"
@@ -16690,11 +16924,11 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -16737,11 +16971,11 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -16795,11 +17029,11 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -16845,11 +17079,11 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -16883,11 +17117,11 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -16912,7 +17146,6 @@
           "text:Work laptop",
           "number:65000",
           "select-one:PHP",
-          "select-one:high",
           "date:2026-06-30",
           "url:",
           "textarea:For freelance work"
@@ -16929,11 +17162,11 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -16959,7 +17192,6 @@
           "text:Rice cooker",
           "number:3500",
           "select-one:PHP",
-          "select-one:medium",
           "date:",
           "url:",
           "textarea:"
@@ -16976,11 +17208,11 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -17014,11 +17246,11 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -17053,11 +17285,11 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -17101,11 +17333,11 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -17152,11 +17384,11 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -18899,6 +19131,7 @@
         "dialogs": 0,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers"
@@ -18958,6 +19191,7 @@
         "dialogs": 0,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers"
@@ -19026,6 +19260,7 @@
         "dialogs": 0,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers"
@@ -19085,6 +19320,7 @@
         "dialogs": 0,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers"
@@ -19153,6 +19389,7 @@
         "dialogs": 0,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers"
@@ -19214,6 +19451,7 @@
         "dialogs": 0,
         "headings": [
           "Allocations",
+          "Recurring entries",
           "Subscriptions",
           "Cash expenses",
           "Income & transfers"
@@ -23356,11 +23594,11 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",
@@ -23400,11 +23638,11 @@
           "₱Tally & Trace",
           "Toggle theme",
           "MSMara Santos",
+          "Add wishlist item",
           "Recurring",
           "Budgets",
           "Savings",
           "Wishlist",
-          "Add item",
           "Savings target",
           "Budget envelope",
           "Mark as purchased",

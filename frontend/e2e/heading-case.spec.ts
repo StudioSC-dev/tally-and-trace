@@ -424,8 +424,8 @@ const SURFACES: Surface[] = [
   { name: 'add recurring entry dialog', dialog: true, open: (p) => openDialog(p, '/allocations?tab=recurring', (q) => q.getByRole('button', { name: named('add recurring entry') })) },
   { name: 'edit recurring entry dialog', dialog: true, open: (p) => openDialog(p, '/allocations?tab=recurring', (q) => recurringRow(q, 'Meralco')) },
   { name: 'charged dialog', dialog: true, open: (p) => openDialog(p, '/allocations?tab=recurring', (q) => q.getByTestId('entry-charged-button').first()) },
-  { name: 'add budget envelope dialog', dialog: true, open: (p) => openDialog(p, '/allocations?tab=budgets', (q) => q.getByRole('button', { name: named('add allocation') })) },
-  { name: 'add savings tracker dialog', dialog: true, open: (p) => openDialog(p, '/allocations?tab=savings', (q) => q.getByRole('button', { name: named('add allocation') })) },
+  { name: 'add budget envelope dialog', dialog: true, open: (p) => openDialog(p, '/allocations?tab=budgets', (q) => q.getByRole('button', { name: named('add budget') })) },
+  { name: 'add savings tracker dialog', dialog: true, open: (p) => openDialog(p, '/allocations?tab=savings', (q) => q.getByRole('button', { name: named('add savings goal') })) },
   { name: 'budget envelope actions dialog', dialog: true, open: (p) => openDialog(p, '/allocations?tab=budgets', (q) => allocationCard(q, budgetName)) },
   { name: 'savings tracker actions dialog', dialog: true, open: (p) => openDialog(p, '/allocations?tab=savings', (q) => allocationCard(q, savingsName)) },
   {
@@ -436,7 +436,7 @@ const SURFACES: Surface[] = [
       await top(p).getByRole('button', { name: named('edit allocation') }).click()
     },
   },
-  { name: 'add wishlist item dialog', dialog: true, open: (p) => openDialog(p, '/allocations?tab=wishlist', (q) => q.getByRole('button', { name: 'Add item', exact: true })) },
+  { name: 'add wishlist item dialog', dialog: true, open: (p) => openDialog(p, '/allocations?tab=wishlist', (q) => q.getByRole('button', { name: 'Add wishlist item', exact: true })) },
   { name: 'edit wishlist item dialog', dialog: true, open: (p) => openDialog(p, '/allocations?tab=wishlist', (q) => q.locator('main article').filter({ hasText: 'Work laptop' }).getByRole('button', { name: 'Edit', exact: true })) },
   // Accounts dialogs.
   { name: 'add account dialog', dialog: true, open: (p) => openDialog(p, '/accounts', (q) => q.getByRole('button', { name: named('add account') })) },
@@ -786,7 +786,7 @@ const EXPECTED: Record<string, Expected & { phone?: Partial<Expected> }> = {
     },
   },
   'allocations, recurring': {
-    headings: ['Allocations', 'Subscriptions', 'Cash expenses', 'Income & transfers'],
+    headings: ['Allocations', 'Recurring entries', 'Subscriptions', 'Cash expenses', 'Income & transfers'],
     titles: [],
     buttons: [
       'Toggle theme',
@@ -849,18 +849,18 @@ const EXPECTED: Record<string, Expected & { phone?: Partial<Expected> }> = {
   'allocations, budgets': {
     headings: ['Allocations', 'Budget envelopes'],
     titles: [],
-    buttons: ['Toggle theme', 'MS Mara Santos', 'Add allocation', 'Recurring', 'Budgets', 'Savings', 'Wishlist'],
+    buttons: ['Toggle theme', 'MS Mara Santos', 'Add budget', 'Recurring', 'Budgets', 'Savings', 'Wishlist'],
     phone: {
-      buttons: ['Toggle theme', 'MS', 'Add allocation', 'Recurring', 'Budgets', 'Savings', 'Wishlist'],
+      buttons: ['Toggle theme', 'MS', 'Add budget', 'Recurring', 'Budgets', 'Savings', 'Wishlist'],
     },
   },
   'allocations, savings': {
-    // STU-787: the ranked section's heading comes first.
-    headings: ['Allocations', 'Savings goals', 'Savings & investment targets'],
+    // STU-796: the tab's intro comes first, then the ranked section's heading.
+    headings: ['Allocations', 'Savings & investment targets', 'Savings goals'],
     titles: [],
-    buttons: ['Toggle theme', 'MS Mara Santos', 'Add allocation', 'Recurring', 'Budgets', 'Savings', 'Wishlist', 'Move Emergency fund up', 'Move Emergency fund down', 'Move Japan trip, October up', 'Move Japan trip, October down', 'Move New laptop up', 'Move New laptop down', 'Move Christmas gifts up', 'Move Christmas gifts down', 'Move Car maintenance up', 'Move Car maintenance down', 'Create a savings target'],
+    buttons: ['Toggle theme', 'MS Mara Santos', 'Add savings goal', 'Recurring', 'Budgets', 'Savings', 'Wishlist', 'Move Emergency fund up', 'Move Emergency fund down', 'Move Japan trip, October up', 'Move Japan trip, October down', 'Move New laptop up', 'Move New laptop down', 'Move Christmas gifts up', 'Move Christmas gifts down', 'Move Car maintenance up', 'Move Car maintenance down', 'Create a savings target'],
     phone: {
-      buttons: ['Toggle theme', 'MS', 'Add allocation', 'Recurring', 'Budgets', 'Savings', 'Wishlist', 'Move Emergency fund up', 'Move Emergency fund down', 'Move Japan trip, October up', 'Move Japan trip, October down', 'Move New laptop up', 'Move New laptop down', 'Move Christmas gifts up', 'Move Christmas gifts down', 'Move Car maintenance up', 'Move Car maintenance down', 'Create a savings target'],
+      buttons: ['Toggle theme', 'MS', 'Add savings goal', 'Recurring', 'Budgets', 'Savings', 'Wishlist', 'Move Emergency fund up', 'Move Emergency fund down', 'Move Japan trip, October up', 'Move Japan trip, October down', 'Move New laptop up', 'Move New laptop down', 'Move Christmas gifts up', 'Move Christmas gifts down', 'Move Car maintenance up', 'Move Car maintenance down', 'Create a savings target'],
     },
   },
   'allocations, wishlist': {
@@ -869,11 +869,11 @@ const EXPECTED: Record<string, Expected & { phone?: Partial<Expected> }> = {
     buttons: [
       'Toggle theme',
       'MS Mara Santos',
+      'Add wishlist item',
       'Recurring',
       'Budgets',
       'Savings',
       'Wishlist',
-      'Add item',
       'Savings target',
       'Budget envelope',
       'Mark as purchased',
@@ -884,12 +884,12 @@ const EXPECTED: Record<string, Expected & { phone?: Partial<Expected> }> = {
       buttons: [
         'Toggle theme',
         'MS',
+        'Add wishlist item',
         'Recurring',
         'Budgets',
         'Savings',
         'Wishlist',
-        'Add item',
-        'Savings target',
+          'Savings target',
         'Budget envelope',
         'Mark as purchased',
         'Edit',
@@ -1098,7 +1098,7 @@ const EXPECTED: Record<string, Expected & { phone?: Partial<Expected> }> = {
   },
   'allocations, recurring, empty': {
     // STU-692: the empty list's own next step, a primary button under its sentence.
-    headings: ['Allocations'],
+    headings: ['Allocations', 'Recurring entries'],
     titles: [],
     buttons: ['Toggle theme', 'MS Mara Santos', 'Add recurring entry', 'Recurring', 'Budgets', 'Savings', 'Wishlist', 'Add a recurring entry'],
     phone: {
@@ -1109,18 +1109,18 @@ const EXPECTED: Record<string, Expected & { phone?: Partial<Expected> }> = {
     // STU-692: the empty list's own next step, a primary button under its sentence.
     headings: ['Allocations', 'Budget envelopes'],
     titles: [],
-    buttons: ['Toggle theme', 'MS Mara Santos', 'Add allocation', 'Recurring', 'Budgets', 'Savings', 'Wishlist', 'Create a budget envelope'],
+    buttons: ['Toggle theme', 'MS Mara Santos', 'Add budget', 'Recurring', 'Budgets', 'Savings', 'Wishlist', 'Create a budget envelope'],
     phone: {
-      buttons: ['Toggle theme', 'MS', 'Add allocation', 'Recurring', 'Budgets', 'Savings', 'Wishlist', 'Create a budget envelope'],
+      buttons: ['Toggle theme', 'MS', 'Add budget', 'Recurring', 'Budgets', 'Savings', 'Wishlist', 'Create a budget envelope'],
     },
   },
   'allocations, savings, empty': {
     // STU-692: the empty list's own next step, a primary button under its sentence.
-    headings: ['Allocations', 'Savings goals', 'Savings & investment targets'],
+    headings: ['Allocations', 'Savings & investment targets', 'Savings goals'],
     titles: [],
-    buttons: ['Toggle theme', 'MS Mara Santos', 'Add allocation', 'Recurring', 'Budgets', 'Savings', 'Wishlist', 'Create a savings target'],
+    buttons: ['Toggle theme', 'MS Mara Santos', 'Add savings goal', 'Recurring', 'Budgets', 'Savings', 'Wishlist', 'Create a savings target'],
     phone: {
-      buttons: ['Toggle theme', 'MS', 'Add allocation', 'Recurring', 'Budgets', 'Savings', 'Wishlist', 'Create a savings target'],
+      buttons: ['Toggle theme', 'MS', 'Add savings goal', 'Recurring', 'Budgets', 'Savings', 'Wishlist', 'Create a savings target'],
     },
   },
   'accounts, empty': {
@@ -2168,15 +2168,15 @@ const ACTIONS: ActionCase[] = [
     effect: async (p) => expect(p.getByRole('alertdialog').getByRole('heading', { name: 'Delete recurring entry' }), 'the delete is confirmed first').toBeVisible(),
   },
   {
-    name: 'Add allocation',
-    open: async (p) => (await openPage(p, '/allocations?tab=budgets'), p.getByRole('button', { name: 'Add allocation', exact: true })),
+    name: 'Add budget',
+    open: async (p) => (await openPage(p, '/allocations?tab=budgets'), p.getByRole('button', { name: 'Add budget', exact: true })),
     effect: async (p) => expect(top(p).getByRole('heading', { name: 'Create budget envelope', exact: true }), 'the envelope form opens').toBeVisible(),
   },
   {
     name: 'Create budget envelope',
     open: async (p) => {
       await openPage(p, '/allocations?tab=budgets')
-      await p.getByRole('button', { name: 'Add allocation', exact: true }).click()
+      await p.getByRole('button', { name: 'Add budget', exact: true }).click()
       await top(p).locator('input[type="text"]').first().fill('Pet care')
       await top(p).locator('select').first().selectOption('11')
       await top(p).getByRole('button', { name: 'Dining out', exact: true }).click()
@@ -2191,7 +2191,7 @@ const ACTIONS: ActionCase[] = [
     name: 'Create savings tracker',
     open: async (p) => {
       await openPage(p, '/allocations?tab=savings')
-      await p.getByRole('button', { name: 'Add allocation', exact: true }).click()
+      await p.getByRole('button', { name: 'Add savings goal', exact: true }).click()
       await top(p).locator('input[type="text"]').first().fill('Pet care fund')
       await top(p).locator('select').first().selectOption('12')
       for (const amount of await top(p).locator('input[type="number"]').all()) {

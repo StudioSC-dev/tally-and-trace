@@ -412,7 +412,7 @@ test.describe('wishlist plan and priority wording (STU-791)', () => {
 
   test('AC8: the form describes Critical as an urgent need that comes before saving, and the rest as wants', async ({ page }) => {
     const api = await open(page, PLAN_OK)
-    await page.getByRole('button', { name: 'Add item', exact: true }).click()
+    await page.getByRole('button', { name: 'Add wishlist item', exact: true }).click()
     const form = page.locator('form').filter({ has: page.getByPlaceholder('What are you saving for?') })
     const priority = form.getByTestId('wishlist-priority')
     await expect(priority).toBeVisible()
@@ -577,7 +577,7 @@ test.describe('wishlist plan and priority wording (STU-791)', () => {
 
   test('AC10: adding a wishlist item refreshes the plan, outlook, free flow and dashboard reads', async ({ page }) => {
     const api = await openEverything(page)
-    await page.getByRole('button', { name: 'Add item', exact: true }).click()
+    await page.getByRole('button', { name: 'Add wishlist item', exact: true }).click()
     const form = page.locator('form').filter({ has: page.getByPlaceholder('What are you saving for?') })
     await form.getByPlaceholder('What are you saving for?').fill('Added item')
     await form.getByPlaceholder('0.00').first().fill('9000')

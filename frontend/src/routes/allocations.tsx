@@ -64,6 +64,7 @@ import { EntryCreditWarningRow, KindCreditLines } from '../components/Allocation
 import type { KindCreditState } from '../components/AllocationsCredit'
 import { ListSheet } from '../components/ListSheet'
 import { PageHeader } from '../components/PageHeader'
+import { SectionIntro } from '../components/SectionIntro'
 import { EmptyState } from '../components/EmptyState'
 import { Row } from '../components/Row'
 import { TagFilter } from '../components/TagFilter'
@@ -312,6 +313,21 @@ type AllocationFormState = {
 
 const CURRENCY_OPTIONS = Object.keys(CURRENCY_CONFIGS) as CurrencyCode[]
 
+/** Each tab's create button, shown in the page header. */
+const ADD_LABEL: Record<AllocationsTab, string> = {
+  subscriptions: 'Add recurring entry',
+  budgets: 'Add budget',
+  savings: 'Add savings goal',
+  wishlist: 'Add wishlist item',
+}
+
+/** What each tab's `SectionIntro` says under its heading (Wishlist's lives in `WishlistPanel`). */
+const INTRO = {
+  subscriptions: 'Regular income, bills and subscriptions.',
+  budgets: 'Monthly spending limits by category.',
+  savings: 'Long-term goals and rainy-day funds.',
+}
+
 export const Route = createFileRoute('/allocations')({
   validateSearch: (search: Record<string, unknown>): { tab?: AllocationsTab | 'recurring' } => ({
     // `recurring` stays as written in the URL; the page maps it to the internal `subscriptions` tab.
@@ -355,6 +371,12 @@ export function AllocationsPage() {
     if (tabFromUrl) setActiveTab(tabFromUrl)
   }, [tabFromUrl])
   const [recurringSearch, setRecurringSearch] = useState('')
+  // The Wishlist create form: the page owns it so the header button and the panel's empty state open the same form.
+  const [wishlistCreateOpen, setWishlistCreateOpen] = useState(false)
+  // The panel unmounts off the Wishlist tab and its draft goes with it, so the flag must not outlive the tab.
+  useEffect(() => {
+    if (activeTab !== 'wishlist') setWishlistCreateOpen(false)
+  }, [activeTab])
 
   const createAllocationDefaults = useCallback(
     (type: 'budget' | 'savings'): AllocationFormState => {
@@ -1668,17 +1690,11 @@ export function AllocationsPage() {
   }
 
   const renderAllocationSection = (
-    title: string,
-    subtitle: string,
     allocations: Allocation[],
     emptyMessage: string,
     emptyAction: string
   ) => (
     <section className="space-y-3">
-      <header className="space-y-1">
-        <h2 className="text-xl font-semibold text-ink">{title}</h2>
-        <p className="text-sm text-muted">{subtitle}</p>
-      </header>
       {loadError && (
         <div className="card p-4 space-y-3" role="alert" data-testid="allocations-load-error">
           <p className="text-sm text-danger">Could not load allocations.</p>
@@ -1847,15 +1863,14 @@ export function AllocationsPage() {
   return (
     <div className="page">
       <PageHeader title="Allocations">
-        {activeTab !== 'wishlist' && (
-          <Button
-              variant="primary"
-              onClick={openCreateModal}
-            className="w-full sm:w-auto justify-center"
-          >
-              {activeTab === 'subscriptions' ? 'Add recurring entry' : 'Add allocation'}
-          </Button>
-        )}
+        <Button
+          variant="primary"
+          onClick={activeTab === 'wishlist' ? () => setWishlistCreateOpen(true) : openCreateModal}
+          // The longest label's width on a phone, so the button reads the same on every tab.
+          className="w-40 sm:w-auto justify-center"
+        >
+          {ADD_LABEL[activeTab]}
+        </Button>
       </PageHeader>
           <nav className="grid grid-cols-4 gap-1 sm:flex">
             {[
@@ -1876,6 +1891,10 @@ export function AllocationsPage() {
               )
             })}
           </nav>
+
+      {activeTab === 'subscriptions' && <SectionIntro title="Recurring entries" description={INTRO.subscriptions} />}
+      {activeTab === 'budgets' && <SectionIntro title="Budget envelopes" description={INTRO.budgets} />}
+      {activeTab === 'savings' && <SectionIntro title="Savings & investment targets" description={INTRO.savings} />}
 
       {activeTab === 'subscriptions' && (
         <div>
@@ -1899,8 +1918,6 @@ export function AllocationsPage() {
 
       {activeTab === 'budgets' &&
         renderAllocationSection(
-          'Budget envelopes',
-          'Monthly spending buckets that align with your categories and keep cash flow on track.',
           budgetEnvelopes,
           'No budget envelopes yet. Create one to keep monthly spending in check.',
           'Create a budget envelope'
@@ -1910,8 +1927,6 @@ export function AllocationsPage() {
 
       {activeTab === 'savings' &&
         renderAllocationSection(
-          'Savings & investment targets',
-          'Longer-term goals and rainy-day funds that should steadily grow over time.',
           savingsAndGoals,
           hasRankedGoals
             ? 'No paused or other savings goals. Your active goals are in the ranked list above.'
@@ -1920,7 +1935,12 @@ export function AllocationsPage() {
         )}
 
       {activeTab === 'wishlist' && (
-        <WishlistPanel onCreateAllocationFromItem={openAllocationFromWishlist} />
+        <WishlistPanel
+          createOpen={wishlistCreateOpen}
+          onCreateOpen={() => setWishlistCreateOpen(true)}
+          onCreateClose={() => setWishlistCreateOpen(false)}
+          onCreateAllocationFromItem={openAllocationFromWishlist}
+        />
       )}
 
       {activeTab !== 'subscriptions' && activeTab !== 'wishlist' && (

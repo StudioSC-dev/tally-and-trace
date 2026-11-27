@@ -8,9 +8,12 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
-import { household, householdViewRoutes, mockHousehold, wishlistRoutes, withDollars, withFiveCurrencies } from './support/fixtures/household'
+import { HOUSEHOLD_TODAY, household, householdViewRoutes, householdWishlistRoutes, mockHousehold, wishlistRoutes, withDollars, withFiveCurrencies } from './support/fixtures/household'
 import type { HouseholdData } from './support/fixtures/household'
-import { addRoutes } from './support/mockApi'
+import { ITEMS, PLAN_OK } from './support/fixtures/wishlistPlan'
+import { addRoutes, apiRoute, sequenceRoute } from './support/mockApi'
+import type { ApiRoute } from './support/mockApi'
+import type { WishlistItem } from '@tally-trace/shared'
 import { shot } from './support/shot'
 
 // This spec lives in <repo>/frontend/e2e.
@@ -62,13 +65,16 @@ const BASE_TOTALS = {
   'available-cash': '₱343,230.90',
 }
 const BASE_TRANSACTIONS_SECTIONS = ['due-section', 'transactions-list-card', 'role:status', 'holds:list-sheet']
-/** The Allocations tabs on `origin/main`, in order, and the header action each one shows (none on Wishlist). */
-const BASE_ALLOCATION_TABS = [
-  { label: 'Recurring', action: 'Add recurring entry' },
-  { label: 'Budgets', action: 'Add allocation' },
-  { label: 'Savings', action: 'Add allocation' },
-  { label: 'Wishlist', action: null },
-]
+/**
+ * The Allocations tabs, in order, with each tab's create button (in the page header) and its `SectionIntro` heading
+ * (STU-796: one layout on every tab).
+ */
+const ALLOCATION_TABS = [
+  { label: 'Recurring', param: 'recurring', action: 'Add recurring entry', intro: 'Recurring entries' },
+  { label: 'Budgets', param: 'budgets', action: 'Add budget', intro: 'Budget envelopes' },
+  { label: 'Savings', param: 'savings', action: 'Add savings goal', intro: 'Savings & investment targets' },
+  { label: 'Wishlist', param: 'wishlist', action: 'Add wishlist item', intro: 'Wishlist' },
+] as const
 
 interface Box {
   x: number
@@ -88,9 +94,9 @@ async function boxOf(el: Locator): Promise<Box> {
 }
 
 /** Opens a route signed in as the household's user, once its title is up, the data has settled and fonts are in. */
-async function open(page: Page, r: Pick<PageCase, 'path' | 'title' | 'lands'>, data: HouseholdData = household): Promise<void> {
+async function open(page: Page, r: Pick<PageCase, 'title' | 'lands'> & { path: string }, data: HouseholdData = household, extra: ApiRoute[] = []): Promise<void> {
   await mockHousehold(page, data)
-  await addRoutes(page, [...householdViewRoutes(data), ...wishlistRoutes(data)])
+  await addRoutes(page, [...householdViewRoutes(data), ...wishlistRoutes(data), ...extra])
   await page.goto(r.path)
   // The dev server compiles a route's chunk on its first visit; under a full parallel run that can pass 5s.
   await expect(page.getByRole('heading', { level: 1, name: r.title })).toBeVisible({ timeout: 15_000 })
@@ -337,19 +343,400 @@ test('excluded page features are unchanged: transactions order', async ({ page }
   await shot(page, 'unchanged-transactions')
 })
 
-test('excluded page features are unchanged: allocations tabs', async ({ page }) => {
-  await open(page, ROUTES[2])
-  const tabs = page.locator('main nav').filter({ has: page.getByRole('button', { name: 'Recurring', exact: true }) }).getByRole('button')
+/** A wishlist item with every field set to something other than the form's default, so an edit's prefill can be read. */
+const EDIT_ITEM: WishlistItem = {
+  ...ITEMS[7],
+  name: 'Phone on the card',
+  estimated_cost: 24000,
+  currency: 'USD',
+  priority: 'high',
+  payment_plan: 'installment',
+  installment_months: 6,
+  url: 'https://example.com/phone',
+  notes: 'A gift for Mama',
+  target_date: '2026-09-30',
+}
+/** The Wishlist tab with items and a purchase plan, so the filter's place ahead of both can be read. */
+const WISHLIST_ITEMS: WishlistItem[] = [...ITEMS.slice(0, 7), EDIT_ITEM]
+const POPULATED_WISHLIST: ApiRoute[] = [...householdWishlistRoutes(WISHLIST_ITEMS), apiRoute('GET', '/wishlist/plan', PLAN_OK)]
+
+/** What each tab's toolbar holds: the search and tag filter on Recurring, "Show purchased" on Wishlist, nothing on the others. */
+const TOOLBAR_COUNTS = {
+  recurring: { search: 1, tag: 1, purchased: 0 },
+  budgets: { search: 0, tag: 0, purchased: 0 },
+  savings: { search: 0, tag: 0, purchased: 0 },
+  wishlist: { search: 0, tag: 0, purchased: 1 },
+} as const
+
+test('excluded page features are unchanged: allocations tabs', async ({ page }, testInfo) => {
+  await open(page, ROUTES[2], household, POPULATED_WISHLIST)
+  const nav = page.locator('main nav').filter({ has: page.getByRole('button', { name: 'Recurring', exact: true }) })
+  const tabs = nav.getByRole('button')
   const labels = (await tabs.allInnerTexts()).map((t) => t.trim())
-  expect(labels, "the Allocations tabs keep main's labels and order").toEqual(BASE_ALLOCATION_TABS.map((t) => t.label))
-  // The header action, read by name so the same check runs on main, where the header is not a <header>.
-  const action = page.locator('main').getByRole('button', { name: /^Add (recurring entry|allocation)$/ })
-  for (const [i, tab] of BASE_ALLOCATION_TABS.entries()) {
+  expect(labels, 'the Allocations tabs keep their labels and order').toEqual(ALLOCATION_TABS.map((t) => t.label))
+  const header = page.getByTestId('page-header')
+  const actions = header.getByTestId('page-actions')
+  const phone = testInfo.project.name === 'phone'
+  const layouts: { tab: string; headerHeight: number; buttonX: number; buttonY: number; buttonWidth: number; buttonHeight: number }[] = []
+  for (const [i, tab] of ALLOCATION_TABS.entries()) {
     await tabs.nth(i).click()
     const pressed = await tabs.evaluateAll((all) => all.map((e) => e.getAttribute('aria-pressed')))
-    expect(pressed, `${tab.label} is the one selected tab`).toEqual(BASE_ALLOCATION_TABS.map((_, j) => String(j === i)))
-    const actions = (await action.allInnerTexts()).map((t) => t.trim())
-    expect(actions, `the ${tab.label} tab's header action`).toEqual(tab.action ? [tab.action] : [])
+    expect(pressed, `${tab.label} is the one selected tab`).toEqual(ALLOCATION_TABS.map((_, j) => String(j === i)))
+    await expect(page.getByTestId('section-intro')).toHaveCount(1)
+
+    // Exactly one create action on the page, in the header's actions, with the tab's label: any button whose name starts
+    // with Add or Create, of any variant, outside an empty state's own action.
+    const creates = await page.locator('main button').evaluateAll((all) =>
+      all
+        .filter((e) => /^(add|create|new)\b/i.test((e.textContent ?? '').trim()) && !e.closest('[data-testid="empty-state"]'))
+        .map((e) => ({ text: (e.textContent ?? '').trim(), inActions: !!e.closest('[data-testid="page-actions"]') })),
+    )
+    expect(creates, `the ${tab.label} tab has one create action, in the header`).toEqual([{ text: tab.action, inActions: true }])
+    expect((await actions.getByRole('button').allInnerTexts()).map((t) => t.trim()), `the ${tab.label} tab's header action`).toEqual([tab.action])
+    // No other primary button in the tab body, apart from an empty state's action.
+    const strays = await page.locator('main [data-variant="primary"]').evaluateAll((all) =>
+      all.filter((e) => !e.closest('[data-testid="page-actions"]') && !e.closest('[data-testid="empty-state"]')).map((e) => (e.textContent ?? '').trim()),
+    )
+    expect(strays, `the ${tab.label} tab has no other primary button`).toEqual([])
+
+    const h1 = await boxOf(page.locator('main h1'))
+    const button = await boxOf(actions.getByRole('button', { name: tab.action, exact: true }))
+    if (!phone) expect(Math.abs(top(button) - top(h1)), `the ${tab.label} button's top is within 4px of the title's`).toBeLessThanOrEqual(4)
+    const head = await boxOf(header)
+    layouts.push({ tab: tab.label, headerHeight: head.height, buttonX: button.x, buttonY: button.y - head.y, buttonWidth: button.width, buttonHeight: button.height })
+    const widths = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }))
+    expect(widths.scroll, `the ${tab.label} tab does not overflow sideways`).toBeLessThanOrEqual(widths.client)
+
+    // The one SectionIntro: a text-xl heading and a description on one rendered line, the first block after the tab nav.
+    const intro = page.getByTestId('section-intro')
+    const heading = intro.getByRole('heading', { level: 2, name: tab.intro, exact: true })
+    await expect(heading).toBeVisible()
+    await expect(heading, `${tab.label}'s intro heading is text-xl`).toHaveClass(/(^|\s)text-xl(\s|$)/)
+    const description = intro.locator('p')
+    expect(((await description.innerText()) ?? '').trim().length, `${tab.label}'s intro has a description`).toBeGreaterThan(0)
+    const lines = await description.evaluate((e) => ({ height: e.getBoundingClientRect().height, line: parseFloat(getComputedStyle(e).lineHeight) }))
+    expect(lines.height, `${tab.label}'s description is one rendered line (${lines.height}px high, line ${lines.line}px)`).toBeLessThanOrEqual(lines.line + 1)
+
+    const first = await nav.evaluate((n) => {
+      const intro = document.querySelector('[data-testid="section-intro"]')
+      // The block right after the nav is, or opens with, the intro.
+      let el: Element | null = n.nextElementSibling
+      while (el && el !== intro && el.firstElementChild) el = el.firstElementChild
+      return el === intro
+    })
+    expect(first, `the ${tab.label} intro is the first block after the nav`).toBe(true)
+
+    // Toolbars: present exactly where the tab has one, each the next block after the one before it.
+    const counts = {
+      search: await page.getByTestId('recurring-search').count(),
+      tag: await page.getByTestId('tag-filter').count(),
+      purchased: await page.getByLabel('Show purchased').count(),
+    }
+    expect(counts, `the ${tab.label} tab's toolbars`).toEqual(TOOLBAR_COUNTS[tab.param])
+    // The next block after `from` is, or holds, `to`: its next sibling, or its nearest ancestor's when it is the last child.
+    const follows = (from: string, to: string): Promise<boolean> =>
+      page.evaluate(
+        ([fromSel, toSel]) => {
+          const find = (sel: string): Element | null => (sel === 'intro' ? document.querySelector('[data-testid="section-intro"]') : document.querySelector(sel))
+          const a = find(fromSel)
+          const b = find(toSel)
+          let n: Element | null = a
+          while (n && !n.nextElementSibling) {
+            n = n.parentElement
+            if (n?.classList.contains('page')) return false
+          }
+          const next = n ? n.nextElementSibling : null
+          return !!next && !!b && (next === b || next.contains(b))
+        },
+        [from, to] as const,
+      )
+    if (tab.param === 'recurring') {
+      expect(await follows('intro', '[data-testid="recurring-search"]'), 'the search is the next block after the intro').toBe(true)
+      expect(await follows('[data-testid="recurring-search"]', '[data-testid="tag-filter"]'), 'the tag filter is the next block after the search').toBe(true)
+    } else if (tab.param === 'wishlist') {
+      await expect(page.getByTestId('purchase-note')).toHaveText('Marking an item purchased does not record the payment. Its estimate moves only once you record the transaction.')
+      expect(await follows('intro', '[data-testid="purchase-note"]'), 'the purchase note is the next block after the intro').toBe(true)
+      expect(await follows('[data-testid="purchase-note"]', 'input[type="checkbox"]'), 'Show purchased is the next block after the note').toBe(true)
+      expect(await follows('input[type="checkbox"]', '[data-testid="purchase-plan"]'), 'the purchase plan is the next block after the filter').toBe(true)
+      const plan = await boxOf(page.getByTestId('purchase-plan'))
+      expect(top(await boxOf(page.getByTestId(`wishlist-item-${ITEMS[0].id}`))), 'the item list follows the plan').toBeGreaterThanOrEqual(bottom(plan))
+    }
+    await shot(page, `allocations-tab-${tab.param}`)
+  }
+  // The header lays out the same on every tab: the same height, and the button in the same place at the same size.
+  for (const l of layouts.slice(1)) {
+    expect(l.headerHeight, `${l.tab}: header height matches ${layouts[0].tab}`).toBeCloseTo(layouts[0].headerHeight, 0)
+    expect(l.buttonY, `${l.tab}: button offset in the header matches`).toBeCloseTo(layouts[0].buttonY, 0)
+    // The button's label sets its width on desktop, where it hangs from the same right edge; on a phone it is a fixed 160px.
+    if (phone) {
+      expect(l.buttonX, `${l.tab}: button left matches`).toBeCloseTo(layouts[0].buttonX, 0)
+      expect(l.buttonWidth, `${l.tab}: button width matches`).toBeCloseTo(layouts[0].buttonWidth, 0)
+    } else expect(l.buttonX + l.buttonWidth, `${l.tab}: button right edge matches`).toBeCloseTo(layouts[0].buttonX + layouts[0].buttonWidth, 0)
+    expect(l.buttonHeight, `${l.tab}: button height matches`).toBeCloseTo(layouts[0].buttonHeight, 0)
   }
   await shot(page, 'unchanged-allocations')
+})
+
+// ─── Allocations create flows ───────────────────────────────────────────────────────────────────
+
+/** The Wishlist add form's fields as they read now, one explicit value each (the segmented controls included). */
+interface WishlistFormState {
+  name: string
+  cost: string
+  currency: string
+  critical: boolean
+  level: string | null
+  targetDate: string
+  payFrom: string
+  payment: string
+  months: string | null
+  link: string
+  notes: string
+}
+
+const wishlistForm = (page: Page): Locator => page.locator('form').filter({ has: page.getByPlaceholder('What are you saving for?') })
+
+async function wishlistFormState(page: Page): Promise<WishlistFormState> {
+  const form = wishlistForm(page)
+  const pressed = async (group: Locator): Promise<string | null> => {
+    const on = await group.getByRole('button').evaluateAll((all) => all.filter((e) => e.getAttribute('aria-pressed') === 'true').map((e) => (e.textContent ?? '').trim()))
+    return on.length === 0 ? null : on.join(',')
+  }
+  const months = form.locator('#wishlist-months')
+  return {
+    name: await form.getByPlaceholder('What are you saving for?').inputValue(),
+    cost: await form.getByPlaceholder('0.00').inputValue(),
+    currency: await form.locator('#wishlist-currency').inputValue(),
+    critical: await form.getByRole('radio', { name: /^Critical/ }).isChecked(),
+    level: await pressed(form.getByRole('group', { name: 'How much you want it' })),
+    targetDate: await form.locator('input[type="date"]').inputValue(),
+    payFrom: await form.locator('#wishlist-pay-from').inputValue(),
+    payment: (await pressed(form.getByRole('group', { name: 'Payment' }))) ?? '',
+    months: (await months.count()) > 0 ? await months.inputValue() : null,
+    link: await form.getByPlaceholder('https://...').inputValue(),
+    notes: await form.getByPlaceholder('Any details').inputValue(),
+  }
+}
+
+/** The add form as it opens: no name, a cost of 0, the default currency, a Medium want, paid in full from no account. */
+const WISHLIST_DEFAULTS: WishlistFormState = {
+  name: '',
+  cost: '0',
+  currency: 'PHP',
+  critical: false,
+  level: 'Medium',
+  targetDate: '',
+  payFrom: '0',
+  payment: 'Full',
+  months: null,
+  link: '',
+  notes: '',
+}
+
+/** Fills the form with values that differ from every default, including the priority and payment controls. */
+async function dirtyWishlistForm(page: Page): Promise<void> {
+  const form = wishlistForm(page)
+  await form.getByPlaceholder('What are you saving for?').fill('Boiler')
+  await form.getByPlaceholder('0.00').fill('18000')
+  await form.getByRole('radio', { name: /^Critical/ }).check()
+  await form.getByRole('group', { name: 'Payment' }).getByRole('button', { name: 'Installments', exact: true }).click()
+  await form.locator('#wishlist-months').fill('12')
+  await form.locator('input[type="date"]').fill('2026-12-01')
+  await form.getByPlaceholder('https://...').fill('https://example.com/boiler')
+  await form.getByPlaceholder('Any details').fill('Before winter')
+}
+
+test('allocation header actions preserve create flows', async ({ page }) => {
+  const refusal = { body: { detail: 'That card cannot take this installment.' }, status: 422 }
+  const created = { body: { ...ITEMS[2], id: 990, name: 'Boiler' }, status: 201 }
+  await open(page, ROUTES[2], household, [...POPULATED_WISHLIST, sequenceRoute<unknown>('POST', '/wishlist/', [refusal, created])])
+  const api = await addRoutes(page, [])
+  const header = page.getByTestId('page-actions')
+  const tab = (label: string): Locator => page.locator('main nav').getByRole('button', { name: label, exact: true })
+  const overlay = page.locator('.modal-backdrop')
+  const close = page.getByLabel('Close allocation modal')
+  // The household's fixed day is 2026-03-12: a monthly period runs from the first of that month to the first of the next.
+  expect(HOUSEHOLD_TODAY).toBe('2026-03-12')
+  const MONTH_START = '2026-03-01'
+  const MONTH_END = '2026-04-01'
+
+  // Recurring opens its own form.
+  await header.getByRole('button', { name: 'Add recurring entry', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Add recurring entry', exact: true })).toBeVisible()
+  await close.click()
+  await expect(overlay).toHaveCount(0)
+  // Budgets opens the budget form with its preset: monthly, from the first of the month to the first of the next.
+  await tab('Budgets').click()
+  await header.getByRole('button', { name: 'Add budget', exact: true }).click()
+  await expect(page.getByRole('heading', { name: /^Create budget envelope/ })).toBeVisible()
+  const cadence = page.getByRole('group', { name: 'Budget cadence' })
+  await expect(cadence.getByRole('button', { name: 'Monthly', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(cadence.getByRole('button', { pressed: true })).toHaveCount(1)
+  await expect(page.locator('[data-field="period_start"]')).toHaveValue(MONTH_START)
+  await expect(page.locator('[data-field="period_end"]')).toHaveValue(MONTH_END)
+  await close.click()
+  await expect(overlay).toHaveCount(0)
+  // Savings opens the savings form with its preset: tracking a single account's balance.
+  await tab('Savings').click()
+  await header.getByRole('button', { name: 'Add savings goal', exact: true }).click()
+  await expect(page.getByRole('heading', { name: /^Create savings tracker/ })).toBeVisible()
+  const mode = page.getByRole('group', { name: 'Tracking mode' })
+  await expect(mode.getByRole('button', { name: /^Target account balance/ })).toHaveAttribute('aria-pressed', 'true')
+  await expect(mode.getByRole('button', { pressed: true })).toHaveCount(1)
+  await close.click()
+  await expect(overlay).toHaveCount(0)
+
+  // Wishlist: the header action opens the add form with its known defaults.
+  await tab('Wishlist').click()
+  const add = header.getByRole('button', { name: 'Add wishlist item', exact: true })
+  const cancel = page.getByRole('button', { name: 'Cancel', exact: true })
+  await add.click()
+  await expect(page.getByRole('heading', { name: 'Add item', exact: true })).toBeVisible()
+  expect(await wishlistFormState(page), 'the add form opens with its defaults').toEqual(WISHLIST_DEFAULTS)
+  // Cancel closes it, and a form changed in every control, priority and payment included, reopens from the defaults.
+  await dirtyWishlistForm(page)
+  await expect(page.getByTestId('wishlist-payment')).toContainText('Months')
+  await cancel.click()
+  await expect(overlay).toHaveCount(0)
+  await add.click()
+  expect(await wishlistFormState(page), 'reopening after a cancel starts from the defaults').toEqual(WISHLIST_DEFAULTS)
+  // A failed save keeps the form open with the entered values and the API's reason.
+  await dirtyWishlistForm(page)
+  const dirty = await wishlistFormState(page)
+  await page.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(page.getByTestId('wishlist-save-error')).toHaveText('That card cannot take this installment.')
+  expect(await wishlistFormState(page), 'a failed save keeps what was entered').toEqual(dirty)
+  // Closing and reopening starts fresh, with no earlier error.
+  await cancel.click()
+  await expect(overlay).toHaveCount(0)
+  await add.click()
+  await expect(page.getByTestId('wishlist-save-error')).toHaveCount(0)
+  expect(await wishlistFormState(page), 'reopening after a failed save starts from the defaults').toEqual(WISHLIST_DEFAULTS)
+  // A successful save closes it and sends the entered values.
+  await dirtyWishlistForm(page)
+  await page.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(overlay).toHaveCount(0)
+  expect(api.bodies('POST', '/wishlist/')[1], 'the save sends the form as before').toMatchObject({
+    name: 'Boiler',
+    estimated_cost: 18000,
+    currency: 'PHP',
+    priority: 'critical',
+    payment_plan: 'installment',
+    installment_months: 12,
+    target_date: '2026-12-01',
+    url: 'https://example.com/boiler',
+    notes: 'Before winter',
+  })
+  await add.click()
+  expect(await wishlistFormState(page), 'reopening after a save starts from the defaults').toEqual(WISHLIST_DEFAULTS)
+  await cancel.click()
+  // Editing opens with that item's own values, none of them a default.
+  await page.getByTestId(`wishlist-item-${EDIT_ITEM.id}`).getByRole('button', { name: 'Edit', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Edit item', exact: true })).toBeVisible()
+  const edit = await wishlistFormState(page)
+  expect(edit, "an edit opens with the item's values").toEqual({
+    name: 'Phone on the card',
+    cost: '24000',
+    currency: 'USD',
+    critical: false,
+    level: 'High',
+    targetDate: '2026-09-30',
+    payFrom: String(EDIT_ITEM.account_id),
+    payment: 'Installments',
+    months: '6',
+    link: 'https://example.com/phone',
+    notes: 'A gift for Mama',
+  })
+  await cancel.click()
+  await expect(overlay).toHaveCount(0)
+  await add.click()
+  expect(await wishlistFormState(page), 'adding after an edit starts from the defaults').toEqual(WISHLIST_DEFAULTS)
+  await cancel.click()
+})
+
+test('allocation header actions preserve create flows: leaving Wishlist closes the form', async ({ page }) => {
+  await open(page, { path: '/allocations?tab=wishlist', title: 'Allocations', lands: '/allocations' }, household, POPULATED_WISHLIST)
+  const overlay = page.locator('.modal-backdrop')
+  await page.getByTestId('page-actions').getByRole('button', { name: 'Add wishlist item', exact: true }).click()
+  await expect(overlay).toHaveCount(1)
+  // Switch tabs by keyboard: focus the Budgets tab behind the form and press Enter, then come back.
+  await page.locator('main nav').getByRole('button', { name: 'Budgets', exact: true }).focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('section-intro').getByRole('heading', { name: 'Budget envelopes' })).toBeVisible()
+  await page.locator('main nav').getByRole('button', { name: 'Wishlist', exact: true }).focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('section-intro').getByRole('heading', { name: 'Wishlist', exact: true })).toBeVisible()
+  await expect(overlay).toHaveCount(0)
+  await expect(page.getByPlaceholder('What are you saving for?')).toHaveCount(0)
+})
+
+test('allocation header actions preserve create flows: a late save does not touch a newer form', async ({ page }) => {
+  // The first save is held; its form is cancelled and a new one opened and filled before the reply comes.
+  let release: () => void = () => undefined
+  const held = new Promise<void>((resolve) => { release = resolve })
+  await open(page, { path: '/allocations?tab=wishlist', title: 'Allocations', lands: '/allocations' }, household, POPULATED_WISHLIST)
+  await page.route('**/api/v1/wishlist/', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    await held
+    return route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ ...ITEMS[2], id: 991, name: 'Late' }) })
+  })
+  const overlay = page.locator('.modal-backdrop')
+  const add = page.getByTestId('page-actions').getByRole('button', { name: 'Add wishlist item', exact: true })
+  await add.click()
+  await wishlistForm(page).getByPlaceholder('What are you saving for?').fill('Late')
+  await wishlistForm(page).getByPlaceholder('0.00').fill('100')
+  await page.getByRole('button', { name: 'Add', exact: true }).click()
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(overlay).toHaveCount(0)
+  await add.click()
+  await wishlistForm(page).getByPlaceholder('What are you saving for?').fill('Newer draft')
+  release()
+  await page.waitForLoadState('networkidle')
+  await expect(overlay, "the late reply leaves the newer form open").toHaveCount(1)
+  await expect(wishlistForm(page).getByPlaceholder('What are you saving for?')).toHaveValue('Newer draft')
+})
+
+test('allocation header actions preserve create flows: an empty wishlist', async ({ page }) => {
+  const refusal = { body: { detail: 'That card cannot take this installment.' }, status: 422 }
+  await open(page, { path: '/allocations?tab=wishlist', title: 'Allocations', lands: '/allocations' }, household, [
+    sequenceRoute<unknown>('POST', '/wishlist/', [refusal, refusal, refusal, refusal]),
+  ])
+  const header = page.getByTestId('page-actions')
+  const first = page.getByTestId('empty-state').getByRole('button', { name: 'Add your first item', exact: true })
+  const overlay = page.locator('.modal-backdrop')
+  await first.click()
+  await expect(page.getByRole('heading', { name: 'Add item', exact: true })).toBeVisible()
+  expect(await wishlistFormState(page), 'the empty state opens the same form, with its defaults').toEqual(WISHLIST_DEFAULTS)
+  // Cancel, the close button and a backdrop click each close it.
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(overlay).toHaveCount(0)
+  await first.click()
+  await page.getByLabel('Close wishlist modal').click()
+  await expect(overlay).toHaveCount(0)
+  await first.click()
+  await overlay.click({ position: { x: 4, y: 4 } })
+  await expect(overlay).toHaveCount(0)
+  // After a failed save, either create action reopens a fresh form with no error.
+  for (const reopen of [header.getByRole('button', { name: 'Add wishlist item', exact: true }), first]) {
+    await first.click()
+    await dirtyWishlistForm(page)
+    await page.getByRole('button', { name: 'Add', exact: true }).click()
+    await expect(page.getByTestId('wishlist-save-error')).toBeVisible()
+    await overlay.click({ position: { x: 4, y: 4 } })
+    await expect(overlay).toHaveCount(0)
+    await reopen.click()
+    await expect(page.getByTestId('wishlist-save-error')).toHaveCount(0)
+    expect(await wishlistFormState(page), 'reopening restores the defaults').toEqual(WISHLIST_DEFAULTS)
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(overlay).toHaveCount(0)
+  }
+})
+
+test('Page documents the main action rule for tabbed pages', () => {
+  const start = DOC.indexOf('### Page')
+  expect(start, 'the design system has a Page section').toBeGreaterThanOrEqual(0)
+  const next = DOC.slice(start + 1).search(/\n#{2,3} /)
+  const section = DOC.slice(start, next === -1 ? undefined : start + 1 + next).replace(/\s+/g, ' ')
+  expect(section).toContain("a page's main action sits in `PageHeader` on every tab, and a tab never adds its own header row")
+  expect(section, "the toolbar rule allows Wishlist's purchase note before its filter").toContain('purchase note')
 })

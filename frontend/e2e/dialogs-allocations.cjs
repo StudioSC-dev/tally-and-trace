@@ -63,7 +63,7 @@ async function openAllocations(browser, tab) {
 }
 
 async function openAddForm(page, formOf) {
-  await page.getByRole('button', { name: 'Add allocation' }).click()
+  await page.getByRole('button', { name: formOf === budgetForm ? 'Add budget' : 'Add savings goal' }).click()
   const form = formOf(page)
   await form.waitFor()
   await h.waitQuiet(page)
