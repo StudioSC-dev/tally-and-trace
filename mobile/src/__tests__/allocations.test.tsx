@@ -10,6 +10,7 @@ const h = vi.hoisted(() => ({
   update: [] as Array<{ id: number; data: Record<string, unknown> }>,
   fail: false,
   allocations: [] as unknown[],
+  accounts: [] as unknown[],
 }))
 
 vi.mock('react', async (orig) => ({
@@ -31,7 +32,7 @@ vi.mock('react-native', () => {
 vi.mock('react-native-safe-area-context', () => ({ SafeAreaView: 'SafeAreaView' }))
 vi.mock('../store/api', () => ({
   useGetAllocationsQuery: () => ({ data: { items: h.allocations }, isLoading: false, isFetching: false, refetch: vi.fn() }),
-  useGetAccountsQuery: () => ({ data: { items: [] } }),
+  useGetAccountsQuery: () => ({ data: { items: h.accounts } }),
   useCreateAllocationMutation: () => [
     (d: Record<string, unknown>) => (h.create.push(d), { unwrap: async () => { if (h.fail) throw new Error('x'); return {} } }),
     { isLoading: false },
@@ -55,13 +56,13 @@ import AllocationsScreen, { AllocationFormModal } from '../../app/(tabs)/allocat
 
 type El = { type?: unknown; props?: Record<string, unknown> }
 // Expands plain function components (e.g. ProgressBar) so their output is searchable too.
-const walk = (node: unknown, out: El[] = []): El[] => {
+const walk = (node: unknown, out: El[] = [], skip?: unknown): El[] => {
   if (node == null || typeof node !== 'object') return out
-  if (Array.isArray(node)) { node.forEach((n) => walk(n, out)); return out }
+  if (Array.isArray(node)) { node.forEach((n) => walk(n, out, skip)); return out }
   const el = node as El
   out.push(el)
-  if (typeof el.type === 'function') walk((el.type as (p: unknown) => unknown)(el.props), out)
-  walk(el.props?.children, out)
+  if (typeof el.type === 'function' && el.type !== skip) walk((el.type as (p: unknown) => unknown)(el.props), out, skip)
+  walk(el.props?.children, out, skip)
   return out
 }
 const strings = (node: unknown, out: string[] = []): string[] => {
@@ -74,12 +75,21 @@ const strings = (node: unknown, out: string[] = []): string[] => {
   return out
 }
 
+type Form = {
+  press: (id: string) => void
+  type: (label: string, v: string) => void
+  byLabel: (label: string) => El | undefined
+  hasAccountPicker: () => boolean
+  closed: () => number
+  submit: () => Promise<void>
+}
+
 const ACCOUNTS = [
   { id: 1, name: 'Cash PHP' },
   { id: 2, name: 'Savings PHP' },
 ]
 
-function mount(extra: Record<string, unknown> = {}) {
+function mount(extra: Record<string, unknown> = {}): Form {
   h.slots = []
   let closed = 0
   const props = { visible: true, onClose: () => { closed++ }, accounts: ACCOUNTS, defaultCurrency: 'PHP', ...extra }
@@ -95,17 +105,60 @@ function mount(extra: Record<string, unknown> = {}) {
     submit: async () => { await (find('submit')!.props!.onPress as () => Promise<void>)() },
   }
 }
+// Renders the whole screen like React would: the form's key decides whether its state survives,
+// and a changed key remounts it (its useState slots are dropped).
+function mountScreen(): Form & { edit: (name: string) => void } {
+  h.slots = []
+  let closeCalls = 0
+  let lastKey: unknown = undefined
+  let seen = false
+  const render = () => {
+    h.idx = 0
+    const tree = (AllocationsScreen as unknown as () => unknown)()
+    const all = walk(tree, [], AllocationFormModal)
+    const modal = all.find((n) => n.type === AllocationFormModal) as (El & { key?: unknown }) | undefined
+    if (!modal) throw new Error('form not rendered')
+    const base = h.idx
+    if (seen && modal.key !== lastKey) h.slots.length = base
+    seen = true
+    lastKey = modal.key
+    const props = { ...modal.props, onClose: () => { closeCalls++; (modal.props!.onClose as () => void)() } }
+    const form = walk((AllocationFormModal as unknown as (p: unknown) => unknown)(props))
+    return { cards: all, form }
+  }
+  const find = (id: string) => render().form.find((n) => n.props?.testID === id)
+  const byLabel = (label: string) => render().form.find((n) => n.props?.label === label)
+  return {
+    edit: (name: string) => {
+      const card = render().cards.find((n) => strings(n).includes(name) && strings(n).includes('✏️ Edit') && n.props?.className === 'mb-3')
+      const edit = walk(card, [], AllocationFormModal).find((n) => n.type === 'TouchableOpacity' && strings(n).includes('✏️ Edit'))
+      ;(edit!.props!.onPress as () => void)()
+    },
+    press: (id: string) => (find(id)!.props!.onPress as () => void)(),
+    type: (label: string, v: string) => (byLabel(label)!.props!.onChangeText as (v: string) => void)(v),
+    byLabel,
+    hasAccountPicker: () => find('account-picker') !== undefined,
+    closed: () => closeCalls,
+    submit: async () => { await (find('submit')!.props!.onPress as () => Promise<void>)() },
+  }
+}
 const lastAlert = () => h.alerts[h.alerts.length - 1]
 
-function cardTexts(allocation: Record<string, unknown>): string {
+function renderCards(allocation: Record<string, unknown>) {
   h.allocations = [allocation]
   h.slots = []
   h.idx = 0
-  return strings((AllocationsScreen as unknown as () => unknown)()).join('|')
+  const tree = (AllocationsScreen as unknown as () => unknown)()
+  // The form modal is hidden here and not part of a card, so it is not expanded.
+  const widths = walk(tree, [], AllocationFormModal)
+    .map((n) => (n.props?.style as { width?: string } | undefined)?.width)
+    .filter((w): w is string => typeof w === 'string')
+  const cardText = strings(walk(tree, [], AllocationFormModal).filter((n) => n.props?.className === 'mb-3')).join('|')
+  return { text: cardText, widths }
 }
 
 beforeEach(() => {
-  h.alerts = []; h.create = []; h.update = []; h.fail = false; h.allocations = []
+  h.alerts = []; h.create = []; h.update = []; h.fail = false; h.allocations = []; h.accounts = []
 })
 
 describe('mobile allocations form', () => {
@@ -126,8 +179,11 @@ describe('mobile allocations form', () => {
   })
 
   it('edits_accountless_budget_without_defaulting_to_first_account', async () => {
-    const initial = { id: 7, name: 'Rent', allocation_type: 'budget', account_id: null, current_amount: 300, target_amount: 1000, currency: 'PHP' }
-    const ui = mount({ initial })
+    h.allocations = [{ id: 7, name: 'Rent', allocation_type: 'budget', account_id: null, current_amount: 300, target_amount: 1000, currency: 'PHP' }]
+    const ui = mountScreen()
+    ui.edit('Rent')
+    expect((ui.byLabel('Name')!.props as { value: string }).value).toBe('Rent')
+    expect((ui.byLabel('Target Amount (optional)')!.props as { value: string }).value).toBe('1000')
     expect(ui.hasAccountPicker()).toBe(false)
     expect(ui.byLabel('Current Amount')).toBeUndefined()
     await ui.submit()
@@ -139,36 +195,62 @@ describe('mobile allocations form', () => {
     expect(ui.closed()).toBe(1)
   })
 
-  it('keeps_savings_and_goal_fields_and_payloads_when_switching_type', async () => {
-    const ui = mount()
-    ui.press('type-budget')
-    expect(ui.hasAccountPicker()).toBe(false)
-    ui.press('type-goal')
+  it('edits_accountless_savings_falling_back_to_first_account', async () => {
+    h.accounts = ACCOUNTS.map((a) => ({ ...a, my_role: 'owner' }))
+    h.allocations = [{ id: 8, name: 'Fund', allocation_type: 'savings', account_id: null, current_amount: 40, currency: 'PHP' }]
+    const ui = mountScreen()
+    ui.edit('Fund')
     expect(ui.hasAccountPicker()).toBe(true)
-    expect(ui.byLabel('Current Amount')).toBeDefined()
-    ui.type('Name', 'Trip')
-    ui.type('Current Amount', '250')
-    ui.press('account-2')
     await ui.submit()
-    expect(h.create[0]).toEqual({
-      name: 'Trip', allocation_type: 'goal', description: undefined, target_amount: undefined, current_amount: 250, account_id: 2, currency: 'PHP',
-    })
-    // Savings still needs an account, and a budget does not.
+    expect(h.update[0].data).toMatchObject({ allocation_type: 'savings', current_amount: 40, account_id: 1 })
+  })
+
+  it('keeps_savings_and_goal_fields_and_payloads_when_switching_type', async () => {
+    for (const type of ['savings', 'goal'] as const) {
+      h.create = []
+      h.alerts = []
+      const noAccounts = mount({ accounts: [] })
+      noAccounts.press('type-budget')
+      noAccounts.press(`type-${type}`)
+      expect(noAccounts.byLabel('Current Amount')).toBeDefined()
+      expect(noAccounts.hasAccountPicker()).toBe(true)
+      noAccounts.type('Name', 'Fund')
+      await noAccounts.submit()
+      expect(h.create).toHaveLength(0)
+      expect(lastAlert().message).toBe('Name and account are required.')
+
+      const ui = mount()
+      ui.press('type-budget')
+      ui.press(`type-${type}`)
+      ui.type('Name', 'Trip')
+      ui.type('Current Amount', '250')
+      ui.press('account-2')
+      await ui.submit()
+      expect(h.create[0]).toEqual({
+        name: 'Trip', allocation_type: type, description: undefined, target_amount: undefined, current_amount: 250, account_id: 2, currency: 'PHP',
+      })
+
+      // A filled-in form switched to Budget drops both fields from the request.
+      h.create = []
+      const sw = mount()
+      sw.press(`type-${type}`)
+      sw.type('Name', 'Trip')
+      sw.type('Current Amount', '250')
+      sw.press('account-2')
+      sw.press('type-budget')
+      expect(sw.byLabel('Current Amount')).toBeUndefined()
+      expect(sw.hasAccountPicker()).toBe(false)
+      await sw.submit()
+      expect(h.create[0]).toEqual({ name: 'Trip', allocation_type: 'budget', description: undefined, target_amount: undefined, currency: 'PHP' })
+      expect('current_amount' in h.create[0]).toBe(false)
+      expect('account_id' in h.create[0]).toBe(false)
+    }
+    // Default savings form still picks the first account and a zero amount.
     h.create = []
-    const none = mount({ accounts: [] })
-    none.type('Name', 'Fund')
-    await none.submit()
-    expect(h.create).toHaveLength(0)
-    expect(lastAlert().message).toBe('Name and account are required.')
-    none.press('type-budget')
-    await none.submit()
-    expect(h.create).toHaveLength(1)
-    expect(h.create[0].allocation_type).toBe('budget')
     const sav = mount()
-    sav.press('type-savings')
     sav.type('Name', 'Rainy day')
     await sav.submit()
-    expect(h.create[1]).toMatchObject({ allocation_type: 'savings', current_amount: 0, account_id: 1 })
+    expect(h.create[0]).toMatchObject({ allocation_type: 'savings', current_amount: 0, account_id: 1 })
   })
 
   it('rejects_budget_with_blank_name', async () => {
@@ -197,28 +279,39 @@ describe('mobile allocations cards', () => {
   const base = { id: 1, name: 'Thing', currency: 'PHP', account_id: null }
 
   it('shows_api_budget_spent_against_target', () => {
-    const text = cardTexts({ ...base, allocation_type: 'budget', current_amount: 1250, target_amount: 5000 })
+    const { text, widths } = renderCards({ ...base, allocation_type: 'budget', current_amount: 1250, target_amount: 5000 })
     expect(text).toContain('1,250')
     expect(text).toMatch(/25\|%/)
     expect(text).toContain('5,000')
+    expect(widths).toEqual(['25%'])
   })
 
   it('shows_api_budget_spent_without_a_positive_target', () => {
-    for (const target_amount of [undefined, 0]) {
-      const text = cardTexts({ ...base, allocation_type: 'budget', current_amount: 1250, target_amount })
+    for (const target_amount of [undefined, null, 0]) {
+      const { text, widths } = renderCards({ ...base, allocation_type: 'budget', current_amount: 1250, target_amount })
       expect(text).toContain('1,250')
       expect(text).not.toContain('%')
       expect(text).not.toContain('of ')
       expect(text).not.toMatch(/\|0\|/)
+      expect(widths).toEqual([])
     }
   })
 
   it('keeps_savings_and_goal_card_amounts_and_progress', () => {
     for (const allocation_type of ['savings', 'goal']) {
-      const text = cardTexts({ ...base, allocation_type, current_amount: 500, target_amount: 2000 })
+      const { text, widths } = renderCards({ ...base, allocation_type, current_amount: 500, target_amount: 2000 })
       expect(text).toContain('500')
       expect(text).toMatch(/25\|%/)
       expect(text).toContain('2,000')
+      expect(widths).toEqual(['25%'])
+      // No limit, or a zero limit: the amount stays, the progress comparison and the stray 0 do not.
+      for (const target_amount of [undefined, null, 0]) {
+        const none = renderCards({ ...base, allocation_type, current_amount: 500, target_amount })
+        expect(none.text).toContain('500')
+        expect(none.text).not.toMatch(/\|0\|/)
+        expect(none.text).not.toContain('%')
+        expect(none.widths).toEqual([])
+      }
     }
   })
 })
