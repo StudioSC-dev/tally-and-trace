@@ -175,7 +175,8 @@ const tab = (page: Page, name: 'Budgets' | 'Savings'): Locator => page.getByRole
  * bottom half (to go below it). The two rows are adjacent, so both fit on a phone's screen.
  */
 async function drag(page: Page, from: string, onto: string, half: 'top' | 'bottom' = 'top'): Promise<void> {
-  await handleOf(page, from).scrollIntoViewIfNeeded()
+  // The intro above the list pushes the rows down, so centre the handle: its neighbour is then on screen too.
+  await handleOf(page, from).evaluate((e) => e.scrollIntoView({ block: 'center', behavior: 'instant' }))
   const start = await handleOf(page, from).boundingBox()
   const target = await rowOf(page, onto).boundingBox()
   if (!start || !target) throw new Error('no box to drag between')
@@ -188,7 +189,7 @@ async function drag(page: Page, from: string, onto: string, half: 'top' | 'botto
 
 /** Adds a savings goal through the create form. */
 async function createGoal(page: Page, name: string): Promise<void> {
-  await page.getByRole('button', { name: 'Add allocation' }).click()
+  await page.getByRole('button', { name: 'Add savings goal' }).click()
   const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Create savings tracker' }) })
   await form.locator('[data-field="name"]').fill(name)
   const savingsAccount = household.accounts.find((a) => a.account_type === 'savings' && a.my_role === 'owner')
@@ -205,10 +206,11 @@ test.describe('ranked savings goals (STU-787)', () => {
     expect(await namesOf(page)).toEqual(START_NAMES)
     await expect(rows(page).first()).toHaveAttribute('data-rank', '1')
     await expect(rows(page).last()).toHaveAttribute('data-rank', String(START.length))
-    // The section sits above the paged list.
+    // The tab's intro comes first, then the ranked section, then the paged list.
+    const intro = await page.getByTestId('section-intro').boundingBox()
     const section = await page.getByTestId('ranked-goals').boundingBox()
-    const list = await page.getByRole('heading', { name: 'Savings & investment targets' }).boundingBox()
-    expect(section && list && section.y < list.y, 'the ranked section is above the paged list').toBe(true)
+    const list = await page.getByText('No paused or other savings goals.').boundingBox()
+    expect(intro && section && list && intro.y < section.y && section.y < list.y, 'the intro, the ranked section and the paged list are in that order').toBe(true)
     await shot(page, 'section')
   })
 
@@ -223,9 +225,8 @@ test.describe('ranked savings goals (STU-787)', () => {
 
   test('AC2: beside a full ranked section the lower list says what it holds and its footer counts one scope', async ({ page }) => {
     await open(page)
-    const lower = page.getByRole('heading', { name: 'Savings & investment targets' }).locator('xpath=ancestor::section[1]')
-    await expect(lower.getByText('No savings or goal envelopes yet', { exact: false })).toHaveCount(0)
-    await expect(lower.getByText('No paused or other savings goals. Your active goals are in the ranked list above.')).toBeVisible()
+    await expect(page.getByText('No savings or goal envelopes yet', { exact: false })).toHaveCount(0)
+    await expect(page.getByText('No paused or other savings goals. Your active goals are in the ranked list above.')).toBeVisible()
     // The footer counts what the paged list loaded against what it holds: the five budgets, never the ranked five.
     await expect(page.getByText(/^Showing \d+ of \d+ envelopes$/)).toHaveText('Showing 5 of 5 envelopes')
   })
@@ -342,6 +343,7 @@ test.describe('ranked savings goals (STU-787)', () => {
     await expect.poll(() => fake.rankedGets()).toBeGreaterThan(1)
     await page.getByRole('button', { name: 'Close allocation actions modal' }).click()
     await expect(rows(page)).toHaveCount(START.length)
+    await handleOf(page, JAPAN.name).evaluate((e) => e.scrollIntoView({ block: 'center', behavior: 'instant' }))
     const start = await handleOf(page, JAPAN.name).boundingBox()
     if (!start) throw new Error('no handle')
     const x = start.x + start.width / 2

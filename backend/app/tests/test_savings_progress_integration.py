@@ -413,7 +413,9 @@ def test_an_update_changes_the_currency_and_the_figure_follows(world):
     assert r.status_code == 200 and r.json()["currency"] == "PHP"
 
 
-def test_a_budgets_total_ignores_its_currency(world):
+def test_a_budgets_total_is_converted_to_its_currency(world):
+    """Each currency's subtotal is converted to the budget's currency on read (STU-795):
+    500 PHP at 58 PHP per USD is 8.62 USD."""
     client, me = world["client"], world["me"]
     budget = {"category_ids": [world["other"]]}
     period = {"period_frequency": "monthly", "period_start": "2026-11-01T00:00:00"}
@@ -424,4 +426,4 @@ def test_a_budgets_total_ignores_its_currency(world):
     _row(client, me, world["checking"], "debit", "2026-11-05", 500, world["other"])
     got = {a["id"]: a for a in _get(client, me, "/allocations/", limit=100)["items"]}
     assert _fields(got[php["id"]]) == (500.0, True, [], None)
-    assert _fields(got[usd["id"]]) == (500.0, True, [], None)
+    assert _fields(got[usd["id"]]) == (8.62, True, [], None)

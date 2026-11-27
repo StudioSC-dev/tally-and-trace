@@ -214,7 +214,10 @@ for (const c of PITCH_CASES) {
     const rows = await measure(page.locator('main').getByTestId('list-sheet').getByTestId('row'))
     const one = rows.filter((r) => r.metaLines === 1)
     expect(c.expected.length, `the fixture has at least two ${c.surface} rows with one meta line`).toBeGreaterThanOrEqual(2)
-    expect(one.map((r) => r.name).sort(), `the ${c.surface} rows with one meta line are the fixture's`).toEqual([...c.expected].sort())
+    // STU-799: Recurring lists 5 entries a page, so its first pages hold some of the fixture's rows.
+    const names = one.map((r) => r.name).sort()
+    if (c.surface === 'recurring') expect(names.filter((n) => !(c.expected as readonly string[]).includes(n)), 'every row with one meta line is the fixture\'s').toEqual([])
+    else expect(names, `the ${c.surface} rows with one meta line are the fixture's`).toEqual([...c.expected].sort())
     // The rows with one meta line include rows with tags and, on Recurring, rows with their own controls.
     expect(one.filter((r) => r.tagged).length, `${c.surface} rows with tags among them`).toBeGreaterThanOrEqual(2)
     if (c.surface === 'recurring') {
@@ -399,6 +402,7 @@ test('recurring entries are one sheet', async ({ page }) => {
   expect(sectionCount, 'the Recurring tab lists kind sections').toBeGreaterThan(1)
   expect(await sections.locator('.card').count(), '.card elements in the Recurring list').toBe(0)
   let total = 0
+  let counted = 0
   for (let i = 0; i < sectionCount; i++) {
     const section = sections.nth(i)
     const key = await section.getAttribute('data-testid')
@@ -410,7 +414,11 @@ test('recurring entries are one sheet', async ({ page }) => {
     expect.soft(style.radius, `${key}: radius-md`).toEqual(new Array<string>(4).fill(RADIUS_MD))
     expect.soft(style.shadow, `${key}: no shadow`).toBe('none')
     const rules = await rowRules(sheets.first().getByTestId('row'))
-    expect.soft(rules.length, `${key}: every entry is a row on the sheet`).toBe(await section.locator('article').count())
+    // STU-799: a section lists 5 entries a page; its header counts them all.
+    const entries = Number(await section.locator('header span').first().innerText())
+    expect.soft(rules.length, `${key}: every entry on the page is a row on the sheet`).toBe(Math.min(5, entries))
+    expect.soft(rules.length, `${key}: the sheet's rows are the page's articles`).toBe(await section.locator('article').count())
+    counted += entries
     for (const [j, r] of rules.entries()) {
       if (j < rules.length - 1) expect.soft(r.bottom, `${key}: row ${r.name} has a 1px line rule under it`).toBe(RULE)
       else expect.soft(r.bottom, `${key}: the last row (${r.name}) has no rule`).toMatch(NO_RULE)
@@ -418,8 +426,8 @@ test('recurring entries are one sheet', async ({ page }) => {
     }
     total += rules.length
   }
-  expect(total, "the sheets' rows match the fixture's recurring entries, limited ones included").toBe(recurring.entries.length)
-  expect(await main.getByTestId('list-sheet').getByTestId('row').count(), 'rows on Recurring sheets').toBe(recurring.entries.length)
+  expect(counted, "the section headers count the fixture's recurring entries, limited ones included").toBe(recurring.entries.length)
+  expect(await main.getByTestId('list-sheet').getByTestId('row').count(), 'rows on Recurring sheets: the first page of each section').toBe(total)
   const limited = main.getByTestId('list-sheet').locator('[data-row-kind="limited-entry"]')
   expect(await limited.count(), 'the limited entries are rows on a sheet').toBe(limitedRecurring.length)
   expect(await limited.evaluateAll((all) => all.map((e) => e.getAttribute('data-testid'))), 'limited entries keep the row hook').toEqual(
@@ -558,6 +566,11 @@ const txRow = (page: Page, description: string): Locator =>
   page.locator('article[data-transaction-id]').filter({ has: page.getByText(description, { exact: true }) })
 const recurringRow = (page: Page, name: string): Locator =>
   page.locator('[data-testid^="kind-section-"] article').filter({ has: page.getByText(name, { exact: true }) })
+/** STU-799: a section lists 5 entries a page, so a row past page 1 is reached through the page search. */
+async function findRecurring(page: Page, name: string): Promise<Locator> {
+  await page.getByLabel('Search recurring entries').fill(name)
+  return recurringRow(page, name)
+}
 const actionModal = (page: Page): Locator => page.locator('.modal-backdrop').filter({ hasText: 'Transaction actions' })
 const recurringForm = (page: Page): Locator => page.locator('form').filter({ has: page.getByRole('button', { name: 'Update recurring entry' }) })
 
@@ -621,7 +634,7 @@ for (const gesture of GESTURES) {
   test(`rows still open their records and keep their actions: recurring row, ${gesture}`, async ({ page }) => {
     await openRecurring(page)
     // STU-683: a click lands anywhere on the row; a key goes to the row's title, the one control that opens it.
-    const row = recurringRow(page, RECURRING)
+    const row = await findRecurring(page, RECURRING)
     await trigger(page, gesture === 'click' ? row : row.getByRole('button', { name: RECURRING, exact: true }), gesture, 'row')
     const form = recurringForm(page)
     await expect(form).toBeVisible()
@@ -646,7 +659,7 @@ for (const a of ACTIONS) {
       if (!entry) throw new Error(`no entry ${a.name} in the fixture`)
       const api = await openRecurring(page)
       await addRoutes(page, [entryOccurrencesRoute(household, entry.id)])
-      const button = recurringRow(page, a.name).getByTestId(a.testId)
+      const button = (await findRecurring(page, a.name)).getByTestId(a.testId)
       await expect(button).toHaveText(a.label)
       await trigger(page, button, gesture)
       const dialog = page.getByTestId('mark-paid-dialog')
@@ -726,10 +739,17 @@ for (const p of PANELS) {
       for (const name of p.names) {
         const card = cards.filter({ has: page.getByText(name, { exact: true }) })
         expect.soft(await card.count(), `${name} is one panel`).toBe(1)
+        // An overspent envelope says how far over instead of drawing its bar and ratio (STU-798).
+        const over = p.tab === 'Budgets' && (await card.getByTestId('card-over').count()) === 1
+        if (over) {
+          expect.soft(await card.getByTestId('budget-usage-fill').count(), `${name} draws no usage bar`).toBe(0)
+          continue
+        }
         expect.soft(await card.getByText(p.progress).count(), `${name} shows its progress`).toBe(1)
         if (p.tab === 'Budgets') expect.soft(await card.getByTestId('budget-usage-fill').count(), `${name} draws its usage bar`).toBe(1)
       }
-      expect(await page.locator('main article.card').filter({ hasText: p.progress }).count(), `${p.tab} panels with their progress`).toBe(p.names.length)
+      const overCount = p.tab === 'Budgets' ? await page.locator('main article.card').getByTestId('card-over').count() : 0
+      expect(await page.locator('main article.card').filter({ hasText: p.progress }).count() + overCount, `${p.tab} panels with their progress`).toBe(p.names.length)
       const first = cards.filter({ has: page.getByText(p.names[0], { exact: true }) })
       await trigger(page, first, gesture)
       const modal = page.locator('.modal-backdrop').filter({ has: page.getByRole('button', { name: 'Edit allocation' }) })
@@ -786,7 +806,9 @@ for (const surface of ['transactions', 'recurring'] as const) {
       const rights = edges.map((e) => e.text)
       expect(Math.max(...rights) - Math.min(...rights), `sheet ${i + 1}: every amount shares one right edge`).toBeLessThanOrEqual(1)
     }
-    expect(rows, `${surface} rows measured`).toBe(surface === 'transactions' ? monthRows.length : recurring.entries.length)
+    // STU-799: Recurring lists 5 entries a page, so only its first pages are measured.
+    if (surface === 'transactions') expect(rows, `${surface} rows measured`).toBe(monthRows.length)
+    else expect(rows, `${surface} rows measured`).toBeGreaterThan(5)
     await shot(page, `align-${surface}`)
   })
 }

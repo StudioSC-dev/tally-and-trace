@@ -140,8 +140,8 @@ async function openAllocations(page: Page, tab: 'Savings' | 'Budgets', categorie
   return api
 }
 
-const addForm = async (page: Page, title: RegExp): Promise<Locator> => {
-  await page.getByRole('button', { name: 'Add allocation' }).click()
+const addForm = async (page: Page, title: RegExp, label = 'Add savings goal'): Promise<Locator> => {
+  await page.getByRole('button', { name: label }).click()
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
   return page.locator('form').filter({ has: page.getByRole('button', { name: /^Create / }) })
 }
@@ -416,24 +416,24 @@ test.describe('savings form tracking mode (STU-778)', () => {
     expect(body).toHaveProperty('target_amount', 1000)
   })
 
-  test('the budget form is unchanged', async ({ page }) => {
+  test('the budget form has no spent or account field and counts accounts through its picker', async ({ page }) => {
     const api = await openAllocations(page, 'Budgets')
-    const form = await addForm(page, /^Create budget envelope/)
-    expect(await labelsOf(form)).toEqual(['Account', 'Name', 'Description', 'Tracked categories', 'Budget cadence', 'Period start', 'Period end (optional)', 'Amount already spent', 'Spending limit'])
-    await expect(field(form, 'account_id')).toHaveCount(1)
-    await expect(field(form, 'current_amount')).toHaveCount(1)
+    const form = await addForm(page, /^Create budget envelope/, 'Add budget')
+    expect(await labelsOf(form)).toEqual(['Name', 'Description', 'Tracked categories', 'Accounts', 'Budget cadence', 'Period start', 'Period end (optional)', 'Spending limit (optional)'])
+    await expect(field(form, 'account_id')).toHaveCount(0)
+    await expect(field(form, 'current_amount')).toHaveCount(0)
     await expect(form.getByText('Tracking mode')).toHaveCount(0)
     await expect(form.getByLabel('Currency', { exact: true })).toHaveCount(0)
-    await field(form, 'account_id').selectOption(String(everyday.id))
     await field(form, 'name').fill('Dining')
     await field(form, 'target_amount').fill('3000')
-    await field(form, 'current_amount').fill('250')
     await form.getByRole('button', { name: /Groceries/ }).first().click()
     await form.getByRole('button', { name: 'Create budget envelope' }).click()
     await expect.poll(() => api.bodies('POST', '/allocations/').length).toBe(1)
     const body = createBody(api)
-    expect(body).toHaveProperty('account_id', everyday.id)
-    expect(body).toHaveProperty('current_amount', 250)
+    expect(body).not.toHaveProperty('account_id')
+    expect(body).not.toHaveProperty('current_amount')
     expect(body).not.toHaveProperty('currency')
+    expect(body).toHaveProperty('configuration.account_ids', [])
+    expect(body).toHaveProperty('carry_over', false)
   })
 })

@@ -219,7 +219,7 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
 
   // The budget and savings forms of Allocations: every `<label>` reads in sentence case, as held here.
   const ALLOCATION_FORMS: { name: string; tab: string; mode?: string; labels: string[] }[] = [
-    { name: 'budget form', tab: 'budgets', labels: ['Account', 'Name', 'Description', 'Tracked categories', 'Budget cadence', 'Period start', 'Period end (optional)', 'Amount already spent', 'Spending limit'] },
+    { name: 'budget form', tab: 'budgets', labels: ['Name', 'Description', 'Tracked categories', 'Accounts', 'Budget cadence', 'Period start', 'Period end (optional)', 'Spending limit (optional)'] },
     { name: 'savings form', tab: 'savings', labels: ['Tracking mode', 'Account', 'Name', 'Description', 'Currency', 'Target amount (optional)', 'Monthly target (optional)', 'Target date'] },
     { name: 'savings form, combined account total', tab: 'savings', mode: 'Combined account total', labels: ['Tracking mode', 'Accounts to aggregate', 'Name', 'Description', 'Currency', 'Target amount (optional)', 'Monthly target (optional)', 'Target date'] },
     { name: 'savings form, savings transactions total', tab: 'savings', mode: 'Savings transactions total', labels: ['Tracking mode', 'Name', 'Description', 'Currency', 'Target amount (optional)', 'Monthly target (optional)', 'Target date'] },
@@ -227,7 +227,7 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
   for (const form of ALLOCATION_FORMS) {
     test(`labels are sentence case: allocations ${form.name}`, async ({ page }) => {
       await open(page, `/allocations?tab=${form.tab}`)
-      await page.getByRole('button', { name: 'Add allocation' }).click()
+      await page.getByRole('button', { name: form.tab === 'budgets' ? 'Add budget' : 'Add savings goal' }).click()
       const dialog = overlay(page)
       await expect(dialog.getByRole('heading', { name: /^Create / })).toBeVisible()
       if (form.mode) await dialog.getByRole('button', { name: form.mode }).click()
@@ -441,10 +441,14 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
       ['Rent', ['Monthly · day 1', 'Manual']],
       ['PLDT Fibr', ['Monthly · day 6', 'Auto-pay']],
     ]
+    const search = page.getByLabel('Search recurring entries')
     for (const [name, facts] of entries) {
+      // STU-799: a section lists 5 entries a page, so each entry is reached through the page search.
+      await search.fill(name)
       const meta = await metaOf(page, name).innerText()
       for (const fact of facts) expect.soft(meta, `${name} keeps "${fact}"`).toContain(fact)
     }
+    await search.fill('')
     await expect.soft(page.getByTestId('kind-section-other').getByText('Payroll', { exact: true }), 'an income entry keeps its place under Income & transfers').toBeVisible()
     await shot(page, 'facts-allocations')
 

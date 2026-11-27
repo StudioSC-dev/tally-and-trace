@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import {
   useLazyGetAllocationsQuery,
+  useLazyGetAllocationQuery,
   useLazyGetBudgetEntriesQuery,
   useGetAccountsQuery,
   useGetCardCreditsQuery,
@@ -29,6 +30,16 @@ import {
   entryCreditWarning,
   isLimited,
   groupByKind,
+  KIND_LABELS,
+  KIND_ORDER,
+  DEFAULT_RECURRING_VIEW,
+  RECURRING_PAGE_SIZE,
+  clampRecurringPage,
+  dueIndicator,
+  hasRecurringFilter,
+  recurringAccountOptions,
+  recurringPageSlice,
+  viewRecurringEntries,
   isOwnerFull,
   isSharedFull,
   RECURRING_ACTION_LABELS,
@@ -38,7 +49,7 @@ import {
   hasCreditLimit,
   withoutError,
 } from '@tally-trace/shared'
-import type { CardCredit, FieldErrors, KindGroup, RecurringAction } from '@tally-trace/shared'
+import type { CardCredit, FieldErrors, KindGroup, KindGroupKey, RecurringAction, RecurringSectionView, RecurringSortKey, RecurringStatusFilter } from '@tally-trace/shared'
 import { accountPickerGroups, matchesRecurringSearch, parseAllocationsTab } from '@tally-trace/shared'
 import type { AllocationsTab } from '@tally-trace/shared'
 import { PickerOptGroups } from '../components/PickerOptGroups'
@@ -51,8 +62,11 @@ import { useRecentPicks } from '../hooks/useRecentPicks'
 import { useDeleteRecurringEntry } from '../hooks/useDeleteRecurringEntry'
 import { useManilaDay } from '../hooks/useManilaDay'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
-import { BudgetUsageBar } from '../components/BudgetUsageBar'
+import { BudgetFigures } from '../components/BudgetFigures'
+import { budgetLimit } from '../utils/budgetFigures'
+import { BudgetEnvelopeDetail } from '../components/BudgetEnvelopeDetail'
 import { amountClass, formatAmount, formatSigned } from '../utils/amount'
+import { withSelection } from '../utils/selection'
 import { CURRENCY_CONFIGS, getCurrencySymbol } from '../utils/currency'
 import type { CurrencyCode } from '../utils/currency'
 import type { AmountKind } from '../utils/amount'
@@ -64,6 +78,7 @@ import { EntryCreditWarningRow, KindCreditLines } from '../components/Allocation
 import type { KindCreditState } from '../components/AllocationsCredit'
 import { ListSheet } from '../components/ListSheet'
 import { PageHeader } from '../components/PageHeader'
+import { SectionIntro } from '../components/SectionIntro'
 import { EmptyState } from '../components/EmptyState'
 import { Row } from '../components/Row'
 import { TagFilter } from '../components/TagFilter'
@@ -73,7 +88,8 @@ import { useToast } from '../hooks/useToast'
 import { RankedGoals } from '../components/RankedGoals'
 import { apiErrorMessage } from '../utils/apiError'
 import { SkeletonRows } from '../components/Loading'
-import { Segment } from '../components/SegmentedControl'
+import { Segment, SegmentedControl } from '../components/SegmentedControl'
+import { Pager } from '../components/Pager'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { StatusText } from '../components/StatusText'
@@ -131,7 +147,7 @@ type AllocationFieldKey =
   | 'period_frequency'
   | 'period_start'
   | 'period_end'
-  | 'current_amount'
+  | 'budget_account_ids'
   | 'target_amount'
   | 'monthly_target'
   | 'target_date'
@@ -140,7 +156,7 @@ const isAllocationFieldKey = (key: string | undefined): key is AllocationFieldKe
   key !== undefined &&
   [
     'account_id', 'name', 'category_ids', 'savings_account_ids', 'period_frequency', 'period_start',
-    'period_end', 'current_amount', 'target_amount', 'monthly_target', 'target_date', 'currency',
+    'period_end', 'budget_account_ids', 'target_amount', 'monthly_target', 'target_date', 'currency',
   ].includes(key)
 
 /** The app's own wording for a required field left empty; a bound such as `min` uses the browser's text. */
@@ -298,7 +314,6 @@ type AllocationFormState = {
   allocation_type: Allocation['allocation_type']
   description: string
   target_amount?: number
-  current_amount: number
   monthly_target?: number
   target_date?: string
   is_active: boolean
@@ -306,11 +321,52 @@ type AllocationFormState = {
   period_frequency?: 'daily' | 'weekly' | 'monthly' | 'quarterly'
   period_start?: string
   period_end?: string
+  /** Budgets only: the "Carry over to next period" switch. It counts only while a limit is set. */
+  carry_over: boolean
   /** A savings currency the user picked (or the stored one when editing); unset follows the mode's default. */
   currency?: CurrencyCode
 }
 
 const CURRENCY_OPTIONS = Object.keys(CURRENCY_CONFIGS) as CurrencyCode[]
+
+/** Each tab's create button, shown in the page header. */
+/** The most entries one `GET budget-entries/` returns: the API's own cap, so the fewest requests load the tab. */
+const RECURRING_FETCH_LIMIT = 200
+
+/** A Recurring section's sort and filter, and the page it is on. */
+interface SectionState extends RecurringSectionView {
+  page: number
+}
+const DEFAULT_SECTION_STATE: SectionState = { ...DEFAULT_RECURRING_VIEW, page: 1 }
+
+const SORT_OPTIONS: ReadonlyArray<{ value: RecurringSortKey; label: string }> = [
+  { value: 'due', label: 'Next due' },
+  { value: 'amount', label: 'Amount' },
+  { value: 'name', label: 'Name' },
+]
+const STATUS_OPTIONS = [
+  { value: 'all' as const, label: 'All' },
+  { value: 'active' as const, label: 'Active' },
+  { value: 'paused' as const, label: 'Paused' },
+]
+const DIRECTION_OPTIONS = [
+  { value: 'asc' as const, label: 'Ascending' },
+  { value: 'desc' as const, label: 'Descending' },
+]
+
+const ADD_LABEL: Record<AllocationsTab, string> = {
+  subscriptions: 'Add recurring entry',
+  budgets: 'Add budget',
+  savings: 'Add savings goal',
+  wishlist: 'Add wishlist item',
+}
+
+/** What each tab's `SectionIntro` says under its heading (Wishlist's lives in `WishlistPanel`). */
+const INTRO = {
+  subscriptions: 'Regular income, bills and subscriptions.',
+  budgets: 'Monthly spending limits by category.',
+  savings: 'Long-term goals and rainy-day funds.',
+}
 
 export const Route = createFileRoute('/allocations')({
   validateSearch: (search: Record<string, unknown>): { tab?: AllocationsTab | 'recurring' } => ({
@@ -325,7 +381,7 @@ export function AllocationsPage() {
   const recentAccounts = useRecentPicks('account')
   const recentCategories = useRecentPicks('category')
   const navigate = useNavigate()
-  const { format, currencyCode: userCurrency } = useCurrency()
+  const { currencyCode: userCurrency } = useCurrency()
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -355,6 +411,12 @@ export function AllocationsPage() {
     if (tabFromUrl) setActiveTab(tabFromUrl)
   }, [tabFromUrl])
   const [recurringSearch, setRecurringSearch] = useState('')
+  // The Wishlist create form: the page owns it so the header button and the panel's empty state open the same form.
+  const [wishlistCreateOpen, setWishlistCreateOpen] = useState(false)
+  // The panel unmounts off the Wishlist tab and its draft goes with it, so the flag must not outlive the tab.
+  useEffect(() => {
+    if (activeTab !== 'wishlist') setWishlistCreateOpen(false)
+  }, [activeTab])
 
   const createAllocationDefaults = useCallback(
     (type: 'budget' | 'savings'): AllocationFormState => {
@@ -365,7 +427,6 @@ export function AllocationsPage() {
         allocation_type: type === 'budget' ? 'budget' : 'savings',
     description: '',
         target_amount: undefined,
-    current_amount: 0,
         monthly_target: undefined,
         target_date: undefined,
         is_active: true,
@@ -373,6 +434,7 @@ export function AllocationsPage() {
         period_frequency: 'monthly',
         period_start: defaultPeriod.start,
         period_end: defaultPeriod.end,
+        carry_over: false,
       }
 
       if (type === 'budget') {
@@ -399,6 +461,8 @@ export function AllocationsPage() {
   )
 
   const [selectedBudgetCategoryIds, setSelectedBudgetCategoryIds] = useState<number[]>([])
+  // Budgets: the accounts an envelope counts; none means every account.
+  const [selectedBudgetAccountIds, setSelectedBudgetAccountIds] = useState<number[]>([])
   const [selectedSavingsAccountIds, setSelectedSavingsAccountIds] = useState<number[]>([])
   const [fieldErrors, setFieldErrors] = useState<FieldErrors<AllocationFieldKey>>({})
   // A refusal with no single field to fix, or a control the form does not wire.
@@ -485,6 +549,18 @@ export function AllocationsPage() {
     categories.forEach((category) => map.set(category.id, category))
     return map
   }, [categories])
+  // Which accounts a budget counts: its `configuration.account_ids`, or every account when there are none.
+  // Saved accounts the picker no longer lists (archived, or not loaded) still filter the envelope: each one shows as a
+  // chip that can be removed.
+  const inactiveBudgetAccountIds = accountsLoaded
+    ? selectedBudgetAccountIds.filter((id) => !ownAccounts.some((a) => a.id === id))
+    : []
+  const budgetAccountLabel = (allocation: Allocation): string => {
+    const raw = (allocation.configuration ?? {})['account_ids']
+    const ids = Array.isArray(raw) ? raw.map((id) => Number(id)).filter((id) => Number.isFinite(id)) : []
+    if (ids.length === 0) return 'All accounts'
+    return ids.map((id) => accountsById.get(id)?.name ?? `Account ${id}`).join(', ')
+  }
   const actionAllocationConfig = (actionAllocation?.configuration ?? {}) as Record<string, unknown>
   const actionAllocationIsBudget = actionAllocation?.allocation_type === 'budget'
   const actionBudgetCadenceLabel =
@@ -499,25 +575,6 @@ export function AllocationsPage() {
     actionAllocationIsBudget && actionAllocation?.period_end
       ? formatBudgetPeriodEndLabel(actionAllocation.period_end)
       : undefined
-  const actionAllocationLimit =
-    actionAllocationIsBudget && actionAllocation
-      ? typeof actionAllocation.target_amount === 'number'
-        ? actionAllocation.target_amount
-        : typeof actionAllocation.monthly_target === 'number'
-        ? actionAllocation.monthly_target
-        : null
-      : actionAllocation?.target_amount ?? null
-  const actionAllocationRemaining =
-    actionAllocation && typeof actionAllocationLimit === 'number'
-      ? actionAllocationLimit - actionAllocation.current_amount
-      : null
-  const actionAllocationUsagePct =
-    actionAllocation &&
-    actionAllocationIsBudget &&
-    typeof actionAllocationLimit === 'number' &&
-    actionAllocationLimit !== 0
-      ? Math.min((actionAllocation.current_amount / actionAllocationLimit) * 100, 999)
-      : null
   const actionAllocationTypeLabel = actionAllocationIsBudget
     ? 'Budget Envelope'
     : actionAllocation?.allocation_type === 'savings'
@@ -554,9 +611,43 @@ export function AllocationsPage() {
   // The first recurring load has settled; later reloads keep the sections on screen.
   const [recurringLoaded, setRecurringLoaded] = useState(false)
   const [recurringError, setRecurringError] = useState(false)
-  const [recurringIncome, setRecurringIncome] = useState<BudgetEntry[]>([])
-  const [recurringExpenses, setRecurringExpenses] = useState<BudgetEntry[]>([])
+  // Every recurring entry the last complete load returned; a load that fails part way leaves it as it was.
+  const [recurringEntries, setRecurringEntries] = useState<BudgetEntry[]>([])
   const [selectedTag, setSelectedTag] = useState<number | undefined>(undefined)
+  // Each section's sort, filter and page, by kind; a section not here has the defaults.
+  const [sectionStates, setSectionStates] = useState<Partial<Record<KindGroupKey, SectionState>>>({})
+  // Sections left standing, with their header, after Clear filters; a search or tag change lets them go.
+  const [knownSections, setKnownSections] = useState<ReadonlySet<KindGroupKey>>(() => new Set())
+  const [heldSections, setHeldSections] = useState<ReadonlySet<KindGroupKey>>(() => new Set())
+  const patchSection = useCallback((key: KindGroupKey, patch: Partial<SectionState>) => {
+    setSectionStates((prev) => ({ ...prev, [key]: { ...(prev[key] ?? DEFAULT_SECTION_STATE), ...patch } }))
+  }, [])
+  // A new search or tag is a new list: every section starts again at its first page.
+  const resetSectionPages = useCallback(() => {
+    setSectionStates((prev) => {
+      const next: Partial<Record<KindGroupKey, SectionState>> = {}
+      for (const key of KIND_ORDER) {
+        const state = prev[key]
+        if (state) next[key] = { ...state, page: 1 }
+      }
+      return next
+    })
+    setHeldSections(new Set())
+  }, [])
+  const changeRecurringSearch = useCallback(
+    (value: string) => {
+      setRecurringSearch(value)
+      resetSectionPages()
+    },
+    [resetSectionPages]
+  )
+  const changeSelectedTag = useCallback(
+    (tag: number | undefined) => {
+      setSelectedTag(tag)
+      resetSectionPages()
+    },
+    [resetSectionPages]
+  )
 
   const loadAllocations = useCallback(
     async (reset = false) => {
@@ -625,20 +716,47 @@ export function AllocationsPage() {
     loadAllocations(true)
   }, [authLoading, isAuthenticated, loadAllocations])
 
+  // The loader runs only while Recurring is the open tab; the ref lets a refresh a dialog asks for later see that.
+  const recurringOpenRef = useRef(activeTab === 'subscriptions')
+  // The lazy query stays subscribed to its last page (and refetches it when an entry changes elsewhere), so the
+  // loader keeps that request to end the subscription when Recurring closes.
+  const budgetEntriesRequestRef = useRef<{ unsubscribe: () => void } | null>(null)
+  const endBudgetEntriesSubscription = useCallback(() => {
+    budgetEntriesRequestRef.current?.unsubscribe()
+    budgetEntriesRequestRef.current = null
+  }, [])
+  useEffect(() => {
+    recurringOpenRef.current = activeTab === 'subscriptions'
+  }, [activeTab])
+
+  // Pages through `GET budget-entries/` by `after_id`, from the first request, so an entry that is deleted or moves
+  // between two requests cannot make the next one skip another. The list is replaced only once every page has come.
   const loadBudgetEntries = useCallback(async () => {
-    if (!isAuthenticated) {
+    if (!isAuthenticated || !recurringOpenRef.current) {
       return
     }
     const isCurrent = beginBudgetEntriesRequest(true)
     try {
       const tagParam = selectedTag !== undefined ? { tag: selectedTag } : {}
-      const [incomeResult, expenseResult] = await Promise.all([
-        triggerBudgetEntries({ entry_type: 'income', limit: 100, ...tagParam }).unwrap(),
-        triggerBudgetEntries({ entry_type: 'expense', limit: 100, ...tagParam }).unwrap(),
-      ])
-      if (!isCurrent()) return
-      setRecurringIncome(incomeResult.items)
-      setRecurringExpenses(expenseResult.items)
+      const loaded: BudgetEntry[] = []
+      let afterId = 0
+      for (;;) {
+        const request = triggerBudgetEntries({ limit: RECURRING_FETCH_LIMIT, after_id: afterId, ...tagParam })
+        budgetEntriesRequestRef.current = request
+        const page = await request.unwrap()
+        if (!isCurrent()) return
+        // An API that ignores the cursor would send the same page again for ever: ids must rise past it.
+        const rising = page.items.every((item, i) => item.id > (i === 0 ? afterId : page.items[i - 1].id))
+        if (!rising) throw new Error('budget-entries page did not advance past its cursor')
+        loaded.push(...page.items)
+        const last = page.items[page.items.length - 1]
+        if (!page.has_more || !last) break
+        afterId = last.id
+      }
+      setRecurringEntries(loaded)
+      // A tag narrows the list, so the sections seen before it stay known (their filters and Clear filters stay).
+      const keys = groupByKind(loaded).map((group) => group.key)
+      setKnownSections((prev) => (selectedTag === undefined ? new Set(keys) : new Set([...prev, ...keys])))
       setRecurringError(false)
     } catch (error) {
       if (!isCurrent()) return
@@ -656,8 +774,24 @@ export function AllocationsPage() {
     if (authLoading || !isAuthenticated) {
       return
     }
+    if (activeTab !== 'subscriptions') {
+      // Leaving Recurring ends a load in flight: it asks for no further page and sets nothing.
+      beginBudgetEntriesRequest(true)
+      endBudgetEntriesSubscription()
+      return
+    }
+    recurringOpenRef.current = true
     loadBudgetEntries()
-  }, [authLoading, isAuthenticated, loadBudgetEntries])
+  }, [authLoading, isAuthenticated, loadBudgetEntries, activeTab, beginBudgetEntriesRequest, endBudgetEntriesSubscription])
+
+  // Leaving the Allocations route ends the load too, and the subscription with it.
+  useEffect(
+    () => () => {
+      beginBudgetEntriesRequest(true)
+      endBudgetEntriesSubscription()
+    },
+    [beginBudgetEntriesRequest, endBudgetEntriesSubscription]
+  )
 
   useEffect(() => {
     return () => {
@@ -718,6 +852,7 @@ export function AllocationsPage() {
     const presetType = activeTab === 'budgets' ? 'budget' : 'savings'
     setAllocationForm(createAllocationDefaults(presetType))
     setSelectedBudgetCategoryIds([])
+    setSelectedBudgetAccountIds([])
     setSelectedSavingsAccountIds([])
     setEditingAllocation(null)
     setIsCreateModalOpen(true)
@@ -727,6 +862,7 @@ export function AllocationsPage() {
     (item: WishlistItem, kind: 'budget' | 'savings') => {
       setEditingAllocation(null)
       setSelectedBudgetCategoryIds([])
+      setSelectedBudgetAccountIds([])
       setSelectedSavingsAccountIds([])
       setAllocationForm({
         ...createAllocationDefaults(kind),
@@ -761,6 +897,7 @@ export function AllocationsPage() {
     const type = activeTab === 'budgets' ? 'budget' : 'savings'
     setAllocationForm(createAllocationDefaults(type))
     setSelectedBudgetCategoryIds([])
+    setSelectedBudgetAccountIds([])
     setSelectedSavingsAccountIds([])
   }, [activeTab, createAllocationDefaults])
 
@@ -918,9 +1055,10 @@ export function AllocationsPage() {
     await loadBudgetEntriesRef.current()
   }, [loadBudgetEntriesRef])
 
-  // Budgets and target-balance savings pick one account; the other savings modes do not.
+  // Target-balance savings pick one account; the other savings modes and budgets do not (a budget counts the
+  // accounts picked in its own multi-picker, or every account).
   const needsSingleAccount =
-    allocationForm.allocation_type === 'budget' || allocationForm.goal_mode === 'target_balance'
+    allocationForm.allocation_type !== 'budget' && allocationForm.goal_mode === 'target_balance'
 
   // A savings tracker's currency: the user's pick, else the chosen account's (target balance), the first
   // aggregated account's (combined total), else the signed-in user's default currency (which useCurrency
@@ -936,6 +1074,9 @@ export function AllocationsPage() {
     return (linked?.currency as CurrencyCode | undefined) ?? userCurrency
   }, [allocationForm.goal_mode, allocationForm.account_id, selectedSavingsAccountIds, ownAccounts, userCurrency])
   const savingsCurrency: CurrencyCode = allocationForm.currency ?? defaultSavingsCurrency
+  // The carry switch reads off, and cannot be turned on, while the envelope has no limit.
+  const budgetHasLimit = allocationForm.target_amount !== undefined
+  const carrySwitchOn = budgetHasLimit && allocationForm.carry_over
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -996,8 +1137,10 @@ export function AllocationsPage() {
 
       let configuration: Record<string, unknown> | undefined
       if (allocationForm.allocation_type === 'budget') {
+        // An empty `account_ids` clears an earlier selection: the envelope counts every account.
         configuration = {
           category_ids: selectedBudgetCategoryIds,
+          account_ids: selectedBudgetAccountIds,
         }
       } else {
         configuration = {
@@ -1023,14 +1166,24 @@ export function AllocationsPage() {
           ? undefined
           : dateInputToWire(allocationForm.target_date)
 
-      // Budgets and a target-balance tracker use the chosen account; a combined total stores
-      // the first aggregated one; a transactions total has none.
-      const payloadAccountId: number | null =
-        allocationForm.allocation_type === 'budget' || allocationForm.goal_mode === 'target_balance'
+      // A target-balance tracker uses the chosen account; a combined total stores the first aggregated one; a
+      // transactions total has none. A budget sends none: its accounts are `configuration.account_ids`.
+      const payloadAccountId: number | null | undefined =
+        allocationForm.allocation_type === 'budget'
+          ? undefined
+          : allocationForm.goal_mode === 'target_balance'
           ? allocationForm.account_id
           : allocationForm.goal_mode === 'multi_account'
           ? selectedSavingsAccountIds[0] ?? null
           : null
+
+      // Carry-over needs a limit: with none the switch counts as off. A carry that was on when the form opened and is
+      // still on keeps its saved start, even if a new period has begun; a new carry starts this period.
+      const isBudgetForm = allocationForm.allocation_type === 'budget'
+      const carryOn = isBudgetForm && allocationForm.target_amount !== undefined && allocationForm.carry_over
+      const savedCarryFrom = editingAllocation?.carry_over_from ?? null
+      const periodStartWire = allocationForm.period_start ? dateInputToWire(allocationForm.period_start) : undefined
+      const carryFrom = !carryOn ? null : savedCarryFrom ?? periodStartWire ?? null
 
       const allocationPayload = {
         account_id: payloadAccountId,
@@ -1038,9 +1191,6 @@ export function AllocationsPage() {
         allocation_type: resolvedAllocationType,
         description: allocationForm.description?.trim() || undefined,
         target_amount: allocationForm.target_amount,
-        // A savings figure is calculated by the API; only a budget's spent amount is sent.
-        current_amount:
-          allocationForm.allocation_type === 'budget' ? allocationForm.current_amount : undefined,
         monthly_target: allocationForm.monthly_target,
         target_date: targetDateIso,
         period_frequency:
@@ -1056,6 +1206,8 @@ export function AllocationsPage() {
         currency: allocationForm.allocation_type === 'budget' ? undefined : savingsCurrency,
         is_active: allocationForm.is_active,
         configuration,
+        carry_over: isBudgetForm ? carryOn : undefined,
+        carry_over_from: isBudgetForm ? carryFrom : undefined,
       }
       
       if (editingAllocation) {
@@ -1079,7 +1231,10 @@ export function AllocationsPage() {
           period_start: editedDate(isBudget, allocationForm.period_start, baseline.period_start),
           period_end: editedDate(isBudget, allocationForm.period_end, baseline.period_end),
         }
-        await updateAllocation({ id: editingAllocation.id, data: { ...fields, ...dateChanges } }).unwrap()
+        // An edit that clears a budget's limit sends null for both limit fields: the API reads a limit as
+        // target_amount, else monthly_target, so a legacy monthly_target would otherwise stay in force.
+        const limitChange = isBudget && allocationForm.target_amount === undefined ? { target_amount: null, monthly_target: null } : {}
+        await updateAllocation({ id: editingAllocation.id, data: { ...fields, ...dateChanges, ...limitChange } }).unwrap()
         setEditingAllocation(null)
       } else {
         await createAllocation(allocationPayload).unwrap()
@@ -1087,11 +1242,17 @@ export function AllocationsPage() {
 
       setAllocationForm(createAllocationDefaults(resolvedAllocationType === 'budget' ? 'budget' : 'savings'))
       setSelectedBudgetCategoryIds([])
+      setSelectedBudgetAccountIds([])
       setSelectedSavingsAccountIds([])
       setIsCreateModalOpen(false)
       await loadAllocations(true)
     } catch (error) {
       console.error('Error saving allocation data:', error)
+      // The form stays open with what was typed; the list changes only after a save the API accepted.
+      // Only a budget shows the refusal; savings and goals keep their behaviour.
+      if (allocationForm.allocation_type === 'budget') {
+        setFormError(apiErrorMessage(error) || 'Could not save this allocation. Please try again.')
+      }
     }
   }
 
@@ -1124,8 +1285,8 @@ export function AllocationsPage() {
       name: allocation.name,
       allocation_type: normalizedType,
       description: allocation.description || '',
-      target_amount: allocation.target_amount,
-      current_amount: allocation.current_amount,
+      // A budget's limit is read the way the card and the API read it: target_amount, else monthly_target.
+      target_amount: normalizedType === 'budget' ? budgetLimit(allocation) ?? undefined : allocation.target_amount,
       monthly_target: normalizedType === 'savings' ? allocation.monthly_target : undefined,
       target_date: normalizedType === 'savings' ? isoToDateInput(allocation.target_date ?? undefined) : undefined,
       currency: normalizedType === 'savings' ? (allocation.currency as CurrencyCode) : undefined,
@@ -1135,6 +1296,7 @@ export function AllocationsPage() {
       period_start: periodStartInput ?? defaultPeriod.start,
       // A stored empty end stays empty: it is not refilled with the cadence's default.
       period_end: periodEndInput,
+      carry_over: normalizedType === 'budget' && allocation.carry_over_from != null,
     })
     if (normalizedType === 'budget') {
       const categoryIds = Array.isArray(config['category_ids'])
@@ -1146,6 +1308,13 @@ export function AllocationsPage() {
             .filter((id): id is number => typeof id === 'number')
         : []
       setSelectedBudgetCategoryIds(categoryIds)
+      setSelectedBudgetAccountIds(
+        Array.isArray(config['account_ids'])
+          ? (config['account_ids'] as Array<number | string>)
+              .map((id) => Number(id))
+              .filter((id) => Number.isFinite(id))
+          : []
+      )
       setActiveTab('budgets')
     } else {
       const accountIds = Array.isArray(config['account_ids'])
@@ -1177,6 +1346,53 @@ export function AllocationsPage() {
     }
     await loadAllocations(true)
   }
+
+  // Opening a budget's snapshot dialog or history refetches the envelope: the fresh copy replaces the list's and the
+  // open dialog's, so a window that rolled over since the list loaded shows the same figures everywhere (STU-798).
+  const [triggerAllocation] = useLazyGetAllocationQuery()
+  const refreshSeq = useRef(0)
+  const appliedRefresh = useRef(0)
+  const refreshEnvelope = useCallback(
+    async (id: number): Promise<Allocation> => {
+      const seq = ++refreshSeq.current
+      const fresh = await triggerAllocation(id).unwrap()
+      // A slower, older read never overwrites a newer one.
+      if (seq > appliedRefresh.current) {
+        appliedRefresh.current = seq
+        setAllocationItems((prev) => prev.map((item) => (item.id === id ? fresh : item)))
+        setActionAllocation((prev) => (prev && prev.id === id ? fresh : prev))
+      }
+      return fresh
+    },
+    [triggerAllocation]
+  )
+  // How the open snapshot's read went, keyed by the budget and attempt it belongs to: a read from an earlier open or
+  // attempt counts as still loading, so Retry never shows the last list copy while its request is pending.
+  const [snapshotResult, setSnapshotResult] = useState<{ key: string; status: 'ok' | 'error' } | null>(null)
+  const [snapshotAttempt, setSnapshotAttempt] = useState(0)
+  // The budget whose snapshot dialog is open.
+  const snapshotBudgetId = isActionModalOpen && actionAllocation?.allocation_type === 'budget' ? actionAllocation.id : null
+  const snapshotKey = `${snapshotBudgetId}:${snapshotAttempt}`
+  const snapshotRead: 'loading' | 'ok' | 'error' = snapshotResult?.key === snapshotKey ? snapshotResult.status : 'loading'
+  useEffect(() => {
+    if (snapshotBudgetId === null) {
+      setSnapshotResult(null)
+      return
+    }
+    let current = true
+    refreshEnvelope(snapshotBudgetId)
+      .then(() => {
+        if (current) setSnapshotResult({ key: snapshotKey, status: 'ok' })
+      })
+      .catch(() => {
+        if (current) setSnapshotResult({ key: snapshotKey, status: 'error' })
+      })
+    return () => {
+      current = false
+    }
+  }, [snapshotBudgetId, snapshotAttempt, snapshotKey, refreshEnvelope])
+  // The budget whose history dialog is open.
+  const [historyFor, setHistoryFor] = useState<Allocation | null>(null)
 
   const openActionModal = (allocation: Allocation) => {
     setActionAllocation(allocation)
@@ -1216,19 +1432,7 @@ export function AllocationsPage() {
     const budgetCadenceLabel = formatBudgetCadenceLabel(allocation.period_frequency)
     const budgetPeriodStartLabel = allocation.period_start ? formatDateLabel(allocation.period_start) : undefined
     const budgetPeriodEndLabel = allocation.period_end ? formatBudgetPeriodEndLabel(allocation.period_end) : undefined
-    const limitAmount =
-      typeof allocation.target_amount === 'number'
-        ? allocation.target_amount
-        : isBudget && typeof allocation.monthly_target === 'number'
-        ? allocation.monthly_target
-        : null
-    const usedAmount = typeof allocation.current_amount === 'number' ? allocation.current_amount : 0
-    const remainingAmount =
-      typeof limitAmount === 'number' ? limitAmount - usedAmount : null
-    const usagePercentage =
-      isBudget && typeof limitAmount === 'number' && limitAmount !== 0
-        ? Math.min((usedAmount / limitAmount) * 100, 999)
-        : 0
+    const budgetScope = isBudget ? budgetAccountLabel(allocation) : null
     const savingsProgressPercentage =
       !isBudget && allocation.target_amount
         ? Math.min((allocation.current_amount / allocation.target_amount) * 100, 999)
@@ -1260,6 +1464,7 @@ export function AllocationsPage() {
     return (
       <article
         key={allocation.id}
+        data-allocation-id={allocation.id}
         className={`card p-4 sm:p-5 cursor-pointer ${ allocation.is_active ? '' : 'opacity-60' }`}
         onClick={() => openActionModal(allocation)}
         role="button"
@@ -1279,7 +1484,7 @@ export function AllocationsPage() {
                 <p className="text-sm text-muted capitalize">
                   {allocation.allocation_type === 'budget' ? 'Budget Envelope' : allocation.allocation_type}
                 </p>
-                {account && <p className="text-sm text-body">{account.name}</p>}
+                {!isBudget && account && <p className="text-sm text-body">{account.name}</p>}
                   {allocation.description && (
                     <p className="text-sm text-body mt-1">{allocation.description}</p>
                   )}
@@ -1310,6 +1515,14 @@ export function AllocationsPage() {
                     {budgetPeriodEndLabel && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
                         Ends {budgetPeriodEndLabel}
+                      </span>
+                    )}
+                    <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1" data-testid="card-accounts">
+                      Accounts: {budgetScope}
+                    </span>
+                    {allocation.carry_over_from != null && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1" data-testid="card-carry-chip">
+                        Carry over on
                       </span>
                     )}
                   </div>
@@ -1359,36 +1572,7 @@ export function AllocationsPage() {
                 
           <div className="space-y-2">
             {isBudget ? (
-              <>
-                {limitAmount !== null && limitAmount > 0 && (
-                  <div className="flex items-center justify-between text-sm text-body">
-                    <span>Spending limit</span>
-                    <span className="font-medium text-ink">{format(limitAmount)}</span>
-                  </div>
-                )}
-                <div className="flex items-center justify-between text-sm text-body">
-                  <span>Spent this period</span>
-                  <span className={`font-semibold ${amountClass('out')}`}>{format(usedAmount)}</span>
-                </div>
-                {limitAmount !== null && limitAmount > 0 && (
-                  <>
-                    <BudgetUsageBar spent={usedAmount} limit={limitAmount} />
-                    <p className="text-right text-xs font-medium text-muted">
-                      {Math.min(Math.max(usagePercentage, 0), 100).toFixed(1)}% of limit used
-                    </p>
-                  </>
-                )}
-                {limitAmount !== null && (
-                  <div className="flex items-center justify-between text-sm text-body">
-                    <span>Remaining</span>
-                    <span
-                      className={`font-semibold ${ remainingAmount !== null && remainingAmount < 0 ? 'text-danger' : 'text-ink' }`}
-                    >
-                      {format(remainingAmount ?? 0)}
-                    </span>
-                  </div>
-                )}
-              </>
+              <BudgetFigures allocation={allocation} prefix="card" spentLabel="Spent this period" />
             ) : (
               <>
                 <div className="flex items-center justify-between text-sm text-body">
@@ -1483,6 +1667,23 @@ export function AllocationsPage() {
     )
   }
 
+  // Only a full, active entry that still has payments to come says how near its next date is.
+  const renderDueIndicator = (entry: BudgetEntry) => {
+    const due = dueIndicator(entry)
+    if (!due) return undefined
+    if (due.kind === 'overdue') {
+      return <StatusText tone="danger" data-testid="due-indicator" data-due="overdue">Overdue</StatusText>
+    }
+    if (due.kind === 'today') {
+      return <StatusText tone="warn" data-testid="due-indicator" data-due="today">Due today</StatusText>
+    }
+    return (
+      <StatusText tone="muted" data-testid="due-indicator" data-due="soon">
+        Due in {due.days} {due.days === 1 ? 'day' : 'days'}
+      </StatusText>
+    )
+  }
+
   const renderBudgetEntryCard = (entry: BudgetEntry) => {
     if (isLimited(entry)) {
       return renderLimitedEntryCard(entry)
@@ -1549,7 +1750,7 @@ export function AllocationsPage() {
     const metaItems = foldFacts([
       typeLabel && <span key="type">{typeLabel}</span>,
       // The cadence once, with how it settles (and that it is paused) in the same item, then when it falls next, then where.
-      <span key="schedule">{[cadenceLabel, settlementLabel(entry.settlement), !entry.is_active && 'Paused'].filter(Boolean).join(' · ')}</span>,
+      <span key="schedule">{[cadenceLabel, settlementLabel(entry.settlement)].join(' · ')}</span>,
       <span key="next" className="text-ink">Next {formatFullDate(entry.next_occurrence)} · {formatRelativeDate(entry.next_occurrence)}</span>,
       account && (
         <span key="account">
@@ -1580,10 +1781,18 @@ export function AllocationsPage() {
       <Row
         key={entry.id}
         className={`${canEdit ? 'hover:bg-sunken cursor-pointer' : ''} ${ entry.is_active ? '' : 'opacity-60' }`}
+        data-paused={entry.is_active ? undefined : 'true'}
         onOpen={canEdit ? () => openRecurringModal(entry) : undefined}
         title={entry.name}
+        badges={entry.is_active ? undefined : <StatusText tone="muted" data-testid="paused-badge">Paused</StatusText>}
         tags={entry.tags}
-        status={remaining === 0 ? <StatusText tone="ok" data-testid="installment-paid">Fully paid</StatusText> : undefined}
+        status={
+          remaining === 0 ? (
+            <StatusText tone="ok" data-testid="installment-paid">Fully paid</StatusText>
+          ) : (
+            renderDueIndicator(entry)
+          )
+        }
         meta={<>{metaItems}</>}
         details={[
           entry.description && <p>{entry.description}</p>,
@@ -1668,17 +1877,11 @@ export function AllocationsPage() {
   }
 
   const renderAllocationSection = (
-    title: string,
-    subtitle: string,
     allocations: Allocation[],
     emptyMessage: string,
     emptyAction: string
   ) => (
     <section className="space-y-3">
-      <header className="space-y-1">
-        <h2 className="text-xl font-semibold text-ink">{title}</h2>
-        <p className="text-sm text-muted">{subtitle}</p>
-      </header>
       {loadError && (
         <div className="card p-4 space-y-3" role="alert" data-testid="allocations-load-error">
           <p className="text-sm text-danger">Could not load allocations.</p>
@@ -1739,18 +1942,10 @@ export function AllocationsPage() {
     )
   }
 
-  // Recurring entries by kind: subscriptions, card installments, cash expenses,
-  // card-billed bills, then income and transfers, then what is shared with you.
-  const renderRecurringKindSections = () => {
-    if (!recurringLoaded) {
-      return (
-        <div className="card p-6" aria-busy="true" data-testid="recurring-pending">
-          <span role="status" className="sr-only">Loading recurring entries</span>
-          <SkeletonRows rows={3} />
-        </div>
-      )
-    }
-    const matching = [...recurringExpenses, ...recurringIncome].filter((entry) => {
+  // The sections Recurring shows, each with its filtered and sorted entries and the page it is on. `group` is the
+  // section after the page search and the tag filter only: the credit summary and the count read it.
+  const recurringSections = useMemo(() => {
+    const matching = recurringEntries.filter((entry) => {
       if (isLimited(entry)) {
         return (
           matchesRecurringSearch(entry, recurringSearch, { accountName: entry.account?.name, categoryName: entry.category_name }) ||
@@ -1773,7 +1968,113 @@ export function AllocationsPage() {
         })
       )
     })
-    const groups = groupByKind(matching)
+    const groups = new Map(groupByKind(matching).map((group) => [group.key, group]))
+    const accountNames = new Map([...accountsById].map(([id, account]) => [id, account.name]))
+    return KIND_ORDER.flatMap((key) => {
+      const state = sectionStates[key] ?? DEFAULT_SECTION_STATE
+      const group: KindGroup = groups.get(key) ?? { key, label: KIND_LABELS[key], entries: [] }
+      // A section with a filter on, or one Clear filters left, stays with its header though the search leaves it nothing.
+      const stays = knownSections.has(key) && (hasRecurringFilter(state) || heldSections.has(key))
+      if (group.entries.length === 0 && !stays) return []
+      const visible = viewRecurringEntries(group.entries, state)
+      const options = recurringAccountOptions(group.entries, accountNames)
+      if (state.accountId !== null && !options.some((option) => option.id === state.accountId)) {
+        options.push({ id: state.accountId, name: accountNames.get(state.accountId) ?? `Account ${state.accountId}` })
+      }
+      return [{ group, state, visible, page: clampRecurringPage(state.page, visible.length), options }]
+    })
+  }, [recurringEntries, recurringSearch, sectionStates, heldSections, knownSections, accountsById, categoriesById])
+
+  // After a reload that leaves fewer pages (a delete, a pause), the page held moves to the last one that exists.
+  useEffect(() => {
+    setSectionStates((prev) => {
+      let next = prev
+      for (const section of recurringSections) {
+        const held = prev[section.group.key]
+        if (held && held.page !== section.page) next = { ...next, [section.group.key]: { ...held, page: section.page } }
+      }
+      return next
+    })
+  }, [recurringSections])
+
+  const renderSectionControls = (section: (typeof recurringSections)[number]) => {
+    const { group, state, options } = section
+    const key = group.key
+    const label = group.label
+    return (
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2" data-testid={`${key}-controls`}>
+        <label className="inline-flex items-center gap-2 text-sm text-body">
+          <span>Sort</span>
+          <select
+            aria-label={`Sort ${label}`}
+            data-testid={`${key}-sort`}
+            value={state.sort}
+            onChange={(event) => patchSection(key, { sort: event.target.value as RecurringSortKey })}
+            className="select-field focus-ring"
+          >
+            {SORT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <SegmentedControl
+          className="flex bg-sunken p-1"
+          aria-label={`Sort order for ${label}`}
+          data-testid={`${key}-direction`}
+          options={DIRECTION_OPTIONS}
+          value={state.direction}
+          onChange={(direction) => patchSection(key, { direction })}
+          segmentClassName="px-3 py-1.5 text-sm"
+        />
+        {key !== 'shared' && (
+          <SegmentedControl
+            className="flex bg-sunken p-1"
+            aria-label={`Status of ${label}`}
+            data-testid={`${key}-status`}
+            options={STATUS_OPTIONS}
+            value={state.status}
+            onChange={(status: RecurringStatusFilter) => patchSection(key, { status, page: 1 })}
+            segmentClassName="px-3 py-1.5 text-sm"
+          />
+        )}
+        {options.length > 0 && (
+          <label className="inline-flex items-center gap-2 text-sm text-body">
+            <span>Account</span>
+            <select
+              aria-label={`Account for ${label}`}
+              data-testid={`${key}-account`}
+              value={state.accountId === null ? '' : String(state.accountId)}
+              onChange={(event) =>
+                patchSection(key, { accountId: event.target.value === '' ? null : Number(event.target.value), page: 1 })
+              }
+              className="select-field focus-ring"
+            >
+              <option value="">All accounts</option>
+              {options.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
+    )
+  }
+
+  // Recurring entries by kind: subscriptions, card installments, cash expenses,
+  // card-billed bills, then income and transfers, then what is shared with you.
+  const renderRecurringKindSections = () => {
+    if (!recurringLoaded) {
+      return (
+        <div className="card p-6" aria-busy="true" data-testid="recurring-pending">
+          <span role="status" className="sr-only">Loading recurring entries</span>
+          <SkeletonRows rows={3} />
+        </div>
+      )
+    }
     const errorAlert = recurringError && (
       <div className="card p-4 space-y-3" role="alert" data-testid="recurring-load-error">
         <p className="text-sm text-danger">Could not load recurring entries.</p>
@@ -1786,7 +2087,7 @@ export function AllocationsPage() {
         </Button>
       </div>
     )
-    if (groups.length === 0 && recurringSearch.trim() !== '') {
+    if (recurringSections.length === 0 && recurringSearch.trim() !== '') {
       return (
         <>
           {errorAlert}
@@ -1796,7 +2097,7 @@ export function AllocationsPage() {
         </>
       )
     }
-    if (groups.length === 0) {
+    if (recurringSections.length === 0) {
       return (
         errorAlert || (!accountsSettled ? null : (
           <EmptyState
@@ -1809,16 +2110,53 @@ export function AllocationsPage() {
     return (
       <>
         {errorAlert}
-        {groups.map((group) => (
-          <section key={group.key} className="space-y-3" data-testid={`kind-section-${group.key}`}>
-            <header className="flex items-baseline gap-2 border-b border-line pb-1">
-              <h2 className="text-xl font-semibold text-ink">{group.label}</h2>
-              <span className="text-sm text-muted">{group.entries.length}</span>
-            </header>
-            {renderKindCredit(group)}
-            <ListSheet>{group.entries.map(renderBudgetEntryCard)}</ListSheet>
-          </section>
-        ))}
+        {recurringSections.map((section) => {
+          const { group, state, visible, page } = section
+          const key = group.key
+          return (
+            <section key={key} className="space-y-3" data-testid={`kind-section-${key}`}>
+              <header className="flex items-baseline gap-2 border-b border-line pb-1">
+                <h2 className="text-xl font-semibold text-ink">{group.label}</h2>
+                <span className="text-sm text-muted">{group.entries.length}</span>
+              </header>
+              {renderSectionControls(section)}
+              {renderKindCredit(group)}
+              {visible.length === 0 ? (
+                <div className="space-y-3" data-testid={`${key}-empty`}>
+                  <p className="text-base text-body">
+                    No matching entries in this section.
+                  </p>
+                  {hasRecurringFilter(state) && (
+                    <Button
+                      variant="secondary"
+                      data-testid={`${key}-clear-filters`}
+                      onClick={() => {
+                        patchSection(key, { status: 'all', accountId: null, page: 1 })
+                        setHeldSections((prev) => new Set(prev).add(key))
+                      }}
+                    >
+                      Clear filters
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <ListSheet>{recurringPageSlice(visible, page).map(renderBudgetEntryCard)}</ListSheet>
+                  {visible.length > RECURRING_PAGE_SIZE && (
+                    <Pager
+                      total={visible.length}
+                      page={page}
+                      pageSize={RECURRING_PAGE_SIZE}
+                      onPage={(next) => patchSection(key, { page: next })}
+                      label={`${group.label} pages`}
+                      testId={`${key}-pager`}
+                    />
+                  )}
+                </>
+              )}
+            </section>
+          )
+        })}
       </>
     )
   }
@@ -1847,15 +2185,14 @@ export function AllocationsPage() {
   return (
     <div className="page">
       <PageHeader title="Allocations">
-        {activeTab !== 'wishlist' && (
-          <Button
-              variant="primary"
-              onClick={openCreateModal}
-            className="w-full sm:w-auto justify-center"
-          >
-              {activeTab === 'subscriptions' ? 'Add recurring entry' : 'Add allocation'}
-          </Button>
-        )}
+        <Button
+          variant="primary"
+          onClick={activeTab === 'wishlist' ? () => setWishlistCreateOpen(true) : openCreateModal}
+          // The longest label's width on a phone, so the button reads the same on every tab.
+          className="w-40 sm:w-auto justify-center"
+        >
+          {ADD_LABEL[activeTab]}
+        </Button>
       </PageHeader>
           <nav className="grid grid-cols-4 gap-1 sm:flex">
             {[
@@ -1877,6 +2214,10 @@ export function AllocationsPage() {
             })}
           </nav>
 
+      {activeTab === 'subscriptions' && <SectionIntro title="Recurring entries" description={INTRO.subscriptions} />}
+      {activeTab === 'budgets' && <SectionIntro title="Budget envelopes" description={INTRO.budgets} />}
+      {activeTab === 'savings' && <SectionIntro title="Savings & investment targets" description={INTRO.savings} />}
+
       {activeTab === 'subscriptions' && (
         <div>
           <label htmlFor="recurring-search" className="sr-only">Search recurring entries</label>
@@ -1884,7 +2225,7 @@ export function AllocationsPage() {
             id="recurring-search"
             type="search"
             value={recurringSearch}
-            onChange={(event) => setRecurringSearch(event.target.value)}
+            onChange={(event) => changeRecurringSearch(event.target.value)}
             placeholder="Search by name, account, category or amount"
             autoComplete="off"
             className="input-field focus-ring !h-11"
@@ -1893,14 +2234,12 @@ export function AllocationsPage() {
         </div>
       )}
 
-      {activeTab === 'subscriptions' && <TagFilter value={selectedTag} onChange={setSelectedTag} />}
+      {activeTab === 'subscriptions' && <TagFilter value={selectedTag} onChange={changeSelectedTag} />}
 
       {activeTab === 'subscriptions' && renderRecurringKindSections()}
 
       {activeTab === 'budgets' &&
         renderAllocationSection(
-          'Budget envelopes',
-          'Monthly spending buckets that align with your categories and keep cash flow on track.',
           budgetEnvelopes,
           'No budget envelopes yet. Create one to keep monthly spending in check.',
           'Create a budget envelope'
@@ -1910,8 +2249,6 @@ export function AllocationsPage() {
 
       {activeTab === 'savings' &&
         renderAllocationSection(
-          'Savings & investment targets',
-          'Longer-term goals and rainy-day funds that should steadily grow over time.',
           savingsAndGoals,
           hasRankedGoals
             ? 'No paused or other savings goals. Your active goals are in the ranked list above.'
@@ -1920,7 +2257,12 @@ export function AllocationsPage() {
         )}
 
       {activeTab === 'wishlist' && (
-        <WishlistPanel onCreateAllocationFromItem={openAllocationFromWishlist} />
+        <WishlistPanel
+          createOpen={wishlistCreateOpen}
+          onCreateOpen={() => setWishlistCreateOpen(true)}
+          onCreateClose={() => setWishlistCreateOpen(false)}
+          onCreateAllocationFromItem={openAllocationFromWishlist}
+        />
       )}
 
       {activeTab !== 'subscriptions' && activeTab !== 'wishlist' && (
@@ -1968,7 +2310,7 @@ export function AllocationsPage() {
                 <div>
                 <h2 className="text-xl font-semibold text-ink">{actionAllocation.name}</h2>
                 <p className="text-sm text-muted">{actionAllocationTypeLabel}</p>
-                {actionAllocationAccount && (
+                {!actionAllocationIsBudget && actionAllocationAccount && (
                   <p className="text-sm text-muted">{actionAllocationAccount.name}</p>
                 )}
                 {actionAllocationIsBudget && actionAllocationCategories.length > 0 && (
@@ -2000,6 +2342,14 @@ export function AllocationsPage() {
                         Ends {actionBudgetPeriodEndLabel}
                       </span>
                     )}
+                    <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1" data-testid="snapshot-accounts">
+                      Accounts: {budgetAccountLabel(actionAllocation)}
+                    </span>
+                    {actionAllocation.carry_over_from != null && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1" data-testid="snapshot-carry-chip">
+                        Carry over on
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
@@ -2018,34 +2368,20 @@ export function AllocationsPage() {
                   {actionAllocationIsBudget ? 'Budget snapshot' : 'Current progress'}
                 </h3>
                 {actionAllocationIsBudget ? (
-                  <>
-                    {actionAllocationLimit !== null && (
-                      <p className="mt-2 text-sm text-muted">
-                        Limit <span className="font-semibold text-ink">{format(actionAllocationLimit)}</span>
-                      </p>
-                    )}
-                    <p className="mt-2 text-sm text-muted">
-                      Spent <span className={`font-semibold ${amountClass('out')}`}>{format(actionAllocation.current_amount)}</span>
-                    </p>
-                    {actionAllocationUsagePct !== null && actionAllocationLimit !== null && actionAllocationLimit > 0 && (
-                      <>
-                        <BudgetUsageBar spent={actionAllocation.current_amount} limit={actionAllocationLimit} />
-                        <p className="text-right text-xs font-medium text-muted">
-                          {Math.min(Math.max(actionAllocationUsagePct, 0), 100).toFixed(1)}% of limit used
-                        </p>
-                      </>
-                    )}
-                    {actionAllocationRemaining !== null && (
-                      <p
-                        className={`mt-2 text-sm ${ actionAllocationRemaining < 0 ? 'text-danger' : 'text-body' }`}
-                      >
-                        Remaining{' '}
-                        <span className="font-semibold">
-                          {format(actionAllocationRemaining)}
-                        </span>
-                      </p>
-                    )}
-                  </>
+                  snapshotRead === 'error' ? (
+                    <div className="mt-2 space-y-3" role="alert" data-testid="snapshot-error">
+                      <p className="text-sm text-danger">Could not refresh this envelope. Its figures are hidden until it loads.</p>
+                      <Button variant="secondary" onClick={() => setSnapshotAttempt((n) => n + 1)}>Retry</Button>
+                    </div>
+                  ) : snapshotRead === 'loading' ? (
+                    <div className="mt-2" data-testid="snapshot-loading">
+                      <SkeletonRows rows={3} />
+                    </div>
+                  ) : (
+                    <div className="mt-2">
+                      <BudgetFigures allocation={actionAllocation} prefix="snapshot" spentLabel="Spent" />
+                    </div>
+                  )
                 ) : (
                   <>
                     <p className="mt-2 text-lg font-bold text-ink">{formatSigned(actionAllocation.current_amount, actionAllocation.currency)}</p>
@@ -2092,6 +2428,20 @@ export function AllocationsPage() {
             </div>
 
             <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {actionAllocationIsBudget && (
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setHistoryFor(actionAllocation)
+                    closeActionModal()
+                  }}
+                  className="flex min-h-11 py-2.5 sm:col-span-2"
+                  data-testid="open-budget-history"
+                >
+                  <Icon name="forecast" />
+                  View period history
+                </Button>
+              )}
                   <Button
                 variant="secondary"
                 onClick={() => handleToggleAllocationActive(actionAllocation)}
@@ -2314,6 +2664,54 @@ export function AllocationsPage() {
                     <p className="mt-2 text-xs text-muted">
                       Transactions in these categories will roll into this envelope when they post.
                     </p>
+                    <div className="mt-4">
+                      <label className="block text-sm font-medium text-body" id="allocation-budget-accounts-label">Accounts</label>
+                      <div ref={bindField('budget_account_ids')}>
+                        <AccountPicker
+                          mode="multi"
+                          accounts={ownAccounts}
+                          value={selectedBudgetAccountIds}
+                          onChange={(ids) => {
+                            clearFieldErrors('budget_account_ids')
+                            setSelectedBudgetAccountIds(ids.filter((id): id is number => typeof id === 'number'))
+                          }}
+                          recentIds={recentAccounts.recentIds}
+                          pinnedId={user?.main_account_id ?? undefined}
+                          dataField="budget_account_ids"
+                          labelledBy="allocation-budget-accounts-label"
+                          describedBy={fieldProps('budget_account_ids')['aria-describedby']}
+                          leading={[
+                            {
+                              key: 'all',
+                              label: 'All accounts',
+                              selected: selectedBudgetAccountIds.length === 0,
+                              onClick: () => setSelectedBudgetAccountIds([]),
+                              disabled: selectedBudgetAccountIds.length === 0,
+                            },
+                          ]}
+                        />
+                      </div>
+                      {inactiveBudgetAccountIds.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-2" data-testid="budget-inactive-accounts">
+                          {inactiveBudgetAccountIds.map((id) => (
+                            <Segment
+                              key={id}
+                              selected
+                              data-account-id={id}
+                              onClick={() => setSelectedBudgetAccountIds((ids) => ids.filter((x) => x !== id))}
+                              className="px-3 py-1 text-sm"
+                            >
+                              Inactive account {id}
+                              <Icon name="close" />
+                            </Segment>
+                          ))}
+                        </div>
+                      )}
+                      {renderFieldError('budget_account_ids')}
+                    </div>
+                    <p className="mt-2 text-xs text-muted" data-testid="budget-history-note">
+                      Period history uses this envelope's current categories and accounts.
+                    </p>
                     <div className="mt-4 space-y-2">
                       <label className="block text-sm font-medium text-body" id="allocation-cadence-label">Budget cadence</label>
                       <div className="flex flex-wrap gap-2" aria-labelledby="allocation-cadence-label" {...groupProps('period_frequency')}>
@@ -2410,38 +2808,10 @@ export function AllocationsPage() {
                   )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {allocationForm.allocation_type === 'budget' && (
-                    <div>
-                      <label className="block text-sm font-medium text-body">
-                        Amount already spent
-                      </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                        value={allocationForm.current_amount}
-                        onChange={(e) =>
-                          setAllocationForm((prev) => ({
-                            ...prev,
-                            current_amount: parseFloat(e.target.value) || 0,
-                          }))
-                        }
-                  className="mt-1 block w-full border border-line px-3 py-2"
-                  required
-                  ref={bindField('current_amount')}
-                  data-field="current_amount"
-                  {...fieldProps('current_amount')}
-                />
-                {renderFieldError('current_amount')}
-                      <p className="mt-1 text-xs text-muted">
-                        Track how much of the envelope has already been used this period.
-                      </p>
-              </div>
-                    )}
               <div>
                       <label className="block text-sm font-medium text-body">
                         {allocationForm.allocation_type === 'budget'
-                          ? 'Spending limit'
+                          ? 'Spending limit (optional)'
                           : 'Target amount (optional)'}
                       </label>
                 <div className="relative">
@@ -2458,11 +2828,16 @@ export function AllocationsPage() {
                         onChange={(e) =>
                           setAllocationForm((prev) => ({
                             ...prev,
-                            target_amount: parseFloat(e.target.value) || undefined,
+                            // A budget keeps a typed 0 (a limit of nothing); only an empty field means no limit.
+                            target_amount:
+                              prev.allocation_type === 'budget'
+                                ? e.target.value === '' || Number.isNaN(parseFloat(e.target.value))
+                                  ? undefined
+                                  : parseFloat(e.target.value)
+                                : parseFloat(e.target.value) || undefined,
                           }))
                         }
                   className={`mt-1 block w-full border border-line px-3 py-2${allocationForm.allocation_type === 'savings' ? ' pl-9' : ''}`}
-                        required={allocationForm.allocation_type === 'budget'}
                         ref={bindField('target_amount')}
                         data-field="target_amount"
                         {...fieldProps('target_amount')}
@@ -2471,7 +2846,7 @@ export function AllocationsPage() {
                       {renderFieldError('target_amount')}
                       {allocationForm.allocation_type === 'budget' ? (
                         <p className="mt-1 text-xs text-muted">
-                          The maximum amount available for this envelope before it resets.
+                          The maximum amount available for this envelope before it resets. Leave it empty for no limit.
                         </p>
                       ) : (
                         <p className="mt-1 text-xs text-muted">
@@ -2480,6 +2855,32 @@ export function AllocationsPage() {
                       )}
                     </div>
               </div>
+
+                  {allocationForm.allocation_type === 'budget' && (
+                    <div className="flex items-center justify-between gap-4 border border-line px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-body" id="allocation-carry-label">Carry over to next period</p>
+                        <p className="text-xs text-muted" id="allocation-carry-help" data-testid="carry-help">
+                          Leftover adds to next period; overspending is taken from it. Starts this period.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={carrySwitchOn}
+                        aria-label="Carry over to next period"
+                        aria-describedby="allocation-carry-help"
+                        disabled={!budgetHasLimit}
+                        onClick={() => setAllocationForm((prev) => ({ ...prev, carry_over: !prev.carry_over }))}
+                        className={withSelection(carrySwitchOn, 'relative inline-flex h-6 w-11 shrink-0 items-center border border-line-strong disabled:opacity-50')}
+                        data-testid="carry-over-switch"
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 transform transition-transform duration-fast ${ carrySwitchOn ? 'translate-x-5 bg-accent' : 'translate-x-1 bg-line-strong' }`}
+                        />
+                      </button>
+                    </div>
+                  )}
               
                   {allocationForm.allocation_type !== 'budget' && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2585,6 +2986,16 @@ export function AllocationsPage() {
           </div>
           </div>
         </div>
+      )}
+
+      {historyFor && (
+        <BudgetEnvelopeDetail
+          key={historyFor.id}
+          allocation={historyFor}
+          refresh={refreshEnvelope}
+          restoreFocus={() => document.querySelector<HTMLElement>(`article[data-allocation-id="${historyFor.id}"]`)}
+          onClose={() => setHistoryFor(null)}
+        />
       )}
 
       {reviewFor && (

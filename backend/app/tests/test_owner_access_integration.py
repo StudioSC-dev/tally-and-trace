@@ -129,6 +129,9 @@ def world(client, db, people, tmp_path, monkeypatch):
     allocation = _post(client, owner, "/allocations/", {
         "account_id": bank["id"], "name": f"{MARK} Fund", "allocation_type": "savings",
         "target_amount": 10_000})
+    budget = _post(client, owner, "/allocations/", {
+        "name": f"{MARK} Envelope", "allocation_type": "budget", "target_amount": 3_000,
+        "configuration": {"category_ids": [category["id"]]}})
     txn = _post(client, owner, "/transactions/", {
         "account_id": bank["id"], "amount": 1_234, "transaction_type": "debit",
         "transaction_date": WHEN, "description": f"{MARK} groceries",
@@ -159,7 +162,7 @@ def world(client, db, people, tmp_path, monkeypatch):
         "close": statements[-1]["close_date"],
         "owner": owner, "stranger": stranger, "bank": bank["id"], "card": card["id"],
         "loan": loan["id"], "category": category["id"], "allocation": allocation["id"],
-        "transaction": txn["id"], "entry": entry["id"], "accountless": accountless["id"],
+        "budget": budget["id"], "transaction": txn["id"], "entry": entry["id"], "accountless": accountless["id"],
         "wish": wish["id"], "tag": tag["id"], "stranger_bank": stranger_bank["id"],
         "tag_share": tag_share.id, "owner_id": owner["id"],
     }
@@ -222,6 +225,8 @@ def _id_routes(w):
         ("put", f"/allocations/{w['allocation']}", {"json": {"name": "Taken"}}),
         ("delete", f"/allocations/{w['allocation']}", {}),
         ("get", f"/allocations/{w['allocation']}/progress", {}),
+        ("get", f"/allocations/{w['budget']}/periods", {}),
+        ("get", f"/allocations/{w['budget']}/transactions", {}),
         ("get", f"/budget-entries/{w['entry']}", {}),
         ("put", f"/budget-entries/{w['entry']}", {"json": {"amount": 1}}),
         ("delete", f"/budget-entries/{w['entry']}", {}),
@@ -339,7 +344,7 @@ def test_every_route_with_an_id_is_in_the_sweep(client, people):
     from app.main import app
 
     w = {k: 0 for k in ("bank", "card", "loan", "transaction", "category", "allocation",
-                        "entry", "accountless", "wish", "tag", "stranger_bank", "tag_share",
+                        "budget", "entry", "accountless", "wish", "tag", "stranger_bank", "tag_share",
                         "owner_id")}
     swept = {(m.upper(), p.split("?")[0].replace("/0", "/{id}").replace(DAY, "{day}"))
              for m, p, _ in _id_routes(w)}

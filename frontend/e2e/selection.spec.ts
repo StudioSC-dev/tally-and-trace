@@ -168,7 +168,7 @@ async function openRecurringDialog(page: Page): Promise<ApiMock> {
 async function openBudgetDialog(page: Page): Promise<ApiMock> {
   const api = await openAllocations(page)
   await page.getByRole('button', { name: 'Budgets', exact: true }).click()
-  await page.getByRole('button', { name: 'Add allocation', exact: true }).click()
+  await page.getByRole('button', { name: 'Add budget', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Create budget envelope' })).toBeVisible()
   return api
 }
@@ -722,18 +722,43 @@ const INVENTORY: Group[] = [
     group: (page) => page.getByRole('button', { name: 'Recurring', exact: true }).locator('..'),
     selected: 'Recurring',
     other: 'Budgets',
-    effect: 'Budgets lists the budget envelopes (Groceries, Dining out, Transport) and the add button becomes Add allocation',
+    effect: 'Budgets lists the budget envelopes (Groceries, Dining out, Transport) and the add button becomes Add budget',
     before: async (page) => {
       await expect(page.getByRole('button', { name: 'Add recurring entry', exact: true })).toBeVisible()
     },
     after: async (page) => {
-      await expect(page.getByRole('button', { name: 'Add allocation', exact: true })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Add budget', exact: true })).toBeVisible()
       await expect(page.getByText('Transport', { exact: true }).first()).toBeVisible()
+    },
+    gone: {
+      controls: [
+        'Sort order for Subscriptions › Ascending',
+        'Sort order for Subscriptions › Descending',
+        'Status of Subscriptions › All',
+        'Status of Subscriptions › Active',
+        'Status of Subscriptions › Paused',
+        'Sort order for Cash expenses › Ascending',
+        'Sort order for Cash expenses › Descending',
+        'Status of Cash expenses › All',
+        'Status of Cash expenses › Active',
+        'Status of Cash expenses › Paused',
+        'Cash expenses pages › 1',
+        'Sort order for Income & transfers › Ascending',
+        'Sort order for Income & transfers › Descending',
+        'Status of Income & transfers › All',
+        'Status of Income & transfers › Active',
+        'Status of Income & transfers › Paused',
+      ],
+      why: "Budgets replaces the Recurring list, and each section's sort, status and page controls go with it (STU-799)",
+      check: async (page) => {
+        await expect(page.getByTestId('cash-sort')).toHaveCount(0)
+        await expect(page.getByTestId('cash-pager')).toHaveCount(0)
+      },
     },
   },
   {
     key: 'allocations-cadence',
-    route: '/allocations (Budgets, Add allocation)',
+    route: '/allocations (Budgets, Add budget)',
     what: 'Create budget envelope: Budget cadence (Segment)',
     kind: 'pressed',
     dialog: true,
@@ -752,7 +777,7 @@ const INVENTORY: Group[] = [
   },
   {
     key: 'allocations-tracked-categories',
-    route: '/allocations (Budgets, Add allocation)',
+    route: '/allocations (Budgets, Add budget)',
     what: 'Create budget envelope: Tracked Categories (CategoryPicker chips, Segment, multi-select)',
     kind: 'pressed',
     multi: 'toggle',
@@ -766,7 +791,7 @@ const INVENTORY: Group[] = [
     items: (page) => dialogOf(page).locator('[data-field="category_ids"] [aria-pressed]'),
     selected: 'Groceries',
     other: 'Dining out',
-    effect: 'Dining out joins Groceries: the envelope is created tracking category_ids [22, 23]',
+    effect: 'Dining out joins Groceries: the envelope is created tracking category_ids [22, 23] over every account',
     before: async (page) => {
       await expect(dialogOf(page).locator('[data-field="category_ids"]').getByRole('button', { name: 'Groceries', exact: true })).toHaveAttribute('aria-pressed', 'true')
     },
@@ -774,12 +799,12 @@ const INVENTORY: Group[] = [
       await expect(dialogOf(page).locator('[data-field="category_ids"]').getByRole('button', { name: 'Dining out', exact: true })).toHaveAttribute('aria-pressed', 'true')
     },
     submit: async (page, api) => {
-      expect(await saveAllocation(page, api, 'Snacks')).toEqual({ category_ids: [22, 23] })
+      expect(await saveAllocation(page, api, 'Snacks')).toEqual({ category_ids: [22, 23], account_ids: [] })
     },
   },
   {
     key: 'allocations-savings-accounts',
-    route: '/allocations (Savings, Add allocation)',
+    route: '/allocations (Savings, Add savings goal)',
     what: 'Savings tracker: Accounts to aggregate (AccountPicker chips, Segment, multi-select)',
     kind: 'pressed',
     multi: 'toggle',
@@ -787,7 +812,7 @@ const INVENTORY: Group[] = [
     open: async (page) => {
       const api = await openAllocations(page)
       await page.getByRole('button', { name: 'Savings', exact: true }).click()
-      await page.getByRole('button', { name: 'Add allocation', exact: true }).click()
+      await page.getByRole('button', { name: 'Add savings goal', exact: true }).click()
       await dialogOf(page).getByRole('button', { name: /Combined account total/ }).click()
       await dialogOf(page).locator('[data-field="savings_account_ids"]').getByRole('button', { name: /^BPI Payroll/ }).click()
       return api

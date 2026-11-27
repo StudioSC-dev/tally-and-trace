@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { accountPickerGroups, centavosToAmount, queryPhase, trySplitInstallment } from '@tally-trace/shared'
 import type {
   WishlistCheckStatus,
@@ -26,6 +26,7 @@ import { Button } from './Button'
 import { Icon } from './Icon'
 import { EmptyState } from './EmptyState'
 import { PickerOptGroups } from './PickerOptGroups'
+import { SectionIntro } from './SectionIntro'
 import { SegmentedControl } from './SegmentedControl'
 import { StatusText } from './StatusText'
 import type { StatusTone } from './StatusText'
@@ -132,6 +133,12 @@ type FormState = {
 }
 
 export interface WishlistPanelProps {
+  /** Whether the add form is open. The page owns this, so its header button and the empty state open the same form. */
+  createOpen: boolean
+  /** Asks the page to open the add form (the empty state's action). */
+  onCreateOpen: () => void
+  /** Called when the add form closes, after a cancel or a successful save. */
+  onCreateClose: () => void
   /**
    * When provided, each item gets quick actions to spin up an allocation from it
    * (a budget envelope or a savings target). Used by the Allocations page tab;
@@ -140,13 +147,12 @@ export interface WishlistPanelProps {
   onCreateAllocationFromItem?: (item: WishlistItem, kind: 'budget' | 'savings') => void
 }
 
-export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps) {
+export function WishlistPanel({ createOpen, onCreateOpen, onCreateClose, onCreateAllocationFromItem }: WishlistPanelProps) {
   const { user, isAuthenticated } = useAuth()
   const defaultCurrency = (user?.default_currency as CurrencyCode) || 'PHP'
   const currencyOptions = useMemo(() => Object.keys(CURRENCY_CONFIGS) as CurrencyCode[], [])
 
   const [showPurchased, setShowPurchased] = useState(false)
-  const [isModalOpen, setIsModalOpen] = useState(false)
   const [editing, setEditing] = useState<WishlistItem | null>(null)
   const emptyForm: FormState = { name: '', estimated_cost: 0, currency: defaultCurrency, priority: 'medium', url: '', notes: '', target_date: '', account_id: 0, payment_plan: 'full', installment_months: '' }
   const [form, setForm] = useState<FormState>(emptyForm)
@@ -179,20 +185,34 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
   const [deleteItem] = useDeleteWishlistItemMutation()
   const askConfirm = useConfirm()
 
-  const closeModal = () => {
-    setSaveError(null)
-    setIsModalOpen(false)
-    setEditing(null)
-    setForm({ ...emptyForm, currency: defaultCurrency })
+  // The form shows for an add (the page's `createOpen`) or an edit. Each time the page opens the add form it starts
+  // fresh: the defaults, and no error from an earlier save.
+  const [wasCreateOpen, setWasCreateOpen] = useState(false)
+  if (createOpen !== wasCreateOpen) {
+    setWasCreateOpen(createOpen)
+    if (createOpen) {
+      setEditing(null)
+      setSaveError(null)
+      setForm({ ...emptyForm, currency: defaultCurrency })
+    }
   }
+  const isModalOpen = createOpen || editing !== null
+  // Each time the form opens or closes starts a new session; a save that finishes after its session ended changes nothing.
+  const sessionRef = useRef(0)
+  useEffect(() => {
+    sessionRef.current += 1
+  }, [createOpen])
 
-  const openCreate = () => {
+  const closeModal = () => {
+    sessionRef.current += 1
+    setSaveError(null)
     setEditing(null)
     setForm({ ...emptyForm, currency: defaultCurrency })
-    setIsModalOpen(true)
+    onCreateClose()
   }
 
   const openEdit = (item: WishlistItem) => {
+    sessionRef.current += 1
     setEditing(item)
     setForm({
       name: item.name,
@@ -206,7 +226,6 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
       payment_plan: item.payment_plan,
       installment_months: item.installment_months != null ? String(item.installment_months) : '',
     })
-    setIsModalOpen(true)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -224,14 +243,16 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
       installment_months: form.payment_plan === 'installment' ? parseInt(form.installment_months, 10) : null,
     }
     setSaveError(null)
+    const session = sessionRef.current
     try {
       if (editing) {
         const saved = await updateItem({ id: editing.id, data: payload }).unwrap()
         // Switching a purchased item to Installments creates its card installment in this request; the notice says so.
         if (saved.notice) showToast(saved.notice)
       } else await createItem(payload).unwrap()
-      closeModal()
+      if (session === sessionRef.current) closeModal()
     } catch (err) {
+      if (session !== sessionRef.current) return
       // A refusal (a locked field once the installment exists, a card that cannot take it) shows in the form, with the API's reason.
       setSaveError(apiErrorMessage(err) || 'Could not save the wishlist item.')
     }
@@ -285,15 +306,20 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-        <div>
-          <h2 className="text-lg font-semibold text-ink">Wishlist</h2>
-          <p className="text-sm text-muted mt-1">
-            Urgent needs come first. Everything else is saved for after your savings. Turn any of them into a budget envelope or savings target.
-          </p>
-          <p className="text-sm text-muted mt-1" data-testid="purchase-note">{PURCHASE_NOTE}</p>
-        </div>
-        <Button variant="primary" onClick={openCreate} className="w-full sm:w-auto justify-center">Add item</Button>
+      <div className="space-y-1">
+        <SectionIntro
+          title="Wishlist"
+          description="Urgent needs first, then everything else."
+        />
+        <p className="text-sm text-muted" data-testid="purchase-note">{PURCHASE_NOTE}</p>
+      </div>
+
+      {/* Filter */}
+      <div className="flex items-center justify-end">
+        <label className="inline-flex items-center gap-2 text-sm text-body">
+          <input type="checkbox" checked={showPurchased} onChange={(e) => setShowPurchased(e.target.checked)} className="border-line" />
+          Show purchased
+        </label>
       </div>
 
       {/* Purchase plan */}
@@ -362,14 +388,6 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
         </div>
       )}
 
-      {/* Filter */}
-      <div className="flex items-center justify-end">
-        <label className="inline-flex items-center gap-2 text-sm text-body">
-          <input type="checkbox" checked={showPurchased} onChange={(e) => setShowPurchased(e.target.checked)} className="border-line" />
-          Show purchased
-        </label>
-      </div>
-
       {/* List */}
       {wishlistPhase === 'error' ? (
         <div className="card p-6 text-center space-y-3" role="alert" data-testid="wishlist-error">
@@ -381,7 +399,7 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
       ) : wishlistPhase !== 'ready' || !items ? (
         <div className="flex items-center justify-center min-h-48"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-ink" /></div>
       ) : items.length === 0 ? (
-        <EmptyState message="Nothing on your wishlist yet." action={{ label: 'Add your first item', onClick: openCreate }} />
+        <EmptyState message="Nothing on your wishlist yet." action={{ label: 'Add your first item', onClick: onCreateOpen }} />
       ) : (
         <div className="grid grid-cols-1 gap-3">
           {items.map((item) => (

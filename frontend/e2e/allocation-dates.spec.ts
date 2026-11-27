@@ -172,6 +172,8 @@ test.describe('allocation dates on edit', () => {
     const savedBudget: StoredAllocation = { ...budget, period_end: null }
     const api = await openAllocations(page, 'Savings', [[goal, budget], [savedGoal, budget], [savedGoal, savedBudget]])
     await mockApi(page, [
+      // The snapshot dialog rereads the envelope: the period end is still set until the save clears it.
+      sequenceRoute<StoredAllocation>('GET', `/allocations/${BUDGET_ID}`, [{ body: budget }, { body: savedBudget }]),
       apiRoute<StoredAllocation>('PUT', `/allocations/${GOAL_ID}`, savedGoal),
       apiRoute<StoredAllocation>('PUT', `/allocations/${BUDGET_ID}`, savedBudget),
     ])
@@ -216,6 +218,7 @@ test.describe('allocation dates on edit', () => {
   test('untouched dates are kept on edit', async ({ page }) => {
     const api = await openAllocations(page, 'Savings', [[goal, budget]])
     await mockApi(page, [
+      apiRoute<StoredAllocation>('GET', `/allocations/${BUDGET_ID}`, budget),
       apiRoute<StoredAllocation>('PUT', `/allocations/${GOAL_ID}`, goal),
       apiRoute<StoredAllocation>('PUT', `/allocations/${BUDGET_ID}`, budget),
     ])
@@ -250,7 +253,7 @@ test.describe('allocation dates on edit', () => {
 
   test('a refused clear shows an inline error', async ({ page }) => {
     const api = await openAllocations(page, 'Budgets', [[goal, budget]])
-    await mockApi(page, [apiRoute<StoredAllocation>('PUT', `/allocations/${BUDGET_ID}`, budget)])
+    await mockApi(page, [apiRoute<StoredAllocation>('GET', `/allocations/${BUDGET_ID}`, budget), apiRoute<StoredAllocation>('PUT', `/allocations/${BUDGET_ID}`, budget)])
     await expect(card(page, budget.name)).toContainText(BUDGET_START_CHIP)
 
     const form = await openEdit(page, budget.name)

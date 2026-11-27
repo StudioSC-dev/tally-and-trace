@@ -132,10 +132,10 @@ async function openTab(page, tab) {
 }
 
 async function createBudget(page, bank, name, { start, end, amount = '1000', description } = {}) {
-  await page.getByRole('button', { name: 'Add allocation' }).click()
+  await page.getByRole('button', { name: 'Add budget' }).click()
   const form = budgetForm(page)
   await form.waitFor()
-  await field(form, 'account_id').selectOption(String(bank.id))
+  // A budget has no account select (STU-798): it counts every account until some are picked.
   await field(form, 'name').fill(name)
   if (description) await form.locator('textarea').fill(description)
   await pick(field(form, 'category_ids'), 'Utilities')
@@ -150,7 +150,7 @@ async function createBudget(page, bank, name, { start, end, amount = '1000', des
 }
 
 async function createSavings(page, bank, name, { target, amount = '5000' } = {}) {
-  await page.getByRole('button', { name: 'Add allocation' }).click()
+  await page.getByRole('button', { name: 'Add savings goal' }).click()
   const form = savingsForm(page)
   await form.waitFor()
   await field(form, 'account_id').selectOption(String(bank.id))
@@ -274,7 +274,7 @@ async function unrelatedBudgetFieldsArePreserved(browser) {
   const name = 'Fields budget'
   const description = 'Keeps its other fields'
   const wanted = {
-    name, description, allocation_type: 'budget', account_id: bank.id, target_amount: 1500,
+    name, description, allocation_type: 'budget', account_id: null, target_amount: 1500,
     current_amount: 0, period_frequency: 'monthly', is_active: true, category_ids: [utilities.id],
   }
   const pickFields = (a) => ({
@@ -296,7 +296,7 @@ async function unrelatedBudgetFieldsArePreserved(browser) {
   check('edit form: name', await field(form, 'name').inputValue(), name)
   check('edit form: description', await form.locator('textarea').inputValue(), description)
   check('edit form: target_amount', await field(form, 'target_amount').inputValue(), '1500')
-  check('edit form: account', await field(form, 'account_id').inputValue(), String(bank.id))
+  check('edit form: no account field', await form.locator('[data-field="account_id"]').count(), 0)
   await form.getByRole('button', { name: 'Update allocation' }).click()
   await modal(page).waitFor({ state: 'detached' })
   await settle(page)

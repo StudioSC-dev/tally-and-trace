@@ -12,10 +12,13 @@
 //   (c) at 390px the box has an accessible label, is 44px tall, and the page does not scroll sideways
 //   (d) the Due card's Subscriptions tab ends with "Manage recurring entries", which opens
 //       /allocations?tab=recurring with the Recurring tab selected
+//   (e) STU-799, on the real API: the tab loads through the after_id cursor (no entry_type), a section of seven
+//       entries pages 5 + 2, a search resets it to page 1, a paused entry wears the Paused badge and the
+//       section's status filter finds it, and Clear filters restores the list
 //
 // Every scenario checks that no browser dialog fired.
 //
-// Usage: node frontend/e2e/recurring-search.cjs [a|b|c|d]
+// Usage: node frontend/e2e/recurring-search.cjs [a|b|c|d|e]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { openDueTab, useDueCheck } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
@@ -218,6 +221,52 @@ async function search(browser) {
   await ctx.close()
 }
 
+async function paging(browser) {
+  console.log('(e) paging, the status filter and the cursor request')
+  const me = await makeUser('e')
+  const bank = await post(me.token, '/accounts/', { name: 'Maya Savings', account_type: 'checking', balance: 100000, currency: 'PHP' })
+  const day = addDays(manilaToday(), 20)
+  const made = []
+  for (let i = 1; i <= 7; i++) {
+    made.push(await post(me.token, '/budget-entries/', {
+      entry_type: 'expense', currency: 'PHP', cadence: 'monthly', next_occurrence: wire(addDays(day, i)),
+      name: `Item ${i}`, amount: 100 * i, account_id: bank.id,
+    }))
+  }
+  // Pause Item 2 through the API so the Paused badge and the status filter have something to find.
+  const second = made[1]
+  const upd = await api(me.token, 'PUT', `/budget-entries/${second.id}`, { is_active: false })
+  if (upd.status >= 300) throw new Error(`pause ${upd.status} ${JSON.stringify(upd.json)}`)
+  const { ctx, page, native } = await newPage(browser)
+  const budgetRequests = []
+  page.on('request', (r) => { if (r.url().includes('/api/v1/budget-entries/?')) budgetRequests.push(new URL(r.url()).searchParams) })
+  await uiLogin(page, me)
+  await openRecurring(page)
+  const listed = await page.getByTestId('kind-section-cash').locator('article').count()
+  check('(e) the first request is a cursor request from id 0', budgetRequests.length > 0 && budgetRequests[0].get('after_id') === '0', true)
+  check('(e) the loader sends no entry_type', budgetRequests.every((p) => !p.has('entry_type')), true)
+  check('(e) a section of seven lists 5 on page 1', listed, 5)
+  const pager = page.getByTestId('cash-pager')
+  check('(e) the pager is shown', await pager.count(), 1)
+  await pager.getByRole('button', { name: '2', exact: true }).click()
+  check('(e) page 2 lists the other 2', await page.getByTestId('kind-section-cash').locator('article').count(), 2)
+  await searchBox(page).fill('item')
+  check('(e) a search returns the section to page 1', await page.getByTestId('kind-section-cash').locator('article').count(), 5)
+  await searchBox(page).fill('')
+  check('(e) a paused entry wears the Paused badge', await page.getByTestId('paused-badge').count(), 1)
+  await page.getByTestId('cash-status').getByRole('button', { name: 'Paused', exact: true }).click()
+  check('(e) the Paused filter lists only the paused entry', await names(page, ['Item 2']), ['Item 2'])
+  await page.getByTestId('cash-status').getByRole('button', { name: 'Active', exact: true }).click()
+  check('(e) the Active filter leaves six, 5 on page 1', [(await namesNow(page)).length, await page.getByTestId('cash-pager').count()], [5, 1])
+  await page.getByTestId('cash-status').getByRole('button', { name: 'Paused', exact: true }).click()
+  await searchBox(page).fill('Item 7')
+  check('(e) an empty section keeps its header and offers Clear filters', await page.getByTestId('cash-clear-filters').count(), 1)
+  await page.getByTestId('cash-clear-filters').click()
+  check('(e) Clear filters lists the match again', await names(page, ['Item 7']), ['Item 7'])
+  check('(e) no browser dialog fired', native.count, 0)
+  await ctx.close()
+}
+
 async function phone(browser) {
   console.log('(c) the search box at 390px')
   const me = await makeUser('c')
@@ -267,6 +316,7 @@ async function dueLink(browser) {
   if (run('b')) await search(browser)
   if (run('c')) await phone(browser)
   if (run('d')) await dueLink(browser)
+  if (run('e')) await paging(browser)
   await browser.close()
   stack.stop()
   console.log(`\nRESULT: ${pass}/${total} assertions passed`)

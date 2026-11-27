@@ -6,7 +6,7 @@
 // inline error.
 // (a) an empty name (native `required`), with a second field also invalid; (b) a budget
 // with no category (the form's own check); (c) a refused delete (500) keeps the Confirm
-// open with the server's reason, then a retry deletes it; (d) a negative current amount
+// open with the server's reason, then a retry deletes it; (d) a negative spending limit
 // (the `min 0` bound) shows the browser's own text; (e) an end date not after the start;
 // (f) a combined-total tracker with no account chosen; (g) a savings-transactions tracker
 // with no "Savings" category shows the form's own line.
@@ -63,7 +63,7 @@ async function openAllocations(browser, tab) {
 }
 
 async function openAddForm(page, formOf) {
-  await page.getByRole('button', { name: 'Add allocation' }).click()
+  await page.getByRole('button', { name: formOf === budgetForm ? 'Add budget' : 'Add savings goal' }).click()
   const form = formOf(page)
   await form.waitFor()
   await h.waitQuiet(page)
@@ -72,7 +72,7 @@ async function openAddForm(page, formOf) {
 
 /** Fills a budget envelope so every field is valid, then lets the caller break one. */
 async function fillValidBudget(form, name) {
-  await field(form, 'account_id').selectOption(String(bank.id))
+  // A budget has no account select (STU-798): it counts every account until some are picked.
   await field(form, 'name').fill(name)
   await pick(field(form, 'category_ids'), 'Utilities')
   await field(form, 'target_amount').fill('1000')
@@ -141,16 +141,17 @@ async function scenarioA(browser) {
   const { ctx, page, native, log } = await openAllocations(browser, 'Budgets')
   try {
     const form = await openAddForm(page, budgetForm)
-    await field(form, 'account_id').selectOption(String(bank.id))
+    // The spending limit is optional now, so the second invalid field is a limit below its `min 0`.
+    await field(form, 'target_amount').fill('-5')
     const before = posts(log)
     await form.getByRole('button', { name: 'Create budget envelope' }).click()
     // Two fields fail the browser's check in this attempt; only the first is shown and focused.
     await h.check('a.two-invalid', 'S', async () => {
       const flagged = [
         await field(form, 'name').evaluate((el) => el.validity.valueMissing),
-        await field(form, 'target_amount').evaluate((el) => el.validity.valueMissing),
+        await field(form, 'target_amount').evaluate((el) => el.validity.rangeUnderflow),
       ]
-      return flagged.every(Boolean) || `name and target_amount valueMissing: ${JSON.stringify(flagged)}`
+      return flagged.every(Boolean) || `name valueMissing and target_amount rangeUnderflow: ${JSON.stringify(flagged)}`
     })
     // The first field must show its message, wiring and focus before either field is edited.
     await checkFieldError(page, form, log, 'a', 'name', 'Please enter a name for this allocation.', before)
@@ -172,7 +173,6 @@ async function scenarioB(browser) {
   const { ctx, page, native, log } = await openAllocations(browser, 'Budgets')
   try {
     const form = await openAddForm(page, budgetForm)
-    await field(form, 'account_id').selectOption(String(bank.id))
     await field(form, 'name').fill('Dialog B Envelope')
     await field(form, 'target_amount').fill('1000')
     const before = posts(log)
@@ -188,27 +188,27 @@ async function scenarioB(browser) {
   }
 }
 
-// (d) A negative current amount: the browser's min check runs, its text shown inline.
+// (d) A negative spending limit: the browser's min check runs, its text shown inline.
 async function scenarioD(browser) {
-  console.log('\n=== (d) current amount -5 (below min): the browser\'s message shown inline, nothing sent')
+  console.log('\n=== (d) spending limit -5 (below min): the browser\'s message shown inline, nothing sent')
   const { ctx, page, native, log } = await openAllocations(browser, 'Budgets')
   try {
     const form = await openAddForm(page, budgetForm)
     await fillValidBudget(form, 'Dialog D Envelope')
-    await field(form, 'current_amount').fill('-5')
+    await field(form, 'target_amount').fill('-5')
     const before = posts(log)
     await form.getByRole('button', { name: 'Create budget envelope' }).click()
-    await checkFieldError(page, form, log, 'd', 'current_amount', null, before)
+    await checkFieldError(page, form, log, 'd', 'target_amount', null, before)
     await h.check('d.browser-text', 'B', async () => {
       const [shown, browserText] = await Promise.all([
-        errorOf(page, 'current_amount').innerText(),
-        field(form, 'current_amount').evaluate((el) => el.validationMessage),
+        errorOf(page, 'target_amount').innerText(),
+        field(form, 'target_amount').evaluate((el) => el.validationMessage),
       ])
       return (browserText !== '' && shown === browserText) || `shown ${JSON.stringify(shown)}, browser ${JSON.stringify(browserText)}`
     })
     await h.check('d.typing-clears', 'B', async () => {
-      await field(form, 'current_amount').fill('5')
-      return (await errorOf(page, 'current_amount').count()) === 0 || 'the error stayed after an edit'
+      await field(form, 'target_amount').fill('5')
+      return (await errorOf(page, 'target_amount').count()) === 0 || 'the error stayed after an edit'
     })
   } finally {
     await d.checkNoNativeDialogs(h, 'd', native)

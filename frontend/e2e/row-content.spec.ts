@@ -64,6 +64,11 @@ async function openRecurring(page: Page): Promise<void> {
   await page.evaluate(() => document.fonts.ready)
 }
 
+/** STU-799: a Recurring section lists 5 entries a page, so a row past page 1 is reached through the page search. */
+async function searchRecurring(page: Page, name: string): Promise<void> {
+  await page.getByLabel('Search recurring entries').fill(name)
+}
+
 const rowNamed = (page: Page, name: string): Locator =>
   page.locator('article[data-testid="row"]').filter({ has: page.locator('[data-row-title]', { hasText: name }) }).first()
 
@@ -107,6 +112,7 @@ for (const e of data.entries) {
   const name = e.view === 'limited' ? e.display_name ?? '' : e.name
   test(`cadence appears once per row: ${name}`, async ({ page }) => {
     await openRecurring(page)
+    await searchRecurring(page, name)
     const word = CADENCE_WORD[e.cadence]
     expect(word, `a cadence word for ${e.cadence}`).toBeTruthy()
     const row = rowNamed(page, name)
@@ -155,6 +161,7 @@ for (const c of TX_COMBOS) {
 for (const c of ENTRY_COMBOS) {
   test(`by follows creator and sharing rules: Allocations, ${c.combo}`, async ({ page }) => {
     await openRecurring(page)
+    await searchRecurring(page, c.name)
     const row = rowNamed(page, c.name)
     await expect(row).toBeVisible()
     const by = row.getByTestId('created-by')
@@ -181,9 +188,21 @@ test('by follows creator and sharing rules: every Transactions row', async ({ pa
 
 test('by follows creator and sharing rules: every Recurring row', async ({ page }) => {
   await openRecurring(page)
-  const expected = data.entries.filter((e) => (e.view === 'limited' ? e.created_by !== null : showsBy(e.created_by, [e.account_id, e.transfer_to_account_id]))).length
-  expect(await attributions(page).count(), 'rows that name their creator, from the fixture').toBe(expected)
-  expect(expected, 'the fixture has rows with and without attribution').toBeLessThan(data.entries.length)
+  const wantsBy = (e: (typeof data.entries)[number]): boolean =>
+    e.view === 'limited' ? e.created_by !== null : showsBy(e.created_by, [e.account_id, e.transfer_to_account_id])
+  // STU-799: a section lists 5 entries a page, so the rows on the page are checked against the fixture one by one.
+  const rows = page.locator('article[data-testid="row"]')
+  const seen = await rows.evaluateAll((all) =>
+    all.map((r) => ({ name: (r.querySelector('[data-row-title]')?.textContent ?? '').trim(), by: r.querySelectorAll('[data-testid="created-by"]').length })),
+  )
+  expect(seen.length, 'rows on the first pages').toBeGreaterThan(5)
+  for (const r of seen) {
+    const e = data.entries.find((x) => (x.view === 'limited' ? x.display_name : x.name) === r.name)
+    expect.soft(e, `${r.name} is in the fixture`).toBeDefined()
+    if (e) expect.soft(r.by, `${r.name} names its creator only when the fixture says so`).toBe(wantsBy(e) ? 1 : 0)
+  }
+  expect(data.entries.filter(wantsBy).length, 'the fixture has rows with attribution').toBeGreaterThan(0)
+  expect(data.entries.filter((e) => !wantsBy(e)).length, 'and rows without').toBeGreaterThan(0)
   await shot(page, 'by-allocations-all')
 })
 
@@ -253,6 +272,7 @@ for (const e of data.entries) {
   test(`rows do not wrap their amount at 390: ${name}`, async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'phone', 'the 390px layout')
     await openRecurring(page)
+    await searchRecurring(page, name)
     const row = rowNamed(page, name)
     await expect(row).toBeVisible()
     // A limited entry has no opener, so its facts wrap onto a line of their own by design (STU-681: every fact stays
@@ -328,7 +348,9 @@ for (const surface of ['recurring', 'transactions'] as const) {
       expect.soft(was, `${r.name} is in the recorded heights`).toBeDefined()
       if (was !== undefined && r.h > was + 1) taller.push(`${r.name}: ${was}px -> ${r.h}px`)
     }
-    expect(now.length, `${surface} rows`).toBe(Object.values(before).flat().length)
+    // STU-799: Recurring lists 5 entries a page, so its first pages hold some of the recorded rows.
+    if (surface === 'recurring') expect(now.length, `${surface} rows`).toBeGreaterThan(5)
+    else expect(now.length, `${surface} rows`).toBe(Object.values(before).flat().length)
     expect(taller, `${surface} rows taller than at 0f24527`).toEqual([])
     await shot(page, `no-taller-${surface}`)
   })

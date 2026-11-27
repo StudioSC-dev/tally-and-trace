@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
-from typing import Annotated, Literal, Optional, List, Union
+from typing import Annotated, Dict, Literal, Optional, List, Union
 from datetime import datetime
 from decimal import Decimal
 from app.core.record_dates import check_record_date
@@ -263,6 +263,29 @@ class TransactionListResponse(BaseModel):
     items: List[TransactionOut]
     total: int
     has_more: bool
+
+
+class BudgetTransactionResponse(TransactionResponse):
+    """A full row counted in a budget window (STU-795): ``missing_rate`` is true
+    when its currency has no rate to the budget's, so it is left out of the total."""
+    missing_rate: bool = False
+
+
+BudgetTransactionOut = Annotated[
+    Union[BudgetTransactionResponse, SharedFullTransaction, LimitedTransaction],
+    Field(discriminator="view"),
+]
+
+
+class BudgetTransactionPage(BaseModel):
+    """``GET /allocations/{id}/transactions`` (STU-795): one page of a window's rows,
+    with the whole window's signed per-currency subtotals (before FX) and its
+    converted total, which is the window's ``spent`` on every page."""
+    items: List[BudgetTransactionOut]
+    total: int
+    has_more: bool
+    currency_subtotals: Dict[str, float]
+    converted_total: float
 
 
 class DescriptionSuggestion(BaseModel):

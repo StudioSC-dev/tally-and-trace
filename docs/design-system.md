@@ -149,6 +149,10 @@ Every route renders into one container, `.page` (`frontend/src/assets/index.css`
   grouped on the right of the same row, 12px apart (8px on a phone). When they do not fit beside the
   title they wrap under it, one section gap (32) down; the dashboard's filters always take that
   second row on a phone. A page's lead sentence is its own section under the header, not part of it.
+- **Tabbed pages:** a page's main action sits in `PageHeader` on every tab, and a tab never adds its own header
+  row. Each tab opens with one `SectionIntro` (`frontend/src/components/`): a `text-xl` heading and a one-line
+  description, directly under the tab nav, then the tab's search or filter toolbar. A tab's own note, such as
+  Wishlist's purchase note, sits between the intro and the toolbar.
 
 ## Radius
 
@@ -284,6 +288,13 @@ Fields have no box. They are written on a ruled line (an underline in `line-stro
   - Used by Transactions and the Allocations Recurring tab (one sheet per kind
     section). Budget and savings allocations stay `.card` panels: each is a goal with
     its own progress, not a list line.
+  - A Recurring section pages its sheet five rows at a time with `Pager`, under a row of its
+    own controls: a sort (next due, amount or name, ascending or descending), a status
+    `SegmentedControl` (All, Active, Paused; none in "Shared with you") and an account
+    select. A section the controls leave empty keeps its header, says so, and offers
+    "Clear filters". A paused entry's row is muted with a "Paused" mark on its title line;
+    a full, active entry due today or within seven days says so in the row's status slot
+    (`StatusText`), and an overdue one reads "Overdue" (`danger`, as in the states below).
   - The dashboard's quick balances are account lines on their panel, ruled with
     `line`, figures right-aligned, with no tile fill; their editor's controls are
     outlined, and its Add account list sits under a rule, not on a fill.

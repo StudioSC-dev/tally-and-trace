@@ -78,7 +78,7 @@ const REMOVED_ALLOCATIONS_HELP = 'Switch tabs to view recurring subscriptions, m
  * - each item's budget badge text;
  * - the add dialog's new text, as `textOf` joins it (no separators): "Pay from", "No account", every account option,
  *   "Payment", "Full" and "Installments";
- * - the dialog's two segment buttons and its `select-one:0` field (Add item and Edit only);
+ * - the dialog's two segment buttons and its `select-one:0` field (Add wishlist item and Edit only);
  * - the reads that follow a click: each item's `GET /wishlist/<id>/outlook`, and after marking an item purchased
  *   (which invalidates the account, recurring-entry and card-credit tags) the accounts list, recurring-entry list and
  *   card-credit reads the Allocations page makes, spelled out below;
@@ -106,7 +106,7 @@ const wishlistBaselineText = (text: string): string =>
 /** The form's priority was a select (`select-one:<level>`) and is now two radios; the recorded field is dropped, and the radios are. */
 const PRIORITY_SELECT = /^select-one:(critical|high|medium|low)$/
 const isWishlist = (key: string): boolean => key.includes('wishlist')
-/** `opensForm`: the click opened the wishlist form (Add item, Edit), whose fields gain "Pay from"; other dialogs keep theirs. */
+/** `opensForm`: the click opened the wishlist form (Add wishlist item, Edit), whose fields gain "Pay from"; other dialogs keep theirs. */
 const withoutWishlistAdditions = (effect: Effect, opensForm: boolean): Effect => ({
   ...effect,
   requests: effect.requests.filter((r) => !WISHLIST_NEW_READS.has(r) && !WISHLIST_OUTLOOK_READ.test(r)).map((r) => r.replace(WISHLIST_PAYMENT_FIELDS, '')),
@@ -260,7 +260,6 @@ const fillRecurring = async (page: Page): Promise<void> => {
 }
 const fillAllocation = async (page: Page): Promise<void> => {
   await dialogOf(page).locator('input[type="text"]').first().fill('Pet care')
-  await dialogOf(page).locator('select').first().selectOption('11')
   // A budget envelope tracks at least one category.
   await dialogOf(page).getByRole('button', { name: 'Dining out', exact: true }).click()
   // The empty amounts: a budget's spending limit, a savings tracker's target.
@@ -396,7 +395,8 @@ const PAGES: Surface[] = [
       await expect(p.getByRole('button', { name: 'Recurring', exact: true })).toHaveAttribute('aria-pressed', 'true')
       return api
     },
-    migrated: ['Add recurring entry', 'Charged', 'Posted', 'Charged', 'Posted', ...Array<string>(9).fill('Mark paid'), 'Mark received'],
+    // STU-799: each section lists 5 entries a page, so the first pages hold five Mark paid rows and the Cash pager's two buttons.
+    migrated: ['Add recurring entry', 'Charged', 'Posted', 'Charged', 'Posted', ...Array<string>(5).fill('Mark paid'), 'Previous', 'Next', 'Mark received'],
   },
   { key: 'accounts', dialog: false, open: (p) => openPage(p, '/accounts', 'Accounts'), migrated: ['Add account'] },
   {
@@ -426,7 +426,7 @@ const PAGES: Surface[] = [
       await settle(p)
       return api
     },
-    migrated: ['Add item', ...householdWishlist.flatMap(() => ['Savings target', 'Budget envelope', 'Mark as purchased', 'Edit', 'Delete'])],
+    migrated: ['Add wishlist item', ...householdWishlist.flatMap(() => ['Savings target', 'Budget envelope', 'Mark as purchased', 'Edit', 'Delete'])],
   },
 ]
 
@@ -634,7 +634,7 @@ const DIALOGS: Surface[] = [
   {
     key: 'wishlist-item',
     dialog: true,
-    open: (p) => openDialog(p, '/allocations?tab=wishlist', 'Allocations', (q) => q.getByRole('button', { name: 'Add item', exact: true }), 'Add item'),
+    open: (p) => openDialog(p, '/allocations?tab=wishlist', 'Allocations', (q) => q.getByRole('button', { name: 'Add wishlist item', exact: true }), 'Add item'),
     migrated: ['Add', 'Cancel'],
     fill: { Add: fillWishlist },
     saved: { Add: SAVED_WISH },
@@ -642,7 +642,7 @@ const DIALOGS: Surface[] = [
   {
     key: 'allocation-create',
     dialog: true,
-    open: (p) => openDialog(p, '/allocations?tab=budgets', 'Allocations', (q) => q.getByRole('button', { name: 'Add allocation', exact: true }), 'Create budget envelope'),
+    open: (p) => openDialog(p, '/allocations?tab=budgets', 'Allocations', (q) => q.getByRole('button', { name: 'Add budget', exact: true }), 'Create budget envelope'),
     migrated: ['Create budget envelope', 'Cancel'],
     fill: { 'Create budget envelope': fillAllocation },
     saved: { 'Create budget envelope': SAVED_ALLOCATION },
@@ -651,7 +651,7 @@ const DIALOGS: Surface[] = [
     key: 'allocation-actions',
     dialog: true,
     open: (p) => openDialog(p, '/allocations?tab=budgets', 'Allocations', (q) => q.locator('main article.card').filter({ has: q.getByText(BUDGET, { exact: true }) }), BUDGET),
-    migrated: ['Pause allocation', 'Edit allocation', 'Delete allocation'],
+    migrated: ['View period history', 'Pause allocation', 'Edit allocation', 'Delete allocation'],
   },
   {
     key: 'payable-detail',
@@ -1174,7 +1174,7 @@ test.describe('AC6: button migration preserves surrounding behavior and layout',
         const project = testInfo.project.name
         const enabled = await target.isEnabled()
         const seen = enabled ? await effectOf(page, target, saved?.row(page)) : null
-        const effect = seen && isWishlist(s.key) ? withoutWishlistAdditions(seen, c.name === 'Add item' || c.name === 'Edit') : seen
+        const effect = seen && isWishlist(s.key) ? withoutWishlistAdditions(seen, c.name === 'Add wishlist item' || c.name === 'Edit') : seen
         await viewportShot(page, `effect-${c.key.replace(/[^a-z0-9]+/gi, '-')}`)
         if (RECORD) {
           record(project, (b) => {

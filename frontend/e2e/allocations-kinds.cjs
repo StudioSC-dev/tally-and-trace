@@ -15,12 +15,15 @@
 //   (f) a card installment added from the form shows "Charged monthly on each
 //       statement close" instead of the cadence and day pickers, previews the
 //       closes, and an off-close date is saved on its statement's close
+//   (g) STU-799: a section's controls and indicators on the real API: Streaming (due in 5 days) shows
+//       "Due in 5 days", the installment dated yesterday shows "Overdue", Salary (8 days out) shows
+//       neither, the shared divider has no status control, and a section sorts by amount in both directions
 //
 // The seeded card closes on yesterday's day of the month, so the seeded
 // installment dated yesterday is already on its close (a card installment is
 // stored on the statement close).
 //
-// Usage: node frontend/e2e/allocations-kinds.cjs [a|b|c|d|e|f]
+// Usage: node frontend/e2e/allocations-kinds.cjs [a|b|c|d|e|f|g]
 const { startLocalStack } = require('./_local_stack.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -376,6 +379,33 @@ async function viewer(browser) {
   await ctx.close()
 }
 
+async function sectionControls(browser) {
+  console.log('(g) due indicators and section controls')
+  const owner = await makeUser('g-owner')
+  const me = await makeUser('g-me')
+  await seed(me)
+  const theirBank = await checking(owner, 'Their joint')
+  await entry(owner, { name: 'Their rent', amount: 9000, account_id: theirBank.id, next_occurrence: wire(addDays(manilaToday(), 4)) })
+  await post(owner.token, `/accounts/${theirBank.id}/shares`, { email: me.email, role: 'viewer' })
+  // A second cash expense so the section has two amounts to sort.
+  await entry(me, { name: 'Pool', amount: 100, account_id: (await checking(me, 'g Cash')).id, next_occurrence: wire(addDays(manilaToday(), 30)) })
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, me)
+  await openAllocations(page)
+  const indicator = (key, name) => cardNamed(page, key, name).getByTestId('due-indicator')
+  check('(g) Streaming is due in 5 days', (await indicator('subscription', 'Streaming').innerText()).trim(), 'Due in 5 days')
+  check('(g) the installment dated yesterday is Overdue', (await indicator('installment', 'Phone plan').innerText()).trim(), 'Overdue')
+  check('(g) Salary, 8 days out, has no indicator', await indicator('other', 'Salary').count(), 0)
+  check('(g) the shared divider has no status control', await page.getByTestId('shared-status').count(), 0)
+  check('(g) a full section has a status control', await page.getByTestId('cash-status').count(), 1)
+  const titles = async () => (await section(page, 'cash').locator('[data-row-title]').allInnerTexts()).map((t) => t.trim())
+  await page.getByTestId('cash-sort').selectOption('amount')
+  check('(g) sorted by amount, ascending', await titles(), ['Pool', 'Gym'])
+  await page.getByTestId('cash-direction').getByRole('button', { name: 'Descending', exact: true }).click()
+  check('(g) sorted by amount, descending', await titles(), ['Gym', 'Pool'])
+  await ctx.close()
+}
+
 ;(async () => {
   stack = await startLocalStack()
   API = `${stack.apiUrl}/api/v1`
@@ -387,6 +417,7 @@ async function viewer(browser) {
   if (run('d')) await cappedBill(browser)
   if (run('e')) await viewer(browser)
   if (run('f')) await chargedOnClose(browser)
+  if (run('g')) await sectionControls(browser)
   await browser.close()
   stack.stop()
   console.log(`\nRESULT: ${pass}/${total} assertions passed`)

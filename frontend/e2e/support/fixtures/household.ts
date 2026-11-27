@@ -36,6 +36,7 @@ import type {
   AccountShares,
   AccountShortfall,
   Allocation,
+  BudgetPeriod,
   BudgetEntry,
   BudgetEntryInput,
   CardCredit,
@@ -1252,15 +1253,23 @@ export function scheduledFor(data: HouseholdData, query: URLSearchParams): Sched
   }
 }
 
-/** `GET /budget-entries/` as the pages ask it: `entry_type`, `is_active`, `limit` and `offset`. */
+/**
+ * `GET /budget-entries/` as the pages ask it: `entry_type`, `is_active`, `limit`, `offset` and `after_id`. With
+ * `after_id` the matches are the entries whose id is higher, in ascending id order, as the API answers a cursor
+ * request; without it they keep the fixture's order.
+ */
 export function budgetEntriesFor(data: HouseholdData, query: URLSearchParams): PaginatedResponse<BudgetEntry> {
-  only(query, ['entry_type', 'is_active', 'limit', 'offset'])
+  only(query, ['entry_type', 'is_active', 'limit', 'offset', 'after_id'])
   const kind = query.get('entry_type')
   const active = query.get('is_active')
+  const after = query.get('after_id')
   const matches = data.entries.filter(
-    (e) => (!kind || e.entry_type === kind) && (active === null || (e.view === 'limited' ? true : String(e.is_active) === active)),
+    (e) =>
+      (!kind || e.entry_type === kind) &&
+      (active === null || (e.view === 'limited' ? true : String(e.is_active) === active)) &&
+      (after === null || e.id > Number(after)),
   )
-  return pageFor(matches, query)
+  return pageFor(after === null ? matches : [...matches].sort((a, b) => a.id - b.id), query)
 }
 
 /** The one bank preset the account form's minimum due rule offers (a card is being added or edited). */
@@ -1287,6 +1296,10 @@ export const householdRoutes = (data: HouseholdData = household): ApiRoute[] => 
   apiRoute<PaginatedResponse<Account>>('GET', '/accounts/', pageOf(data.accounts)),
   queryRoute<PaginatedResponse<Allocation>>('GET', '/allocations/', (q) => allocationsFor(data.allocations, q)),
   apiRoute<{ items: Allocation[] }>('GET', '/allocations/ranked', { items: rankedGoals(data.allocations) }),
+  // Opening a budget's snapshot dialog refetches the envelope (STU-798).
+  ...data.allocations.filter((a) => a.allocation_type === 'budget').map((a) => apiRoute<Allocation>('GET', `/allocations/${a.id}`, a)),
+  // Its history dialog reads the windows; the shared household has none.
+  ...data.allocations.filter((a) => a.allocation_type === 'budget').map((a) => apiRoute<BudgetPeriod[]>('GET', `/allocations/${a.id}/periods`, [])),
   apiRoute<QuickBalances>('GET', '/dashboard/quick-balances', data.quickBalances),
   apiRoute<DashboardSnapshot>('GET', '/dashboard/snapshot', data.snapshot),
   apiRoute<CashflowTimeline>('GET', '/forecast/timeline', data.timeline),
