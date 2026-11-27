@@ -539,19 +539,23 @@ def _capture(engine):
 
 
 @needs_db
-def test_budget_list_scans_transactions_once(realistic, sw_client, sw_db):
+def test_budget_list_scans_transactions_once(realistic, sw_client, sw_db, monkeypatch):
     """AC28: the budget list reads every envelope's spent figures, across all their
     windows, in one statement that scans ``transactions`` once. Ten envelopes on the
     realistic owner (2,938 rows): five started two years ago (one of them daily, so 730
     stored windows), the others weekly, quarterly, in USD, with no limit and a custom
-    window; some limited to accounts."""
+    window; some limited to accounts. They are created 40 days back, so the first list
+    call rolls eight of them: it adds one statement however many roll (their stored
+    totals refreshed together), not one per envelope."""
     import json
     import re
+    from datetime import timedelta
 
     from sqlalchemy import text
 
     from app.core.database import engine
     from app.models.category import Category
+    from app.tests.fixtures.realistic import REF, pin_clock
 
     owner = realistic.callers["owner"]
     headers, acc = owner.headers, realistic.accounts
@@ -577,6 +581,7 @@ def test_budget_list_scans_transactions_once(realistic, sw_client, sw_db):
          "period_end": "2026-12-01T00:00:00", "target_amount": 30_000},
     ]
     ids = []
+    pin_clock(monkeypatch, REF - timedelta(days=40))
     try:
         for n, fields in enumerate(envelopes):
             accounts = fields.pop("account_ids", None)
@@ -588,21 +593,43 @@ def test_budget_list_scans_transactions_once(realistic, sw_client, sw_db):
                 "configuration": configuration, **fields})
             assert r.status_code == 200, r.text
             ids.append(r.json()["id"])
+        pin_clock(monkeypatch, REF)
+
+        def spent_statements(seen):
+            reading = [(s, p) for s, p in seen if re.search(r"\btransactions\b", s)]
+            assert all("AS MATERIALIZED" in s for s, _ in reading), [s[:120] for s, _ in reading]
+            return reading
+
+        def elapsed():
+            rows = sw_db.execute(text(
+                "SELECT count(*) FROM allocations WHERE id = ANY(:ids) AND period_end <= :now"),
+                {"ids": ids, "now": REF}).scalar_one()
+            sw_db.rollback()
+            return rows
+
+        path = f"{API}/allocations/?allocation_type=budget&limit=100"
+        assert elapsed() == 8
+        seen, stop = _capture(engine)  # the first call: eight elapsed envelopes roll
+        try:
+            r = sw_client.get(path, headers=headers)
+        finally:
+            stop()
+        assert r.status_code == 200 and elapsed() == 0
+        cold = spent_statements(seen)
+        assert len(cold) == 2, [s[:120] for s, _ in cold]  # stored totals, then spent
         stored = sw_db.execute(text(
             "SELECT count(*) FROM budget_periods WHERE allocation_id = ANY(:ids)"),
             {"ids": ids}).scalar_one()
         sw_db.rollback()
         assert stored >= 730 + 4 * 24
 
-        path = f"{API}/allocations/?allocation_type=budget&limit=100"
-        assert sw_client.get(path, headers=headers).status_code == 200  # warm; nothing rolls
-        seen, stop = _capture(engine)
+        seen, stop = _capture(engine)  # warm: nothing rolls
         try:
             r = sw_client.get(path, headers=headers)
         finally:
             stop()
         assert r.status_code == 200 and r.json()["total"] == len(ids)
-        reading = [(s, p) for s, p in seen if re.search(r"\btransactions\b", s)]
+        reading = spent_statements(seen)
         assert len(reading) == 1, [s[:120] for s, _ in reading]  # one spent statement
         (statement, parameters), = reading
         assert "budget_periods" not in statement
@@ -621,7 +648,7 @@ def test_budget_list_scans_transactions_once(realistic, sw_client, sw_db):
         assert scans[0]["Actual Loops"] == 1, scans[0]
         print(f"\nSTU-795 budget list: {len(seen)} statements, one transactions scan "
               f"({scans[0]['Node Type']}, {scans[0]['Actual Rows']} rows) over "
-              f"{stored} stored windows")
+              f"{stored} stored windows; the first call, rolling 8, read it twice")
     finally:
         sw_db.rollback()
         if ids:
@@ -703,7 +730,7 @@ ROLL_400_FLOOR_MS = 100
 
 @needs_db
 def test_first_write_rolls_400_daily_windows_within_ceiling(
-        realistic, sw_client, sw_people, sw_db, monkeypatch):
+        realistic, sw_client, sw_people, sw_db, monkeypatch, capsys):
     """AC30: a daily budget left 400 days: the first write stores all 400 windows in one
     statement. Five independently reset fixtures (a fresh user and budget each, set up
     outside the timer); the median request time stays under the ceiling."""
@@ -739,6 +766,8 @@ def test_first_write_rolls_400_daily_windows_within_ceiling(
         assert stored == 400
     median = statistics.median(timings)
     limit = max(ROLL_400_FLOOR_MS, 3 * ROLL_400_BASELINE_MS)
-    print(f"\nSTU-795 first write rolling 400 daily windows: median {median:.1f} ms "
-          f"(runs {[round(t, 1) for t in timings]}, limit {limit} ms)")
-    assert median < limit, (median, limit)
+    report = (f"STU-795 first write rolling 400 daily windows: median {median:.1f} ms "
+              f"(runs {[round(t, 1) for t in timings]}, limit {limit} ms)")
+    with capsys.disabled():  # shown in every run's log (CI's), not only on failure
+        print(f"\n{report}")
+    assert median < limit, report

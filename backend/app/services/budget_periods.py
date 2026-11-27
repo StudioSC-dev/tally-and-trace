@@ -32,8 +32,12 @@ Spent is debits less credits, floored at 0. A window starting beyond the horizon
 (now + 14 h) counts nothing.
 
 **Carry**: only within a chain, the stored windows sharing a ``carry_from`` and then
-the current window when its ``carry_over_from`` is that value. A chain opens at 0 and
-is computed over all of it, rows older than the ones shown included.
+the current window when its ``carry_over_from`` is that value; a window starting
+before that value (moved there by a date edit) is never in it, and is stored with
+none. A chain opens at 0 and is computed over all of it, rows older than the ones
+shown included. A write's response reads the current window alone
+(``snapshots(..., history=False)``): its carry figures are null when it is in a
+chain, since only a read replays the chain.
 ``available = limit + carry_in``, ``remaining = available - spent`` (both may be
 negative) and the next window's ``carry_in`` is this one's ``remaining``. A window
 missing a rate is not ``complete``; every later window of its chain is
@@ -115,8 +119,13 @@ def _int_ids(value) -> List[int]:
 
 
 def category_ids(allocation: Allocation) -> Set[int]:
-    """The category ids a budget's configuration names, ignoring any that aren't ids."""
-    return set(_int_ids((allocation.configuration or {}).get("category_ids")))
+    """The category ids a budget's configuration names, ignoring any that aren't ids.
+
+    A list, or a value the configuration validator has always accepted and the matcher
+    before STU-795 iterated: a string (``"7"`` is category 7) or an object (its keys).
+    """
+    value = (allocation.configuration or {}).get("category_ids")
+    return set(_int_ids(list(value) if isinstance(value, (str, dict)) else value))
 
 
 def account_ids(allocation: Allocation) -> List[int]:
@@ -173,7 +182,8 @@ def counted_criterion(allocation: Allocation, start: datetime, end: datetime):
 _STORE = text(
     'INSERT INTO budget_periods (allocation_id, start, "end", "limit", currency, carry_from) '
     'SELECT CAST(:allocation_id AS integer), w.start, w.finish, CAST(:limit AS numeric), '
-    'CAST(:currency AS currencytype), CAST(:carry_from AS timestamp) '
+    'CAST(:currency AS currencytype), '
+    'CASE WHEN w.start >= CAST(:carry_from AS timestamp) THEN CAST(:carry_from AS timestamp) END '
     'FROM unnest(CAST(:starts AS timestamp[]), CAST(:ends AS timestamp[])) AS w(start, finish) '
     "ON CONFLICT (allocation_id, start) DO NOTHING"
 ).bindparams(bindparam("starts", type_=ARRAY(DateTime)),
@@ -181,7 +191,8 @@ _STORE = text(
 
 
 def store(db: Session, allocation: Allocation, windows: Sequence[Tuple[datetime, datetime]]) -> None:
-    """Store closed windows under the allocation's settings now, in one statement."""
+    """Store closed windows under the allocation's settings now, in one statement; a
+    window starting before ``carry_over_from`` is stored outside the chain."""
     if not windows:
         return
     currency = allocation.currency or CurrencyType.PHP
@@ -231,8 +242,10 @@ def roll_for_read(db: Session, allocations: Iterable[Allocation]) -> None:
 
     In a short transaction of its own: the owner's budget lock, then the budgets
     locked and re-read, so a roll never writes over an edit committed meanwhile;
-    each still elapsed is rolled (its windows stored) and its total recomputed;
-    then committed. Nothing is written when no budget has elapsed.
+    each still elapsed is rolled (its windows stored), then their stored totals are
+    refreshed together (``refresh_totals``); then committed. Nothing is written when
+    no budget has elapsed. The re-read allocations are the session's, so a caller
+    holding one sees any edit (a type change included) the lock waited for.
     """
     tx = _tx()
     stale = [a for a in allocations if needs_roll(a)]
@@ -240,10 +253,28 @@ def roll_for_read(db: Session, allocations: Iterable[Allocation]) -> None:
         return
     for owner_id in sorted({a.user_id for a in stale}):
         locking.lock_owner_budgets(db, owner_id)
-    for allocation in tx._lock_allocations(db, stale):
-        if needs_roll(allocation):
-            tx._recompute_budget_total(db, allocation, [None])
+    rolled = [a for a in tx._lock_allocations(db, stale) if needs_roll(a)]
+    for allocation in rolled:
+        roll(db, allocation)
+    refresh_totals(db, rolled)
     db.commit()
+
+
+def refresh_totals(db: Session, budgets: List[Allocation]) -> None:
+    """Set each budget's stored ``current_amount`` to its current window's raw total, as
+    a write recomputes it (``_recompute_budget_total``: debits less credits, unconverted,
+    never below 0; nothing for a window that has not started), in one statement."""
+    if not budgets:
+        return
+    from app.core.time import utc_now
+
+    windows = {b.id: [Window(*current_window(b), None)] for b in budgets}
+    _subtotals(db, budgets, windows)
+    for budget in budgets:
+        (window,) = windows[budget.id]
+        budget.current_amount = max(ZERO, sum(window.subtotals.values(), ZERO))
+        budget.updated_at = utc_now()
+    db.flush()
 
 
 def newest_stored_end(db: Session, allocation_id: int) -> Optional[datetime]:
@@ -272,11 +303,18 @@ class Window:
     subtotals: Dict[str, Decimal] = field(default_factory=dict)
     spent: Decimal = ZERO
     missing: List[str] = field(default_factory=list)
-    carry_in: Decimal = ZERO
+    # None (with ``provisional`` and ``inherited_missing``) when a write's response
+    # reads a chained current window without its chain (``snapshots(history=False)``).
+    carry_in: Optional[Decimal] = ZERO
     available: Optional[Decimal] = None
     remaining: Optional[Decimal] = None
-    provisional: bool = False
-    inherited_missing: List[str] = field(default_factory=list)
+    provisional: Optional[bool] = False
+    inherited_missing: Optional[List[str]] = field(default_factory=list)
+
+    @property
+    def chained(self) -> bool:
+        """In a carry chain: carry is on and the window starts at or after it began."""
+        return self.carry_from is not None and self.start >= self.carry_from
 
     @property
     def complete(self) -> bool:
@@ -296,10 +334,11 @@ class Window:
 
     def current_fields(self) -> dict:
         """The current window's fields on an allocation response."""
+        inherited = self.inherited_missing
         return {"current_amount": self.spent, "carry_in": self.carry_in,
                 "available": self.available, "complete": self.complete,
                 "missing": list(self.missing), "provisional": self.provisional,
-                "inherited_missing": list(self.inherited_missing)}
+                "inherited_missing": None if inherited is None else list(inherited)}
 
 
 @dataclass
@@ -324,14 +363,18 @@ def _stored(db: Session, ids: List[int]) -> Dict[int, List[BudgetPeriod]]:
     return rows
 
 
-def _plan(allocation: Allocation, stored: List[BudgetPeriod]) -> Tuple[List[Window], List[List[Window]]]:
-    """The windows shown (newest first) and the carry chains, oldest window first."""
+def _plan(allocation: Allocation, stored: List[BudgetPeriod],
+          history: bool = True) -> Tuple[List[Window], List[List[Window]]]:
+    """The windows shown (newest first) and the carry chains, oldest window first.
+    Without ``history``, the current window alone and no chain."""
     tx = _tx()
     frequency = allocation.period_frequency or BudgetPeriodFrequency.MONTHLY
     limit = budget_limit(allocation)
     start, end = current_window(allocation)
     current = Window(start, end, limit, carry_from=naive_utc(allocation.carry_over_from),
                      is_current=True)
+    if not history:
+        return [current], []
     closed = [Window(naive_utc(r.start), naive_utc(r.end),
                      Decimal(r.limit) if r.limit is not None else None,
                      carry_from=naive_utc(r.carry_from))
@@ -344,11 +387,9 @@ def _plan(allocation: Allocation, stored: List[BudgetPeriod]) -> Tuple[List[Wind
         next_start = begin
 
     chains: Dict[datetime, List[Window]] = {}
-    for window in closed:
-        if window.carry_from is not None:
+    for window in [*closed, current]:
+        if window.chained:
             chains.setdefault(window.carry_from, []).append(window)
-    if current.carry_from is not None:
-        chains.setdefault(current.carry_from, []).append(current)
     shown_ids = {id(w) for w in shown}
     wanted = [chain for chain in chains.values() if any(id(w) in shown_ids for w in chain)]
     created = naive_utc(allocation.created_at)
@@ -366,19 +407,22 @@ def _carry(window: Window, carry_in: Decimal, inherited: Set[str]) -> None:
 
 
 def snapshots(db: Session, allocations: Iterable[Allocation],
-              fx: FxRates) -> Dict[int, Snapshot]:
+              fx: FxRates, *, history: bool = True) -> Dict[int, Snapshot]:
     """``{allocation id: snapshot}`` for the budgets among ``allocations``.
 
     Two statements whatever the number of budgets: their stored windows, and the
-    spent statement (``_spent``). Call ``roll_for_read`` first on a read.
+    spent statement (``_spent``). Call ``roll_for_read`` first on a read. Without
+    ``history`` (a write's response), the current window alone, in the spent
+    statement only: no stored window is read and no chain replayed, so a chained
+    current window's carry figures are None.
     """
     budgets = [a for a in allocations if a.allocation_type == AllocationType.BUDGET]
     if not budgets:
         return {}
-    stored = _stored(db, [b.id for b in budgets])
+    stored = _stored(db, [b.id for b in budgets]) if history else {}
     plans: Dict[int, Tuple[List[Window], List[List[Window]]]] = {}
     for budget in budgets:
-        plans[budget.id] = _plan(budget, stored.get(budget.id, []))
+        plans[budget.id] = _plan(budget, stored.get(budget.id, []), history)
 
     measured: Dict[int, List[Window]] = {}
     for budget in budgets:
@@ -409,6 +453,10 @@ def snapshots(db: Session, allocations: Iterable[Allocation],
                 inherited |= set(window.missing)
         for window in shown:
             if id(window) in in_chain and window.limit is not None:
+                continue
+            if not history and window.chained and window.limit is not None:
+                window.carry_in = window.available = window.remaining = None
+                window.provisional = window.inherited_missing = None
                 continue
             window.carry_in, window.provisional, window.inherited_missing = ZERO, False, []
             if window.limit is not None:
@@ -483,9 +531,10 @@ GROUP BY w.env_id, w.idx, k.currency
 )
 
 
-def _spent(db: Session, budgets: List[Allocation], measured: Dict[int, List[Window]],
-           fx: FxRates) -> None:
-    """Fill each window's subtotals, spent and missing currencies, in one statement."""
+def _subtotals(db: Session, budgets: List[Allocation],
+               measured: Dict[int, List[Window]]) -> None:
+    """Fill each window's signed per-currency subtotals, in one statement (none when
+    every window starts beyond the horizon)."""
     limit = horizon()
     params = {k: [] for k in ("env_ids", "env_owners", "env_all_accounts", "cat_env",
                               "cat_ids", "acct_env", "acct_ids", "win_env", "win_idx",
@@ -520,6 +569,12 @@ def _spent(db: Session, budgets: List[Allocation], measured: Dict[int, List[Wind
         for env_id, idx, currency, total in rows:
             window = by_key[(env_id, idx)]
             window.subtotals[currency] = window.subtotals.get(currency, ZERO) + Decimal(total)
+
+
+def _spent(db: Session, budgets: List[Allocation], measured: Dict[int, List[Window]],
+           fx: FxRates) -> None:
+    """Fill each window's subtotals, spent and missing currencies, in one statement."""
+    _subtotals(db, budgets, measured)
     quotes = {b.id: _code(b.currency) for b in budgets}
     for budget in budgets:
         for window in measured[budget.id]:

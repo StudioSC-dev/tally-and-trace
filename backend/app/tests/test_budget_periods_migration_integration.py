@@ -7,6 +7,7 @@ backfill. The downgrade drops both; a stripped key is not restored. Skips withou
 a database.
 """
 import os
+import secrets
 import subprocess
 import sys
 from pathlib import Path
@@ -86,8 +87,9 @@ def test_budget_period_migration_up_and_down(scratch_url):
         with engine.begin() as c:
             user = c.execute(text(
                 "INSERT INTO users (email, password_hash, first_name, last_name, is_active, "
-                "is_verified) VALUES ('periods@example.com', 'x', 'Budget', 'Probe', true, "
-                "true) RETURNING id")).scalar_one()
+                "is_verified) VALUES (:email, 'x', 'Budget', 'Probe', true, true) "
+                "RETURNING id"), {"email": f"periods-{secrets.token_hex(6)}@example.com"}
+            ).scalar_one()
             selected = _allocation(c, user, "budget",
                                    '{"category_ids": [1], "account_ids": [7, 8]}')
             emptied = _allocation(c, user, "budget", '{"account_ids": []}')
@@ -95,10 +97,18 @@ def test_budget_period_migration_up_and_down(scratch_url):
             savings = _allocation(c, user, "savings",
                                   '{"goal_mode": "multi_account", "account_ids": [7]}')
             assert not _has_table(c) and "carry_over_from" not in _columns(c)
+            assert "period_anchor_day" not in _columns(c)
 
         _alembic(scratch_url, "upgrade", PERIODS)
         with engine.begin() as c:
             assert _has_table(c) and "carry_over_from" in _columns(c)
+            assert "period_anchor_day" in _columns(c)
+            assert c.execute(text(
+                "SELECT count(*) FROM allocations WHERE period_anchor_day IS NOT NULL")
+            ).scalar_one() == 0
+            checks = {k["name"]: k["sqltext"]
+                      for k in inspect(c).get_check_constraints("budget_periods")}
+            assert "ck_budget_periods_positive_length" in checks
             # Every budget's account_ids is stripped, unconditionally; savings keep theirs.
             assert _configuration(c, selected) == {"category_ids": [1]}
             assert _configuration(c, emptied) == {}
@@ -126,6 +136,7 @@ def test_budget_period_migration_up_and_down(scratch_url):
         _alembic(scratch_url, "downgrade", PREVIOUS)
         with engine.begin() as c:
             assert not _has_table(c) and "carry_over_from" not in _columns(c)
+            assert "period_anchor_day" not in _columns(c)
             assert _configuration(c, selected) == {"category_ids": [1]}  # not restored
             assert _configuration(c, savings) == {"goal_mode": "multi_account",
                                                   "account_ids": [7]}

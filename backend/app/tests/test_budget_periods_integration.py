@@ -287,6 +287,63 @@ def test_budget_account_selection_is_preserved_or_cleared(env):
     assert body["configuration"]["account_ids"] == []
     assert body["current_amount"] == 140.0
     assert _stored_total(w, bid) == Decimal("140.00")
+    # A stored empty list is kept too, when the key is omitted or the configuration null.
+    body = _put(w, bid, {"configuration": {"category_ids": [w.food]}})
+    assert body["configuration"] == {"category_ids": [w.food], "account_ids": []}
+    assert _put(w, bid, {"configuration": None})["configuration"] == {"account_ids": []}
+
+
+def test_budget_conversion_keeps_the_stored_account_selection(env):
+    w = env
+    other = w.people()
+    theirs = _account(w.client, other, "Theirs")
+    _row(w, w.bank, at(2026, 1, 3), 100)
+    _row(w, w.wallet, at(2026, 1, 4), 40)
+
+    def fund():
+        return _call(w, "POST", "/allocations/", json={
+            "name": "Fund", "allocation_type": "savings", "target_amount": 100,
+            "configuration": {"goal_mode": "multi_account", "account_ids": [w.bank]}})["id"]
+
+    # Made a budget with only its categories sent: its accounts are kept, not widened.
+    kept = fund()
+    body = _put(w, kept, {"allocation_type": "budget",
+                          "configuration": {"category_ids": [w.food]}})
+    assert body["configuration"] == {"category_ids": [w.food], "account_ids": [w.bank]}
+    assert body["current_amount"] == 100.0
+    assert _stored_total(w, kept) == Decimal("100.00")
+    # A list sent with the change replaces them, and is checked like any other.
+    replaced = fund()
+    status = w.client.put(f"{API}/allocations/{replaced}", headers=w.me["headers"], json={
+        "allocation_type": "budget",
+        "configuration": {"category_ids": [w.food], "account_ids": [theirs]}}).status_code
+    assert status in (403, 404)
+    assert _get(w, replaced)["allocation_type"] == "savings"
+    body = _put(w, replaced, {"allocation_type": "budget", "configuration": {
+        "category_ids": [w.food], "account_ids": [w.wallet]}})
+    assert (body["configuration"]["account_ids"], body["current_amount"]) == ([w.wallet], 40.0)
+
+
+def test_budget_legacy_category_configuration_keeps_counting(env):
+    w = env
+    budget = _create(w)
+    bid = budget["id"]
+    # Stored as the validator has always accepted it: an object naming the category.
+    w.db.execute(text("UPDATE allocations SET configuration = CAST(:c AS jsonb) WHERE id = :a"),
+                 {"c": f'{{"category_ids": {{"{w.food}": true}}}}', "a": bid})
+    w.db.commit()
+    _row(w, w.bank, at(2026, 1, 3), 100)   # the write discovers it
+    _row(w, w.bank, at(2026, 1, 4), 30, category="fuel")
+    assert _stored_total(w, bid) == Decimal("100.00")
+    assert _get(w, bid)["current_amount"] == 100.0
+    assert _periods(w, bid)[0]["spent"] == 100.0
+    assert _page(w, bid)["total"] == 1
+    # New input in that shape is stored as a list.
+    body = _create(w, configuration={"category_ids": {str(w.fuel): True}})
+    assert body["configuration"]["category_ids"] == [w.fuel]
+    assert body["current_amount"] == 30.0
+    body = _put(w, body["id"], {"configuration": {"category_ids": {str(w.food): True}}})
+    assert body["configuration"]["category_ids"] == [w.food]
 
 
 def test_allocation_list_filters_on_stored_legacy_account(env):
@@ -318,16 +375,20 @@ def test_budget_carry_toggle_and_reset(env):
     w.clock(at(2026, 3, 10, 3))
     body = _get(w, bid)
     assert (body["carry_in"], body["available"]) == (700.0, 1700.0)
-    # True again while on keeps the chain.
+    # True again while on keeps the chain. A write's response doesn't replay the chain:
+    # its carry figures are null while carry is on; reads have them.
     body = _put(w, bid, {"carry_over": True})
-    assert body["carry_over_from"] == "2026-02-01T00:00:00" and body["carry_in"] == 700.0
+    assert body["carry_over_from"] == "2026-02-01T00:00:00"
+    assert (body["carry_in"], body["available"], body["provisional"]) == (None, None, None)
+    assert body["current_amount"] == 0.0
+    assert _get(w, bid)["carry_in"] == 700.0
     # False clears it.
     body = _put(w, bid, {"carry_over": False})
     assert body["carry_over_from"] is None
     assert (body["carry_in"], body["available"]) == (0.0, 1000.0)
     # On again in the same window: a new chain, its carry-in reset to 0.
-    body = _put(w, bid, {"carry_over": True})
-    assert body["carry_over_from"] == "2026-03-01T00:00:00" and body["carry_in"] == 0.0
+    assert _put(w, bid, {"carry_over": True})["carry_over_from"] == "2026-03-01T00:00:00"
+    assert _get(w, bid)["carry_in"] == 0.0
     # Omitted on update: unchanged.
     assert _put(w, bid, {"name": "Food"})["carry_over_from"] == "2026-03-01T00:00:00"
     # The closed periods are kept, with the chain each ran in.
@@ -364,7 +425,8 @@ def test_budget_carry_requires_a_limit(env):
     assert (body["target_amount"], body["carry_over_from"]) == (500.0, "2026-01-01T00:00:00")
     # Moving the limit to monthly_target keeps carry.
     body = _put(w, bid, {"target_amount": None, "monthly_target": 200, "carry_over": True})
-    assert body["carry_over_from"] == "2026-01-01T00:00:00" and body["available"] == 200.0
+    assert body["carry_over_from"] == "2026-01-01T00:00:00"
+    assert _get(w, bid)["available"] == 200.0
     # Clearing the last limit with carry omitted clears it.
     body = _put(w, bid, {"monthly_target": None})
     assert body["carry_over_from"] is None and body["available"] is None
@@ -455,6 +517,13 @@ def test_budget_period_constraints_and_cascade(env):
             'INSERT INTO budget_periods (allocation_id, start, "end", currency) '
             "VALUES (:a, '2025-11-01', '2025-12-01', 'PHP')"), {"a": bid})
     w.db.rollback()
+    # A window's end is after its start.
+    for end in ("2024-01-01", "2023-12-31"):
+        with pytest.raises(IntegrityError, match="ck_budget_periods_positive_length"):
+            w.db.execute(text(
+                'INSERT INTO budget_periods (allocation_id, start, "end", currency) '
+                "VALUES (:a, '2024-01-01', :e, 'PHP')"), {"a": bid, "e": end})
+        w.db.rollback()
     assert len(_stored(w, bid)) == 2
 
     # The API's delete is soft: the periods stay. Removing the row removes them.
@@ -521,6 +590,15 @@ def test_budget_roll_stores_each_elapsed_window_once(env):
     assert periods[1]["start"] == "2026-01-01T00:00:00Z" and not periods[1]["estimated"]
     assert _get(w, early)["period_start"] == "2026-02-01T00:00:00"
 
+    # A zero-amount posted row rolls early the same way, and February counts it.
+    w.clock(at(2026, 2, 28, 12))
+    zero = _create(w)["id"]
+    zero_row = _row(w, w.bank, at(2026, 3, 1), 0)
+    assert [(s, e) for s, e, *_ in _stored(w, zero)] == [(at(2026, 2, 1), at(2026, 3, 1))]
+    assert _get(w, zero)["period_start"] == "2026-03-01T00:00:00"
+    page = _page(w, zero)
+    assert ([i["id"] for i in page["items"]], page["converted_total"]) == ([zero_row], 0.0)
+
 
 def test_read_roll_racing_an_edit_keeps_the_edit(env):
     from app.core.database import SessionLocal
@@ -569,6 +647,110 @@ def test_read_roll_racing_an_edit_keeps_the_edit(env):
                                 None)]
 
 
+def _racing(w, bid, update, request):
+    """``request()`` while another session holds ``update`` on the budget, uncommitted
+    for half a second: its result and how long it waited."""
+    from app.core.database import SessionLocal
+    from app.models.allocation import Allocation
+    from app.models.user import User
+    from app.routers.allocations import apply_allocation_update
+    from app.schemas.allocation import AllocationUpdate
+
+    editor = SessionLocal()
+    holding, errors = threading.Event(), []
+
+    def edit():
+        try:
+            apply_allocation_update(editor, editor.get(User, w.me["id"]),
+                                    editor.get(Allocation, bid),
+                                    AllocationUpdate(**update).dict(exclude_unset=True))
+            holding.set()
+            time.sleep(0.5)
+            editor.commit()
+        except BaseException as exc:  # pragma: no cover - reported below
+            errors.append(exc)
+            editor.rollback()  # release the locks, so the request returns
+            holding.set()
+
+    thread = threading.Thread(target=edit)
+    try:
+        thread.start()
+        assert holding.wait(10)
+        started = time.monotonic()
+        result = request()
+        waited = time.monotonic() - started
+        thread.join(10)
+    finally:
+        editor.close()
+    assert errors == []
+    return result, waited
+
+
+def test_read_routes_racing_a_type_or_date_edit_answer_for_the_edit(env):
+    w = env
+    savings = {"allocation_type": "savings", "configuration": {"goal_mode": "transaction_total"}}
+    periods_bid, page_bid, dated_bid = (_create(w)["id"] for _ in range(3))
+    _row(w, w.bank, at(2026, 2, 7), 60)
+    w.clock(at(2026, 2, 10, 3))
+    # Both were budgets when the request looked; each waited for the edit's lock, saw
+    # the allocation as edited, and answers 404, not a 500.
+    for bid, path in ((periods_bid, "periods"), (page_bid, "transactions")):
+        response, waited = _racing(w, bid, savings, lambda: w.client.get(
+            f"{API}/allocations/{bid}/{path}", headers=w.me["headers"]))
+        assert waited >= 0.3
+        assert response.status_code == 404, response.text
+    # A date edit: the racing read answers with the edited window.
+    dated = {"period_start": "2026-02-05T00:00:00", "period_end": "2026-03-05T00:00:00"}
+    response, waited = _racing(w, dated_bid, dated, lambda: w.client.get(
+        f"{API}/allocations/{dated_bid}/periods", headers=w.me["headers"]))
+    assert waited >= 0.3 and response.status_code == 200, response.text
+    current, january = response.json()[:2]
+    assert (current["start"], current["end"], current["spent"]) == (
+        "2026-02-05T00:00:00Z", "2026-03-05T00:00:00Z", 60.0)
+    assert (january["start"], january["end"], january["estimated"]) == (
+        "2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z", False)
+
+
+def test_budget_drill_down_reads_one_snapshot(env, monkeypatch):
+    from app.core.database import SessionLocal
+    from app.models.transaction import Transaction, TransactionType
+    from app.services import budget_periods
+
+    w = env
+    bid = _create(w)["id"]
+    _row(w, w.bank, at(2026, 1, 3), 100)
+    spent = budget_periods._spent
+    late = []
+
+    def spent_then_commit(*args, **kwargs):
+        spent(*args, **kwargs)
+        if not late:
+            # A matching row committed after the figures, before the count and the page.
+            other = SessionLocal()
+            try:
+                row = Transaction(user_id=w.me["id"], account_id=w.bank, category_id=w.food,
+                                  transaction_type=TransactionType.DEBIT, amount=40,
+                                  description="Late", transaction_date=at(2026, 1, 4),
+                                  is_posted=True)
+                other.add(row)
+                other.commit()
+                late.append(row.id)
+            finally:
+                other.close()
+
+    monkeypatch.setattr(budget_periods, "_spent", spent_then_commit)
+    page = _page(w, bid, limit=100)
+    assert late
+    assert (page["total"], [i["id"] for i in page["items"]], page["converted_total"]) == (
+        1, [i["id"] for i in page["items"]][:1], 100.0)
+    assert late[0] not in [i["id"] for i in page["items"]]
+    assert sum(i["amount"] for i in page["items"]) == page["converted_total"]
+    # The next read sees it everywhere.
+    page = _page(w, bid, limit=100)
+    assert (page["total"], page["converted_total"]) == (2, 140.0)
+    assert late[0] in [i["id"] for i in page["items"]]
+
+
 def test_budget_roll_before_edit_keeps_the_old_limit(env):
     w = env
     w.clock(at(2026, 1, 31, 23))
@@ -596,6 +778,72 @@ def test_budget_date_edit_cannot_overlap_history(env):
     assert body["carry_over_from"] == "2026-02-05T00:00:00"
     _put(w, bid, {"period_start": "2025-12-01T00:00:00"}, expect=422)
     assert _get(w, bid)["period_start"] == "2026-02-05T00:00:00"
+
+
+def test_budget_date_edit_cannot_reopen_or_invert_a_window(env):
+    w = env
+    # A custom January 10 to February 10 window, closed on February 15.
+    bid = _create(w, period_start="2026-01-10T00:00:00", period_end="2026-02-10T00:00:00")["id"]
+    w.clock(at(2026, 2, 15, 3))
+    _get(w, bid)
+    history = _stored(w, bid)
+    assert [(s, e) for s, e, *_ in history] == [(at(2026, 1, 10), at(2026, 2, 10))]
+    # A cleared start is the period containing now, February 1: before the closed end.
+    _put(w, bid, {"period_start": None}, expect=422)
+    _put(w, bid, {"period_start": None, "period_end": "2026-03-20T00:00:00"}, expect=422)
+    # An end at or before the start, alone or with a start.
+    _put(w, bid, {"period_end": "2026-02-10T00:00:00"}, expect=422)
+    _put(w, bid, {"period_end": "2026-02-01T00:00:00"}, expect=422)
+    _put(w, bid, {"period_start": "2026-02-20T00:00:00",
+                  "period_end": "2026-02-20T00:00:00"}, expect=422)
+    body = _get(w, bid)
+    assert (body["period_start"], body["period_end"]) == ("2026-02-10T00:00:00",
+                                                           "2026-03-10T00:00:00")
+    # An end-only edit that keeps the window the right way round applies.
+    body = _put(w, bid, {"period_end": "2026-03-01T00:00:00"})
+    assert (body["period_start"], body["period_end"]) == ("2026-02-10T00:00:00",
+                                                           "2026-03-01T00:00:00")
+    w.clock(at(2026, 3, 5, 3))
+    periods = _periods(w, bid)
+    _assert_contiguous(periods)
+    assert _stored(w, bid)[0] == history[0]
+    # Create refuses an inverted window too.
+    _create(w, expect=422, period_start="2026-03-10T00:00:00", period_end="2026-03-01T00:00:00")
+
+
+def test_budget_carry_never_reaches_before_it_was_switched_on(env):
+    w = env
+    # Carry switched on for a window that has not started: from March 1.
+    bid = _create(w, period_start="2026-03-01T00:00:00", carry_over=True)["id"]
+    assert _get(w, bid)["carry_over_from"] == "2026-03-01T00:00:00"
+    # Moving the window before that while carry stays on is refused.
+    for body in ({"period_start": "2026-02-01T00:00:00", "period_end": "2026-03-01T00:00:00"},
+                 {"period_start": "2026-02-01T00:00:00", "carry_over": True},
+                 {"period_start": None}):
+        _put(w, bid, body, expect=422)
+    assert _get(w, bid)["period_start"] == "2026-03-01T00:00:00"
+    # Later is fine, and so is earlier with carry turned off.
+    _put(w, bid, {"period_start": "2026-03-02T00:00:00", "period_end": "2026-04-01T00:00:00"})
+    body = _put(w, bid, {"period_start": "2026-02-01T00:00:00",
+                         "period_end": "2026-03-01T00:00:00", "carry_over": False})
+    assert body["carry_over_from"] is None
+
+    # A window before the marker that got there anyway (written directly) is stored
+    # outside the chain, and a stored one marked in it is not counted in it either.
+    other = _create(w, period_start="2026-03-01T00:00:00", carry_over=True)["id"]
+    w.db.execute(text("UPDATE allocations SET period_start = :s, period_end = :e WHERE id = :a"),
+                 {"s": at(2026, 2, 1), "e": at(2026, 3, 1), "a": other})
+    w.db.commit()
+    w.clock(at(2026, 3, 10, 3))
+    current, february = _periods(w, other)[:2]
+    assert _stored(w, other) == [(at(2026, 2, 1), at(2026, 3, 1), Decimal("1000.00"), "PHP",
+                                  None)]
+    assert (february["carry_in"], current["carry_in"], current["available"]) == (
+        0.0, 0.0, 1000.0)
+    w.db.execute(text("UPDATE budget_periods SET carry_from = :c WHERE allocation_id = :a"),
+                 {"c": at(2026, 3, 1), "a": other})
+    w.db.commit()
+    assert _periods(w, other)[0]["carry_in"] == 0.0
 
 
 # --- the periods service ------------------------------------------------------------------------
@@ -630,6 +878,48 @@ def test_budget_history_preserves_custom_and_month_end_boundaries(env):
     _assert_contiguous(periods)
 
 
+def test_budget_cadence_anchor_is_kept_across_rolls(env):
+    w = env
+    # Quarterly on a fixed 30th, and quarterly from March 31 (month end), each rolled in
+    # separate reads: both pass a June 30 to September 30 window, then part.
+    # Also January 31, quarterly, and a custom first window ending on the 15th, monthly.
+    w.clock(at(2025, 2, 5, 3))
+    january_31 = _create(w, period_frequency="quarterly", period_start="2025-01-31T00:00:00")["id"]
+    custom = _create(w, period_start="2025-01-10T00:00:00", period_end="2025-02-15T00:00:00")["id"]
+    w.clock(at(2025, 4, 5, 3))
+    month_end = _create(w, period_frequency="quarterly", period_start="2025-03-31T00:00:00")["id"]
+    w.clock(at(2025, 7, 5, 3))
+    thirtieth = _create(w, period_frequency="quarterly", period_start="2025-06-30T00:00:00")["id"]
+    _get(w, month_end)
+    for day in (at(2025, 10, 5, 3), at(2026, 1, 5, 3)):
+        w.clock(day)
+        for bid in (month_end, thirtieth, january_31, custom):
+            _get(w, bid)
+
+    def spans(bid):
+        return [(s, e) for s, e, *_ in _stored(w, bid)]
+
+    assert spans(thirtieth) == [(at(2025, 6, 30), at(2025, 9, 30)),
+                                (at(2025, 9, 30), at(2025, 12, 30))]
+    assert _windows(_periods(w, thirtieth))[0] == (utc(2025, 12, 30), utc(2026, 3, 30))
+    assert spans(month_end) == [(at(2025, 3, 31), at(2025, 6, 30)),
+                                (at(2025, 6, 30), at(2025, 9, 30)),
+                                (at(2025, 9, 30), at(2025, 12, 31))]
+    assert spans(january_31) == [(at(2025, 1, 31), at(2025, 4, 30)),
+                                 (at(2025, 4, 30), at(2025, 7, 31)),
+                                 (at(2025, 7, 31), at(2025, 10, 31))]
+    assert spans(custom)[:3] == [(at(2025, 1, 10), at(2025, 2, 15)),
+                                 (at(2025, 2, 15), at(2025, 3, 15)),
+                                 (at(2025, 3, 15), at(2025, 4, 15))]
+    for bid in (month_end, thirtieth, january_31, custom):
+        _assert_contiguous(_periods(w, bid))
+    # A date edit takes the anchor from the new window: the 31st becomes the 20th.
+    _put(w, month_end, {"period_end": "2026-01-20T00:00:00"})
+    w.clock(at(2026, 5, 5, 3))
+    assert _windows(_periods(w, month_end))[:2] == [(utc(2026, 4, 20), utc(2026, 7, 20)),
+                                                    (utc(2026, 1, 20), utc(2026, 4, 20))]
+
+
 def test_budget_history_fills_with_estimated_windows(env):
     w = env
     w.clock(at(2026, 3, 10, 3))
@@ -662,12 +952,18 @@ def test_budget_history_uses_current_membership_and_stored_limits(env):
     bid = _create(w, target_amount=500)["id"]
     _row(w, w.bank, at(2026, 1, 4), 100)
     _row(w, w.bank, at(2026, 1, 5), 70, category="fuel")
+    _row(w, w.wallet, at(2026, 1, 6), 25, category="fuel")
     w.clock(at(2026, 2, 10, 3))
     _put(w, bid, {"target_amount": 800, "configuration": {"category_ids": [w.food, w.fuel]}})
     _row(w, w.bank, at(2026, 2, 3), 30, category="fuel")
     current, january = _periods(w, bid)[:2]
-    assert (january["limit"], january["spent"]) == (500.0, 170.0)  # today's categories
+    assert (january["limit"], january["spent"]) == (500.0, 195.0)  # today's categories
     assert (current["limit"], current["spent"]) == (800.0, 30.0)
+    # Today's account selection too: limited to the wallet, January counts its row only.
+    _put(w, bid, {"configuration": {"category_ids": [w.food, w.fuel], "account_ids": [w.wallet]}})
+    current, january = _periods(w, bid)[:2]
+    assert (january["limit"], january["spent"], current["spent"]) == (500.0, 25.0, 0.0)
+    assert _page(w, bid, period_start=january["start"])["total"] == 1
 
 
 def test_budget_spent_uses_signed_currency_subtotals(env):
@@ -781,18 +1077,21 @@ def test_missing_budget_rates_propagate_within_the_chain(env):
             january["spent"]) == (False, ["EUR"], False, 100.0)
     assert (february["complete"], february["provisional"], february["inherited_missing"],
             february["carry_in"]) == (True, True, ["EUR"], 900.0)
-    _row(w, w.eur, at(2026, 2, 4), 5)
+    yen = _account(w.client, w.me, "Yen", "JPY")
+    _row(w, yen, at(2026, 2, 4), 500)  # another currency with no rate
     w.clock(at(2026, 3, 10, 3))
     march, february = _periods(w, bid)[:2]
-    assert (february["missing"], february["inherited_missing"]) == (["EUR"], ["EUR"])
+    assert (february["missing"], february["inherited_missing"]) == (["JPY"], ["EUR"])
+    # Upstream currencies accumulate: January's EUR and February's JPY.
     assert (march["provisional"], march["inherited_missing"], march["carry_in"]) == (
-        True, ["EUR"], 1900.0)
+        True, ["EUR", "JPY"], 1900.0)
     body = _get(w, bid)
     assert (body["complete"], body["provisional"], body["inherited_missing"]) == (
-        True, True, ["EUR"])
+        True, True, ["EUR", "JPY"])
     # A new chain clears the inherited flags.
     _put(w, bid, {"carry_over": False})
-    body = _put(w, bid, {"carry_over": True})
+    _put(w, bid, {"carry_over": True})
+    body = _get(w, bid)
     assert (body["provisional"], body["inherited_missing"], body["carry_in"]) == (False, [], 0.0)
 
 
@@ -820,6 +1119,26 @@ def test_budget_writes_recompute_only_the_current_period(env):
     assert not [s for s in statements if "budget_periods" in s]
     assert _stored(w, bid) == history
     assert _stored_total(w, bid) == Decimal("60.00")
+
+    # Nor by an allocation's create and update: their responses read the current window
+    # alone (its carry figures null while carry is on), in one spent statement.
+    for write in (lambda: _put(w, bid, {"name": "Renamed"}),
+                  lambda: _put(w, bid, {"target_amount": 900, "configuration": {
+                      "category_ids": [w.food], "account_ids": [w.bank]}}),
+                  lambda: _create(w, carry_over=True)):
+        statements.clear()
+        event.listen(engine, "before_cursor_execute", capture)
+        try:
+            body = write()
+        finally:
+            event.remove(engine, "before_cursor_execute", capture)
+        assert not [s for s in statements if "budget_periods" in s], statements
+        spent = [s for s in statements if "AS MATERIALIZED" in s]
+        totals = [s for s in statements if "sum(" in s.lower() and "transactions" in s]
+        assert len(spent) == 1 and spent[0].count("transactions t") == 1
+        assert len(totals) == 2, totals  # today's recompute, and the current window
+        assert (body["current_amount"], body["carry_in"], body["available"]) == (60.0, None, None)
+    assert _stored(w, bid) == history
     # Reads compute the chain: January's late row lowers what carries into March.
     march, february, january = _periods(w, bid)[:3]
     assert january["spent"] == 140.0
@@ -831,6 +1150,7 @@ def test_budget_writes_recompute_only_the_current_period(env):
 def test_budget_reads_agree_after_a_read_only_roll(env):
     w = env
     bid = _create(w, carry_over=True)["id"]
+    monthly = _create(w, target_amount=None, monthly_target=300, carry_over=True)["id"]
     _row(w, w.bank, at(2026, 1, 3), 100)
     _row(w, w.usd, at(2026, 1, 4), 2)  # 116 PHP
     _row(w, w.bank, at(2026, 3, 1, 1), 30)  # dated ahead: counts once March is current
@@ -851,6 +1171,19 @@ def test_budget_reads_agree_after_a_read_only_roll(env):
         assert drill["converted_total"] == window["spent"]
         assert drill["total"] == len(drill["items"])
     assert _stored_total(w, bid) == Decimal("30.00")
+    assert (progress["remaining_amount"], progress["monthly_progress"]) == (
+        periods[0]["remaining"], periods[0]["spent"])
+
+    # A monthly-only limit with carry: progress reads the same current window.
+    progress = _call(w, "GET", f"/allocations/{monthly}/progress")
+    current = _periods(w, monthly)[0]
+    detail = _get(w, monthly)
+    # January 300 - 216 = 84 carries; February 384 unspent carries; March 684 - 30.
+    assert (current["carry_in"], current["available"], current["spent"],
+            current["remaining"]) == (384.0, 684.0, 30.0, 654.0)
+    assert (progress["remaining_amount"], progress["monthly_progress"],
+            progress["current_amount"]) == (654.0, 30.0, 30.0)
+    assert (detail["current_amount"], detail["available"]) == (30.0, 684.0)
 
 
 def test_budget_create_and_update_ignore_sent_current_amount(env):
@@ -933,6 +1266,13 @@ def test_budget_transaction_page_contract(env):
     _page(w, bid, expect=422, limit=0)
     _page(w, bid, expect=422, limit=1001)
     _page(w, bid, expect=422, offset=-1)
+
+    # More than ten rows: the default page holds ten.
+    for day in range(10, 16):
+        _row(w, w.bank, at(2026, 1, day), 1)
+    page = _page(w, bid)
+    assert (len(page["items"]), page["total"], page["has_more"]) == (10, 11, True)
+    assert [i["id"] for i in _page(w, bid, offset=10)["items"]] == [oldest]
 
 
 def test_budget_transactions_apply_redaction_after_revocation(env):

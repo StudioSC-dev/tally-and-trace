@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, Text, ForeignKey, Enum, Boolean, JSON
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, Text, ForeignKey, Enum, Boolean, JSON, SmallInteger
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -58,6 +58,10 @@ class Allocation(Base):
     # Budgets only (STU-795): the start of the window carry-over was switched on in,
     # naive UTC like ``period_start``; null means off. Server-managed.
     carry_over_from = Column(DateTime, nullable=True)
+    # Budgets only (STU-795): the day of the month a monthly or quarterly budget's
+    # windows end on, kept across rolls; null until the first roll and after a date
+    # edit (then read from the window). Server-managed.
+    period_anchor_day = Column(SmallInteger, nullable=True)
 
     # Goal settings
     target_date = Column(DateTime, nullable=True)

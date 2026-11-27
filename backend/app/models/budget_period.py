@@ -1,4 +1,6 @@
-from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, Numeric, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint, Column, DateTime, Enum, ForeignKey, Integer, Numeric, UniqueConstraint,
+)
 from sqlalchemy.sql import func
 
 from app.core.database import Base
@@ -13,11 +15,13 @@ class BudgetPeriod(Base):
     ``target_amount``, else ``monthly_target``; null without either).
     ``carry_from`` is the budget's ``carry_over_from`` while the window was
     current, null when carry was off: rows sharing a ``carry_from`` form one
-    carry chain. Only ``services.budget_periods`` writes these rows.
+    carry chain; a window that starts before its ``carry_from`` is stored with none.
+    ``end`` is always after ``start``. Only ``services.budget_periods`` writes these rows.
     """
     __tablename__ = "budget_periods"
     __table_args__ = (
         UniqueConstraint("allocation_id", "start", name="uq_budget_periods_allocation_start"),
+        CheckConstraint('"end" > start', name="ck_budget_periods_positive_length"),
     )
 
     id = Column(Integer, primary_key=True)

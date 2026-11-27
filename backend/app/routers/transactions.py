@@ -140,26 +140,29 @@ def _is_month_end(value: datetime) -> bool:
     return value.day == monthrange(value.year, value.month)[1]
 
 
-def _next_period_end(start: datetime, end: datetime,
-                     frequency: BudgetPeriodFrequency) -> datetime:
-    """The end of the window that follows ``[start, end)``: one cadence step from ``end``.
+def _cadence_anchor(start: datetime, end: datetime) -> int:
+    """The day of the month a monthly or quarterly window ``[start, end)`` ends on, as
+    intended (STU-795): its end's day, unless the end is a month's last day clamped
+    below the start's day (Jan 31 to Feb 28, or Jan 30 to Feb 28), when it is the
+    start's day. A fixed 30th (Jun 30 to Sep 30) stays the 30th."""
+    if _is_month_end(end) and start.day > end.day:
+        return start.day
+    return end.day
 
-    A monthly or quarterly step keeps the cadence's day across short months
-    (STU-795), read from the window itself: a window starting and ending on a
-    month's last day is anchored on the month end (Jan 31 gives Feb 28, then
-    Mar 31); one ending on a month's last day, clamped below its start's day,
-    keeps that day (Jan 30 gives Feb 28, then Mar 30); any other keeps its end's
-    day (a custom window ending on the 15th steps to the 15th).
+
+def _next_period_end(end: datetime, frequency: BudgetPeriodFrequency,
+                     anchor: Optional[int] = None) -> datetime:
+    """The end of the window that starts at ``end``: one cadence step from it.
+
+    A monthly or quarterly step ends on the ``anchor`` day (the budget's
+    ``period_anchor_day``, STU-795), clamped to short months, so the cadence's day
+    survives them: anchored on the 31st, Jan 31 gives Feb 28, then Mar 31; on the
+    30th, Jun 30 gives Sep 30, then Dec 30. Without an anchor, ``end``'s day.
     """
     freq = frequency or BudgetPeriodFrequency.MONTHLY
     if freq not in (BudgetPeriodFrequency.MONTHLY, BudgetPeriodFrequency.QUARTERLY):
         return _compute_period_end(end, freq)
-    if _is_month_end(end) and _is_month_end(start):
-        day = 31
-    elif _is_month_end(end) and start.day > end.day:
-        day = start.day
-    else:
-        day = end.day
+    day = anchor or end.day
     months = 1 if freq == BudgetPeriodFrequency.MONTHLY else 3
     month_index = end.month - 1 + months
     year = end.year + month_index // 12
@@ -192,7 +195,9 @@ def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime],
 
     Each window a roll passes, the one left and every one skipped, is appended to
     ``closed`` as ``(start, end)`` when it is given (STU-795), including one an
-    early roll leaves before it has ended. A roll steps by ``_next_period_end``.
+    early roll leaves before it has ended. A roll steps by ``_next_period_end`` on
+    the allocation's ``period_anchor_day``; a monthly or quarterly budget without one
+    takes it from the window it first rolls past (``_cadence_anchor``) and keeps it.
     """
     frequency = allocation.period_frequency or BudgetPeriodFrequency.MONTHLY
     normalized_reference = _normalize_reference(reference)
@@ -215,10 +220,16 @@ def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime],
     elif period_end is None:
         period_end = _compute_period_end(period_start, frequency)
 
+    cadenced = frequency in (BudgetPeriodFrequency.MONTHLY, BudgetPeriodFrequency.QUARTERLY)
+    anchor = allocation.period_anchor_day if cadenced else None
+
     def advance(start: datetime, end: datetime) -> tuple:
+        nonlocal anchor
         if closed is not None:
             closed.append((start, end))
-        return end, _next_period_end(start, end, frequency)
+        if cadenced and anchor is None:
+            anchor = _cadence_anchor(start, end)
+        return end, _next_period_end(end, frequency, anchor)
 
     while now >= period_end:
         period_start, period_end = advance(period_start, period_end)
@@ -232,6 +243,8 @@ def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime],
         allocation.current_amount = Decimal("0")
         allocation.period_start = period_start
         allocation.period_end = period_end
+        if anchor is not None and allocation.period_anchor_day != anchor:
+            allocation.period_anchor_day = anchor
 
     if normalized_reference < period_start or normalized_reference >= period_end or period_start > horizon:
         return False
@@ -788,14 +801,6 @@ def _owner_exemption_allows(db: Session, txn: Transaction, requested: dict) -> b
     return figure is not None and keys == {"is_posted", figure}
 
 
-def _budget_delta_for_transaction(transaction_type: TransactionType, amount: float) -> float:
-    if transaction_type == TransactionType.DEBIT:
-        return amount
-    if transaction_type == TransactionType.CREDIT:
-        return -amount
-    return 0.0
-
-
 def _configured_category_ids(allocation: Allocation) -> Set[int]:
     """The category ids a budget's configuration names, ignoring any that aren't ids."""
     return budget_periods.category_ids(allocation)
@@ -862,8 +867,9 @@ def _counted_allocations(db: Session, *, user_id: int, transaction_type, amount,
                          allocation_id: Optional[int],
                          category_id: Optional[int],
                          account_id: Optional[int] = None) -> List[Allocation]:
-    """The budgets a row counts toward: none unless it is a posted debit or credit."""
-    if not is_posted or not _budget_delta_for_transaction(transaction_type, amount):
+    """The budgets a row counts toward: none unless it is a posted debit or credit,
+    whatever its amount (a zero one included, as reads count it, STU-795)."""
+    if not is_posted or transaction_type not in budget_periods.COUNTED_TYPES:
         return []
     return _get_budget_allocations_for_transaction(
         db, user_id=user_id, allocation_id=allocation_id, category_id=category_id,
