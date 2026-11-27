@@ -722,9 +722,9 @@ def test_budget_roll_adds_only_one_insert_to_transaction_write(
 
 
 # AC30: the median wall time (ms) of the first write after 400 daily windows elapsed,
-# measured on the local Postgres 15 test container on 2026-11-27 (the scenario's own
-# fixture; not yet measured on CI). The gate is the greater of 100 ms and 3x this.
-ROLL_400_BASELINE_MS = 33
+# measured on CI (GitHub Actions, Postgres 15, run 45956521869) on 2026-11-27. The
+# gate is the greater of 100 ms and 3x this.
+ROLL_400_BASELINE_MS = 23
 ROLL_400_FLOOR_MS = 100
 
 
