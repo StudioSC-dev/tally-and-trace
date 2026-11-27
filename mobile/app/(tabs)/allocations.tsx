@@ -36,7 +36,7 @@ function ProgressBar({ percent }: { percent: number }) {
 
 // ─── Allocation Form Modal ────────────────────────────────────────────────────
 
-function AllocationFormModal({
+export function AllocationFormModal({
   visible,
   onClose,
   initial,
@@ -59,15 +59,21 @@ function AllocationFormModal({
     description: initial?.description ?? '',
     target_amount: String(initial?.target_amount ?? ''),
     current_amount: String(initial?.current_amount ?? 0),
-    account_id: String(initial?.account_id ?? accounts[0]?.id ?? ''),
+    // An existing allocation keeps its own account (or none); only a new one defaults to the first.
+    account_id: String(initial?.id ? (initial.account_id ?? '') : (initial?.account_id ?? accounts[0]?.id ?? '')),
     currency: initial?.currency ?? defaultCurrency,
   })
+
+  const isBudget = form.allocation_type === 'budget'
 
   const set = (key: keyof typeof form, value: string) =>
     setForm((p) => ({ ...p, [key]: value }))
 
   const handleSubmit = async () => {
-    if (!form.name.trim() || !form.account_id) {
+    if (!form.name.trim()) {
+      return Alert.alert('Error', isBudget ? 'Name is required.' : 'Name and account are required.')
+    }
+    if (!isBudget && !form.account_id) {
       return Alert.alert('Error', 'Name and account are required.')
     }
     try {
@@ -76,9 +82,12 @@ function AllocationFormModal({
         allocation_type: form.allocation_type as Allocation['allocation_type'],
         description: form.description.trim() || undefined,
         target_amount: form.target_amount ? parseFloat(form.target_amount) : undefined,
-        current_amount: parseFloat(form.current_amount) || 0,
-        account_id: parseInt(form.account_id),
         currency: form.currency as CurrencyCode,
+      }
+      // The server computes a budget's spent and has no account for it, so neither is sent.
+      if (!isBudget) {
+        payload.current_amount = parseFloat(form.current_amount) || 0
+        payload.account_id = parseInt(form.account_id)
       }
       if (isEdit && initial?.id) {
         await update({ id: initial.id, data: payload }).unwrap()
@@ -120,6 +129,7 @@ function AllocationFormModal({
               {(['savings', 'budget', 'goal'] as const).map((t) => (
                 <TouchableOpacity
                   key={t}
+                  testID={`type-${t}`}
                   onPress={() => set('allocation_type', t)}
                   className={`flex-1 py-2 rounded-lg border items-center ${
                     form.allocation_type === t
@@ -147,22 +157,26 @@ function AllocationFormModal({
             keyboardType="decimal-pad"
           />
 
-          <Input
-            label="Current Amount"
-            placeholder="0.00"
-            value={form.current_amount}
-            onChangeText={(v) => set('current_amount', v)}
-            keyboardType="decimal-pad"
-          />
+          {!isBudget && (
+            <Input
+              label="Current Amount"
+              placeholder="0.00"
+              value={form.current_amount}
+              onChangeText={(v) => set('current_amount', v)}
+              keyboardType="decimal-pad"
+            />
+          )}
 
           {/* Account */}
-          <View className="gap-2">
+          {!isBudget && (
+          <View className="gap-2" testID="account-picker">
             <Text className="text-slate-400 text-sm font-medium">Account</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <View className="flex-row gap-2">
                 {accounts.map((acc) => (
                   <TouchableOpacity
                     key={acc.id}
+                    testID={`account-${acc.id}`}
                     onPress={() => set('account_id', String(acc.id))}
                     className={`px-3 py-2 rounded-lg border ${
                       form.account_id === String(acc.id)
@@ -184,6 +198,7 @@ function AllocationFormModal({
               </View>
             </ScrollView>
           </View>
+          )}
 
           <Input
             label="Description (optional)"
@@ -194,6 +209,7 @@ function AllocationFormModal({
 
           <Button
             label={isEdit ? 'Save Changes' : 'Create'}
+            testID="submit"
             onPress={handleSubmit}
             loading={isSaving}
             className="mt-4"
@@ -257,7 +273,7 @@ export default function AllocationsScreen() {
           </Text>
         </View>
 
-        {alloc.target_amount && (
+        {!!alloc.target_amount && alloc.target_amount > 0 && (
           <>
             <ProgressBar percent={progress} />
             <View className="flex-row justify-between mt-1">
