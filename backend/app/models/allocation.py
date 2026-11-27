@@ -55,6 +55,9 @@ class Allocation(Base):
     )
     period_start = Column(DateTime, nullable=True)
     period_end = Column(DateTime, nullable=True)
+    # Budgets only (STU-795): the start of the window carry-over was switched on in,
+    # naive UTC like ``period_start``; null means off. Server-managed.
+    carry_over_from = Column(DateTime, nullable=True)
 
     # Goal settings
     target_date = Column(DateTime, nullable=True)

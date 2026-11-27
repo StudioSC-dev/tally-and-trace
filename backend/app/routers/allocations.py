@@ -13,16 +13,21 @@ from app.models.category import Category
 from app.models.allocation import Allocation, AllocationType
 from app.schemas.allocation import (
     MULTI_ACCOUNT, TRANSACTION_TOTAL, AllocationCreate, AllocationResponse, AllocationUpdate, AllocationListResponse,
-    AllocationRankedResponse, AllocationRankOrder, account_rule_error, goal_mode,
+    AllocationRankedResponse, AllocationRankOrder, BudgetPeriodResponse, account_rule_error, goal_mode,
 )
+from app.schemas.transaction import BudgetTransactionPage
+from app.core.redaction import FULL, serialize_transactions
 from app.models.user import CurrencyType, User
 from app.core.time import utc_now
 from app.routers.transactions import _lock_allocations, _recompute_budget_total
 from app.services import allocation_rank
+from app.services import budget_periods
 from app.services.fx import FxRates, get_fx
 from app.services.savings_progress import progress_for
 
 router = APIRouter()
+
+CARRY_NEEDS_A_LIMIT = "carry_over needs a target_amount or a monthly_target"
 
 
 def _ids(value, detail: str) -> list:
@@ -60,16 +65,31 @@ def _first_aggregated_account(allocation_type, configuration) -> Optional[int]:
                     "configuration.account_ids must be a list of ids")
     return first
 
+def _money(value):
+    return None if value is None else float(value)
+
+
 def _responses(db: Session, allocations: Iterable[Allocation],
                fx: FxRates) -> List[AllocationResponse]:
-    """The allocations as responses: savings ones with their calculated progress."""
+    """The allocations as responses: savings ones with their calculated progress,
+    budgets with their current window (``services.budget_periods``), any elapsed
+    budget rolled first in a short transaction of its own (STU-795)."""
     allocations = list(allocations)
+    budget_periods.roll_for_read(db, allocations)
     progress = progress_for(db, allocations, fx)
+    budgets = budget_periods.snapshots(db, allocations, fx)
     bodies = []
     for allocation in allocations:
         body = AllocationResponse.model_validate(allocation)
         if allocation.id in progress:
             body = body.model_copy(update=progress[allocation.id].as_fields())
+        if allocation.id in budgets:
+            fields = budgets[allocation.id].current.current_fields()
+            body = body.model_copy(update={
+                **fields, **{k: _money(fields[k]) for k in ("current_amount", "carry_in",
+                                                            "available")}})
+        else:
+            body = body.model_copy(update={"carry_over_from": None})
         bodies.append(body)
     return bodies
 
@@ -150,6 +170,10 @@ def create_allocation(
     locking.lock_owner_budgets(db, current_user.id)
     _validate_configuration(db, current_user, allocation.configuration)
     allocation_data = allocation.dict()
+    is_budget = allocation.allocation_type == AllocationType.BUDGET
+    carry_over = bool(allocation_data.pop("carry_over", None)) and is_budget
+    if carry_over and allocation.target_amount is None and allocation.monthly_target is None:
+        raise HTTPException(status_code=422, detail=CARRY_NEEDS_A_LIMIT)
     first = _first_aggregated_account(allocation.allocation_type, allocation.configuration)
     if first is not None:
         allocation_data["account_id"] = first
@@ -177,6 +201,9 @@ def create_allocation(
     if db_allocation.allocation_type == AllocationType.BUDGET:
         # A budget's total is derived from its rows (STU-222): a sent one is ignored.
         _recompute_budget_total(db, db_allocation, [None])
+        if carry_over:
+            # Carry starts at the current window (STU-795).
+            db_allocation.carry_over_from = budget_periods.naive_utc(db_allocation.period_start)
     db.commit()
     db.refresh(db_allocation)
     return _responses(db, [db_allocation], fx)[0]
@@ -210,6 +237,24 @@ def update_allocation(
     db.refresh(db_allocation)
     return _responses(db, [db_allocation], fx)[0]
 
+def _budget_configuration(stored, sent):
+    """A budget's configuration as edited: the stored ``account_ids`` are kept when
+    the edit sends no configuration (null) or one without the key (STU-795), so an
+    older form never widens an envelope to every account."""
+    kept = stored.get("account_ids") if isinstance(stored, dict) else None
+    if not isinstance(kept, list) or not kept:
+        return sent
+    if sent is None:
+        return {"account_ids": kept}
+    if isinstance(sent, dict) and "account_ids" not in sent:
+        return {**sent, "account_ids": kept}
+    return sent
+
+
+def _code(currency) -> str:
+    return getattr(currency, "value", currency) or CurrencyType.PHP.value
+
+
 def apply_allocation_update(db: Session, user: User, allocation: Allocation,
                             update_data: dict) -> Allocation:
     """Apply an allocation edit, uncommitted, and return the allocation.
@@ -219,6 +264,13 @@ def apply_allocation_update(db: Session, user: User, allocation: Allocation,
     change never races a transaction write discovering that owner's budgets
     (STU-222). A budget's total is derived from its rows: a sent one is ignored
     and the total is recomputed.
+
+    A budget first closes its elapsed windows under the settings they ran with
+    (STU-795), then the edit is checked and applied: a currency change once a
+    window is stored, a ``period_start`` before the newest stored window's end
+    and ``carry_over`` true with no limit left are refused (422) with nothing
+    changed. ``carry_over`` true starts carry at the current window (kept when
+    already on), false or no limit left clears it, and leaving budget clears it.
     """
     locking.lock_owner_budgets(db, user.id)
     locked = _lock_allocations(db, [allocation])
@@ -227,11 +279,19 @@ def apply_allocation_update(db: Session, user: User, allocation: Allocation,
         raise HTTPException(status_code=404, detail="Allocation not found")
     (allocation,) = locked
     was_ranked = allocation_rank.is_ranked(allocation.allocation_type, allocation.is_active)
+    was_budget = allocation.allocation_type == AllocationType.BUDGET
+    if was_budget:
+        budget_periods.roll(db, allocation)
     update_data = dict(update_data)
+    carry_over = update_data.pop("carry_over", None)
     if "currency" in update_data and update_data["currency"] is None:
         update_data.pop("currency")  # a null currency is no change, never a null column
     if "is_active" in update_data and update_data["is_active"] is None:
         update_data.pop("is_active")  # a null is_active is no change, never a null column
+    is_budget = update_data.get("allocation_type", allocation.allocation_type) == AllocationType.BUDGET
+    if is_budget and was_budget and "configuration" in update_data:
+        update_data["configuration"] = _budget_configuration(
+            allocation.configuration, update_data["configuration"])
     if {"allocation_type", "configuration", "account_id"} & update_data.keys():
         # The account each mode needs (STU-777), judged on the allocation as edited.
         allocation_type = update_data.get("allocation_type", allocation.allocation_type)
@@ -247,18 +307,45 @@ def apply_allocation_update(db: Session, user: User, allocation: Allocation,
             update_data["account_id"] = first
     if "account_id" in update_data and update_data["account_id"] is not None:
         get_account_or_404(db, user, update_data["account_id"], roles=OWNER_ROLES)
+    if ("currency" in update_data
+            and _code(update_data["currency"]) != _code(allocation.currency)
+            and budget_periods.has_stored(db, allocation.id)):
+        raise HTTPException(status_code=422, detail=(
+            "This budget has closed periods in its currency; start a new envelope to "
+            "use another currency"))
+    if is_budget:
+        start = update_data.get("period_start", None if was_budget else allocation.period_start)
+        newest = budget_periods.newest_stored_end(db, allocation.id) if start else None
+        if newest is not None and budget_periods.naive_utc(start) < newest:
+            raise HTTPException(status_code=422, detail=(
+                "period_start can't be before the end of the budget's newest closed period "
+                f"({newest.isoformat()})"))
+    limits = [update_data.get(f, getattr(allocation, f)) for f in ("target_amount", "monthly_target")]
+    has_limit = any(v is not None for v in limits)
+    if is_budget and carry_over is True and not has_limit:
+        raise HTTPException(status_code=422, detail=CARRY_NEEDS_A_LIMIT)
     if update_data.get("allocation_type", allocation.allocation_type) in (
             AllocationType.BUDGET, AllocationType.SAVINGS):
         # Budgets' and savings' figures are derived (STU-222, STU-777): a sent one is ignored.
         update_data.pop("current_amount", None)
     for field, value in update_data.items():
         setattr(allocation, field, value)
+    if (not is_budget or carry_over is False or not has_limit
+            or (not was_budget and carry_over is not True)):
+        allocation.carry_over_from = None
 
     allocation.updated_at = utc_now()
     db.flush()
     allocation_rank.sync_membership(db, allocation, was_ranked)
-    if allocation.allocation_type == AllocationType.BUDGET:
+    if is_budget:
+        if not was_budget:
+            # Back to budget: its window moves to now, storing none of the windows it
+            # spent as another type.
+            budget_periods.roll(db, allocation, keep=False)
         _recompute_budget_total(db, allocation, [None])
+        if carry_over is True and allocation.carry_over_from is None:
+            allocation.carry_over_from = budget_periods.naive_utc(allocation.period_start)
+            db.flush()
     return allocation
 
 @router.delete("/{allocation_id}")
@@ -287,8 +374,11 @@ def get_allocation_progress(
     """Get progress details for an allocation"""
     allocation = get_owned_or_404(db, Allocation, allocation_id, current_user, "Allocation not found")
     # A savings allocation's figure is calculated from its mode (STU-777).
+    budget_periods.roll_for_read(db, [allocation])
     savings = progress_for(db, [allocation], fx).get(allocation.id)
-    current_amount = savings.current_amount if savings else allocation.current_amount
+    budget = budget_periods.snapshots(db, [allocation], fx).get(allocation.id)
+    current_amount = (savings.current_amount if savings
+                      else budget.current.spent if budget else allocation.current_amount)
     # Calculate progress percentage
     progress_percentage = 0
     if allocation.target_amount and allocation.target_amount > 0:
@@ -327,6 +417,68 @@ def get_allocation_progress(
     if savings:
         body.update(savings.as_fields())
     return body
+
+def _budget_or_404(db: Session, user: User, allocation_id: int) -> Allocation:
+    """The caller's own budget; a missing, foreign or non-budget allocation is a 404."""
+    allocation = get_owned_or_404(db, Allocation, allocation_id, user, "Allocation not found")
+    if allocation.allocation_type != AllocationType.BUDGET:
+        raise HTTPException(status_code=404, detail="Allocation not found")
+    return allocation
+
+
+@router.get("/{allocation_id}/periods", response_model=List[BudgetPeriodResponse])
+def get_budget_periods(
+    allocation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    fx: FxRates = Depends(get_fx),
+):
+    """A budget's last 12 windows, newest (the current one) first (STU-795)."""
+    allocation = _budget_or_404(db, current_user, allocation_id)
+    budget_periods.roll_for_read(db, [allocation])
+    snapshot = budget_periods.snapshots(db, [allocation], fx)[allocation.id]
+    return [window.as_dict() for window in snapshot.windows]
+
+
+@router.get("/{allocation_id}/transactions", response_model=BudgetTransactionPage)
+def get_budget_transactions(
+    allocation_id: int,
+    period_start: Optional[datetime] = Query(
+        None, description="The start of one of the windows /periods returns; the current "
+                          "window when omitted"),
+    limit: int = Query(10, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    fx: FxRates = Depends(get_fx),
+):
+    """The rows a budget window counts, newest first, as ``GET /transactions`` shows
+    them, with the window's per-currency subtotals and converted total (STU-795)."""
+    allocation = _budget_or_404(db, current_user, allocation_id)
+    budget_periods.roll_for_read(db, [allocation])
+    snapshot = budget_periods.snapshots(db, [allocation], fx)[allocation.id]
+    if period_start is None:
+        window = snapshot.current
+    else:
+        window = snapshot.window_at(budget_periods.naive_utc(period_start))
+        if window is None:
+            raise HTTPException(status_code=422, detail=(
+                "period_start must be the start of one of the budget's last 12 periods"))
+    query = budget_periods.counted_rows(db, allocation, window)
+    total = query.count()
+    rows = query.offset(offset).limit(limit).all()
+    items = serialize_transactions(db, current_user, rows)
+    quote = allocation.currency or CurrencyType.PHP
+    for item, row in zip(items, rows):
+        if item["view"] == FULL:
+            item["missing_rate"] = fx.rate(budget_periods.row_currency(db, row), quote) is None
+    return {
+        "items": items, "total": total, "has_more": offset + len(rows) < total,
+        "currency_subtotals": {code: float(amount)
+                               for code, amount in sorted(window.subtotals.items())},
+        "converted_total": float(window.spent),
+    }
+
 
 @router.get("/summary/goals")
 def get_goals_summary(

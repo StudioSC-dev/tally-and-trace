@@ -1,8 +1,8 @@
 """An allocation's account is optional where its mode needs none (STU-777).
 
 ``allocations.account_id`` is nullable. A ``transaction_total`` savings
-allocation can be saved with no account; budgets, goals and ``target_balance``
-savings (a missing ``goal_mode`` included) still need one; ``multi_account``
+allocation can be saved with no account, and so can a budget (STU-795); goals and
+``target_balance`` savings (a missing ``goal_mode`` included) still need one; ``multi_account``
 savings store their first aggregated account. The migration's downgrade
 backfills nulls with the owner's main account, else their first owned one,
 before restoring NOT NULL. Skips without a database.
@@ -196,13 +196,12 @@ def test_transaction_total_savings_needs_no_account(sw_client, sw_people):
 
 
 @pytest.mark.parametrize("body", [
-    {"allocation_type": "budget", "configuration": {"category_ids": []}},
     {"allocation_type": "goal"},
     {"allocation_type": "savings", "configuration": {"goal_mode": "target_balance"}},
     {"allocation_type": "savings", "configuration": {}},
     {"allocation_type": "savings"},
 ])
-def test_budgets_goals_and_target_balance_need_an_account(sw_client, sw_people, body):
+def test_goals_and_target_balance_savings_need_an_account(sw_client, sw_people, body):
     me = sw_people()
     _create(sw_client, me, body, expect=422)
 
@@ -252,7 +251,9 @@ def test_update_applies_the_rule_to_the_edited_allocation(sw_client, sw_people):
                                      "configuration": {"category_ids": []},
                                      "period_frequency": "monthly",
                                      "period_start": "2026-11-01T00:00:00"})
-    _update(sw_client, me, budget["id"], {"account_id": None}, expect=422)
+    # A budget needs no account (STU-795): clearing it succeeds.
+    cleared = _update(sw_client, me, budget["id"], {"account_id": None})
+    assert cleared["account_id"] is None
 
     savings = _create(sw_client, me, {"allocation_type": "savings", "account_id": bank,
                                       "configuration": {"goal_mode": "target_balance"}})

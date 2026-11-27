@@ -167,7 +167,7 @@ def redate_row(db: Session, txn: Transaction, new_date: datetime) -> None:
     allocations = _lock_allocations(db, _counted_allocations(
         db, user_id=txn.user_id, transaction_type=txn.transaction_type, amount=txn.amount,
         is_posted=txn.is_posted, allocation_id=txn.allocation_id,
-        category_id=txn.category_id))
+        category_id=txn.category_id, account_id=txn.account_id))
     txn.transaction_date = new_date
     txn.updated_at = utc_now()
     db.flush()
