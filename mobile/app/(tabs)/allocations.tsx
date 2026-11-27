@@ -59,8 +59,8 @@ export function AllocationFormModal({
     description: initial?.description ?? '',
     target_amount: String(initial?.target_amount ?? ''),
     current_amount: String(initial?.current_amount ?? 0),
-    // An existing allocation keeps its own account (or none); only a new one defaults to the first.
-    account_id: String(initial?.id ? (initial.account_id ?? '') : (initial?.account_id ?? accounts[0]?.id ?? '')),
+    // Only a budget may have no account; everything else falls back to the first one.
+    account_id: String(initial?.account_id ?? (initial?.allocation_type === 'budget' ? '' : (accounts[0]?.id ?? ''))),
     currency: initial?.currency ?? defaultCurrency,
   })
 
@@ -232,6 +232,8 @@ export default function AllocationsScreen() {
 
   const [modalVisible, setModalVisible] = useState(false)
   const [editing, setEditing] = useState<Allocation | undefined>()
+  // Bumped on every open so the form (mounted while hidden) starts from fresh state.
+  const [formKey, setFormKey] = useState(0)
 
   const allocations = data?.items ?? []
   // Allocations are private to their owner, so only own accounts are offered.
@@ -287,7 +289,7 @@ export default function AllocationsScreen() {
 
         <View className="flex-row gap-2 mt-3">
           <TouchableOpacity
-            onPress={() => { setEditing(alloc); setModalVisible(true) }}
+            onPress={() => { setEditing(alloc); setFormKey((k) => k + 1); setModalVisible(true) }}
             className="flex-1 py-1.5 rounded-lg bg-slate-700 items-center"
           >
             <Text className="text-slate-200 text-xs font-medium">✏️ Edit</Text>
@@ -316,7 +318,7 @@ export default function AllocationsScreen() {
           title="Allocations & Goals"
           action={
             <TouchableOpacity
-              onPress={() => { setEditing(undefined); setModalVisible(true) }}
+              onPress={() => { setEditing(undefined); setFormKey((k) => k + 1); setModalVisible(true) }}
               className="bg-sky-500 px-3 py-1.5 rounded-lg"
             >
               <Text className="text-white font-semibold text-sm">+ Add</Text>
@@ -353,6 +355,7 @@ export default function AllocationsScreen() {
       </ScrollView>
 
       <AllocationFormModal
+        key={formKey}
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
         initial={editing}
