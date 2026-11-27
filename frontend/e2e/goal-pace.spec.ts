@@ -290,7 +290,7 @@ test.describe('goal pace and underfunded flag (STU-790)', () => {
   test('AC5: creating a goal reads the free flow again, and the new goal gets its pace at the bottom', async ({ page }) => {
     const api = await openWithWrites(page)
     await expect.poll(() => api.count('GET', FLOW_PATH)).toBe(1)
-    await page.getByRole('button', { name: 'Add allocation' }).click()
+    await page.getByRole('button', { name: 'Add savings goal' }).click()
     const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Create savings tracker' }) })
     await form.locator('[data-field="name"]').fill('Wedding fund')
     const savingsAccount = household.accounts.find((a) => a.account_type === 'savings' && a.my_role === 'owner')

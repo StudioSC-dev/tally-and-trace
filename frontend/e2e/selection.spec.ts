@@ -168,7 +168,7 @@ async function openRecurringDialog(page: Page): Promise<ApiMock> {
 async function openBudgetDialog(page: Page): Promise<ApiMock> {
   const api = await openAllocations(page)
   await page.getByRole('button', { name: 'Budgets', exact: true }).click()
-  await page.getByRole('button', { name: 'Add allocation', exact: true }).click()
+  await page.getByRole('button', { name: 'Add budget', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Create budget envelope' })).toBeVisible()
   return api
 }
@@ -722,12 +722,12 @@ const INVENTORY: Group[] = [
     group: (page) => page.getByRole('button', { name: 'Recurring', exact: true }).locator('..'),
     selected: 'Recurring',
     other: 'Budgets',
-    effect: 'Budgets lists the budget envelopes (Groceries, Dining out, Transport) and the add button becomes Add allocation',
+    effect: 'Budgets lists the budget envelopes (Groceries, Dining out, Transport) and the add button becomes Add budget',
     before: async (page) => {
       await expect(page.getByRole('button', { name: 'Add recurring entry', exact: true })).toBeVisible()
     },
     after: async (page) => {
-      await expect(page.getByRole('button', { name: 'Add allocation', exact: true })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Add budget', exact: true })).toBeVisible()
       await expect(page.getByText('Transport', { exact: true }).first()).toBeVisible()
     },
   },
@@ -787,7 +787,7 @@ const INVENTORY: Group[] = [
     open: async (page) => {
       const api = await openAllocations(page)
       await page.getByRole('button', { name: 'Savings', exact: true }).click()
-      await page.getByRole('button', { name: 'Add allocation', exact: true }).click()
+      await page.getByRole('button', { name: 'Add savings goal', exact: true }).click()
       await dialogOf(page).getByRole('button', { name: /Combined account total/ }).click()
       await dialogOf(page).locator('[data-field="savings_account_ids"]').getByRole('button', { name: /^BPI Payroll/ }).click()
       return api

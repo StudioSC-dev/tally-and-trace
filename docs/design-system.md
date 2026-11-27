@@ -149,6 +149,9 @@ Every route renders into one container, `.page` (`frontend/src/assets/index.css`
   grouped on the right of the same row, 12px apart (8px on a phone). When they do not fit beside the
   title they wrap under it, one section gap (32) down; the dashboard's filters always take that
   second row on a phone. A page's lead sentence is its own section under the header, not part of it.
+- **Tabbed pages:** a page's main action sits in `PageHeader` on every tab, and a tab never adds its own header
+  row. Each tab opens with one `SectionIntro` (`frontend/src/components/`): a `text-xl` heading and a one-line
+  description, directly under the tab nav, with the tab's search or filter toolbar right below it.
 
 ## Radius
 

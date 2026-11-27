@@ -298,7 +298,7 @@ const SURFACES: Surface[] = [
   {
     key: 'allocation create',
     page: false,
-    open: (p) => openDialog(p, '/allocations?tab=budgets', 'Allocations', (q) => q.getByRole('button', { name: 'Add allocation', exact: true }), 'Create budget envelope'),
+    open: (p) => openDialog(p, '/allocations?tab=budgets', 'Allocations', (q) => q.getByRole('button', { name: 'Add budget', exact: true }), 'Create budget envelope'),
     target: (p) => dialogOf(p).locator('svg[data-icon="close"], svg[data-icon="pause"]'),
   },
   {
@@ -320,7 +320,7 @@ const SURFACES: Surface[] = [
   {
     key: 'wishlist item',
     page: false,
-    open: (p) => openDialog(p, '/allocations?tab=wishlist', 'Allocations', (q) => q.getByRole('button', { name: 'Add item', exact: true }), 'Add item'),
+    open: (p) => openDialog(p, '/allocations?tab=wishlist', 'Allocations', (q) => q.getByRole('button', { name: 'Add wishlist item', exact: true }), 'Add item'),
     target: (p) => p.getByRole('button', { name: 'Close wishlist modal' }).locator('svg'),
   },
 ]

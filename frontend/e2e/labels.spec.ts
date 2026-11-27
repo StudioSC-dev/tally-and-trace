@@ -227,7 +227,7 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
   for (const form of ALLOCATION_FORMS) {
     test(`labels are sentence case: allocations ${form.name}`, async ({ page }) => {
       await open(page, `/allocations?tab=${form.tab}`)
-      await page.getByRole('button', { name: 'Add allocation' }).click()
+      await page.getByRole('button', { name: form.tab === 'budgets' ? 'Add budget' : 'Add savings goal' }).click()
       const dialog = overlay(page)
       await expect(dialog.getByRole('heading', { name: /^Create / })).toBeVisible()
       if (form.mode) await dialog.getByRole('button', { name: form.mode }).click()

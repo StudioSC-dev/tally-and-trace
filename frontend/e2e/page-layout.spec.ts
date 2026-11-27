@@ -8,9 +8,11 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
-import { household, householdViewRoutes, mockHousehold, wishlistRoutes, withDollars, withFiveCurrencies } from './support/fixtures/household'
+import { household, householdViewRoutes, householdWishlistRoutes, mockHousehold, wishlistRoutes, withDollars, withFiveCurrencies } from './support/fixtures/household'
 import type { HouseholdData } from './support/fixtures/household'
-import { addRoutes } from './support/mockApi'
+import { ITEMS, PLAN_OK } from './support/fixtures/wishlistPlan'
+import { addRoutes, apiRoute, sequenceRoute } from './support/mockApi'
+import type { ApiRoute } from './support/mockApi'
 import { shot } from './support/shot'
 
 // This spec lives in <repo>/frontend/e2e.
@@ -62,13 +64,16 @@ const BASE_TOTALS = {
   'available-cash': '₱343,230.90',
 }
 const BASE_TRANSACTIONS_SECTIONS = ['due-section', 'transactions-list-card', 'role:status', 'holds:list-sheet']
-/** The Allocations tabs on `origin/main`, in order, and the header action each one shows (none on Wishlist). */
-const BASE_ALLOCATION_TABS = [
-  { label: 'Recurring', action: 'Add recurring entry' },
-  { label: 'Budgets', action: 'Add allocation' },
-  { label: 'Savings', action: 'Add allocation' },
-  { label: 'Wishlist', action: null },
-]
+/**
+ * The Allocations tabs, in order, with each tab's create button (in the page header) and its `SectionIntro` heading
+ * (STU-796: one layout on every tab).
+ */
+const ALLOCATION_TABS = [
+  { label: 'Recurring', param: 'recurring', action: 'Add recurring entry', intro: 'Recurring entries' },
+  { label: 'Budgets', param: 'budgets', action: 'Add budget', intro: 'Budget envelopes' },
+  { label: 'Savings', param: 'savings', action: 'Add savings goal', intro: 'Savings & investment targets' },
+  { label: 'Wishlist', param: 'wishlist', action: 'Add wishlist item', intro: 'Wishlist' },
+] as const
 
 interface Box {
   x: number
@@ -88,9 +93,9 @@ async function boxOf(el: Locator): Promise<Box> {
 }
 
 /** Opens a route signed in as the household's user, once its title is up, the data has settled and fonts are in. */
-async function open(page: Page, r: Pick<PageCase, 'path' | 'title' | 'lands'>, data: HouseholdData = household): Promise<void> {
+async function open(page: Page, r: Pick<PageCase, 'title' | 'lands'> & { path: string }, data: HouseholdData = household, extra: ApiRoute[] = []): Promise<void> {
   await mockHousehold(page, data)
-  await addRoutes(page, [...householdViewRoutes(data), ...wishlistRoutes(data)])
+  await addRoutes(page, [...householdViewRoutes(data), ...wishlistRoutes(data), ...extra])
   await page.goto(r.path)
   // The dev server compiles a route's chunk on its first visit; under a full parallel run that can pass 5s.
   await expect(page.getByRole('heading', { level: 1, name: r.title })).toBeVisible({ timeout: 15_000 })
@@ -337,19 +342,224 @@ test('excluded page features are unchanged: transactions order', async ({ page }
   await shot(page, 'unchanged-transactions')
 })
 
-test('excluded page features are unchanged: allocations tabs', async ({ page }) => {
-  await open(page, ROUTES[2])
-  const tabs = page.locator('main nav').filter({ has: page.getByRole('button', { name: 'Recurring', exact: true }) }).getByRole('button')
+/** The Wishlist tab with items and a purchase plan, so the filter's place ahead of both can be read. */
+const POPULATED_WISHLIST: ApiRoute[] = [...householdWishlistRoutes(ITEMS), apiRoute('GET', '/wishlist/plan', PLAN_OK)]
+
+test('excluded page features are unchanged: allocations tabs', async ({ page }, testInfo) => {
+  await open(page, ROUTES[2], household, POPULATED_WISHLIST)
+  const nav = page.locator('main nav').filter({ has: page.getByRole('button', { name: 'Recurring', exact: true }) })
+  const tabs = nav.getByRole('button')
   const labels = (await tabs.allInnerTexts()).map((t) => t.trim())
-  expect(labels, "the Allocations tabs keep main's labels and order").toEqual(BASE_ALLOCATION_TABS.map((t) => t.label))
-  // The header action, read by name so the same check runs on main, where the header is not a <header>.
-  const action = page.locator('main').getByRole('button', { name: /^Add (recurring entry|allocation)$/ })
-  for (const [i, tab] of BASE_ALLOCATION_TABS.entries()) {
+  expect(labels, 'the Allocations tabs keep their labels and order').toEqual(ALLOCATION_TABS.map((t) => t.label))
+  const header = page.getByTestId('page-header')
+  const actions = header.getByTestId('page-actions')
+  const phone = testInfo.project.name === 'phone'
+  const layouts: { tab: string; headerHeight: number; buttonX: number; buttonY: number; buttonWidth: number; buttonHeight: number }[] = []
+  for (const [i, tab] of ALLOCATION_TABS.entries()) {
     await tabs.nth(i).click()
     const pressed = await tabs.evaluateAll((all) => all.map((e) => e.getAttribute('aria-pressed')))
-    expect(pressed, `${tab.label} is the one selected tab`).toEqual(BASE_ALLOCATION_TABS.map((_, j) => String(j === i)))
-    const actions = (await action.allInnerTexts()).map((t) => t.trim())
-    expect(actions, `the ${tab.label} tab's header action`).toEqual(tab.action ? [tab.action] : [])
+    expect(pressed, `${tab.label} is the one selected tab`).toEqual(ALLOCATION_TABS.map((_, j) => String(j === i)))
+    await expect(page.getByTestId('section-intro')).toHaveCount(1)
+
+    // One create button, in the page header's actions, with the tab's label.
+    expect((await actions.getByRole('button').allInnerTexts()).map((t) => t.trim()), `the ${tab.label} tab's header action`).toEqual([tab.action])
+    // No other primary button in the tab body, apart from an empty state's action.
+    const strays = await page.locator('main [data-variant="primary"]').evaluateAll((all) =>
+      all.filter((e) => !e.closest('[data-testid="page-actions"]') && !e.closest('[data-testid="empty-state"]')).map((e) => (e.textContent ?? '').trim()),
+    )
+    expect(strays, `the ${tab.label} tab has no other primary button`).toEqual([])
+
+    const h1 = await boxOf(page.locator('main h1'))
+    const button = await boxOf(actions.getByRole('button', { name: tab.action, exact: true }))
+    if (!phone) expect(Math.abs(top(button) - top(h1)), `the ${tab.label} button's top is within 4px of the title's`).toBeLessThanOrEqual(4)
+    const head = await boxOf(header)
+    layouts.push({ tab: tab.label, headerHeight: head.height, buttonX: button.x, buttonY: button.y - head.y, buttonWidth: button.width, buttonHeight: button.height })
+    const widths = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }))
+    expect(widths.scroll, `the ${tab.label} tab does not overflow sideways`).toBeLessThanOrEqual(widths.client)
+
+    // The one SectionIntro: a text-xl heading and its description, the first block after the tab nav.
+    const intro = page.getByTestId('section-intro')
+    const heading = intro.getByRole('heading', { level: 2, name: tab.intro, exact: true })
+    await expect(heading).toBeVisible()
+    await expect(heading, `${tab.label}'s intro heading is text-xl`).toHaveClass(/(^|\s)text-xl(\s|$)/)
+    expect(((await intro.locator('p').innerText()) ?? '').trim().length, `${tab.label}'s intro has a description`).toBeGreaterThan(0)
+    const between = await nav.evaluate((n, introTop) => {
+      const intro = document.querySelector('[data-testid="section-intro"]')
+      if (!intro) return ['no intro']
+      const navBottom = n.getBoundingClientRect().bottom
+      const root = n.closest('.page') ?? document.body
+      const follows = !!(n.compareDocumentPosition(intro) & Node.DOCUMENT_POSITION_FOLLOWING)
+      const found = [...root.querySelectorAll('*')]
+        .filter((e) => !e.contains(intro) && !intro.contains(e) && !n.contains(e))
+        .filter((e) => {
+          const b = e.getBoundingClientRect()
+          return b.height > 0 && b.width > 0 && b.top >= navBottom - 0.5 && b.top < introTop - 0.5
+        })
+        .map((e) => `${e.tagName.toLowerCase()} ${(e.textContent ?? '').trim().slice(0, 20)}`)
+      return follows ? found : ['intro before nav']
+    }, (await boxOf(intro)).y)
+    expect(between, `nothing sits between the ${tab.label} nav and its intro`).toEqual([])
+
+    // Each toolbar follows the intro, in order.
+    const introBottom = bottom(await boxOf(intro))
+    if (tab.param === 'recurring') {
+      const search = bottom(await boxOf(page.getByTestId('recurring-search')))
+      const tag = await boxOf(page.getByTestId('tag-filter'))
+      expect(top(await boxOf(page.getByTestId('recurring-search'))), 'the search follows the intro').toBeGreaterThanOrEqual(introBottom)
+      expect(top(tag), 'the tag filter follows the search').toBeGreaterThanOrEqual(search)
+      expect(top(tag), 'the tag filter is ahead of the first group').toBeLessThan(top(await boxOf(page.getByTestId('kind-section-subscription'))))
+    }
+    if (tab.param === 'wishlist') {
+      const note = page.getByTestId('purchase-note')
+      await expect(note).toHaveText('Marking an item purchased does not record the payment. Its estimate moves only once you record the transaction.')
+      const filter = await boxOf(page.getByLabel('Show purchased'))
+      const noteBox = await boxOf(note)
+      expect(top(noteBox) - introBottom, 'the purchase note sits right under the intro').toBeLessThanOrEqual(8)
+      expect(top(noteBox), 'the purchase note follows the intro').toBeGreaterThanOrEqual(introBottom)
+      expect(top(filter), 'Show purchased follows the note').toBeGreaterThanOrEqual(bottom(noteBox))
+      expect(top(await boxOf(page.getByTestId('purchase-plan'))), 'the purchase plan follows the filter').toBeGreaterThanOrEqual(bottom(filter))
+      expect(top(await boxOf(page.getByTestId(`wishlist-item-${ITEMS[0].id}`))), 'the item list follows the plan').toBeGreaterThanOrEqual(bottom(await boxOf(page.getByTestId('purchase-plan'))))
+    }
+    await shot(page, `allocations-tab-${tab.param}`)
+  }
+  // The header lays out the same on every tab: the same height, and the button in the same place at the same size.
+  for (const l of layouts.slice(1)) {
+    expect(l.headerHeight, `${l.tab}: header height matches ${layouts[0].tab}`).toBeCloseTo(layouts[0].headerHeight, 0)
+    expect(l.buttonY, `${l.tab}: button offset in the header matches`).toBeCloseTo(layouts[0].buttonY, 0)
+    // The button's label sets its width on desktop, where it hangs from the same right edge; on a phone it is full width.
+    if (phone) {
+      expect(l.buttonX, `${l.tab}: button left matches`).toBeCloseTo(layouts[0].buttonX, 0)
+      expect(l.buttonWidth, `${l.tab}: button width matches`).toBeCloseTo(layouts[0].buttonWidth, 0)
+    } else expect(l.buttonX + l.buttonWidth, `${l.tab}: button right edge matches`).toBeCloseTo(layouts[0].buttonX + layouts[0].buttonWidth, 0)
+    expect(l.buttonHeight, `${l.tab}: button height matches`).toBeCloseTo(layouts[0].buttonHeight, 0)
   }
   await shot(page, 'unchanged-allocations')
+})
+
+// ─── Allocations create flows ───────────────────────────────────────────────────────────────────
+
+/** Every input, select and radio the Wishlist form shows, as it reads now: the form's defaults, or an item's values. */
+const wishlistFormValues = (page: Page): Promise<string[]> =>
+  page.locator('form:has(input[placeholder="What are you saving for?"])').locator('input, select, textarea').evaluateAll((all) =>
+    all.map((e) => {
+      const input = e as HTMLInputElement
+      return `${input.type}:${input.name || input.placeholder}:${input.type === 'radio' || input.type === 'checkbox' ? input.checked : input.value}`
+    }),
+  )
+
+test('allocation header actions preserve create flows', async ({ page }) => {
+  const refusal = { body: { detail: 'That card cannot take this installment.' }, status: 422 }
+  const created = { body: { ...ITEMS[2], id: 990, name: 'Boiler' }, status: 201 }
+  await open(page, ROUTES[2], household, [...POPULATED_WISHLIST, sequenceRoute<unknown>('POST', '/wishlist/', [refusal, created])])
+  const api = await addRoutes(page, [])
+  const header = page.getByTestId('page-actions')
+  const tab = (label: string): Locator => page.locator('main nav').getByRole('button', { name: label, exact: true })
+  const overlay = page.locator('.modal-backdrop')
+
+  // Recurring, Budgets and Savings: the header action opens that tab's own form, with its preset.
+  await header.getByRole('button', { name: 'Add recurring entry', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Add recurring entry', exact: true })).toBeVisible()
+  await page.getByLabel('Close allocation modal').click()
+  await expect(overlay).toHaveCount(0)
+  await tab('Budgets').click()
+  await header.getByRole('button', { name: 'Add budget', exact: true }).click()
+  await expect(page.getByRole('heading', { name: /^Create budget envelope/ })).toBeVisible()
+  await page.getByLabel('Close allocation modal').click()
+  await expect(overlay).toHaveCount(0)
+  await tab('Savings').click()
+  await header.getByRole('button', { name: 'Add savings goal', exact: true }).click()
+  await expect(page.getByRole('heading', { name: /^Create savings tracker/ })).toBeVisible()
+  await page.getByLabel('Close allocation modal').click()
+  await expect(overlay).toHaveCount(0)
+
+  // Wishlist: the header action opens the add form.
+  await tab('Wishlist').click()
+  const add = header.getByRole('button', { name: 'Add wishlist item', exact: true })
+  const name = page.getByPlaceholder('What are you saving for?')
+  await add.click()
+  await expect(page.getByRole('heading', { name: 'Add item', exact: true })).toBeVisible()
+  const defaults = await wishlistFormValues(page)
+  // Cancel closes it.
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(overlay).toHaveCount(0)
+  // A failed save keeps the form open with the entered values and the API's reason.
+  await add.click()
+  expect(await wishlistFormValues(page), 'reopening after a cancel starts from the defaults').toEqual(defaults)
+  await name.fill('Boiler')
+  await page.getByPlaceholder('0.00').first().fill('18000')
+  await page.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(page.getByTestId('wishlist-save-error')).toHaveText('That card cannot take this installment.')
+  await expect(name).toHaveValue('Boiler')
+  await expect(page.getByPlaceholder('0.00').first()).toHaveValue('18000')
+  // Closing and reopening starts fresh, with no earlier error.
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(overlay).toHaveCount(0)
+  await add.click()
+  await expect(page.getByTestId('wishlist-save-error')).toHaveCount(0)
+  expect(await wishlistFormValues(page), 'reopening after a failed save starts from the defaults').toEqual(defaults)
+  // A successful save closes it, and sends the entered values.
+  await name.fill('Boiler')
+  await page.getByPlaceholder('0.00').first().fill('18000')
+  await page.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(overlay).toHaveCount(0)
+  expect(api.bodies('POST', '/wishlist/')[1], 'the save sends the form as before').toMatchObject({ name: 'Boiler', estimated_cost: 18000, currency: 'PHP', priority: 'medium', payment_plan: 'full' })
+  await add.click()
+  expect(await wishlistFormValues(page), 'reopening after a save starts from the defaults').toEqual(defaults)
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  // Editing opens with that item's own values.
+  const first = ITEMS[0]
+  await page.getByTestId(`wishlist-item-${first.id}`).getByRole('button', { name: 'Edit', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Edit item', exact: true })).toBeVisible()
+  await expect(name).toHaveValue(first.name)
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(overlay).toHaveCount(0)
+  await add.click()
+  expect(await wishlistFormValues(page), 'adding after an edit starts from the defaults').toEqual(defaults)
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+})
+
+test('allocation header actions preserve create flows: an empty wishlist', async ({ page }) => {
+  const refusal = { body: { detail: 'That card cannot take this installment.' }, status: 422 }
+  await open(page, { path: '/allocations?tab=wishlist', title: 'Allocations', lands: '/allocations' }, household, [
+    sequenceRoute<unknown>('POST', '/wishlist/', [refusal, refusal, refusal, refusal]),
+  ])
+  const header = page.getByTestId('page-actions')
+  const first = page.getByTestId('empty-state').getByRole('button', { name: 'Add your first item', exact: true })
+  const name = page.getByPlaceholder('What are you saving for?')
+  const overlay = page.locator('.modal-backdrop')
+  await first.click()
+  await expect(page.getByRole('heading', { name: 'Add item', exact: true })).toBeVisible()
+  const defaults = await wishlistFormValues(page)
+  // Cancel, the close button and a backdrop click each close it.
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(overlay).toHaveCount(0)
+  await first.click()
+  await page.getByLabel('Close wishlist modal').click()
+  await expect(overlay).toHaveCount(0)
+  await first.click()
+  await overlay.click({ position: { x: 4, y: 4 } })
+  await expect(overlay).toHaveCount(0)
+  // After a failed save, either create action reopens a fresh form with no error.
+  for (const reopen of [header.getByRole('button', { name: 'Add wishlist item', exact: true }), first]) {
+    await first.click()
+    await name.fill('Boiler')
+    await page.getByPlaceholder('0.00').first().fill('18000')
+    await page.getByRole('button', { name: 'Add', exact: true }).click()
+    await expect(page.getByTestId('wishlist-save-error')).toBeVisible()
+    await overlay.click({ position: { x: 4, y: 4 } })
+    await expect(overlay).toHaveCount(0)
+    await reopen.click()
+    await expect(page.getByTestId('wishlist-save-error')).toHaveCount(0)
+    expect(await wishlistFormValues(page), 'reopening restores the defaults').toEqual(defaults)
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(overlay).toHaveCount(0)
+  }
+})
+
+test('Page documents the main action rule for tabbed pages', () => {
+  const start = DOC.indexOf('### Page')
+  expect(start, 'the design system has a Page section').toBeGreaterThanOrEqual(0)
+  const next = DOC.slice(start + 1).search(/\n#{2,3} /)
+  const section = DOC.slice(start, next === -1 ? undefined : start + 1 + next).replace(/\s+/g, ' ')
+  expect(section).toContain("a page's main action sits in `PageHeader` on every tab, and a tab never adds its own header row")
 })

@@ -135,7 +135,7 @@ async function scenarioB(browser) {
     await h.waitQuiet(page)
     await page.getByRole('button', { name: 'Budgets', exact: true }).click()
     await h.waitQuiet(page)
-    await page.getByRole('button', { name: 'Add allocation' }).click()
+    await page.getByRole('button', { name: 'Add budget' }).click()
     const sel = page.locator('select[data-field="account_id"]')
     await sel.waitFor()
     await h.waitQuiet(page)
