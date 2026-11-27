@@ -15,7 +15,7 @@ import type {
 } from '@tally-trace/shared'
 import { householdWishlistRoutes } from './support/fixtures/household'
 import { landingStubs } from './support/landing'
-import { apiRoute, errorRoute, mockApi, queryRoute, sequenceRoute } from './support/mockApi'
+import { apiRoute, mockApi, queryRoute, sequenceRoute } from './support/mockApi'
 import type { ApiMock, ApiRoute } from './support/mockApi'
 import { shot } from './support/shot'
 import { signedIn } from './support/signedIn'
@@ -101,6 +101,13 @@ const envelope = (over: Partial<Allocation> = {}): Allocation => ({
   ...over,
 })
 
+/**
+ * An envelope as the API sends it with no `target_amount` (STU-795 returns null, not a missing key): the shared
+ * `Allocation` type only allows a number or nothing there, so the null is put on after the typed fixture is built.
+ */
+const apiShaped = (base: Allocation, over: { target_amount?: number | null; monthly_target?: number | null }): Allocation =>
+  ({ ...base, ...over }) as unknown as Allocation
+
 const savingsGoal: Allocation = {
   id: 21,
   account_id: everyday.id,
@@ -168,6 +175,9 @@ const accountPicker = (form: Locator): Locator => field(form, 'budget_account_id
 const pickCategory = (form: Locator): Promise<void> => form.getByRole('button', { name: /Groceries/ }).first().click()
 const snapshot = (page: Page): Locator => page.locator('.modal-backdrop').filter({ has: page.getByText('Budget snapshot') })
 const detail = (page: Page): Locator => page.getByTestId('budget-detail')
+
+/** A route that answers from state each time it is called, so a write changes what the next read returns. */
+const live = <T>(method: ApiRoute['method'], path: string, respond: () => T, status = 200): ApiRoute => ({ method, path, status, body: {}, respond })
 
 const bodiesOf = (api: ApiMock, method: 'POST' | 'PUT', path: string): Record<string, unknown>[] =>
   api.bodies(method, path) as Record<string, unknown>[]
@@ -335,6 +345,135 @@ test.describe('budget form (STU-798)', () => {
     expect(puts[2]).toHaveProperty('target_amount', null)
   })
 
+  test('An unlimited envelope reads as no limit and cannot turn carry on', async ({ page }) => {
+    // The API answers an envelope with no limit as target_amount null (and no monthly_target).
+    const unlimited = apiShaped(envelope({ available: null, carry_in: 0 }), { target_amount: null, monthly_target: null })
+    const api = await openAllocations(page, {
+      list: [unlimited],
+      routes: [
+        apiRoute<Allocation>('GET', `/allocations/${unlimited.id}`, unlimited),
+        apiRoute<Allocation>('PUT', `/allocations/${unlimited.id}`, unlimited),
+      ],
+    })
+    const edit = await editForm(page)
+    await expect(field(edit, 'target_amount')).toHaveValue('')
+    await expect(carrySwitch(edit)).toHaveAttribute('aria-checked', 'false')
+    await expect(carrySwitch(edit)).toBeDisabled()
+    await edit.getByRole('button', { name: 'Update allocation' }).click()
+    await expect(edit).toBeHidden()
+    const put = bodiesOf(api, 'PUT', `/allocations/${unlimited.id}`)[0]
+    expect(put).toHaveProperty('carry_over', false)
+    expect(put).toHaveProperty('carry_over_from', null)
+    expect(put).toHaveProperty('target_amount', null)
+    expect(put).toHaveProperty('monthly_target', null)
+    // Typing a limit enables the switch; the save then sends the limit and the choice.
+    const again = await editForm(page)
+    await field(again, 'target_amount').fill('1200')
+    await expect(carrySwitch(again)).toBeEnabled()
+    await carrySwitch(again).click()
+    await again.getByRole('button', { name: 'Update allocation' }).click()
+    await expect(again).toBeHidden()
+    const second = bodiesOf(api, 'PUT', `/allocations/${unlimited.id}`)[1]
+    expect(second).toHaveProperty('target_amount', 1200)
+    expect(second).toHaveProperty('carry_over', true)
+    expect(second).not.toHaveProperty('monthly_target')
+  })
+
+  test('A limit of zero is kept, not read as no limit', async ({ page }) => {
+    const env = envelope()
+    const api = await openAllocations(page, {
+      list: [env],
+      routes: [
+        apiRoute<Allocation>('GET', `/allocations/${env.id}`, env),
+        apiRoute<Allocation>('POST', '/allocations/', env, 201),
+        apiRoute<Allocation>('PUT', `/allocations/${env.id}`, env),
+      ],
+    })
+    const edit = await editForm(page)
+    await field(edit, 'target_amount').fill('0')
+    await expect(field(edit, 'target_amount')).toHaveValue('0')
+    await expect(carrySwitch(edit)).toBeEnabled()
+    await carrySwitch(edit).click()
+    await expect(carrySwitch(edit)).toHaveAttribute('aria-checked', 'true')
+    await edit.getByRole('button', { name: 'Update allocation' }).click()
+    await expect(edit).toBeHidden()
+    const put = bodiesOf(api, 'PUT', `/allocations/${env.id}`)[0]
+    expect(put).toHaveProperty('target_amount', 0)
+    expect(put).toHaveProperty('carry_over', true)
+    expect(put).not.toHaveProperty('monthly_target')
+
+    const form = await addForm(page)
+    await field(form, 'name').fill('Nothing to spend')
+    await pickCategory(form)
+    await field(form, 'target_amount').fill('0')
+    await expect(field(form, 'target_amount')).toHaveValue('0')
+    await expect(carrySwitch(form)).toBeEnabled()
+    await form.getByRole('button', { name: 'Create budget envelope' }).click()
+    await expect.poll(() => bodiesOf(api, 'POST', '/allocations/').length).toBe(1)
+    expect(bodiesOf(api, 'POST', '/allocations/')[0]).toHaveProperty('target_amount', 0)
+  })
+
+  test('A legacy monthly target is the limit and can be cleared', async ({ page }) => {
+    // Older envelopes hold their limit as monthly_target; the API and the card read target_amount, else monthly_target.
+    const legacy = apiShaped(envelope({ available: 6000, current_amount: 1500 }), { target_amount: null, monthly_target: 6000 })
+    const api = await openAllocations(page, {
+      list: [legacy],
+      routes: [
+        apiRoute<Allocation>('GET', `/allocations/${legacy.id}`, legacy),
+        apiRoute<Allocation>('PUT', `/allocations/${legacy.id}`, legacy),
+      ],
+    })
+    await expect(card(page, legacy.name).getByTestId('card-limit')).toHaveText('₱6,000.00')
+    const edit = await editForm(page)
+    await expect(field(edit, 'target_amount')).toHaveValue('6000')
+    await expect(carrySwitch(edit)).toBeEnabled()
+    await field(edit, 'target_amount').fill('7500')
+    await edit.getByRole('button', { name: 'Update allocation' }).click()
+    await expect(edit).toBeHidden()
+    const first = bodiesOf(api, 'PUT', `/allocations/${legacy.id}`)[0]
+    expect(first).toHaveProperty('target_amount', 7500)
+    expect(first).not.toHaveProperty('monthly_target')
+
+    // Clearing the field removes the limit: both limit fields go as null, or the old monthly target would stay in force.
+    const cleared = await editForm(page)
+    await field(cleared, 'target_amount').fill('')
+    await expect(carrySwitch(cleared)).toBeDisabled()
+    await cleared.getByRole('button', { name: 'Update allocation' }).click()
+    await expect(cleared).toBeHidden()
+    const second = bodiesOf(api, 'PUT', `/allocations/${legacy.id}`)[1]
+    expect(second).toHaveProperty('target_amount', null)
+    expect(second).toHaveProperty('monthly_target', null)
+    expect(second).toHaveProperty('carry_over', false)
+  })
+
+  test('Archived accounts stay on the envelope as removable chips', async ({ page }) => {
+    // Account 9 was archived after it was chosen: the picker lists active accounts only, but the envelope still filters on it.
+    const env = envelope({ configuration: { category_ids: [groceries.id], account_ids: [joint.id, 9] } })
+    const api = await openAllocations(page, {
+      list: [env],
+      routes: [
+        apiRoute<Allocation>('GET', `/allocations/${env.id}`, env),
+        apiRoute<Allocation>('PUT', `/allocations/${env.id}`, env),
+      ],
+    })
+    const edit = await editForm(page)
+    const orphans = edit.getByTestId('budget-inactive-accounts')
+    await expect(orphans.getByRole('button')).toHaveCount(1)
+    await expect(orphans.getByRole('button', { name: 'Inactive account 9' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(accountPicker(edit).getByRole('button', { name: /^Joint savings/ })).toHaveAttribute('aria-pressed', 'true')
+    // Saved as it is, it keeps the archived id.
+    await edit.getByRole('button', { name: 'Update allocation' }).click()
+    await expect(edit).toBeHidden()
+    expect(bodiesOf(api, 'PUT', `/allocations/${env.id}`)[0]).toHaveProperty('configuration.account_ids', [joint.id, 9])
+    // Removing the chip drops the id.
+    const again = await editForm(page)
+    await again.getByTestId('budget-inactive-accounts').getByRole('button', { name: 'Inactive account 9' }).click()
+    await expect(again.getByTestId('budget-inactive-accounts')).toHaveCount(0)
+    await again.getByRole('button', { name: 'Update allocation' }).click()
+    await expect(again).toBeHidden()
+    expect(bodiesOf(api, 'PUT', `/allocations/${env.id}`)[1]).toHaveProperty('configuration.account_ids', [joint.id])
+  })
+
   test('Form explains which settings history uses', async ({ page }) => {
     await openAllocations(page, { list: [envelope()] })
     const form = await addForm(page)
@@ -482,6 +621,8 @@ test.describe('budget card and snapshot (STU-798)', () => {
       available: 13500,
       current_amount: 300,
     })
+    // The history's own read answers differently again: the envelope was renamed and moved to dollars meanwhile.
+    const renamed: Allocation = { ...rolled, name: 'Groceries and household', currency: 'USD', current_amount: 410 }
     const periods: BudgetPeriod[] = [
       period('2031-04-01', '2031-05-01', { limit: 8000, carry_in: 5500, available: 13500, spent: 300, remaining: 13200, is_current: true }),
       period('2031-03-01', '2031-04-01', { limit: 8000, carry_in: 0, available: 8000, spent: 2500, remaining: 5500 }),
@@ -489,9 +630,9 @@ test.describe('budget card and snapshot (STU-798)', () => {
     const api = await openAllocations(page, {
       list: [stale],
       routes: [
-        sequenceRoute<Allocation>('GET', `/allocations/${stale.id}`, [{ body: rolled }]),
+        sequenceRoute<Allocation>('GET', `/allocations/${stale.id}`, [{ body: rolled }, { body: renamed }]),
         apiRoute<BudgetPeriod[]>('GET', `/allocations/${stale.id}/periods`, periods),
-        queryRoute<BudgetTransactionPage>('GET', `/allocations/${stale.id}/transactions`, () => countedPage([], 300)),
+        queryRoute<BudgetTransactionPage>('GET', `/allocations/${stale.id}/transactions`, () => countedPage([], 0, 300)),
       ],
     })
     await expect(card(page, stale.name).getByTestId('card-spent')).toHaveText('₱2,500.00')
@@ -526,6 +667,11 @@ test.describe('budget card and snapshot (STU-798)', () => {
     await expect(page.getByTestId('budget-periods')).toBeVisible()
     await expect(detail(page).locator('[data-row-kind="budget-period"]')).toHaveCount(2)
     expect(api.count('GET', `/allocations/${stale.id}`)).toBe(2)
+    // The detail is drawn from the envelope its own read returned: new title, new currency; the card behind it too.
+    await expect(detail(page).getByRole('heading', { name: 'Groceries and household' })).toBeVisible()
+    await expect(rowsOf(detail(page), 'budget-period').nth(0).getByTestId('period-spent')).toHaveText('Spent $300.00')
+    await expect(rowsOf(detail(page), 'budget-period').nth(0).getByTestId('period-available')).toHaveText('Available $13,500.00')
+    await expect(card(page, 'Groceries and household').getByTestId('card-spent')).toHaveText('$410.00')
     expect(api.count('GET', `/allocations/${stale.id}/periods`)).toBe(1)
   })
 })
@@ -573,9 +719,10 @@ const countedTx = (id: number, description: string, amount: number, day: string,
   ...over,
 })
 
+/** One page of a window's counted transactions; `total` is the window's row count, which an empty page (an offset past the last row) keeps. */
 const countedPage = (items: BudgetTransaction[], total: number, converted = total, hasMore = false): BudgetTransactionPage => ({
   items,
-  total: items.length === 0 ? 0 : total,
+  total,
   has_more: hasMore,
   currency_subtotals: { PHP: converted },
   converted_total: converted,
@@ -601,6 +748,7 @@ const twelveWindows = (): BudgetPeriod[] => {
 }
 
 const rowsOf = (scope: Locator, kind: string): Locator => scope.locator(`[data-row-kind="${kind}"]`)
+const periodSpent = (scope: Locator): Locator => rowsOf(scope.getByTestId('budget-periods'), 'budget-period').nth(0).getByTestId('period-spent')
 
 test.describe('budget envelope detail (STU-798)', () => {
   test('Period history shows the newest windows and their status', async ({ page }) => {
@@ -718,6 +866,155 @@ test.describe('budget envelope detail (STU-798)', () => {
     await expect(counted.getByTestId('counted-total')).toHaveText('₱0.00')
   })
 
+  test('A warm cache never draws the previous current window while history reloads', async ({ page }) => {
+    const env = envelope()
+    const before = [
+      period('2031-03-01', '2031-04-01', { spent: 2500, remaining: 5500, is_current: true }),
+      period('2031-02-01', '2031-03-01', { spent: 1800, remaining: 6200 }),
+    ]
+    // After a roll April is current.
+    const after = [
+      period('2031-04-01', '2031-05-01', { spent: 0, remaining: 8000, is_current: true }),
+      ...before.map((w) => ({ ...w, is_current: false })),
+    ]
+    const calls: string[] = []
+    await openAllocations(page, {
+      list: [env],
+      routes: [
+        apiRoute<Allocation>('GET', `/allocations/${env.id}`, env),
+        apiRoute<BudgetPeriod[]>('GET', `/allocations/${env.id}/periods`, before),
+        queryRoute<BudgetTransactionPage>('GET', `/allocations/${env.id}/transactions`, (q) => {
+          const start = q.get('period_start')
+          if (start !== null) calls.push(start)
+          return countedPage([countedTx(4000, start === after[0].start ? 'April row' : 'March row', 100, '2031-03-05')], 1, 100)
+        }),
+      ],
+    })
+    // First open: March is current and its rows load; then close, which leaves both answers in the cache.
+    await card(page, env.name).click()
+    await snapshot(page).getByTestId('open-budget-history').click()
+    await expect(rowsOf(detail(page), 'budget-period').nth(0)).toHaveAttribute('data-start', before[0].start)
+    await expect(rowsOf(detail(page), 'counted-transaction')).toHaveCount(1)
+    await page.getByRole('button', { name: 'Close envelope history' }).click()
+    await expect(detail(page)).toHaveCount(0)
+    const warm = calls.length
+
+    // Reopen with the new periods held: nothing cached is drawn and no request goes out for the old window.
+    let release: () => void = () => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await page.route(`**/api/v1/allocations/${env.id}/periods`, async (route: Route) => {
+      await held
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(after) })
+    })
+    await card(page, env.name).click()
+    await snapshot(page).getByTestId('open-budget-history').click()
+    await expect(detail(page)).toBeVisible()
+    await page.waitForTimeout(400)
+    await expect(rowsOf(detail(page), 'budget-period')).toHaveCount(0)
+    await expect(rowsOf(detail(page), 'counted-transaction')).toHaveCount(0)
+    expect(calls.length, 'no counted request while the periods are pending').toBe(warm)
+    release()
+    await expect(rowsOf(detail(page), 'budget-period').nth(0)).toHaveAttribute('data-start', after[0].start)
+    await expect(rowsOf(detail(page), 'budget-period').nth(0)).toHaveAttribute('aria-current', 'true')
+    await expect(rowsOf(detail(page), 'counted-transaction').nth(0).getByRole('link')).toHaveText('April row')
+    expect(calls.slice(warm)).toEqual([after[0].start])
+
+    // Going back to a window whose rows are cached does not flash them: the held request is answered first.
+    let releaseMarch: () => void = () => undefined
+    const heldMarch = new Promise<void>((resolve) => {
+      releaseMarch = resolve
+    })
+    await page.route(`**/api/v1/allocations/${env.id}/transactions*`, async (route: Route) => {
+      if (new URL(route.request().url()).searchParams.get('period_start') === before[0].start) await heldMarch
+      await route.fallback()
+    })
+    await rowsOf(detail(page), 'budget-period').nth(1).getByRole('button').click()
+    await expect(rowsOf(detail(page), 'budget-period').nth(1)).toHaveAttribute('aria-current', 'true')
+    await page.waitForTimeout(300)
+    await expect(rowsOf(detail(page), 'counted-transaction')).toHaveCount(0)
+    releaseMarch()
+    await expect(rowsOf(detail(page), 'counted-transaction').nth(0).getByRole('link')).toHaveText('March row')
+  })
+
+  test('An empty page past the last row keeps the pager and the total', async ({ page }) => {
+    const env = envelope()
+    const windows = [period('2031-03-01', '2031-04-01', { spent: 2500, remaining: 5500, is_current: true })]
+    const rows = Array.from({ length: 10 }, (_, i) => countedTx(5000 + i, `Row ${i + 1}`, 250, '2031-03-05'))
+    await openAllocations(page, {
+      list: [env],
+      routes: [
+        apiRoute<Allocation>('GET', `/allocations/${env.id}`, env),
+        apiRoute<BudgetPeriod[]>('GET', `/allocations/${env.id}/periods`, windows),
+        queryRoute<BudgetTransactionPage>('GET', `/allocations/${env.id}/transactions`, (q) => {
+          // Rows were removed since the page was listed: 25 still counted by the total, but nothing after row 10.
+          const offset = Number(q.get('offset') ?? 0)
+          return countedPage(offset === 0 ? rows : [], 25, 2500, offset === 0)
+        }),
+      ],
+    })
+    await card(page, env.name).click()
+    await snapshot(page).getByTestId('open-budget-history').click()
+    const counted = detail(page).getByTestId('budget-counted')
+    await expect(rowsOf(counted, 'counted-transaction')).toHaveCount(10)
+    await counted.getByRole('button', { name: 'Next' }).click()
+    await expect(counted.getByTestId('counted-page-empty')).toBeVisible()
+    await expect(counted.getByTestId('counted-empty')).toHaveCount(0)
+    await expect(counted.getByTestId('counted-pager')).toBeVisible()
+    await expect(counted.getByTestId('counted-total')).toHaveText('₱2,500.00')
+    await expect(periodSpent(detail(page))).toHaveText('Spent ₱2,500.00')
+    await shot(page, 'budget-detail-empty-page')
+    // The way back is still there.
+    await counted.getByRole('button', { name: 'Previous' }).click()
+    await expect(rowsOf(counted, 'counted-transaction')).toHaveCount(10)
+    await expect(counted.getByTestId('counted-page-empty')).toHaveCount(0)
+  })
+
+  test('History traps focus, closes on Escape and returns focus to the envelope card', async ({ page }, testInfo) => {
+    const env = envelope()
+    const windows = [period('2031-03-01', '2031-04-01', { spent: 2500, remaining: 5500, is_current: true })]
+    await openAllocations(page, {
+      list: [env],
+      routes: [
+        apiRoute<Allocation>('GET', `/allocations/${env.id}`, env),
+        apiRoute<BudgetPeriod[]>('GET', `/allocations/${env.id}/periods`, windows),
+        queryRoute<BudgetTransactionPage>('GET', `/allocations/${env.id}/transactions`, () =>
+          countedPage([countedTx(6000, 'Only row', 100, '2031-03-05')], 1, 100),
+        ),
+      ],
+    })
+    await card(page, env.name).click()
+    await snapshot(page).getByTestId('open-budget-history').click()
+    const close = page.getByRole('button', { name: 'Close envelope history' })
+    await expect(close).toBeFocused()
+    await expect(rowsOf(detail(page), 'counted-transaction')).toHaveCount(1)
+    const inside = (): Promise<boolean> => page.evaluate(() => !!document.activeElement?.closest('[data-testid="budget-detail"]'))
+    for (let i = 0; i < 10; i += 1) {
+      await page.keyboard.press('Tab')
+      expect(await inside(), `Tab ${i + 1} stays in the dialog`).toBe(true)
+    }
+    await close.focus()
+    await page.keyboard.press('Shift+Tab')
+    expect(await inside(), 'Shift+Tab wraps inside the dialog').toBe(true)
+    // The icon-only close button is a full touch target on a phone.
+    if (testInfo.project.name === 'phone') {
+      const box = await close.boundingBox()
+      expect(box?.width ?? 0).toBeGreaterThanOrEqual(44)
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44)
+    }
+    await page.keyboard.press('Escape')
+    await expect(detail(page)).toHaveCount(0)
+    await expect(card(page, env.name)).toBeFocused()
+
+    // The close button returns focus to the card too.
+    await card(page, env.name).click()
+    await snapshot(page).getByTestId('open-budget-history').click()
+    await close.click()
+    await expect(detail(page)).toHaveCount(0)
+    await expect(card(page, env.name)).toBeFocused()
+  })
+
   test('Budget changes preserve other Allocations flows', async ({ page }) => {
     const env = envelope()
     const api = await openAllocations(page, {
@@ -795,9 +1092,25 @@ test.describe('budget envelope detail (STU-798)', () => {
     await expect(dialog.getByTestId('snapshot-error')).toBeVisible()
     await expect(dialog.getByTestId('snapshot-figures')).toHaveCount(0)
     await expect(card(page, env.name).getByTestId('card-spent')).toHaveText('₱2,500.00')
-    // Retry reads it again: the second answer succeeds.
+    // Retry reads it again. While that read is pending the dialog shows neither the error nor the list copy's figures.
+    let releaseRetry: () => void = () => undefined
+    const heldRetry = new Promise<void>((resolve) => {
+      releaseRetry = resolve
+    })
+    await page.route(`**/api/v1/allocations/${env.id}`, async (route: Route) => {
+      await heldRetry
+      await route.fallback()
+    })
     await dialog.getByTestId('snapshot-error').getByRole('button', { name: 'Retry' }).click()
+    await expect(dialog.getByTestId('snapshot-loading')).toBeVisible()
+    await expect(dialog.getByTestId('snapshot-error')).toHaveCount(0)
+    await page.waitForTimeout(300)
+    await expect(dialog.getByTestId('snapshot-figures')).toHaveCount(0)
+    await expect(dialog.getByTestId('snapshot-spent')).toHaveCount(0)
+    releaseRetry()
+    // The second answer succeeds.
     await expect(dialog.getByTestId('snapshot-spent')).toHaveText('₱2,500.00')
+    await expect(dialog.getByTestId('snapshot-loading')).toHaveCount(0)
 
     // 2. The history's own envelope read fails (the third answer): history stays hidden and reads nothing.
     await dialog.getByTestId('open-budget-history').click()
@@ -836,43 +1149,86 @@ test.describe('budget envelope detail (STU-798)', () => {
 
   test('Failed budget saves preserve form values and list data', async ({ page }) => {
     const env = envelope()
-    await openAllocations(page, {
+    const diningEnv = envelope({ id: 32, name: 'Dining', description: 'Eating out', target_amount: 3000, available: 3000, current_amount: 0, carry_over_from: '2031-03-01T00:00:00', configuration: { category_ids: [7], account_ids: [joint.id] } })
+    const renamed = envelope({ name: 'Groceries and more', target_amount: 9000, available: 9000 })
+    const holder: { api: ApiMock | null } = { api: null }
+    const saves = (method: 'POST' | 'PUT', path: string): number => holder.api?.count(method, path) ?? 0
+    const api = await openAllocations(page, {
       list: [env],
       routes: [
         apiRoute<Allocation>('GET', `/allocations/${env.id}`, env),
-        errorRoute('POST', '/allocations/', 422, 'carry_over needs a target_amount or a monthly_target'),
-        errorRoute('PUT', `/allocations/${env.id}`, 500, 'The server could not save this envelope'),
+        // Each refusal is followed by a save the API accepts; the list answers from what has been saved.
+        sequenceRoute<Allocation | { detail: string }>('POST', '/allocations/', [
+          { body: { detail: 'carry_over needs a target_amount or a monthly_target' }, status: 422 },
+          { body: diningEnv, status: 201 },
+        ]),
+        sequenceRoute<Allocation | { detail: string }>('PUT', `/allocations/${env.id}`, [
+          { body: { detail: 'The server could not save this envelope' }, status: 500 },
+          { body: renamed },
+        ]),
+        live<PaginatedResponse<Allocation>>('GET', '/allocations/', () =>
+          page_([saves('PUT', `/allocations/${env.id}`) >= 2 ? renamed : env, ...(saves('POST', '/allocations/') >= 2 ? [diningEnv] : [])]),
+        ),
       ],
     })
+    holder.api = api
+    const cards = page.locator('article[role="button"]')
     await expect(card(page, env.name)).toBeVisible()
+    await expect(cards).toHaveCount(1)
 
+    // Create: a refusal keeps every value, the alert shows, and the list is as it was.
     const form = await addForm(page)
     await field(form, 'name').fill('Dining')
     await form.locator('textarea').fill('Eating out')
     await field(form, 'target_amount').fill('3000')
     await pickCategory(form)
+    await accountPicker(form).getByRole('button', { name: /^Joint savings/ }).click()
+    await carrySwitch(form).click()
     await form.getByRole('button', { name: 'Create budget envelope' }).click()
     await expect(form.getByTestId('allocation-form-error')).toHaveText('carry_over needs a target_amount or a monthly_target')
     await expect(form).toBeVisible()
     await expect(field(form, 'name')).toHaveValue('Dining')
+    await expect(form.locator('textarea')).toHaveValue('Eating out')
     await expect(field(form, 'target_amount')).toHaveValue('3000')
     await expect(form.getByRole('button', { name: /Groceries/ }).first()).toHaveAttribute('aria-pressed', 'true')
-    // The list on screen is the one it was: no envelope was added and the saved one is unchanged.
-    await expect(page.locator('article[role="button"]')).toHaveCount(1)
-    await page.getByRole('button', { name: 'Cancel' }).click()
+    await expect(accountPicker(form).getByRole('button', { name: /^Joint savings/ })).toHaveAttribute('aria-pressed', 'true')
+    await expect(accountPicker(form).locator('[data-picker-leading="all"]')).toHaveAttribute('aria-pressed', 'false')
+    await expect(carrySwitch(form)).toHaveAttribute('aria-checked', 'true')
+    await expect(cards).toHaveCount(1)
+    await expect(card(page, 'Dining')).toHaveCount(0)
+    await shot(page, 'budget-form-save-error')
+    // Retried unchanged, the save goes through: only now does the list gain the envelope.
+    await form.getByRole('button', { name: 'Create budget envelope' }).click()
+    await expect(form).toBeHidden()
+    await expect(cards).toHaveCount(2)
+    await expect(card(page, 'Dining')).toBeVisible()
+    expect(bodiesOf(api, 'POST', '/allocations/')).toHaveLength(2)
+    expect(bodiesOf(api, 'POST', '/allocations/')[1]).toHaveProperty('configuration.account_ids', [joint.id])
+    expect(bodiesOf(api, 'POST', '/allocations/')[1]).toHaveProperty('carry_over', true)
 
+    // Edit: the same, with the saved values changed.
     const edit = await editForm(page)
     await field(edit, 'name').fill('Groceries and more')
+    await edit.locator('textarea').fill('Weekly shop')
     await field(edit, 'target_amount').fill('9000')
+    await accountPicker(edit).getByRole('button', { name: /^Everyday/ }).click()
+    await carrySwitch(edit).click()
     await edit.getByRole('button', { name: 'Update allocation' }).click()
     await expect(edit.getByTestId('allocation-form-error')).toHaveText('The server could not save this envelope')
     await expect(edit).toBeVisible()
     await expect(field(edit, 'name')).toHaveValue('Groceries and more')
+    await expect(edit.locator('textarea')).toHaveValue('Weekly shop')
     await expect(field(edit, 'target_amount')).toHaveValue('9000')
-    await page.getByRole('button', { name: 'Cancel' }).click()
-    await expect(page.locator('article[role="button"]')).toHaveCount(1)
-    await expect(card(page, 'Groceries').getByTestId('card-limit')).toHaveText('₱8,000.00')
-    await expect(page.getByText('Groceries and more')).toHaveCount(0)
-    await shot(page, 'budget-form-save-error')
+    await expect(accountPicker(edit).getByRole('button', { name: /^Everyday/ })).toHaveAttribute('aria-pressed', 'true')
+    await expect(carrySwitch(edit)).toHaveAttribute('aria-checked', 'true')
+    await expect(cards).toHaveCount(2)
+    await expect(card(page, 'Groceries and more')).toHaveCount(0)
+    await expect(card(page, env.name).getByTestId('card-limit')).toHaveText('₱8,000.00')
+    await shot(page, 'budget-form-edit-save-error')
+    await edit.getByRole('button', { name: 'Update allocation' }).click()
+    await expect(edit).toBeHidden()
+    await expect(card(page, 'Groceries and more').getByTestId('card-limit')).toHaveText('₱9,000.00')
+    await expect(cards).toHaveCount(2)
+    expect(bodiesOf(api, 'PUT', `/allocations/${env.id}`)).toHaveLength(2)
   })
 })

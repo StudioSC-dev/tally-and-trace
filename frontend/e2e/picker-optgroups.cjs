@@ -125,7 +125,8 @@ async function scenarioA(browser) {
   }
 }
 
-// (b) The allocation form's Account.
+// (b) The allocation form's Account. A budget no longer has one (STU-798: it counts accounts through the Accounts
+// picker), so the grouped select is checked on the savings form, which keeps it.
 async function scenarioB(browser) {
   console.log('\n=== (b) allocation form: Account is grouped')
   const { ctx, page } = await newPage(browser)
@@ -136,6 +137,14 @@ async function scenarioB(browser) {
     await page.getByRole('button', { name: 'Budgets', exact: true }).click()
     await h.waitQuiet(page)
     await page.getByRole('button', { name: 'Add budget' }).click()
+    await page.getByRole('button', { name: 'Create budget envelope' }).waitFor()
+    await h.waitQuiet(page)
+    await h.check('b.budget-has-no-account-select', 'B', async () =>
+      (await page.locator('select[data-field="account_id"]').count()) === 0 || 'the budget form still has an Account select')
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await page.getByRole('button', { name: 'Savings', exact: true }).click()
+    await h.waitQuiet(page)
+    await page.getByRole('button', { name: 'Add savings goal' }).click()
     const sel = page.locator('select[data-field="account_id"]')
     await sel.waitFor()
     await h.waitQuiet(page)

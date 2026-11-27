@@ -16135,11 +16135,11 @@
           "Budgets",
           "Savings",
           "Wishlist",
-          "Close envelope history",
           "Dashboard",
           "Accounts",
           "Transactions",
-          "Allocations"
+          "Allocations",
+          "Close envelope history"
         ],
         "requests": [
           "GET /allocations/66",

@@ -791,7 +791,7 @@ const INVENTORY: Group[] = [
     items: (page) => dialogOf(page).locator('[data-field="category_ids"] [aria-pressed]'),
     selected: 'Groceries',
     other: 'Dining out',
-    effect: 'Dining out joins Groceries: the envelope is created tracking category_ids [22, 23]',
+    effect: 'Dining out joins Groceries: the envelope is created tracking category_ids [22, 23] over every account',
     before: async (page) => {
       await expect(dialogOf(page).locator('[data-field="category_ids"]').getByRole('button', { name: 'Groceries', exact: true })).toHaveAttribute('aria-pressed', 'true')
     },
@@ -799,7 +799,7 @@ const INVENTORY: Group[] = [
       await expect(dialogOf(page).locator('[data-field="category_ids"]').getByRole('button', { name: 'Dining out', exact: true })).toHaveAttribute('aria-pressed', 'true')
     },
     submit: async (page, api) => {
-      expect(await saveAllocation(page, api, 'Snacks')).toEqual({ category_ids: [22, 23] })
+      expect(await saveAllocation(page, api, 'Snacks')).toEqual({ category_ids: [22, 23], account_ids: [] })
     },
   },
   {

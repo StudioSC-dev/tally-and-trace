@@ -117,7 +117,7 @@ async function fillEnvelope(page, u, name) {
   const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Create budget envelope' }) })
   await form.waitFor()
   await h.waitQuiet(page)
-  await form.locator('select').first().selectOption(String(u.bank.id))
+  // A budget has no account select (STU-798): it counts every account until some are picked.
   await form.locator('input[type="text"]').first().fill(name)
   await pick(form.locator('[data-field="category_ids"]'), 'Utilities')
   // The spending limit is the form's last number input.
