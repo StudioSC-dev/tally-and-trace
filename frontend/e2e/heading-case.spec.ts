@@ -1692,10 +1692,17 @@ const EXPECTED: Record<string, Expected & { phone?: Partial<Expected> }> = {
       'Household help',
       'Rent',
       'All 11 categories',
+      'All accounts',
+      'BPI Payroll (PHP)',
+      'Metrobank Savings (PHP)',
+      'GCash (PHP)',
+      'Cash on hand (PHP)',
+      'HSBC Red Mastercard (PHP)',
       'Daily',
       'Weekly',
       'Monthly',
       'Quarterly',
+      'Carry over to next period',
       'Active',
       'Create budget envelope',
       'Cancel',
@@ -1717,7 +1724,7 @@ const EXPECTED: Record<string, Expected & { phone?: Partial<Expected> }> = {
   'budget envelope actions dialog': {
     headings: ['Dining out', 'Budget snapshot', 'Details'],
     titles: ['Dining out'],
-    buttons: ['Close allocation actions modal', 'Pause allocation', 'Edit allocation', 'Delete allocation'],
+    buttons: ['Close allocation actions modal', 'View period history', 'Pause allocation', 'Edit allocation', 'Delete allocation'],
   },
   'savings tracker actions dialog': {
     headings: ['Emergency fund', 'Current progress', 'Details'],
@@ -1735,10 +1742,17 @@ const EXPECTED: Record<string, Expected & { phone?: Partial<Expected> }> = {
       'Household help',
       'Rent',
       'All 11 categories',
+      'All accounts',
+      'BPI Payroll (PHP)',
+      'Metrobank Savings (PHP)',
+      'GCash (PHP)',
+      'Cash on hand (PHP)',
+      'HSBC Red Mastercard (PHP)',
       'Daily',
       'Weekly',
       'Monthly',
       'Quarterly',
+      'Carry over to next period',
       'Active',
       'Update allocation',
       'Cancel',
@@ -2188,7 +2202,6 @@ const ACTIONS: ActionCase[] = [
       await openPage(p, '/allocations?tab=budgets')
       await p.getByRole('button', { name: 'Add budget', exact: true }).click()
       await top(p).locator('input[type="text"]').first().fill('Pet care')
-      await top(p).locator('select').first().selectOption('11')
       await top(p).getByRole('button', { name: 'Dining out', exact: true }).click()
       for (const amount of await top(p).locator('input[type="number"]').all()) {
         if ((await amount.inputValue()) === '') await amount.fill('3000')

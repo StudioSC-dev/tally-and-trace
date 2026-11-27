@@ -291,6 +291,15 @@ test.describe('envelope bars', () => {
             ? page.getByTestId('envelope-row').filter({ hasText: envelope.name })
             : page.locator('article').filter({ hasText: envelope.name })
           const fill = row.getByTestId('budget-usage-fill')
+          if (surface === 'Allocations' && envelope.level === '120%') {
+            // An overspent envelope draws no bar on the Allocations card; it says how far over, in the danger tone (STU-798).
+            await expect(fill).toHaveCount(0)
+            const over = row.getByTestId('card-over')
+            await expect(over).toBeVisible()
+            expect(await colourOf(over), `the over line on Allocations in ${theme}`).toBe((theme === 'light' ? LIGHT : DARK).danger)
+            await shot(page, `envelope-allocations-120-${theme}`)
+            return
+          }
           await expect(fill).toBeVisible()
           await expect.poll(() => fillOf(fill), { message: `the ${envelope.level} fill on ${surface} in ${theme}` }).toBe(envelope.fill[index])
           await expect.poll(() => fillOf(row.getByTestId('budget-usage-track')), { message: `the track at ${envelope.level} on ${surface} in ${theme}` }).toBe(TRACK[index])
@@ -341,7 +350,8 @@ test.describe('amount classes', () => {
       expect(count(sourceOf[site], pattern), `${site}: ${what}`).toBe(n)
     }
     expectCalls('src/routes/allocations.tsx', /text-lg font-bold \$\{amountClass\(/g, 2, 'both recurring entry amounts take amountClass(')
-    expectCalls('src/routes/allocations.tsx', /font-semibold \$\{amountClass\('out'\)\}`\}>\{format\((usedAmount|actionAllocation\.current_amount)\)/g, 2, 'the budget card and modal Spent amounts are amount-out')
+    // The budget card and snapshot dialog share one figures block (STU-798), which owns the Spent amount.
+    expect(count(readFrontend('src/components/BudgetFigures.tsx'), /font-semibold \$\{amountClass\('out'\)\}`\}[^\n]*data-testid=\{hook\('spent'\)\}/g), 'the budget card and modal Spent amount is amount-out').toBe(1)
     expectCalls('src/routes/allocations.tsx', /formatAmount\(/g, 2, 'both recurring entry amounts are formatted with formatAmount(')
     expectCalls('src/routes/transactions.tsx', /const amountClassName = amountClass\(amountKind\)/g, 1, 'the row class comes from amountClass(amountKind)')
     expectCalls('src/routes/transactions.tsx', /\$\{actionMeta\?\.amountClass \?\? ''\} font-medium/g, 1, 'the action modal Amount row uses the row class')
@@ -402,7 +412,7 @@ test.describe('amount classes', () => {
   test('amount colour is a class, not a selector shim: budget modal spent', async ({ page }) => {
     await open(page, '/allocations?tab=budgets')
     await page.locator('article').filter({ hasText: 'Groceries' }).first().click()
-    const spent = page.locator('.modal-backdrop').getByText(/^Spent/).locator('span')
+    const spent = page.getByTestId('snapshot-spent')
     await expect(spent).toBeVisible()
     expect(await semanticOf(spent), 'the budget modal Spent amount').toEqual(['amount-out'])
     await viewportShot(page, 'classes-budget-modal')

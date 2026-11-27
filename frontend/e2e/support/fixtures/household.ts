@@ -36,6 +36,7 @@ import type {
   AccountShares,
   AccountShortfall,
   Allocation,
+  BudgetPeriod,
   BudgetEntry,
   BudgetEntryInput,
   CardCredit,
@@ -1295,6 +1296,10 @@ export const householdRoutes = (data: HouseholdData = household): ApiRoute[] => 
   apiRoute<PaginatedResponse<Account>>('GET', '/accounts/', pageOf(data.accounts)),
   queryRoute<PaginatedResponse<Allocation>>('GET', '/allocations/', (q) => allocationsFor(data.allocations, q)),
   apiRoute<{ items: Allocation[] }>('GET', '/allocations/ranked', { items: rankedGoals(data.allocations) }),
+  // Opening a budget's snapshot dialog refetches the envelope (STU-798).
+  ...data.allocations.filter((a) => a.allocation_type === 'budget').map((a) => apiRoute<Allocation>('GET', `/allocations/${a.id}`, a)),
+  // Its history dialog reads the windows; the shared household has none.
+  ...data.allocations.filter((a) => a.allocation_type === 'budget').map((a) => apiRoute<BudgetPeriod[]>('GET', `/allocations/${a.id}/periods`, [])),
   apiRoute<QuickBalances>('GET', '/dashboard/quick-balances', data.quickBalances),
   apiRoute<DashboardSnapshot>('GET', '/dashboard/snapshot', data.snapshot),
   apiRoute<CashflowTimeline>('GET', '/forecast/timeline', data.timeline),

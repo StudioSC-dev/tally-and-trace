@@ -260,7 +260,6 @@ const fillRecurring = async (page: Page): Promise<void> => {
 }
 const fillAllocation = async (page: Page): Promise<void> => {
   await dialogOf(page).locator('input[type="text"]').first().fill('Pet care')
-  await dialogOf(page).locator('select').first().selectOption('11')
   // A budget envelope tracks at least one category.
   await dialogOf(page).getByRole('button', { name: 'Dining out', exact: true }).click()
   // The empty amounts: a budget's spending limit, a savings tracker's target.
@@ -652,7 +651,7 @@ const DIALOGS: Surface[] = [
     key: 'allocation-actions',
     dialog: true,
     open: (p) => openDialog(p, '/allocations?tab=budgets', 'Allocations', (q) => q.locator('main article.card').filter({ has: q.getByText(BUDGET, { exact: true }) }), BUDGET),
-    migrated: ['Pause allocation', 'Edit allocation', 'Delete allocation'],
+    migrated: ['View period history', 'Pause allocation', 'Edit allocation', 'Delete allocation'],
   },
   {
     key: 'payable-detail',

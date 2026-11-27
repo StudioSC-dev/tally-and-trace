@@ -219,7 +219,7 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
 
   // The budget and savings forms of Allocations: every `<label>` reads in sentence case, as held here.
   const ALLOCATION_FORMS: { name: string; tab: string; mode?: string; labels: string[] }[] = [
-    { name: 'budget form', tab: 'budgets', labels: ['Account', 'Name', 'Description', 'Tracked categories', 'Budget cadence', 'Period start', 'Period end (optional)', 'Amount already spent', 'Spending limit'] },
+    { name: 'budget form', tab: 'budgets', labels: ['Name', 'Description', 'Tracked categories', 'Accounts', 'Budget cadence', 'Period start', 'Period end (optional)', 'Spending limit (optional)'] },
     { name: 'savings form', tab: 'savings', labels: ['Tracking mode', 'Account', 'Name', 'Description', 'Currency', 'Target amount (optional)', 'Monthly target (optional)', 'Target date'] },
     { name: 'savings form, combined account total', tab: 'savings', mode: 'Combined account total', labels: ['Tracking mode', 'Accounts to aggregate', 'Name', 'Description', 'Currency', 'Target amount (optional)', 'Monthly target (optional)', 'Target date'] },
     { name: 'savings form, savings transactions total', tab: 'savings', mode: 'Savings transactions total', labels: ['Tracking mode', 'Name', 'Description', 'Currency', 'Target amount (optional)', 'Monthly target (optional)', 'Target date'] },

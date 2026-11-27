@@ -739,10 +739,17 @@ for (const p of PANELS) {
       for (const name of p.names) {
         const card = cards.filter({ has: page.getByText(name, { exact: true }) })
         expect.soft(await card.count(), `${name} is one panel`).toBe(1)
+        // An overspent envelope says how far over instead of drawing its bar and ratio (STU-798).
+        const over = p.tab === 'Budgets' && (await card.getByTestId('card-over').count()) === 1
+        if (over) {
+          expect.soft(await card.getByTestId('budget-usage-fill').count(), `${name} draws no usage bar`).toBe(0)
+          continue
+        }
         expect.soft(await card.getByText(p.progress).count(), `${name} shows its progress`).toBe(1)
         if (p.tab === 'Budgets') expect.soft(await card.getByTestId('budget-usage-fill').count(), `${name} draws its usage bar`).toBe(1)
       }
-      expect(await page.locator('main article.card').filter({ hasText: p.progress }).count(), `${p.tab} panels with their progress`).toBe(p.names.length)
+      const overCount = p.tab === 'Budgets' ? await page.locator('main article.card').getByTestId('card-over').count() : 0
+      expect(await page.locator('main article.card').filter({ hasText: p.progress }).count() + overCount, `${p.tab} panels with their progress`).toBe(p.names.length)
       const first = cards.filter({ has: page.getByText(p.names[0], { exact: true }) })
       await trigger(page, first, gesture)
       const modal = page.locator('.modal-backdrop').filter({ has: page.getByRole('button', { name: 'Edit allocation' }) })
