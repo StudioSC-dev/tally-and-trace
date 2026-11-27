@@ -93,7 +93,11 @@ async function openRecurring(page: Page): Promise<ApiMock> {
   const api = await open(page, '/allocations?tab=recurring', 'Allocations')
   const rows = page.locator('[data-testid^="kind-section-"]').getByTestId('row')
   await expect(rows.first()).toBeVisible()
-  await expect.poll(() => rows.count(), { message: 'recurring rows listed' }).toBe(recurring.entries.length)
+  // STU-799: the headers count every entry (the tab has loaded them all); a section lists 5 of them a page.
+  const counts = (): Promise<number[]> =>
+    page.locator('[data-testid^="kind-section-"] header span').evaluateAll((els) => els.map((e) => Number(e.textContent)))
+  await expect.poll(async () => (await counts()).reduce((a, b) => a + b, 0), { message: 'every recurring entry counted' }).toBe(recurring.entries.length)
+  await expect.poll(async () => rows.count(), { message: 'the first page of each section listed' }).toBe((await counts()).reduce((a, n) => a + Math.min(5, n), 0))
   await page.mouse.move(0, 0)
   return api
 }
@@ -101,6 +105,12 @@ async function openRecurring(page: Page): Promise<ApiMock> {
 /** The recurring row whose title is `name`. */
 const recurringRow = (page: Page, name: string): Locator =>
   page.locator('[data-testid^="kind-section-"]').getByTestId('row').filter({ has: page.locator('[data-row-title]', { hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) }) })
+
+/** STU-799: a section lists 5 entries a page, so a row past page 1 is reached through the page search. */
+async function findRow(page: Page, name: string): Promise<Locator> {
+  await page.getByLabel('Search recurring entries').fill(name)
+  return recurringRow(page, name)
+}
 
 /** The open recurring-entry edit dialog. */
 const editDialog = (page: Page): Locator => page.locator('form').filter({ has: page.getByRole('button', { name: 'Update recurring entry' }) })
@@ -124,7 +134,7 @@ test('the row title is the control: one control per row, named after the entry',
   await openRecurring(page)
   await shot(page, 'title-controls')
   for (const e of editable) {
-    const row = recurringRow(page, e.name)
+    const row = await findRow(page, e.name)
     await expect(row, `${e.name}: one row`).toHaveCount(1)
     expect(await row.getAttribute('role'), `${e.name}: the row itself is not a control`).toBeNull()
     expect(await row.getByRole('button', { name: e.name, exact: true }).count(), `${e.name}: controls named after the entry`).toBe(1)
@@ -135,11 +145,13 @@ type Gesture = 'click' | 'Enter' | 'Space'
 const GESTURES: Gesture[] = ['click', 'Enter', 'Space']
 /** An entry with Charged and Posted beside its title, so the title is not the row's only control. */
 const WITH_ACTIONS = 'Netflix Standard'
+/** An editable entry that draws a tag chip on its title line (STU-799: found by the page search, as it may not be on page 1). */
+const TAGGED = (editable.find((e) => e.tags.length > 0) ?? editable[0]).name
 
 for (const gesture of GESTURES) {
   test(`the row title is the control: ${gesture} opens the edit dialog`, async ({ page }) => {
     await openRecurring(page)
-    const title = recurringRow(page, WITH_ACTIONS).getByRole('button', { name: WITH_ACTIONS, exact: true })
+    const title = (await findRow(page, WITH_ACTIONS)).getByRole('button', { name: WITH_ACTIONS, exact: true })
     if (gesture === 'click') await title.click()
     else {
       await title.focus()
@@ -170,7 +182,7 @@ for (const a of ACTIONS) {
     const entry = entryNamed(WITH_ACTIONS)
     const path = `/budget-entries/${entry.id}/materialize`
     const api = await openRecurring(page)
-    const button = recurringRow(page, WITH_ACTIONS).getByTestId(a.testId)
+    const button = (await findRow(page, WITH_ACTIONS)).getByTestId(a.testId)
     await expect(button).toHaveText(a.label)
     await button.click()
     const dialog = page.getByTestId('mark-paid-dialog')
@@ -199,7 +211,7 @@ for (const a of ACTIONS) {
 
 test('keyboard order is title then actions', async ({ page }) => {
   await openRecurring(page)
-  const row = recurringRow(page, WITH_ACTIONS)
+  const row = await findRow(page, WITH_ACTIONS)
   const title = row.getByRole('button', { name: WITH_ACTIONS, exact: true })
   await title.focus()
   await expect(title).toBeFocused()
@@ -425,7 +437,8 @@ test('recurring rows preserve appearance and pointer behaviour: appearance', asy
     return
   }
   const base = readBaseline()[testInfo.project.name] ?? []
-  expect(base.length, `the baseline has the ${testInfo.project.name} rows`).toBe(recurring.entries.length)
+  // STU-799: the baseline was re-recorded for the first page of each Recurring section (5 entries a page).
+  expect(base.length, `the baseline has the ${testInfo.project.name} rows`).toBe(looks.length)
   expect(looks.map((l) => l.name), 'the same rows in the same order').toEqual(base.map((l) => l.name))
   const changed = base.flatMap((b, i) => (looks[i] ? differences(b, looks[i]) : [`${b.name}: missing`]))
   expect(changed, 'differences from the baseline recorded before this change').toEqual([])
@@ -463,8 +476,8 @@ for (const area of AREAS) {
     // Netflix Standard draws no chip on its title line, so the chip is clicked on the first editable row that does.
     const row =
       area.name === 'tag chip'
-        ? page.locator('[data-testid^="kind-section-"] article[data-testid="row"]:not([data-row-kind="limited-entry"])').filter({ has: page.getByTestId('row-tags').getByTestId('tag-chip') }).first()
-        : recurringRow(page, WITH_ACTIONS)
+        ? (await findRow(page, TAGGED)).filter({ has: page.getByTestId('row-tags').getByTestId('tag-chip') }).first()
+        : await findRow(page, WITH_ACTIONS)
     const name = ((await row.locator('[data-row-title]').textContent()) ?? '').trim()
     const target = area.find(row)
     await target.scrollIntoViewIfNeeded()

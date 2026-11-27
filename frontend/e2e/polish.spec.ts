@@ -801,6 +801,8 @@ for (const a of ACTIONS) {
     const entry = household.entries.find((e) => e.view !== 'limited' && e.name === a.name)
     if (!entry) throw new Error(`no entry ${a.name} in the fixture`)
     const api = await open(page, '/allocations?tab=recurring', 'Allocations', { extra: [...householdDialogRoutes(household), ...householdSaveRoutes(household)] })
+    // STU-799: a section lists 5 entries a page, so the entry is reached through the page search.
+    await page.getByLabel('Search recurring entries').fill(a.name)
     const row = page.locator('[data-testid^="kind-section-"] article').filter({ has: page.getByText(a.name, { exact: true }) })
     const button = row.getByTestId(a.testId)
     await expect(button).toHaveText(a.label)

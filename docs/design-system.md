@@ -288,6 +288,13 @@ Fields have no box. They are written on a ruled line (an underline in `line-stro
   - Used by Transactions and the Allocations Recurring tab (one sheet per kind
     section). Budget and savings allocations stay `.card` panels: each is a goal with
     its own progress, not a list line.
+  - A Recurring section pages its sheet five rows at a time with `Pager`, under a row of its
+    own controls: a sort (next due, amount or name, ascending or descending), a status
+    `SegmentedControl` (All, Active, Paused; none in "Shared with you") and an account
+    select. A section the controls leave empty keeps its header, says so, and offers
+    "Clear filters". A paused entry's row is muted with a "Paused" mark on its title line;
+    a full, active entry due today or within seven days says so in the row's status slot
+    (`StatusText`), and an overdue one reads "Overdue" in the `warn` tone.
   - The dashboard's quick balances are account lines on their panel, ruled with
     `line`, figures right-aligned, with no tile fill; their editor's controls are
     outlined, and its Add account list sits under a rule, not on a fill.

@@ -396,7 +396,8 @@ const PAGES: Surface[] = [
       await expect(p.getByRole('button', { name: 'Recurring', exact: true })).toHaveAttribute('aria-pressed', 'true')
       return api
     },
-    migrated: ['Add recurring entry', 'Charged', 'Posted', 'Charged', 'Posted', ...Array<string>(9).fill('Mark paid'), 'Mark received'],
+    // STU-799: each section lists 5 entries a page, so the first pages hold five Mark paid rows and the Cash pager's two buttons.
+    migrated: ['Add recurring entry', 'Charged', 'Posted', 'Charged', 'Posted', ...Array<string>(5).fill('Mark paid'), 'Previous', 'Next', 'Mark received'],
   },
   { key: 'accounts', dialog: false, open: (p) => openPage(p, '/accounts', 'Accounts'), migrated: ['Add account'] },
   {

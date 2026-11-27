@@ -1,24 +1,32 @@
 {
   "desktop": [
     {
-      "name": "Netflix Standard",
+      "name": "Disney+ Premium",
       "x": 105,
-      "y": 442,
+      "y": 578,
       "sy": 1,
       "w": 1230,
       "h": 57,
-      "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
+      "row": "rgba(0, 0, 0, 0) | 0.6 | 8px | 16px | 8px | 16px",
       "texts": [
         {
-          "text": "Netflix Standard",
+          "text": "Disney+ Premium",
           "x": 16,
           "y": 10,
-          "w": 114,
+          "w": 122,
           "h": 19,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 15px | 600 | normal | 24px | normal | none | none | ellipsis | 1"
         },
         {
-          "text": "Monthly · day 9 · Scheduled",
+          "text": "Paused",
+          "x": 160,
+          "y": 10.59,
+          "w": 44,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 20.8px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "Monthly · day 2 · Scheduled",
           "x": 16,
           "y": 32,
           "w": 151,
@@ -34,24 +42,24 @@
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "Apr 9th, 2026",
+          "text": "Apr 2nd, 2026",
           "x": 207,
           "y": 32,
-          "w": 74,
+          "w": 77,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "·",
-          "x": 281,
+          "x": 284,
           "y": 32,
           "w": 10,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "In 28 days",
-          "x": 291,
+          "text": "In 21 days",
+          "x": 294,
           "y": 32,
           "w": 57,
           "h": 15,
@@ -59,7 +67,7 @@
         },
         {
           "text": "Account:",
-          "x": 360,
+          "x": 363,
           "y": 32,
           "w": 52,
           "h": 15,
@@ -67,30 +75,14 @@
         },
         {
           "text": "HSBC Red Mastercard",
-          "x": 412,
+          "x": 415,
           "y": 32,
           "w": 118,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "Charged",
-          "x": 1007,
-          "y": 20,
-          "w": 44,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Posted",
-          "x": 1081,
-          "y": 20,
-          "w": 38,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "₱549.00",
+          "text": "₱369.00",
           "x": 1142,
           "y": 16,
           "w": 72,
@@ -104,21 +96,14 @@
           "y": 0,
           "w": 1230,
           "h": 57,
-          "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 5px | 5px | 0px | 0px | none | 1"
+          "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 5px | 5px | 0px | 0px | none | 0.6"
         },
         {
-          "x": 996,
-          "y": 16,
-          "w": 66,
-          "h": 24,
-          "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
-        },
-        {
-          "x": 1070,
-          "y": 16,
-          "w": 60,
-          "h": 24,
-          "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
+          "x": 146,
+          "y": 15.98,
+          "w": 8,
+          "h": 8,
+          "style": "rgb(74, 89, 80) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 9999px | 9999px | 9999px | 9999px | none | 1"
         }
       ],
       "hover": "rgb(214, 222, 211)",
@@ -127,7 +112,7 @@
     {
       "name": "Spotify Duo",
       "x": 105,
-      "y": 499,
+      "y": 635,
       "sy": 58,
       "w": 1230,
       "h": 57,
@@ -249,57 +234,57 @@
       "cursor": "pointer"
     },
     {
-      "name": "Disney+ Premium",
+      "name": "Netflix Standard",
       "x": 105,
-      "y": 556,
+      "y": 692,
       "sy": 115,
       "w": 1230,
       "h": 56,
-      "row": "rgba(0, 0, 0, 0) | 0.6 | 8px | 16px | 8px | 16px",
+      "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
       "texts": [
         {
-          "text": "Disney+ Premium",
+          "text": "Netflix Standard",
           "x": 16,
           "y": 10,
-          "w": 122,
+          "w": 114,
           "h": 19,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 15px | 600 | normal | 24px | normal | none | none | ellipsis | 1"
         },
         {
-          "text": "Monthly · day 2 · Scheduled · Paused",
+          "text": "Monthly · day 9 · Scheduled",
           "x": 16,
           "y": 32,
-          "w": 201,
+          "w": 151,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "Next",
-          "x": 229,
+          "x": 179,
           "y": 32,
           "w": 28,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "Apr 2nd, 2026",
-          "x": 257,
+          "text": "Apr 9th, 2026",
+          "x": 207,
           "y": 32,
-          "w": 77,
+          "w": 74,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "·",
-          "x": 334,
+          "x": 281,
           "y": 32,
           "w": 10,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "In 21 days",
-          "x": 344,
+          "text": "In 28 days",
+          "x": 291,
           "y": 32,
           "w": 57,
           "h": 15,
@@ -307,7 +292,7 @@
         },
         {
           "text": "Account:",
-          "x": 413,
+          "x": 360,
           "y": 32,
           "w": 52,
           "h": 15,
@@ -315,14 +300,30 @@
         },
         {
           "text": "HSBC Red Mastercard",
-          "x": 465,
+          "x": 412,
           "y": 32,
           "w": 118,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "₱369.00",
+          "text": "Charged",
+          "x": 1007,
+          "y": 20,
+          "w": 44,
+          "h": 15,
+          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "Posted",
+          "x": 1081,
+          "y": 20,
+          "w": 38,
+          "h": 15,
+          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "₱549.00",
           "x": 1142,
           "y": 16,
           "w": 72,
@@ -330,14 +331,29 @@
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
         }
       ],
-      "boxes": [],
+      "boxes": [
+        {
+          "x": 996,
+          "y": 16,
+          "w": 66,
+          "h": 24,
+          "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
+        },
+        {
+          "x": 1070,
+          "y": 16,
+          "w": 60,
+          "h": 24,
+          "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
+        }
+      ],
       "hover": "rgb(214, 222, 211)",
       "cursor": "pointer"
     },
     {
       "name": "Laptop, 12 months",
       "x": 105,
-      "y": 691,
+      "y": 879,
       "sy": 1,
       "w": 1230,
       "h": 99,
@@ -531,7 +547,7 @@
     {
       "name": "Aircon, 12 months",
       "x": 105,
-      "y": 790,
+      "y": 978,
       "sy": 100,
       "w": 1230,
       "h": 99,
@@ -725,7 +741,7 @@
     {
       "name": "Washing machine, 12 months",
       "x": 105,
-      "y": 889,
+      "y": 1077,
       "sy": 199,
       "w": 1230,
       "h": 99,
@@ -919,7 +935,7 @@
     {
       "name": "Rice cooker, 6 months",
       "x": 105,
-      "y": 988,
+      "y": 1176,
       "sy": 298,
       "w": 1230,
       "h": 56,
@@ -1035,99 +1051,139 @@
       "cursor": "pointer"
     },
     {
-      "name": "Rent",
+      "name": "Palengke run",
       "x": 105,
-      "y": 1123,
+      "y": 1363,
       "sy": 1,
       "w": 1230,
       "h": 57,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
       "texts": [
         {
-          "text": "Rent",
+          "text": "Palengke run",
           "x": 16,
           "y": 10,
-          "w": 33,
+          "w": 91,
           "h": 19,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 15px | 600 | normal | 24px | normal | none | none | ellipsis | 1"
         },
         {
           "text": "Household",
-          "x": 77,
+          "x": 135,
           "y": 12,
           "w": 59,
           "h": 15,
           "style": "rgb(45, 59, 51) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "Monthly · day 1 · Manual",
-          "x": 16,
+          "text": "Due in",
+          "x": 30,
+          "y": 31,
+          "w": 41,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "2",
+          "x": 71,
+          "y": 31,
+          "w": 8,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "days",
+          "x": 82,
+          "y": 31,
+          "w": 28,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "Weekly · Saturday · Manual",
+          "x": 122,
           "y": 32,
-          "w": 132,
+          "w": 146,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "Next",
-          "x": 160,
+          "x": 280,
           "y": 32,
           "w": 28,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "Apr 1st, 2026",
-          "x": 188,
+          "text": "Mar 14th, 2026",
+          "x": 308,
           "y": 32,
-          "w": 73,
+          "w": 82,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "·",
-          "x": 261,
+          "x": 390,
           "y": 32,
           "w": 10,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "In 20 days",
-          "x": 271,
+          "text": "In 2 days",
+          "x": 400,
           "y": 32,
-          "w": 57,
+          "w": 50,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "Account:",
-          "x": 340,
+          "x": 462,
           "y": 32,
           "w": 52,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "BPI Payroll",
-          "x": 392,
+          "text": "BDO Joint household",
+          "x": 514,
           "y": 32,
-          "w": 59,
+          "w": 116,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "·",
+          "x": 630,
+          "y": 32,
+          "w": 10,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "by Mara S.",
+          "x": 640,
+          "y": 32,
+          "w": 55,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "Mark paid",
-          "x": 1040,
+          "x": 1051,
           "y": 20,
           "w": 52,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "₱22,000.00",
-          "x": 1115,
+          "text": "₱1,300.00",
+          "x": 1126,
           "y": 16,
-          "w": 99,
+          "w": 88,
           "h": 23,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
         }
@@ -1141,21 +1197,28 @@
           "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 5px | 5px | 0px | 0px | none | 1"
         },
         {
-          "x": 57,
+          "x": 115,
           "y": 10,
           "w": 87,
           "h": 20,
           "style": "rgb(214, 222, 211) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 4px | 4px | 4px | 4px | none | 1"
         },
         {
-          "x": 65,
+          "x": 123,
           "y": 17,
           "w": 6,
           "h": 6,
           "style": "rgb(63, 107, 92) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 9999px | 9999px | 9999px | 9999px | none | 1"
         },
         {
-          "x": 1029,
+          "x": 16,
+          "y": 36,
+          "w": 8,
+          "h": 8,
+          "style": "rgb(74, 89, 80) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 9999px | 9999px | 9999px | 9999px | none | 1"
+        },
+        {
+          "x": 1040,
           "y": 16,
           "w": 74,
           "h": 24,
@@ -1166,83 +1229,123 @@
       "cursor": "pointer"
     },
     {
-      "name": "Meralco",
+      "name": "Yaya salary",
       "x": 105,
-      "y": 1180,
+      "y": 1420,
       "sy": 58,
       "w": 1230,
       "h": 57,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
       "texts": [
         {
-          "text": "Meralco",
+          "text": "Yaya salary",
           "x": 16,
           "y": 10,
-          "w": 54,
+          "w": 77,
           "h": 19,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 15px | 600 | normal | 24px | normal | none | none | ellipsis | 1"
         },
         {
           "text": "Household",
-          "x": 98,
+          "x": 121,
           "y": 12,
           "w": 59,
           "h": 15,
           "style": "rgb(45, 59, 51) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "Monthly · day 10 · Manual",
-          "x": 16,
+          "text": "Due in",
+          "x": 30,
+          "y": 31,
+          "w": 41,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "3",
+          "x": 71,
+          "y": 31,
+          "w": 8,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "days",
+          "x": 82,
+          "y": 31,
+          "w": 28,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "Twice a month · Manual",
+          "x": 122,
           "y": 32,
-          "w": 139,
+          "w": 128,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "Next",
-          "x": 167,
+          "x": 262,
           "y": 32,
           "w": 28,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "Apr 10th, 2026",
-          "x": 195,
+          "text": "Mar 15th, 2026",
+          "x": 290,
           "y": 32,
-          "w": 81,
+          "w": 82,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "·",
-          "x": 276,
+          "x": 372,
           "y": 32,
           "w": 10,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "In 29 days",
-          "x": 286,
+          "text": "In 3 days",
+          "x": 382,
           "y": 32,
-          "w": 57,
+          "w": 50,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "Account:",
-          "x": 355,
+          "x": 444,
           "y": 32,
           "w": 52,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "BPI Payroll",
-          "x": 407,
+          "text": "BDO Joint household",
+          "x": 496,
           "y": 32,
-          "w": 59,
+          "w": 116,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "·",
+          "x": 612,
+          "y": 32,
+          "w": 10,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "by Mara S.",
+          "x": 622,
+          "y": 32,
+          "w": 55,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
@@ -1255,7 +1358,7 @@
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "₱4,600.00",
+          "text": "₱4,500.00",
           "x": 1126,
           "y": 16,
           "w": 88,
@@ -1272,18 +1375,25 @@
           "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 0px | 0px | 0px | 0px | none | 1"
         },
         {
-          "x": 78,
+          "x": 101,
           "y": 10,
           "w": 87,
           "h": 20,
           "style": "rgb(214, 222, 211) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 4px | 4px | 4px | 4px | none | 1"
         },
         {
-          "x": 86,
+          "x": 109,
           "y": 17,
           "w": 6,
           "h": 6,
           "style": "rgb(63, 107, 92) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 9999px | 9999px | 9999px | 9999px | none | 1"
+        },
+        {
+          "x": 16,
+          "y": 36,
+          "w": 8,
+          "h": 8,
+          "style": "rgb(74, 89, 80) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 9999px | 9999px | 9999px | 9999px | none | 1"
         },
         {
           "x": 1040,
@@ -1297,65 +1407,89 @@
       "cursor": "pointer"
     },
     {
-      "name": "PLDT Fibr",
+      "name": "Globe Postpaid",
       "x": 105,
-      "y": 1237,
+      "y": 1477,
       "sy": 115,
       "w": 1230,
       "h": 57,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
       "texts": [
         {
-          "text": "PLDT Fibr",
+          "text": "Globe Postpaid",
           "x": 16,
           "y": 10,
-          "w": 69,
+          "w": 105,
           "h": 19,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 15px | 600 | normal | 24px | normal | none | none | ellipsis | 1"
         },
         {
-          "text": "Monthly · day 6 · Auto-pay",
-          "x": 16,
+          "text": "Due in",
+          "x": 30,
+          "y": 31,
+          "w": 41,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "6",
+          "x": 71,
+          "y": 31,
+          "w": 8,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "days",
+          "x": 82,
+          "y": 31,
+          "w": 28,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "Monthly · day 18 · Auto-pay",
+          "x": 122,
           "y": 32,
-          "w": 143,
+          "w": 150,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "Next",
-          "x": 171,
+          "x": 284,
           "y": 32,
           "w": 28,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "Apr 6th, 2026",
-          "x": 199,
+          "text": "Mar 18th, 2026",
+          "x": 312,
           "y": 32,
-          "w": 74,
+          "w": 82,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "·",
-          "x": 273,
+          "x": 394,
           "y": 32,
           "w": 10,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "In 25 days",
-          "x": 283,
+          "text": "In 6 days",
+          "x": 404,
           "y": 32,
-          "w": 57,
+          "w": 50,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "Account:",
-          "x": 352,
+          "x": 466,
           "y": 32,
           "w": 52,
           "h": 15,
@@ -1363,7 +1497,7 @@
         },
         {
           "text": "BPI Payroll",
-          "x": 404,
+          "x": 518,
           "y": 32,
           "w": 59,
           "h": 15,
@@ -1378,7 +1512,7 @@
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "₱1,899.00",
+          "text": "₱1,299.00",
           "x": 1126,
           "y": 16,
           "w": 88,
@@ -1395,116 +1529,14 @@
           "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 0px | 0px | 0px | 0px | none | 1"
         },
         {
-          "x": 1040,
-          "y": 16,
-          "w": 74,
-          "h": 24,
-          "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
-        }
-      ],
-      "hover": "rgb(214, 222, 211)",
-      "cursor": "pointer"
-    },
-    {
-      "name": "Emergency fund top-up",
-      "x": 105,
-      "y": 1294,
-      "sy": 172,
-      "w": 1230,
-      "h": 57,
-      "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
-      "texts": [
-        {
-          "text": "Emergency fund top-up",
           "x": 16,
-          "y": 10,
-          "w": 164,
-          "h": 19,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 15px | 600 | normal | 24px | normal | none | none | ellipsis | 1"
+          "y": 36,
+          "w": 8,
+          "h": 8,
+          "style": "rgb(74, 89, 80) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 9999px | 9999px | 9999px | 9999px | none | 1"
         },
         {
-          "text": "Monthly · day 8 · Manual",
-          "x": 16,
-          "y": 32,
-          "w": 132,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Next",
-          "x": 160,
-          "y": 32,
-          "w": 28,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Apr 8th, 2026",
-          "x": 188,
-          "y": 32,
-          "w": 74,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "·",
-          "x": 262,
-          "y": 32,
-          "w": 10,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "In 27 days",
-          "x": 272,
-          "y": 32,
-          "w": 57,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Account:",
-          "x": 341,
-          "y": 32,
-          "w": 52,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "BPI Payroll",
-          "x": 393,
-          "y": 32,
-          "w": 59,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Mark paid",
           "x": 1040,
-          "y": 20,
-          "w": 52,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "₱10,000.00",
-          "x": 1115,
-          "y": 16,
-          "w": 99,
-          "h": 23,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
-        }
-      ],
-      "boxes": [
-        {
-          "x": 0,
-          "y": 0,
-          "w": 1230,
-          "h": 57,
-          "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 0px | 0px | 0px | 0px | none | 1"
-        },
-        {
-          "x": 1029,
           "y": 16,
           "w": 74,
           "h": 24,
@@ -1517,8 +1549,8 @@
     {
       "name": "HMO dependent add-on",
       "x": 105,
-      "y": 1351,
-      "sy": 229,
+      "y": 1534,
+      "sy": 172,
       "w": 1230,
       "h": 57,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
@@ -1624,121 +1656,12 @@
       "cursor": "pointer"
     },
     {
-      "name": "Globe Postpaid",
-      "x": 105,
-      "y": 1408,
-      "sy": 286,
-      "w": 1230,
-      "h": 57,
-      "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
-      "texts": [
-        {
-          "text": "Globe Postpaid",
-          "x": 16,
-          "y": 10,
-          "w": 105,
-          "h": 19,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 15px | 600 | normal | 24px | normal | none | none | ellipsis | 1"
-        },
-        {
-          "text": "Monthly · day 18 · Auto-pay",
-          "x": 16,
-          "y": 32,
-          "w": 150,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Next",
-          "x": 178,
-          "y": 32,
-          "w": 28,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Mar 18th, 2026",
-          "x": 206,
-          "y": 32,
-          "w": 82,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "·",
-          "x": 288,
-          "y": 32,
-          "w": 10,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "In 6 days",
-          "x": 298,
-          "y": 32,
-          "w": 50,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Account:",
-          "x": 360,
-          "y": 32,
-          "w": 52,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "BPI Payroll",
-          "x": 412,
-          "y": 32,
-          "w": 59,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Mark paid",
-          "x": 1051,
-          "y": 20,
-          "w": 52,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "₱1,299.00",
-          "x": 1126,
-          "y": 16,
-          "w": 88,
-          "h": 23,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
-        }
-      ],
-      "boxes": [
-        {
-          "x": 0,
-          "y": 0,
-          "w": 1230,
-          "h": 57,
-          "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 0px | 0px | 0px | 0px | none | 1"
-        },
-        {
-          "x": 1040,
-          "y": 16,
-          "w": 74,
-          "h": 24,
-          "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
-        }
-      ],
-      "hover": "rgb(214, 222, 211)",
-      "cursor": "pointer"
-    },
-    {
       "name": "Maynilad water",
       "x": 105,
-      "y": 1465,
-      "sy": 343,
+      "y": 1591,
+      "sy": 229,
       "w": 1230,
-      "h": 57,
+      "h": 56,
       "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
       "texts": [
         {
@@ -1832,13 +1755,6 @@
       ],
       "boxes": [
         {
-          "x": 0,
-          "y": 0,
-          "w": 1230,
-          "h": 57,
-          "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 0px | 0px | 0px | 0px | none | 1"
-        },
-        {
           "x": 130,
           "y": 10,
           "w": 87,
@@ -1864,389 +1780,9 @@
       "cursor": "pointer"
     },
     {
-      "name": "Palengke run",
-      "x": 105,
-      "y": 1522,
-      "sy": 400,
-      "w": 1230,
-      "h": 57,
-      "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
-      "texts": [
-        {
-          "text": "Palengke run",
-          "x": 16,
-          "y": 10,
-          "w": 91,
-          "h": 19,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 15px | 600 | normal | 24px | normal | none | none | ellipsis | 1"
-        },
-        {
-          "text": "Household",
-          "x": 135,
-          "y": 12,
-          "w": 59,
-          "h": 15,
-          "style": "rgb(45, 59, 51) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Weekly · Saturday · Manual",
-          "x": 16,
-          "y": 32,
-          "w": 146,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Next",
-          "x": 174,
-          "y": 32,
-          "w": 28,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Mar 14th, 2026",
-          "x": 202,
-          "y": 32,
-          "w": 82,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "·",
-          "x": 284,
-          "y": 32,
-          "w": 10,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "In 2 days",
-          "x": 294,
-          "y": 32,
-          "w": 50,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Account:",
-          "x": 356,
-          "y": 32,
-          "w": 52,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "BDO Joint household",
-          "x": 408,
-          "y": 32,
-          "w": 116,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "·",
-          "x": 524,
-          "y": 32,
-          "w": 10,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "by Mara S.",
-          "x": 534,
-          "y": 32,
-          "w": 55,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Mark paid",
-          "x": 1051,
-          "y": 20,
-          "w": 52,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "₱1,300.00",
-          "x": 1126,
-          "y": 16,
-          "w": 88,
-          "h": 23,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
-        }
-      ],
-      "boxes": [
-        {
-          "x": 0,
-          "y": 0,
-          "w": 1230,
-          "h": 57,
-          "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 0px | 0px | 0px | 0px | none | 1"
-        },
-        {
-          "x": 115,
-          "y": 10,
-          "w": 87,
-          "h": 20,
-          "style": "rgb(214, 222, 211) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 4px | 4px | 4px | 4px | none | 1"
-        },
-        {
-          "x": 123,
-          "y": 17,
-          "w": 6,
-          "h": 6,
-          "style": "rgb(63, 107, 92) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 9999px | 9999px | 9999px | 9999px | none | 1"
-        },
-        {
-          "x": 1040,
-          "y": 16,
-          "w": 74,
-          "h": 24,
-          "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
-        }
-      ],
-      "hover": "rgb(214, 222, 211)",
-      "cursor": "pointer"
-    },
-    {
-      "name": "Yaya salary",
-      "x": 105,
-      "y": 1579,
-      "sy": 457,
-      "w": 1230,
-      "h": 57,
-      "row": "rgba(0, 0, 0, 0) | 1 | 8px | 16px | 8px | 16px",
-      "texts": [
-        {
-          "text": "Yaya salary",
-          "x": 16,
-          "y": 10,
-          "w": 77,
-          "h": 19,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 15px | 600 | normal | 24px | normal | none | none | ellipsis | 1"
-        },
-        {
-          "text": "Household",
-          "x": 121,
-          "y": 12,
-          "w": 59,
-          "h": 15,
-          "style": "rgb(45, 59, 51) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Twice a month · Manual",
-          "x": 16,
-          "y": 32,
-          "w": 128,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Next",
-          "x": 156,
-          "y": 32,
-          "w": 28,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Mar 15th, 2026",
-          "x": 184,
-          "y": 32,
-          "w": 82,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "·",
-          "x": 266,
-          "y": 32,
-          "w": 10,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "In 3 days",
-          "x": 276,
-          "y": 32,
-          "w": 50,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Account:",
-          "x": 338,
-          "y": 32,
-          "w": 52,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "BDO Joint household",
-          "x": 390,
-          "y": 32,
-          "w": 116,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "·",
-          "x": 506,
-          "y": 32,
-          "w": 10,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "by Mara S.",
-          "x": 516,
-          "y": 32,
-          "w": 55,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Mark paid",
-          "x": 1051,
-          "y": 20,
-          "w": 52,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "₱4,500.00",
-          "x": 1126,
-          "y": 16,
-          "w": 88,
-          "h": 23,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
-        }
-      ],
-      "boxes": [
-        {
-          "x": 0,
-          "y": 0,
-          "w": 1230,
-          "h": 57,
-          "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 0px | 0px | 0px | 0px | none | 1"
-        },
-        {
-          "x": 101,
-          "y": 10,
-          "w": 87,
-          "h": 20,
-          "style": "rgb(214, 222, 211) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 4px | 4px | 4px | 4px | none | 1"
-        },
-        {
-          "x": 109,
-          "y": 17,
-          "w": 6,
-          "h": 6,
-          "style": "rgb(63, 107, 92) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 9999px | 9999px | 9999px | 9999px | none | 1"
-        },
-        {
-          "x": 1040,
-          "y": 16,
-          "w": 74,
-          "h": 24,
-          "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
-        }
-      ],
-      "hover": "rgb(214, 222, 211)",
-      "cursor": "pointer"
-    },
-    {
-      "name": "Gym membership",
-      "x": 105,
-      "y": 1636,
-      "sy": 514,
-      "w": 1230,
-      "h": 56,
-      "row": "rgba(0, 0, 0, 0) | 0.6 | 8px | 16px | 8px | 16px",
-      "texts": [
-        {
-          "text": "Gym membership",
-          "x": 16,
-          "y": 10,
-          "w": 122,
-          "h": 19,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 15px | 600 | normal | 24px | normal | none | none | ellipsis | 1"
-        },
-        {
-          "text": "Monthly · day 5 · Manual · Paused",
-          "x": 16,
-          "y": 32,
-          "w": 182,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Next",
-          "x": 210,
-          "y": 32,
-          "w": 28,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Apr 5th, 2026",
-          "x": 238,
-          "y": 32,
-          "w": 74,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "·",
-          "x": 312,
-          "y": 32,
-          "w": 10,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "In 24 days",
-          "x": 322,
-          "y": 32,
-          "w": 57,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Account:",
-          "x": 391,
-          "y": 32,
-          "w": 52,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "BPI Payroll",
-          "x": 443,
-          "y": 32,
-          "w": 59,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "₱2,500.00",
-          "x": 1126,
-          "y": 16,
-          "w": 88,
-          "h": 23,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
-        }
-      ],
-      "boxes": [],
-      "hover": "rgb(214, 222, 211)",
-      "cursor": "pointer"
-    },
-    {
       "name": "Payroll",
       "x": 105,
-      "y": 1771,
+      "y": 1828,
       "sy": 1,
       "w": 1230,
       "h": 56,
@@ -2261,8 +1797,32 @@
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 15px | 600 | normal | 24px | normal | none | none | ellipsis | 1"
         },
         {
+          "text": "Due in",
+          "x": 30,
+          "y": 31,
+          "w": 41,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "3",
+          "x": 71,
+          "y": 31,
+          "w": 8,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "days",
+          "x": 82,
+          "y": 31,
+          "w": 28,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
           "text": "Twice a month · Scheduled",
-          "x": 16,
+          "x": 122,
           "y": 32,
           "w": 147,
           "h": 15,
@@ -2270,7 +1830,7 @@
         },
         {
           "text": "Next",
-          "x": 175,
+          "x": 281,
           "y": 32,
           "w": 28,
           "h": 15,
@@ -2278,7 +1838,7 @@
         },
         {
           "text": "Mar 15th, 2026",
-          "x": 203,
+          "x": 309,
           "y": 32,
           "w": 82,
           "h": 15,
@@ -2286,7 +1846,7 @@
         },
         {
           "text": "·",
-          "x": 285,
+          "x": 391,
           "y": 32,
           "w": 10,
           "h": 15,
@@ -2294,7 +1854,7 @@
         },
         {
           "text": "In 3 days",
-          "x": 295,
+          "x": 401,
           "y": 32,
           "w": 50,
           "h": 15,
@@ -2302,7 +1862,7 @@
         },
         {
           "text": "Account:",
-          "x": 357,
+          "x": 463,
           "y": 32,
           "w": 52,
           "h": 15,
@@ -2310,7 +1870,7 @@
         },
         {
           "text": "BPI Payroll",
-          "x": 409,
+          "x": 515,
           "y": 32,
           "w": 59,
           "h": 15,
@@ -2335,6 +1895,13 @@
       ],
       "boxes": [
         {
+          "x": 16,
+          "y": 36,
+          "w": 8,
+          "h": 8,
+          "style": "rgb(74, 89, 80) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 9999px | 9999px | 9999px | 9999px | none | 1"
+        },
+        {
           "x": 994,
           "y": 16,
           "w": 98,
@@ -2348,7 +1915,7 @@
     {
       "name": "Water refill service",
       "x": 105,
-      "y": 1906,
+      "y": 2015,
       "sy": 1,
       "w": 1230,
       "h": 101,
@@ -2490,7 +2057,7 @@
     {
       "name": "Condo parking rental income",
       "x": 105,
-      "y": 2007,
+      "y": 2116,
       "sy": 102,
       "w": 1230,
       "h": 100,
@@ -2584,24 +2151,32 @@
   ],
   "phone": [
     {
-      "name": "Netflix Standard",
+      "name": "Disney+ Premium",
       "x": 13,
-      "y": 454,
+      "y": 714,
       "sy": 1,
       "w": 364,
       "h": 65,
-      "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
+      "row": "rgba(0, 0, 0, 0) | 0.6 | 12px | 16px | 12px | 16px",
       "texts": [
         {
-          "text": "Netflix Standard",
+          "text": "Disney+ Premium",
           "x": 16,
           "y": 14,
-          "w": 114,
+          "w": 122,
           "h": 19,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 15px | 600 | normal | 24px | normal | none | none | ellipsis | 1"
         },
         {
-          "text": "Monthly · day 9 · Scheduled",
+          "text": "Paused",
+          "x": 160,
+          "y": 14.59,
+          "w": 44,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 20.8px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "Monthly · day 2 · Scheduled",
           "x": 16,
           "y": 36,
           "w": 151,
@@ -2617,24 +2192,24 @@
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "Apr 9th, 2026",
+          "text": "Apr 2nd, 2026",
           "x": 207,
           "y": 36,
-          "w": 74,
+          "w": 77,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "·",
-          "x": 281,
+          "x": 284,
           "y": 36,
           "w": 10,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "In 28 days",
-          "x": 291,
+          "text": "In 21 days",
+          "x": 294,
           "y": 36,
           "w": 57,
           "h": 15,
@@ -2642,7 +2217,7 @@
         },
         {
           "text": "Account:",
-          "x": 360,
+          "x": 363,
           "y": 36,
           "w": 52,
           "h": 15,
@@ -2650,30 +2225,14 @@
         },
         {
           "text": "HSBC Red Mastercard",
-          "x": 412,
+          "x": 415,
           "y": 36,
           "w": 118,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "Charged",
-          "x": 141,
-          "y": 24,
-          "w": 44,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Posted",
-          "x": 215,
-          "y": 24,
-          "w": 38,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "₱549.00",
+          "text": "₱369.00",
           "x": 276,
           "y": 20,
           "w": 72,
@@ -2687,21 +2246,14 @@
           "y": 0,
           "w": 364,
           "h": 65,
-          "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 5px | 5px | 0px | 0px | none | 1"
+          "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 5px | 5px | 0px | 0px | none | 0.6"
         },
         {
-          "x": 130,
-          "y": 10,
-          "w": 66,
-          "h": 44,
-          "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
-        },
-        {
-          "x": 204,
-          "y": 10,
-          "w": 60,
-          "h": 44,
-          "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
+          "x": 146,
+          "y": 19.98,
+          "w": 8,
+          "h": 8,
+          "style": "rgb(74, 89, 80) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 9999px | 9999px | 9999px | 9999px | none | 1"
         }
       ],
       "hover": "rgb(214, 222, 211)",
@@ -2710,7 +2262,7 @@
     {
       "name": "Spotify Duo",
       "x": 13,
-      "y": 519,
+      "y": 779,
       "sy": 66,
       "w": 364,
       "h": 65,
@@ -2832,57 +2384,57 @@
       "cursor": "pointer"
     },
     {
-      "name": "Disney+ Premium",
+      "name": "Netflix Standard",
       "x": 13,
-      "y": 584,
+      "y": 844,
       "sy": 131,
       "w": 364,
       "h": 64,
-      "row": "rgba(0, 0, 0, 0) | 0.6 | 12px | 16px | 12px | 16px",
+      "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
       "texts": [
         {
-          "text": "Disney+ Premium",
+          "text": "Netflix Standard",
           "x": 16,
           "y": 14,
-          "w": 122,
+          "w": 114,
           "h": 19,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 15px | 600 | normal | 24px | normal | none | none | ellipsis | 1"
         },
         {
-          "text": "Monthly · day 2 · Scheduled · Paused",
+          "text": "Monthly · day 9 · Scheduled",
           "x": 16,
           "y": 36,
-          "w": 201,
+          "w": 151,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "Next",
-          "x": 229,
+          "x": 179,
           "y": 36,
           "w": 28,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "Apr 2nd, 2026",
-          "x": 257,
+          "text": "Apr 9th, 2026",
+          "x": 207,
           "y": 36,
-          "w": 77,
+          "w": 74,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "·",
-          "x": 334,
+          "x": 281,
           "y": 36,
           "w": 10,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "In 21 days",
-          "x": 344,
+          "text": "In 28 days",
+          "x": 291,
           "y": 36,
           "w": 57,
           "h": 15,
@@ -2890,7 +2442,7 @@
         },
         {
           "text": "Account:",
-          "x": 413,
+          "x": 360,
           "y": 36,
           "w": 52,
           "h": 15,
@@ -2898,14 +2450,30 @@
         },
         {
           "text": "HSBC Red Mastercard",
-          "x": 465,
+          "x": 412,
           "y": 36,
           "w": 118,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "₱369.00",
+          "text": "Charged",
+          "x": 141,
+          "y": 24,
+          "w": 44,
+          "h": 15,
+          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "Posted",
+          "x": 215,
+          "y": 24,
+          "w": 38,
+          "h": 15,
+          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "₱549.00",
           "x": 276,
           "y": 20,
           "w": 72,
@@ -2913,14 +2481,29 @@
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
         }
       ],
-      "boxes": [],
+      "boxes": [
+        {
+          "x": 130,
+          "y": 10,
+          "w": 66,
+          "h": 44,
+          "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
+        },
+        {
+          "x": 204,
+          "y": 10,
+          "w": 60,
+          "h": 44,
+          "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
+        }
+      ],
       "hover": "rgb(214, 222, 211)",
       "cursor": "pointer"
     },
     {
       "name": "Laptop, 12 months",
       "x": 13,
-      "y": 727,
+      "y": 1163,
       "sy": 1,
       "w": 364,
       "h": 137,
@@ -3114,7 +2697,7 @@
     {
       "name": "Aircon, 12 months",
       "x": 13,
-      "y": 864,
+      "y": 1300,
       "sy": 138,
       "w": 364,
       "h": 137,
@@ -3308,7 +2891,7 @@
     {
       "name": "Washing machine, 12 months",
       "x": 13,
-      "y": 1001,
+      "y": 1437,
       "sy": 275,
       "w": 364,
       "h": 137,
@@ -3502,7 +3085,7 @@
     {
       "name": "Rice cooker, 6 months",
       "x": 13,
-      "y": 1138,
+      "y": 1574,
       "sy": 412,
       "w": 364,
       "h": 64,
@@ -3618,99 +3201,147 @@
       "cursor": "pointer"
     },
     {
-      "name": "Rent",
+      "name": "Palengke run",
       "x": 13,
-      "y": 1281,
+      "y": 1893,
       "sy": 1,
       "w": 364,
       "h": 65,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
       "texts": [
         {
-          "text": "Rent",
+          "text": "Palengke run",
           "x": 16,
           "y": 14,
-          "w": 33,
+          "w": 91,
           "h": 19,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 15px | 600 | normal | 24px | normal | none | none | ellipsis | 1"
         },
         {
-          "text": "Household",
-          "x": 77,
+          "text": "+",
+          "x": 124,
           "y": 16,
-          "w": 59,
+          "w": 7,
           "h": 15,
-          "style": "rgb(45, 59, 51) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+          "style": "rgb(45, 59, 51) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 600 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "Monthly · day 1 · Manual",
-          "x": 16,
+          "text": "1",
+          "x": 131,
+          "y": 16,
+          "w": 7,
+          "h": 15,
+          "style": "rgb(45, 59, 51) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 600 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "Due in",
+          "x": 30,
+          "y": 35,
+          "w": 41,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "2",
+          "x": 71,
+          "y": 35,
+          "w": 8,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "days",
+          "x": 82,
+          "y": 35,
+          "w": 28,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "Weekly · Saturday · Manual",
+          "x": 122,
           "y": 36,
-          "w": 132,
+          "w": 146,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "Next",
-          "x": 160,
+          "x": 280,
           "y": 36,
           "w": 28,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "Apr 1st, 2026",
-          "x": 188,
+          "text": "Mar 14th, 2026",
+          "x": 308,
           "y": 36,
-          "w": 73,
+          "w": 82,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "·",
-          "x": 261,
+          "x": 390,
           "y": 36,
           "w": 10,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "In 20 days",
-          "x": 271,
+          "text": "In 2 days",
+          "x": 400,
           "y": 36,
-          "w": 57,
+          "w": 50,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "Account:",
-          "x": 340,
+          "x": 462,
           "y": 36,
           "w": 52,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "BPI Payroll",
-          "x": 392,
+          "text": "BDO Joint household",
+          "x": 514,
           "y": 36,
-          "w": 59,
+          "w": 116,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "·",
+          "x": 630,
+          "y": 36,
+          "w": 10,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "by Mara S.",
+          "x": 640,
+          "y": 36,
+          "w": 55,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "Mark paid",
-          "x": 174,
+          "x": 185,
           "y": 24,
           "w": 52,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "₱22,000.00",
-          "x": 249,
+          "text": "₱1,300.00",
+          "x": 260,
           "y": 20,
-          "w": 99,
+          "w": 88,
           "h": 23,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
         }
@@ -3724,21 +3355,21 @@
           "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 5px | 5px | 0px | 0px | none | 1"
         },
         {
-          "x": 57,
-          "y": 14,
-          "w": 87,
-          "h": 20,
-          "style": "rgb(214, 222, 211) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 4px | 4px | 4px | 4px | none | 1"
+          "x": 115,
+          "y": 13,
+          "w": 32,
+          "h": 22,
+          "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 9999px | 9999px | 9999px | 9999px | none | 1"
         },
         {
-          "x": 65,
-          "y": 21,
-          "w": 6,
-          "h": 6,
-          "style": "rgb(63, 107, 92) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 9999px | 9999px | 9999px | 9999px | none | 1"
+          "x": 16,
+          "y": 40,
+          "w": 8,
+          "h": 8,
+          "style": "rgb(74, 89, 80) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 9999px | 9999px | 9999px | 9999px | none | 1"
         },
         {
-          "x": 163,
+          "x": 174,
           "y": 10,
           "w": 74,
           "h": 44,
@@ -3749,25 +3380,25 @@
       "cursor": "pointer"
     },
     {
-      "name": "Meralco",
+      "name": "Yaya salary",
       "x": 13,
-      "y": 1346,
+      "y": 1958,
       "sy": 66,
       "w": 364,
       "h": 65,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
       "texts": [
         {
-          "text": "Meralco",
+          "text": "Yaya salary",
           "x": 16,
           "y": 14,
-          "w": 54,
+          "w": 77,
           "h": 19,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 15px | 600 | normal | 24px | normal | none | none | ellipsis | 1"
         },
         {
           "text": "+",
-          "x": 87,
+          "x": 110,
           "y": 16,
           "w": 7,
           "h": 15,
@@ -3775,65 +3406,105 @@
         },
         {
           "text": "1",
-          "x": 94,
+          "x": 117,
           "y": 16,
           "w": 7,
           "h": 15,
           "style": "rgb(45, 59, 51) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 600 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "Monthly · day 10 · Manual",
-          "x": 16,
+          "text": "Due in",
+          "x": 30,
+          "y": 35,
+          "w": 41,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "3",
+          "x": 71,
+          "y": 35,
+          "w": 8,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "days",
+          "x": 82,
+          "y": 35,
+          "w": 28,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "Twice a month · Manual",
+          "x": 122,
           "y": 36,
-          "w": 139,
+          "w": 128,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "Next",
-          "x": 167,
+          "x": 262,
           "y": 36,
           "w": 28,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "Apr 10th, 2026",
-          "x": 195,
+          "text": "Mar 15th, 2026",
+          "x": 290,
           "y": 36,
-          "w": 81,
+          "w": 82,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "·",
-          "x": 276,
+          "x": 372,
           "y": 36,
           "w": 10,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "In 29 days",
-          "x": 286,
+          "text": "In 3 days",
+          "x": 382,
           "y": 36,
-          "w": 57,
+          "w": 50,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "Account:",
-          "x": 355,
+          "x": 444,
           "y": 36,
           "w": 52,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "BPI Payroll",
-          "x": 407,
+          "text": "BDO Joint household",
+          "x": 496,
           "y": 36,
-          "w": 59,
+          "w": 116,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "·",
+          "x": 612,
+          "y": 36,
+          "w": 10,
+          "h": 15,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "by Mara S.",
+          "x": 622,
+          "y": 36,
+          "w": 55,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
@@ -3846,7 +3517,7 @@
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "₱4,600.00",
+          "text": "₱4,500.00",
           "x": 260,
           "y": 20,
           "w": 88,
@@ -3863,13 +3534,20 @@
           "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 0px | 0px | 0px | 0px | none | 1"
         },
         {
-          "x": 78,
+          "x": 101,
           "y": 13,
           "w": 32,
           "h": 22,
           "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 9999px | 9999px | 9999px | 9999px | none | 1"
         },
         {
+          "x": 16,
+          "y": 40,
+          "w": 8,
+          "h": 8,
+          "style": "rgb(74, 89, 80) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 9999px | 9999px | 9999px | 9999px | none | 1"
+        },
+        {
           "x": 174,
           "y": 10,
           "w": 74,
@@ -3881,65 +3559,89 @@
       "cursor": "pointer"
     },
     {
-      "name": "PLDT Fibr",
+      "name": "Globe Postpaid",
       "x": 13,
-      "y": 1411,
+      "y": 2023,
       "sy": 131,
       "w": 364,
       "h": 65,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
       "texts": [
         {
-          "text": "PLDT Fibr",
+          "text": "Globe Postpaid",
           "x": 16,
           "y": 14,
-          "w": 69,
+          "w": 105,
           "h": 19,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 15px | 600 | normal | 24px | normal | none | none | ellipsis | 1"
         },
         {
-          "text": "Monthly · day 6 · Auto-pay",
-          "x": 16,
+          "text": "Due in",
+          "x": 30,
+          "y": 35,
+          "w": 41,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "6",
+          "x": 71,
+          "y": 35,
+          "w": 8,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "days",
+          "x": 82,
+          "y": 35,
+          "w": 28,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "Monthly · day 18 · Auto-pay",
+          "x": 122,
           "y": 36,
-          "w": 143,
+          "w": 150,
           "h": 15,
           "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "Next",
-          "x": 171,
+          "x": 284,
           "y": 36,
           "w": 28,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "Apr 6th, 2026",
-          "x": 199,
+          "text": "Mar 18th, 2026",
+          "x": 312,
           "y": 36,
-          "w": 74,
+          "w": 82,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "·",
-          "x": 273,
+          "x": 394,
           "y": 36,
           "w": 10,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "In 25 days",
-          "x": 283,
+          "text": "In 6 days",
+          "x": 404,
           "y": 36,
-          "w": 57,
+          "w": 50,
           "h": 15,
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
           "text": "Account:",
-          "x": 352,
+          "x": 466,
           "y": 36,
           "w": 52,
           "h": 15,
@@ -3947,7 +3649,7 @@
         },
         {
           "text": "BPI Payroll",
-          "x": 404,
+          "x": 518,
           "y": 36,
           "w": 59,
           "h": 15,
@@ -3962,7 +3664,7 @@
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
         },
         {
-          "text": "₱1,899.00",
+          "text": "₱1,299.00",
           "x": 260,
           "y": 20,
           "w": 88,
@@ -3979,116 +3681,14 @@
           "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 0px | 0px | 0px | 0px | none | 1"
         },
         {
-          "x": 174,
-          "y": 10,
-          "w": 74,
-          "h": 44,
-          "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
-        }
-      ],
-      "hover": "rgb(214, 222, 211)",
-      "cursor": "pointer"
-    },
-    {
-      "name": "Emergency fund top-up",
-      "x": 13,
-      "y": 1476,
-      "sy": 196,
-      "w": 364,
-      "h": 65,
-      "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
-      "texts": [
-        {
-          "text": "Emergency fund top-up",
           "x": 16,
-          "y": 14,
-          "w": 164,
-          "h": 19,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 15px | 600 | normal | 24px | normal | none | none | ellipsis | 1"
+          "y": 40,
+          "w": 8,
+          "h": 8,
+          "style": "rgb(74, 89, 80) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 9999px | 9999px | 9999px | 9999px | none | 1"
         },
         {
-          "text": "Monthly · day 8 · Manual",
-          "x": 16,
-          "y": 36,
-          "w": 132,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Next",
-          "x": 160,
-          "y": 36,
-          "w": 28,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Apr 8th, 2026",
-          "x": 188,
-          "y": 36,
-          "w": 74,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "·",
-          "x": 262,
-          "y": 36,
-          "w": 10,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "In 27 days",
-          "x": 272,
-          "y": 36,
-          "w": 57,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Account:",
-          "x": 341,
-          "y": 36,
-          "w": 52,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "BPI Payroll",
-          "x": 393,
-          "y": 36,
-          "w": 59,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Mark paid",
           "x": 174,
-          "y": 24,
-          "w": 52,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "₱10,000.00",
-          "x": 249,
-          "y": 20,
-          "w": 99,
-          "h": 23,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
-        }
-      ],
-      "boxes": [
-        {
-          "x": 0,
-          "y": 0,
-          "w": 364,
-          "h": 65,
-          "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 0px | 0px | 0px | 0px | none | 1"
-        },
-        {
-          "x": 163,
           "y": 10,
           "w": 74,
           "h": 44,
@@ -4101,8 +3701,8 @@
     {
       "name": "HMO dependent add-on",
       "x": 13,
-      "y": 1541,
-      "sy": 261,
+      "y": 2088,
+      "sy": 196,
       "w": 364,
       "h": 65,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
@@ -4208,121 +3808,12 @@
       "cursor": "pointer"
     },
     {
-      "name": "Globe Postpaid",
-      "x": 13,
-      "y": 1606,
-      "sy": 326,
-      "w": 364,
-      "h": 65,
-      "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
-      "texts": [
-        {
-          "text": "Globe Postpaid",
-          "x": 16,
-          "y": 14,
-          "w": 105,
-          "h": 19,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 15px | 600 | normal | 24px | normal | none | none | ellipsis | 1"
-        },
-        {
-          "text": "Monthly · day 18 · Auto-pay",
-          "x": 16,
-          "y": 36,
-          "w": 150,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Next",
-          "x": 178,
-          "y": 36,
-          "w": 28,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Mar 18th, 2026",
-          "x": 206,
-          "y": 36,
-          "w": 82,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "·",
-          "x": 288,
-          "y": 36,
-          "w": 10,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "In 6 days",
-          "x": 298,
-          "y": 36,
-          "w": 50,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Account:",
-          "x": 360,
-          "y": 36,
-          "w": 52,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "BPI Payroll",
-          "x": 412,
-          "y": 36,
-          "w": 59,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Mark paid",
-          "x": 185,
-          "y": 24,
-          "w": 52,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "₱1,299.00",
-          "x": 260,
-          "y": 20,
-          "w": 88,
-          "h": 23,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
-        }
-      ],
-      "boxes": [
-        {
-          "x": 0,
-          "y": 0,
-          "w": 364,
-          "h": 65,
-          "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 0px | 0px | 0px | 0px | none | 1"
-        },
-        {
-          "x": 174,
-          "y": 10,
-          "w": 74,
-          "h": 44,
-          "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
-        }
-      ],
-      "hover": "rgb(214, 222, 211)",
-      "cursor": "pointer"
-    },
-    {
       "name": "Maynilad water",
       "x": 13,
-      "y": 1671,
-      "sy": 391,
+      "y": 2153,
+      "sy": 261,
       "w": 364,
-      "h": 65,
+      "h": 64,
       "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
       "texts": [
         {
@@ -4424,13 +3915,6 @@
       ],
       "boxes": [
         {
-          "x": 0,
-          "y": 0,
-          "w": 364,
-          "h": 65,
-          "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 0px | 0px | 0px | 0px | none | 1"
-        },
-        {
           "x": 130,
           "y": 13,
           "w": 32,
@@ -4449,391 +3933,9 @@
       "cursor": "pointer"
     },
     {
-      "name": "Palengke run",
-      "x": 13,
-      "y": 1736,
-      "sy": 456,
-      "w": 364,
-      "h": 65,
-      "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
-      "texts": [
-        {
-          "text": "Palengke run",
-          "x": 16,
-          "y": 14,
-          "w": 91,
-          "h": 19,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 15px | 600 | normal | 24px | normal | none | none | ellipsis | 1"
-        },
-        {
-          "text": "+",
-          "x": 124,
-          "y": 16,
-          "w": 7,
-          "h": 15,
-          "style": "rgb(45, 59, 51) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 600 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "1",
-          "x": 131,
-          "y": 16,
-          "w": 7,
-          "h": 15,
-          "style": "rgb(45, 59, 51) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 600 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Weekly · Saturday · Manual",
-          "x": 16,
-          "y": 36,
-          "w": 146,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Next",
-          "x": 174,
-          "y": 36,
-          "w": 28,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Mar 14th, 2026",
-          "x": 202,
-          "y": 36,
-          "w": 82,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "·",
-          "x": 284,
-          "y": 36,
-          "w": 10,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "In 2 days",
-          "x": 294,
-          "y": 36,
-          "w": 50,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Account:",
-          "x": 356,
-          "y": 36,
-          "w": 52,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "BDO Joint household",
-          "x": 408,
-          "y": 36,
-          "w": 116,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "·",
-          "x": 524,
-          "y": 36,
-          "w": 10,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "by Mara S.",
-          "x": 534,
-          "y": 36,
-          "w": 55,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Mark paid",
-          "x": 185,
-          "y": 24,
-          "w": 52,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "₱1,300.00",
-          "x": 260,
-          "y": 20,
-          "w": 88,
-          "h": 23,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
-        }
-      ],
-      "boxes": [
-        {
-          "x": 0,
-          "y": 0,
-          "w": 364,
-          "h": 65,
-          "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 0px | 0px | 0px | 0px | none | 1"
-        },
-        {
-          "x": 115,
-          "y": 13,
-          "w": 32,
-          "h": 22,
-          "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 9999px | 9999px | 9999px | 9999px | none | 1"
-        },
-        {
-          "x": 174,
-          "y": 10,
-          "w": 74,
-          "h": 44,
-          "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
-        }
-      ],
-      "hover": "rgb(214, 222, 211)",
-      "cursor": "pointer"
-    },
-    {
-      "name": "Yaya salary",
-      "x": 13,
-      "y": 1801,
-      "sy": 521,
-      "w": 364,
-      "h": 65,
-      "row": "rgba(0, 0, 0, 0) | 1 | 12px | 16px | 12px | 16px",
-      "texts": [
-        {
-          "text": "Yaya salary",
-          "x": 16,
-          "y": 14,
-          "w": 77,
-          "h": 19,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 15px | 600 | normal | 24px | normal | none | none | ellipsis | 1"
-        },
-        {
-          "text": "+",
-          "x": 110,
-          "y": 16,
-          "w": 7,
-          "h": 15,
-          "style": "rgb(45, 59, 51) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 600 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "1",
-          "x": 117,
-          "y": 16,
-          "w": 7,
-          "h": 15,
-          "style": "rgb(45, 59, 51) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 600 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Twice a month · Manual",
-          "x": 16,
-          "y": 36,
-          "w": 128,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Next",
-          "x": 156,
-          "y": 36,
-          "w": 28,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Mar 15th, 2026",
-          "x": 184,
-          "y": 36,
-          "w": 82,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "·",
-          "x": 266,
-          "y": 36,
-          "w": 10,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "In 3 days",
-          "x": 276,
-          "y": 36,
-          "w": 50,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Account:",
-          "x": 338,
-          "y": 36,
-          "w": 52,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "BDO Joint household",
-          "x": 390,
-          "y": 36,
-          "w": 116,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "·",
-          "x": 506,
-          "y": 36,
-          "w": 10,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "by Mara S.",
-          "x": 516,
-          "y": 36,
-          "w": 55,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Mark paid",
-          "x": 185,
-          "y": 24,
-          "w": 52,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "₱4,500.00",
-          "x": 260,
-          "y": 20,
-          "w": 88,
-          "h": 23,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
-        }
-      ],
-      "boxes": [
-        {
-          "x": 0,
-          "y": 0,
-          "w": 364,
-          "h": 65,
-          "style": "rgba(0, 0, 0, 0) | none | 0px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 1px solid rgb(188, 201, 184) | 0px solid rgb(188, 201, 184) | 0px | 0px | 0px | 0px | none | 1"
-        },
-        {
-          "x": 101,
-          "y": 13,
-          "w": 32,
-          "h": 22,
-          "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 9999px | 9999px | 9999px | 9999px | none | 1"
-        },
-        {
-          "x": 174,
-          "y": 10,
-          "w": 74,
-          "h": 44,
-          "style": "rgba(0, 0, 0, 0) | none | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 1px solid rgb(116, 136, 112) | 4px | 4px | 4px | 4px | none | 1"
-        }
-      ],
-      "hover": "rgb(214, 222, 211)",
-      "cursor": "pointer"
-    },
-    {
-      "name": "Gym membership",
-      "x": 13,
-      "y": 1866,
-      "sy": 586,
-      "w": 364,
-      "h": 64,
-      "row": "rgba(0, 0, 0, 0) | 0.6 | 12px | 16px | 12px | 16px",
-      "texts": [
-        {
-          "text": "Gym membership",
-          "x": 16,
-          "y": 14,
-          "w": 122,
-          "h": 19,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 15px | 600 | normal | 24px | normal | none | none | ellipsis | 1"
-        },
-        {
-          "text": "Monthly · day 5 · Manual · Paused",
-          "x": 16,
-          "y": 36,
-          "w": 182,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Next",
-          "x": 210,
-          "y": 36,
-          "w": 28,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Apr 5th, 2026",
-          "x": 238,
-          "y": 36,
-          "w": 74,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "·",
-          "x": 312,
-          "y": 36,
-          "w": 10,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "In 24 days",
-          "x": 322,
-          "y": 36,
-          "w": 57,
-          "h": 15,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "Account:",
-          "x": 391,
-          "y": 36,
-          "w": 52,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "BPI Payroll",
-          "x": 443,
-          "y": 36,
-          "w": 59,
-          "h": 15,
-          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 12px | 400 | normal | 16px | normal | none | none | clip | 1"
-        },
-        {
-          "text": "₱2,500.00",
-          "x": 260,
-          "y": 20,
-          "w": 88,
-          "h": 23,
-          "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 18px | 700 | normal | 26px | normal | none | none | clip | 1"
-        }
-      ],
-      "boxes": [],
-      "hover": "rgb(214, 222, 211)",
-      "cursor": "pointer"
-    },
-    {
       "name": "Payroll",
       "x": 13,
-      "y": 2009,
+      "y": 2556,
       "sy": 1,
       "w": 364,
       "h": 64,
@@ -4848,8 +3950,32 @@
           "style": "rgb(22, 36, 28) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 15px | 600 | normal | 24px | normal | none | none | ellipsis | 1"
         },
         {
+          "text": "Due in",
+          "x": 30,
+          "y": 35,
+          "w": 41,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "3",
+          "x": 71,
+          "y": 35,
+          "w": 8,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
+          "text": "days",
+          "x": 82,
+          "y": 35,
+          "w": 28,
+          "h": 17,
+          "style": "rgb(74, 89, 80) | \"IBM Plex Sans\", ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif | 13px | 500 | normal | 16px | normal | none | none | clip | 1"
+        },
+        {
           "text": "Twice a month · Scheduled",
-          "x": 16,
+          "x": 122,
           "y": 36,
           "w": 147,
           "h": 15,
@@ -4857,7 +3983,7 @@
         },
         {
           "text": "Next",
-          "x": 175,
+          "x": 281,
           "y": 36,
           "w": 28,
           "h": 15,
@@ -4865,7 +3991,7 @@
         },
         {
           "text": "Mar 15th, 2026",
-          "x": 203,
+          "x": 309,
           "y": 36,
           "w": 82,
           "h": 15,
@@ -4873,7 +3999,7 @@
         },
         {
           "text": "·",
-          "x": 285,
+          "x": 391,
           "y": 36,
           "w": 10,
           "h": 15,
@@ -4881,7 +4007,7 @@
         },
         {
           "text": "In 3 days",
-          "x": 295,
+          "x": 401,
           "y": 36,
           "w": 50,
           "h": 15,
@@ -4889,7 +4015,7 @@
         },
         {
           "text": "Account:",
-          "x": 357,
+          "x": 463,
           "y": 36,
           "w": 52,
           "h": 15,
@@ -4897,7 +4023,7 @@
         },
         {
           "text": "BPI Payroll",
-          "x": 409,
+          "x": 515,
           "y": 36,
           "w": 59,
           "h": 15,
@@ -4922,6 +4048,13 @@
       ],
       "boxes": [
         {
+          "x": 16,
+          "y": 40,
+          "w": 8,
+          "h": 8,
+          "style": "rgb(74, 89, 80) | none | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 0px solid rgb(229, 231, 235) | 9999px | 9999px | 9999px | 9999px | none | 1"
+        },
+        {
           "x": 128,
           "y": 10,
           "w": 98,
@@ -4935,7 +4068,7 @@
     {
       "name": "Water refill service",
       "x": 13,
-      "y": 2152,
+      "y": 2763,
       "sy": 1,
       "w": 364,
       "h": 141,
@@ -5077,7 +4210,7 @@
     {
       "name": "Condo parking rental income",
       "x": 13,
-      "y": 2293,
+      "y": 2904,
       "sy": 142,
       "w": 364,
       "h": 124,

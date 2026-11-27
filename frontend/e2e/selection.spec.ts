@@ -730,6 +730,31 @@ const INVENTORY: Group[] = [
       await expect(page.getByRole('button', { name: 'Add budget', exact: true })).toBeVisible()
       await expect(page.getByText('Transport', { exact: true }).first()).toBeVisible()
     },
+    gone: {
+      controls: [
+        'Sort order for Subscriptions › Ascending',
+        'Sort order for Subscriptions › Descending',
+        'Status of Subscriptions › All',
+        'Status of Subscriptions › Active',
+        'Status of Subscriptions › Paused',
+        'Sort order for Cash expenses › Ascending',
+        'Sort order for Cash expenses › Descending',
+        'Status of Cash expenses › All',
+        'Status of Cash expenses › Active',
+        'Status of Cash expenses › Paused',
+        'Cash expenses pages › 1',
+        'Sort order for Income & transfers › Ascending',
+        'Sort order for Income & transfers › Descending',
+        'Status of Income & transfers › All',
+        'Status of Income & transfers › Active',
+        'Status of Income & transfers › Paused',
+      ],
+      why: "Budgets replaces the Recurring list, and each section's sort, status and page controls go with it (STU-799)",
+      check: async (page) => {
+        await expect(page.getByTestId('cash-sort')).toHaveCount(0)
+        await expect(page.getByTestId('cash-pager')).toHaveCount(0)
+      },
+    },
   },
   {
     key: 'allocations-cadence',

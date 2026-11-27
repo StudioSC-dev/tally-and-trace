@@ -441,10 +441,14 @@ test.describe('Labels, counts and chrome (STU-677)', () => {
       ['Rent', ['Monthly · day 1', 'Manual']],
       ['PLDT Fibr', ['Monthly · day 6', 'Auto-pay']],
     ]
+    const search = page.getByLabel('Search recurring entries')
     for (const [name, facts] of entries) {
+      // STU-799: a section lists 5 entries a page, so each entry is reached through the page search.
+      await search.fill(name)
       const meta = await metaOf(page, name).innerText()
       for (const fact of facts) expect.soft(meta, `${name} keeps "${fact}"`).toContain(fact)
     }
+    await search.fill('')
     await expect.soft(page.getByTestId('kind-section-other').getByText('Payroll', { exact: true }), 'an income entry keeps its place under Income & transfers').toBeVisible()
     await shot(page, 'facts-allocations')
 
